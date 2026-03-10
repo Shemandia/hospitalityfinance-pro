@@ -8,6 +8,7 @@ import { getPeriods, getTrialBalance } from "../../../../lib/gl-api";
 import { Button } from "../../../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../../components/ui/card";
 import { Badge } from "../../../../components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../../components/ui/select";
 
 type TrialBalanceRow = {
   accountId: string;
@@ -250,33 +251,33 @@ export default function TrialBalancePage() {
       <Card>
         <CardContent className="flex flex-wrap items-center gap-4 py-3 px-6">
           <div className="flex items-center gap-2">
-            <label htmlFor="tb-period" className="text-sm font-medium whitespace-nowrap">Period</label>
-            <select
-              id="tb-period"
-              value={periodId}
-              onChange={e => setPeriodId(e.target.value)}
-              className="h-8 rounded-md border border-border bg-white px-2.5 text-sm"
-            >
-              <option value="">Select period</option>
-              {periods.map(p => (
-                <option key={p.id} value={p.id}>{p.name}{p.status === "OPEN" ? " (Open)" : ""}</option>
-              ))}
-            </select>
+            <span className="text-sm font-medium whitespace-nowrap">Period</span>
+            <Select value={periodId || "NONE"} onValueChange={v => setPeriodId(v === "NONE" ? "" : v)}>
+              <SelectTrigger className="h-8 w-48">
+                <SelectValue placeholder="Select period" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="NONE">Select period</SelectItem>
+                {periods.map(p => (
+                  <SelectItem key={p.id} value={p.id}>{p.name}{p.status === "OPEN" ? " (Open)" : ""}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="flex items-center gap-2">
-            <label htmlFor="tb-comp" className="text-sm font-medium whitespace-nowrap">Comparative</label>
-            <select
-              id="tb-comp"
-              value={comparativePeriodId}
-              onChange={e => setComparativePeriodId(e.target.value)}
-              className="h-8 rounded-md border border-border bg-white px-2.5 text-sm"
-            >
-              <option value="">None</option>
-              {periods.map(p => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
+            <span className="text-sm font-medium whitespace-nowrap">Compare to</span>
+            <Select value={comparativePeriodId || "NONE"} onValueChange={v => setComparativePeriodId(v === "NONE" ? "" : v)}>
+              <SelectTrigger className="h-8 w-48">
+                <SelectValue placeholder="None" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="NONE">None</SelectItem>
+                {periods.map(p => (
+                  <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <label className="flex items-center gap-1.5 text-sm cursor-pointer">

@@ -1,6 +1,7 @@
 import cors from "@fastify/cors";
 import Fastify, { type FastifyInstance } from "fastify";
 import { enterRequestContext, updateRequestContext } from "./db/requestContext.js";
+import { prisma } from "./db/prisma.js";
 import { requireAuth } from "./middleware/requireAuth.js";
 import { requireRole } from "./middleware/requireRole.js";
 import { registerGLRouter } from "./modules/gl/router.js";
@@ -17,7 +18,10 @@ import { registerKPIRouter } from "./modules/kpi/router.js";
 import authPlugin from "./plugins/auth.js";
 
 export async function createApp(): Promise<FastifyInstance> {
-  const app = Fastify({ logger: true });
+  const app = Fastify({
+    logger: true,
+    bodyLimit: 10 * 1024 * 1024  // 10 MB for file imports
+  });
 
   await app.register(cors, {
     origin: true,
@@ -52,6 +56,14 @@ export async function createApp(): Promise<FastifyInstance> {
       },
       errors: []
     };
+  });
+
+  app.get("/api/v1/entities", { preHandler: [requireAuth] }, async (request) => {
+    const entities = await (prisma as any).entity.findMany({
+      select: { id: true, name: true, code: true, currency: true, parentId: true },
+      orderBy: { name: "asc" }
+    });
+    return { data: entities, errors: [] };
   });
 
   app.get(

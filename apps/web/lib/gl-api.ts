@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
 type Envelope<T> = {
   data: T;
@@ -9,6 +9,72 @@ type Envelope<T> = {
 export type ApiContext = {
   accessToken: string;
   entityId: string;
+};
+
+// ── Core domain types ────────────────────────────────────────────────────────
+
+export type JournalSummary = {
+  id: string;
+  reference: string;
+  description: string;
+  status: string;
+  source: string;
+  periodId: string;
+  functionalCurrency: string;
+  createdAt: string;
+  _count: { lines: number; approvals: number };
+};
+
+export type JournalLine = {
+  id: string;
+  accountId: string;
+  debit: string;
+  credit: string;
+  currency: string;
+  fxRate: string;
+  debitFunctional: string;
+  creditFunctional: string;
+  description: string;
+  lineNumber: number;
+  account: { code: string; name: string; type: string };
+};
+
+export type JournalDetail = {
+  id: string;
+  reference: string;
+  description: string;
+  status: string;
+  source: string;
+  periodId: string;
+  functionalCurrency: string;
+  createdAt: string;
+  postedAt: string | null;
+  lines: JournalLine[];
+  period: { id: string; name: string; status: string };
+  approvals: Array<{ id: string; status: string; approver: { id: string; name: string; email: string }; reason?: string | null }>;
+};
+
+export type GLAccount = {
+  id: string;
+  code: string;
+  name: string;
+  type: string;
+  subType: string | null;
+  level: number;
+  parentId: string | null;
+  isActive: boolean;
+  currency: string;
+};
+
+export type AuditEvent = {
+  id: string;
+  eventType: string;
+  resourceType: string;
+  resourceId: string;
+  userId: string | null;
+  createdAt: string;
+  beforeState: unknown;
+  afterState: unknown;
 };
 
 async function request<T>(
@@ -53,14 +119,14 @@ export async function getGLJournals(
     search.set("search", params.search);
   }
   const query = search.toString();
-  return request<Array<Record<string, unknown>>>(
+  return request<JournalSummary[]>(
     context,
     `/api/v1/gl/journals${query ? `?${query}` : ""}`
   );
 }
 
 export async function getGLJournal(context: ApiContext, journalId: string) {
-  return request<Record<string, unknown>>(context, `/api/v1/gl/journals/${journalId}`);
+  return request<JournalDetail>(context, `/api/v1/gl/journals/${journalId}`);
 }
 
 export async function createGLJournal(
@@ -120,7 +186,19 @@ export async function postGLJournal(context: ApiContext, journalId: string) {
 }
 
 export async function getGLAccounts(context: ApiContext) {
-  return request<Array<Record<string, unknown>>>(context, "/api/v1/gl/accounts");
+  return request<GLAccount[]>(context, "/api/v1/gl/accounts");
+}
+
+export type EntitySummaryItem = {
+  id: string;
+  name: string;
+  code: string;
+  currency: string;
+  parentId: string | null;
+};
+
+export async function getEntities(context: ApiContext) {
+  return request<EntitySummaryItem[]>(context, "/api/v1/entities");
 }
 
 export type PeriodStatus = "OPEN" | "CLOSED" | "LOCKED";
@@ -192,7 +270,7 @@ export async function getAuditEvents(
   if (params.limit) {
     search.set("limit", String(params.limit));
   }
-  return request<Array<Record<string, unknown>>>(
+  return request<AuditEvent[]>(
     context,
     `/api/v1/audit?${search.toString()}`
   );

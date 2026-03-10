@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { ErrorBoundary } from "../../components/error-boundary";
 import { auth, signOut } from "../../auth";
 import {
   LayoutDashboard,
@@ -162,7 +163,9 @@ export default async function DashboardLayout({ children }: { children: ReactNod
         </header>
 
         <main className="flex-1 p-4 sm:p-6 overflow-auto">
-          {children}
+          <ErrorBoundary>
+            {children}
+          </ErrorBoundary>
         </main>
       </div>
     </div>

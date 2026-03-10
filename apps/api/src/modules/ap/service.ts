@@ -578,7 +578,8 @@ ${transactions
           line.accountId,
           invoice.periodId,
           line.debitFunctional,
-          line.creditFunctional
+          line.creditFunctional,
+          line.account.type
         );
       }
 
@@ -789,9 +790,7 @@ ${transactions
 
     const file = this.buildPaymentFile(currentRun, entries);
     const outputDir = join(process.cwd(), process.env.PAYMENT_RUN_OUTPUT_DIR ?? "payment-runs");
-    await mkdir(outputDir, { recursive: true });
     const bankFilePath = join(outputDir, `${currentRun.id}.${file.extension}`);
-    await writeFile(bankFilePath, file.content, "utf8");
 
     return this.prisma.$transaction(async (transaction) => {
       await setEntityDbContext(transaction, entityId);
@@ -819,6 +818,8 @@ ${transactions
         throw new APServiceError("AP_PAYMENT_RUN_NOT_FOUND", "Payment run not found.", 404);
       }
 
+      await mkdir(outputDir, { recursive: true });
+      await writeFile(bankFilePath, file.content, "utf8");
       await txRepository.setPaymentRunFilePath(entityId, paymentRunId, bankFilePath);
 
       const invoiceGroups = new Map<
@@ -911,7 +912,8 @@ ${transactions
             line.accountId,
             openPaymentPeriod.id,
             line.debitFunctional,
-            line.creditFunctional
+            line.creditFunctional,
+            line.account.type
           );
         }
 

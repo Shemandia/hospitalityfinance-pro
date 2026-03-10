@@ -272,7 +272,8 @@ export class GLService {
         line.accountId,
         journal.periodId,
         line.debitFunctional,
-        line.creditFunctional
+        line.creditFunctional,
+        line.account.type
       );
     }
   }
@@ -318,7 +319,7 @@ export class GLService {
 
     const appBaseUrl = process.env.APP_BASE_URL ?? "http://localhost:3000";
 
-    await Promise.allSettled(
+    const emailResults = await Promise.allSettled(
       result.approvalRecipients.map((recipient) =>
         sendApprovalEmail({
           to: recipient.email,
@@ -330,6 +331,16 @@ export class GLService {
         })
       )
     );
+    const emailFailures = emailResults.filter(
+      (r): r is PromiseRejectedResult => r.status === "rejected"
+    );
+    if (emailFailures.length > 0) {
+      console.warn(
+        "[GLService] Approval email failures:",
+        emailFailures.length,
+        emailFailures.map(f => f.reason?.message ?? "unknown")
+      );
+    }
 
     return result.journal;
   }
@@ -441,6 +452,21 @@ export class GLService {
         reason
       );
       await repository.markPendingApprovalsRejected(entityId, journalId, reason);
+
+      // Reverse account balances if journal was already posted
+      if (journal.status === "POSTED") {
+        for (const line of journal.lines) {
+          await repository.updateAccountBalance(
+            entityId,
+            line.accountId,
+            journal.periodId,
+            line.creditFunctional,  // swapped: credits become debits
+            line.debitFunctional,   // swapped: debits become credits
+            line.account.type
+          );
+        }
+      }
+
       await repository.setJournalStatus(entityId, journalId, "DRAFT", null);
 
       return repository.getJournalWithLines(entityId, journalId);

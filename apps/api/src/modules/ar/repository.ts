@@ -302,7 +302,7 @@ export class ARRepository {
           }))
         }
       },
-      include: { lines: true }
+      include: { lines: { include: { account: { select: { type: true } } } } }
     });
   }
 
@@ -311,8 +311,14 @@ export class ARRepository {
     accountId: string,
     periodId: string,
     debitFunctional: Prisma.Decimal,
-    creditFunctional: Prisma.Decimal
+    creditFunctional: Prisma.Decimal,
+    accountType: string
   ) {
+    const isDebitNormal = ["ASSET", "EXPENSE", "CONTRA_REVENUE"].includes(accountType);
+    const balanceDelta = isDebitNormal
+      ? debitFunctional.sub(creditFunctional)
+      : creditFunctional.sub(debitFunctional);
+
     return this.db.accountPeriodBalance.upsert({
       where: { entityId_accountId_periodId: { entityId, accountId, periodId } },
       create: {
@@ -322,12 +328,12 @@ export class ARRepository {
         openingBalance: new Prisma.Decimal(0),
         periodDebits: debitFunctional,
         periodCredits: creditFunctional,
-        closingBalance: debitFunctional.sub(creditFunctional)
+        closingBalance: balanceDelta
       },
       update: {
         periodDebits: { increment: debitFunctional },
         periodCredits: { increment: creditFunctional },
-        closingBalance: { increment: debitFunctional.sub(creditFunctional) }
+        closingBalance: { increment: balanceDelta }
       }
     });
   }

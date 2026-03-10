@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
+import rateLimit from "@fastify/rate-limit";
 import type { PrismaClient } from "@prisma/client";
 import { z, ZodError } from "zod";
 import { prisma } from "../../db/prisma.js";
@@ -226,6 +227,8 @@ const connectorMappingSchema = z.object({
 export async function registerIntegrationRouter(app: FastifyInstance): Promise<void> {
   app.register(async (router) => {
     router.addHook("preHandler", requireAuth);
+
+    await router.register(rateLimit, { max: 10, timeWindow: "1 minute" });
 
     // ── Opera Cloud ─────────────────────────────────────────────────────────
 

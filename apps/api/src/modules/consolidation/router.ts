@@ -39,6 +39,12 @@ export async function registerConsolidationRouter(app: FastifyInstance): Promise
       "/:parentEntityId/runs",
       async (request, reply) => {
         try {
+          if (request.entityId !== request.params.parentEntityId) {
+            return reply.code(403).send({
+              data: null,
+              errors: [{ code: "CONSOLIDATION_FORBIDDEN", message: "No access to this entity." }]
+            });
+          }
           const data = await consolidationService.listRuns(request.params.parentEntityId);
           return reply.send({ data, errors: [] });
         } catch (error) { return mapError(reply, error); }
@@ -49,6 +55,12 @@ export async function registerConsolidationRouter(app: FastifyInstance): Promise
       "/:parentEntityId/runs/:runId",
       async (request, reply) => {
         try {
+          if (request.entityId !== request.params.parentEntityId) {
+            return reply.code(403).send({
+              data: null,
+              errors: [{ code: "CONSOLIDATION_FORBIDDEN", message: "No access to this entity." }]
+            });
+          }
           const data = await consolidationService.getRun(
             request.params.parentEntityId,
             request.params.runId
@@ -61,6 +73,12 @@ export async function registerConsolidationRouter(app: FastifyInstance): Promise
     router.post("/run", async (request, reply) => {
       try {
         const payload = runConsolidationSchema.parse(request.body);
+        if (request.entityId !== payload.parentEntityId) {
+          return reply.code(403).send({
+            data: null,
+            errors: [{ code: "CONSOLIDATION_FORBIDDEN", message: "No access to this entity." }]
+          });
+        }
         const data = await consolidationService.runConsolidation(payload);
         return reply.code(201).send({ data, errors: [] });
       } catch (error) { return mapError(reply, error); }

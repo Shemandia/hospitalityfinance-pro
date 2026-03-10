@@ -42,11 +42,13 @@ type ConsolidatedLine = {
 export class ConsolidationService {
   constructor(private readonly prisma: PrismaClient) {}
 
-  listRuns(parentEntityId: string) {
+  listRuns(parentEntityId: string, take = 50, skip = 0) {
     return this.prisma.consolidationRun.findMany({
       where: { parentEntityId },
       orderBy: [{ createdAt: "desc" }],
-      include: { entityResults: true }
+      include: { entityResults: true },
+      take,
+      skip
     });
   }
 

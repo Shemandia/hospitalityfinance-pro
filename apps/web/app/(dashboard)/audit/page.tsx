@@ -4,6 +4,11 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useApiContext } from "../../../components/use-api-context";
 import { getAuditEvents } from "../../../lib/gl-api";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../components/ui/select";
+import { Input } from "../../../components/ui/input";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../../components/ui/table";
+import { Badge } from "../../../components/ui/badge";
 
 type AuditEvent = {
   id: string;
@@ -38,66 +43,76 @@ export default function AuditPage() {
   });
 
   return (
-    <section style={{ background: "#fff", borderRadius: "12px", padding: "1rem", boxShadow: "0 10px 24px rgba(15,45,94,.07)" }}>
-      <h2 style={{ marginTop: 0, color: "#0f2d5e" }}>Audit Log Viewer</h2>
-      <p style={{ marginTop: 0, color: "#475569" }}>
-        Query immutable audit events by resource type and resource ID.
-      </p>
+    <Card>
+      <CardHeader>
+        <CardTitle>Audit Log Viewer</CardTitle>
+        <CardDescription>
+          Query immutable audit events by resource type and resource ID.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="flex gap-2.5 mb-4">
+          <Select value={resourceType} onValueChange={setResourceType}>
+            <SelectTrigger className="w-45">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="journal">journal</SelectItem>
+              <SelectItem value="journalline">journalline</SelectItem>
+              <SelectItem value="account">account</SelectItem>
+              <SelectItem value="apinvoice">apinvoice</SelectItem>
+              <SelectItem value="arinvoice">arinvoice</SelectItem>
+              <SelectItem value="appayment">appayment</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input
+            placeholder="Resource ID"
+            value={resourceId}
+            onChange={(event) => setResourceId(event.target.value)}
+            className="min-w-80"
+          />
+        </div>
 
-      <div style={{ display: "flex", gap: "0.6rem", marginBottom: "0.8rem" }}>
-        <select value={resourceType} onChange={(event) => setResourceType(event.target.value)}>
-          <option value="journal">journal</option>
-          <option value="journalline">journalline</option>
-          <option value="account">account</option>
-          <option value="apinvoice">apinvoice</option>
-          <option value="arinvoice">arinvoice</option>
-          <option value="appayment">appayment</option>
-        </select>
-        <input
-          placeholder="Resource ID"
-          value={resourceId}
-          onChange={(event) => setResourceId(event.target.value)}
-          style={{ minWidth: "320px" }}
-        />
-      </div>
+        {query.isLoading ? <p className="text-sm text-muted-foreground">Loading audit events...</p> : null}
+        {query.isError ? <p className="text-sm text-destructive">{(query.error as Error).message}</p> : null}
 
-      {query.isLoading ? <p>Loading audit events...</p> : null}
-      {query.isError ? <p style={{ color: "#b91c1c" }}>{(query.error as Error).message}</p> : null}
-
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr>
-              <th style={{ textAlign: "left", borderBottom: "1px solid #e2e8f0", padding: "0.5rem" }}>When</th>
-              <th style={{ textAlign: "left", borderBottom: "1px solid #e2e8f0", padding: "0.5rem" }}>Event</th>
-              <th style={{ textAlign: "left", borderBottom: "1px solid #e2e8f0", padding: "0.5rem" }}>User</th>
-              <th style={{ textAlign: "left", borderBottom: "1px solid #e2e8f0", padding: "0.5rem" }}>Before</th>
-              <th style={{ textAlign: "left", borderBottom: "1px solid #e2e8f0", padding: "0.5rem" }}>After</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(query.data ?? []).map((event) => (
-              <tr key={event.id}>
-                <td style={{ borderBottom: "1px solid #f1f5f9", padding: "0.5rem" }}>
-                  {new Date(event.createdAt).toLocaleString()}
-                </td>
-                <td style={{ borderBottom: "1px solid #f1f5f9", padding: "0.5rem" }}>{event.eventType}</td>
-                <td style={{ borderBottom: "1px solid #f1f5f9", padding: "0.5rem" }}>{event.userId ?? "-"}</td>
-                <td style={{ borderBottom: "1px solid #f1f5f9", padding: "0.5rem" }}>
-                  <pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>
-                    {event.beforeState ? JSON.stringify(event.beforeState, null, 2) : "-"}
-                  </pre>
-                </td>
-                <td style={{ borderBottom: "1px solid #f1f5f9", padding: "0.5rem" }}>
-                  <pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>
-                    {event.afterState ? JSON.stringify(event.afterState, null, 2) : "-"}
-                  </pre>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>When</TableHead>
+                <TableHead>Event</TableHead>
+                <TableHead>User</TableHead>
+                <TableHead>Before</TableHead>
+                <TableHead>After</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(query.data ?? []).map((event) => (
+                <TableRow key={event.id}>
+                  <TableCell className="whitespace-nowrap">
+                    {new Date(event.createdAt).toLocaleString()}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline">{event.eventType}</Badge>
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">{event.userId ?? "-"}</TableCell>
+                  <TableCell>
+                    <pre className="m-0 whitespace-pre-wrap text-xs max-w-xs overflow-auto">
+                      {event.beforeState ? JSON.stringify(event.beforeState, null, 2) : "-"}
+                    </pre>
+                  </TableCell>
+                  <TableCell>
+                    <pre className="m-0 whitespace-pre-wrap text-xs max-w-xs overflow-auto">
+                      {event.afterState ? JSON.stringify(event.afterState, null, 2) : "-"}
+                    </pre>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

@@ -318,7 +318,7 @@ export class APRepository {
         }
       },
       include: {
-        lines: true
+        lines: { include: { account: { select: { type: true } } } }
       }
     });
   }
@@ -328,8 +328,11 @@ export class APRepository {
     accountId: string,
     periodId: string,
     debitFunctional: Prisma.Decimal,
-    creditFunctional: Prisma.Decimal
+    creditFunctional: Prisma.Decimal,
+    accountType: string
   ) {
+    const isDebitNormal = ["ASSET", "EXPENSE", "CONTRA_REVENUE"].includes(accountType);
+
     const existing = await this.db.accountPeriodBalance.findUnique({
       where: {
         entityId_accountId_periodId: {
@@ -344,7 +347,9 @@ export class APRepository {
       const opening = new Prisma.Decimal(0);
       const periodDebits = debitFunctional;
       const periodCredits = creditFunctional;
-      const closing = opening.add(periodDebits).sub(periodCredits);
+      const closing = isDebitNormal
+        ? opening.add(periodDebits).sub(periodCredits)
+        : opening.sub(periodDebits).add(periodCredits);
 
       await this.db.accountPeriodBalance.create({
         data: {
@@ -366,9 +371,9 @@ export class APRepository {
     const periodCredits = new Prisma.Decimal(existing.periodCredits).add(
       creditFunctional
     );
-    const closing = new Prisma.Decimal(existing.openingBalance)
-      .add(periodDebits)
-      .sub(periodCredits);
+    const closing = isDebitNormal
+      ? new Prisma.Decimal(existing.openingBalance).add(periodDebits).sub(periodCredits)
+      : new Prisma.Decimal(existing.openingBalance).sub(periodDebits).add(periodCredits);
 
     await this.db.accountPeriodBalance.update({
       where: { id: existing.id },
@@ -632,7 +637,7 @@ export class APRepository {
         }
       },
       include: {
-        lines: true
+        lines: { include: { account: { select: { type: true } } } }
       }
     });
   }

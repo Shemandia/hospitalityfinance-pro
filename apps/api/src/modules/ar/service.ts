@@ -173,7 +173,8 @@ export class ARService {
           line.accountId,
           period.id,
           line.debitFunctional,
-          line.creditFunctional
+          line.creditFunctional,
+          line.account.type
         );
       }
 

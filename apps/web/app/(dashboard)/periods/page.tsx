@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useSession } from "next-auth/react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Calendar,
@@ -40,8 +39,8 @@ import {
   reopenPeriod,
   type Period,
   type PeriodStatus,
-  type ApiContext,
 } from "../../../lib/gl-api";
+import { useApiContext } from "../../../components/use-api-context";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -394,15 +393,8 @@ function YearGroup({
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function PeriodsPage() {
-  const { data: session } = useSession();
+  const ctx = useApiContext();
   const queryClient = useQueryClient();
-
-  const ctx: ApiContext | null = session?.user?.entityIds?.[0]
-    ? {
-        accessToken: (session as unknown as { accessToken?: string }).accessToken ?? "dev-token",
-        entityId: session.user.entityIds[0],
-      }
-    : null;
 
   // ── Data ──────────────────────────────────────────────────────────────────
 
@@ -547,7 +539,11 @@ export default function PeriodsPage() {
       <Card>
         <CardContent className="p-0">
           {isLoading && (
-            <div className="py-16 text-center text-sm text-muted-foreground">Loading periods…</div>
+            <div className="space-y-3 p-4">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="h-10 w-full animate-pulse rounded bg-muted" />
+              ))}
+            </div>
           )}
 
           {loadError && (

@@ -14,6 +14,7 @@ import type { CurrencyExposureRow, EntitySummary } from "../../../lib/gl-api";
 import { Button } from "../../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
 import { Badge } from "../../../components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../components/ui/select";
 import { Separator } from "../../../components/ui/separator";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -573,16 +574,18 @@ export default function DashboardPage() {
           </div>
           <div className="ml-auto flex items-center gap-2">
             <span className="text-sm text-muted-foreground">Period:</span>
-            <select
-              aria-label="Select period"
-              value={activePeriodId}
-              onChange={e => setPeriodId(e.target.value)}
-              className="flex h-8 rounded-md border border-border bg-white px-2.5 py-1 text-sm"
-            >
-              {periods.map(p => (
-                <option key={p.id} value={p.id}>{p.name}{p.status === "OPEN" ? " (Open)" : ""}</option>
-              ))}
-            </select>
+            <Select value={activePeriodId} onValueChange={setPeriodId}>
+              <SelectTrigger className="h-8 w-52">
+                <SelectValue placeholder="Select period" />
+              </SelectTrigger>
+              <SelectContent>
+                {periods.map(p => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}{p.status === "OPEN" ? " (Open)" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </CardContent>
       </Card>

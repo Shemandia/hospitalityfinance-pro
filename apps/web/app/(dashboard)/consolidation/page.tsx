@@ -7,6 +7,7 @@ import {
   getPeriodList,
   runConsolidation,
   getConsolidationRuns,
+  getEntities,
 } from "../../../lib/gl-api";
 import type { ConsolidationResult, ConsolidationRun, ConsolidatedLine } from "../../../lib/gl-api";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
@@ -54,14 +55,8 @@ const TYPE_COLORS: Record<string, string> = {
   EXPENSE: "bg-red-700",
 };
 
-// ── DEMO entity data ─────────────────────────────────────────────────────────
-// In production this would be fetched from /api/v1/entities or similar.
-// For now we hardcode the known demo entities from the seed data.
-const DEMO_ENTITIES = [
-  { id: "00000000-0000-0000-0000-000000000001", name: "HFP Demo Group", type: "GROUP" },
-  { id: "00000000-0000-0000-0000-000000000002", name: "HFP Demo Resort - Jumeirah", type: "PROPERTY" },
-  { id: "00000000-0000-0000-0000-000000000003", name: "HFP Demo Resort - Marina", type: "PROPERTY" },
-];
+// Entity type alias used in the page
+type EntityItem = { id: string; name: string; parentId: string | null };
 
 // ── Type-grouped results ──────────────────────────────────────────────────────
 
@@ -112,7 +107,7 @@ function TypeSection({
                 <th className="py-2 px-4 text-left font-semibold text-slate-500 w-20">Code</th>
                 <th className="py-2 px-4 text-left font-semibold text-slate-500">Account</th>
                 {entityIds.map((eid) => {
-                  const entity = DEMO_ENTITIES.find((e) => e.id === eid);
+                  const entity = entities.find((e) => e.id === eid);
                   return (
                     <th key={eid} className="py-2 px-3 text-right font-semibold text-slate-500 whitespace-nowrap">
                       {entity?.name ?? eid.slice(0, 8)}
@@ -184,6 +179,17 @@ export default function ConsolidationPage() {
 
   const [result, setResult] = useState<ConsolidationResult | null>(null);
   const [openSections, setOpenSections] = useState<Set<string>>(new Set(TYPE_ORDER));
+
+  const entitiesQuery = useQuery({
+    queryKey: ["entities", apiContext?.entityId],
+    queryFn: async () => {
+      if (!apiContext) return [];
+      const res = await getEntities(apiContext);
+      return (res.data ?? []) as EntityItem[];
+    },
+    enabled: Boolean(apiContext),
+  });
+  const entities = entitiesQuery.data ?? [];
 
   const periodsQuery = useQuery({
     queryKey: ["periods", apiContext?.entityId],
@@ -258,7 +264,7 @@ export default function ConsolidationPage() {
     if (!result) return;
     const rows: string[][] = [
       ["Account Code", "Account Name", "Type", ...childEntityIds.map(
-        (eid) => DEMO_ENTITIES.find((e) => e.id === eid)?.name ?? eid
+        (eid) => entities.find((e) => e.id === eid)?.name ?? eid
       ), "Eliminations", "Consolidated"],
     ];
     for (const line of result.consolidatedLines) {
@@ -320,7 +326,7 @@ export default function ConsolidationPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="NONE">Select group entity…</SelectItem>
-                  {DEMO_ENTITIES.filter((e) => e.type === "GROUP").map((e) => (
+                  {entities.filter((e) => e.parentId === null).map((e) => (
                     <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>
                   ))}
                 </SelectContent>
@@ -333,7 +339,7 @@ export default function ConsolidationPage() {
                 Child Entities
               </Label>
               <div className="space-y-1.5 rounded-md border border-border p-2.5">
-                {DEMO_ENTITIES.filter((e) => e.type === "PROPERTY").map((e) => (
+                {entities.filter((e) => e.parentId !== null).map((e) => (
                   <label key={e.id} className="flex items-center gap-2 cursor-pointer text-sm">
                     <input
                       type="checkbox"

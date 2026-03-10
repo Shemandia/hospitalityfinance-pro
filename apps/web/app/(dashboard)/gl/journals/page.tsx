@@ -236,7 +236,12 @@ export default function GLJournalsPage() {
             </TableHeader>
             <TableBody>
               {journalsQuery.isLoading ? (
-                <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground text-sm">Loading journals…</TableCell></TableRow>
+                <>
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <TableRow key={i}><TableCell colSpan={6}><div className="h-8 w-full animate-pulse rounded bg-muted" /></TableCell></TableRow>
+                  ))}
+                </>
+
               ) : journalsQuery.isError ? (
                 <TableRow><TableCell colSpan={6} className="text-center py-8 text-destructive text-sm">{(journalsQuery.error as Error).message}</TableCell></TableRow>
               ) : table.getRowModel().rows.length === 0 ? (

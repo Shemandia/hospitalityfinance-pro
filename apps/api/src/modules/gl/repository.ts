@@ -194,7 +194,7 @@ export class GLRepository {
       include: {
         lines: {
           orderBy: [{ lineNumber: "asc" }],
-          include: { account: { select: { code: true, name: true } } }
+          include: { account: { select: { code: true, name: true, type: true } } }
         },
         period: true,
         approvals: {
@@ -232,8 +232,7 @@ export class GLRepository {
         : {}),
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       include: {
-        lines: true,
-        approvals: true
+        _count: { select: { lines: true, approvals: true } }
       }
     });
   }
@@ -348,8 +347,11 @@ export class GLRepository {
     accountId: string,
     periodId: string,
     debitFunctional: Prisma.Decimal,
-    creditFunctional: Prisma.Decimal
+    creditFunctional: Prisma.Decimal,
+    accountType: string
   ) {
+    const isDebitNormal = ["ASSET", "EXPENSE", "CONTRA_REVENUE"].includes(accountType);
+
     const existing = await this.db.accountPeriodBalance.findUnique({
       where: {
         entityId_accountId_periodId: {
@@ -364,7 +366,9 @@ export class GLRepository {
       const opening = new Prisma.Decimal(0);
       const periodDebits = debitFunctional;
       const periodCredits = creditFunctional;
-      const closing = opening.add(periodDebits).sub(periodCredits);
+      const closing = isDebitNormal
+        ? opening.add(periodDebits).sub(periodCredits)
+        : opening.sub(periodDebits).add(periodCredits);
 
       await this.db.accountPeriodBalance.create({
         data: {
@@ -386,9 +390,9 @@ export class GLRepository {
     const periodCredits = new Prisma.Decimal(existing.periodCredits).add(
       creditFunctional
     );
-    const closing = new Prisma.Decimal(existing.openingBalance)
-      .add(periodDebits)
-      .sub(periodCredits);
+    const closing = isDebitNormal
+      ? new Prisma.Decimal(existing.openingBalance).add(periodDebits).sub(periodCredits)
+      : new Prisma.Decimal(existing.openingBalance).sub(periodDebits).add(periodCredits);
 
     await this.db.accountPeriodBalance.update({
       where: { id: existing.id },
@@ -428,11 +432,13 @@ export class GLRepository {
       ),
       comparative_balances AS (
         SELECT
-          account_id,
-          COALESCE(closing_balance, 0)::numeric(18,4) AS comparative_closing_balance
-        FROM account_period_balances
-        WHERE entity_id = ${entityId}
-          AND period_id = ${comparativePeriodId ?? ""}
+          apb2.account_id,
+          COALESCE(apb2.closing_balance, 0)::numeric(18,4) AS comparative_closing_balance
+        FROM account_period_balances apb2
+        WHERE apb2.entity_id = ${entityId}
+          ${comparativePeriodId
+            ? Prisma.sql`AND apb2.period_id = ${comparativePeriodId}`
+            : Prisma.sql`AND 1 = 0`}
       )
       SELECT
         pb.account_id,
