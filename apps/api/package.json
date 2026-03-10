@@ -1,0 +1,49 @@
+{
+  "name": "@hfp/api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:migrate": "prisma migrate dev --schema src/db/schema.prisma",
+    "db:generate": "prisma generate --schema src/db/schema.prisma",
+    "db:seed": "tsx src/db/seed.ts",
+    "db:setup:audit": "tsx src/db/setupAuditImmutability.ts",
+    "db:setup:rls": "tsx src/db/setupEntityRls.ts",
+    "db:setup:performance": "tsx src/db/setupPerformance.ts",
+    "report:worker": "tsx src/jobs/report-generation-worker.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.907.0",
+    "@fastify/cors": "^9.0.1",
+    "@prisma/client": "^5.22.0",
+    "@react-pdf/renderer": "^4.3.1",
+    "amqplib": "^0.10.8",
+    "bullmq": "^5.58.5",
+    "fastify": "^4.28.1",
+    "fastify-plugin": "^5.0.1",
+    "jose": "^5.9.6",
+    "react": "^19.0.0",
+    "ssh2-sftp-client": "^10.0.3",
+    "xlsx": "^0.18.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/amqplib": "^0.10.7",
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.2.2",
+    "@types/ssh2-sftp-client": "^9.0.4",
+    "prisma": "^5.22.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  },
+  "prisma": {
+    "seed": "tsx src/db/seed.ts"
+  }
+}
