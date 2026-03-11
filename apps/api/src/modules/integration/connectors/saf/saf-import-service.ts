@@ -16,7 +16,7 @@ import {
   isGLAccount,
   isStatisticalAccount,
   type SAFParseResult,
-  type SAFTransactionLine,
+  type SAFTransactionLine
 } from "./saf-parser.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -79,20 +79,18 @@ export async function getAccountMapping(
   // Fetch all existing accounts for this entity
   const existingAccounts = await prisma.account.findMany({
     where: { entityId },
-    select: { id: true, code: true, name: true },
+    select: { id: true, code: true, name: true }
   });
 
-  const codeIndex = new Map(existingAccounts.map(a => [a.code, a]));
+  const codeIndex = new Map(existingAccounts.map((a) => [a.code, a]));
 
   // Fetch connector mappings for any source codes
   const connectorMappings = await prisma.connectorMapping.findMany({
     where: { entityId, sourceCode: { in: safCodes } },
-    include: { glAccount: { select: { id: true, code: true, name: true } } },
+    include: { glAccount: { select: { id: true, code: true, name: true } } }
   });
   const mappingIndex = new Map(
-    connectorMappings
-      .filter(m => m.glAccount)
-      .map(m => [m.sourceCode, m.glAccount!])
+    connectorMappings.filter((m) => m.glAccount).map((m) => [m.sourceCode, m.glAccount!])
   );
 
   const results: AccountMappingEntry[] = [];
@@ -110,7 +108,7 @@ export async function getAccountMapping(
         glAccountCode: exact.code,
         glAccountName: exact.name,
         isVendor,
-        suggestion: null,
+        suggestion: null
       });
       continue;
     }
@@ -120,7 +118,7 @@ export async function getAccountMapping(
     if (isGLAccount(code)) {
       // Try prefix match (e.g. 13050 → 1305x accounts)
       const prefix = code.substring(0, Math.min(4, code.length));
-      const similar = existingAccounts.find(a => a.code.startsWith(prefix));
+      const similar = existingAccounts.find((a) => a.code.startsWith(prefix));
       if (similar) {
         suggestion = `${similar.code} — ${similar.name}`;
       }
@@ -133,7 +131,7 @@ export async function getAccountMapping(
       glAccountCode: null,
       glAccountName: null,
       isVendor,
-      suggestion,
+      suggestion
     });
   }
 
@@ -149,7 +147,8 @@ export async function executeSAFImport(
   const parsed = parseSAFFile(opts.fileContent, opts.filename);
 
   // Opera statistics files (MS/DS) are intentionally unbalanced — skip balance check
-  const isStatsFile = parsed.operaFileType === "market_stats" || parsed.operaFileType === "daily_stats";
+  const isStatsFile =
+    parsed.operaFileType === "market_stats" || parsed.operaFileType === "daily_stats";
   if (!parsed.isBalanced && !isStatsFile) {
     throw new Error(
       `File out of balance: debits=${parsed.totalDebits}, credits=${parsed.totalCredits}`
@@ -170,14 +169,14 @@ export async function executeSAFImport(
     linesSkipped: 0,
     unmappedAccounts: [],
     duplicatesSkipped: 0,
-    duplicateReferences: [],
+    duplicateReferences: []
   };
 
   // Build account mapping
   const accountMap = new Map<string, string>();
   const existingAccounts = await prisma.account.findMany({
     where: { entityId: opts.entityId },
-    select: { id: true, code: true, name: true },
+    select: { id: true, code: true, name: true }
   });
   for (const a of existingAccounts) accountMap.set(a.code, a.id);
 
@@ -197,15 +196,15 @@ export async function executeSAFImport(
             normalBalance: "CREDIT",
             allowPosting: true,
             isControlAccount: true,
-            level: 3,
-          },
+            level: 3
+          }
         });
         accountMap.set(code, account.id);
         result.accountsCreated++;
 
         // Auto-create supplier
         const existingSupplier = await prisma.supplier.findUnique({
-          where: { entityId_code: { entityId: opts.entityId, code } },
+          where: { entityId_code: { entityId: opts.entityId, code } }
         });
         if (!existingSupplier) {
           await prisma.supplier.create({
@@ -215,8 +214,8 @@ export async function executeSAFImport(
               code,
               currency: parsed.currency ?? "USD",
               paymentTermsDays: 30,
-              isActive: true,
-            },
+              isActive: true
+            }
           });
           result.suppliersCreated++;
         }
@@ -225,10 +224,22 @@ export async function executeSAFImport(
         const numCode = parseInt(code, 10);
         let type: "ASSET" | "LIABILITY" | "EQUITY" | "REVENUE" | "EXPENSE" = "EXPENSE";
         let normalBalance: "DEBIT" | "CREDIT" = "DEBIT";
-        if (numCode < 20000) { type = "EXPENSE"; normalBalance = "DEBIT"; }
-        if (numCode >= 20000 && numCode < 30000) { type = "LIABILITY"; normalBalance = "CREDIT"; } // Tax accounts etc.
-        if (numCode >= 40000 && numCode < 50000) { type = "EXPENSE"; normalBalance = "DEBIT"; }
-        if (numCode >= 60000) { type = "EXPENSE"; normalBalance = "DEBIT"; }
+        if (numCode < 20000) {
+          type = "EXPENSE";
+          normalBalance = "DEBIT";
+        }
+        if (numCode >= 20000 && numCode < 30000) {
+          type = "LIABILITY";
+          normalBalance = "CREDIT";
+        } // Tax accounts etc.
+        if (numCode >= 40000 && numCode < 50000) {
+          type = "EXPENSE";
+          normalBalance = "DEBIT";
+        }
+        if (numCode >= 60000) {
+          type = "EXPENSE";
+          normalBalance = "DEBIT";
+        }
 
         const account = await prisma.account.create({
           data: {
@@ -239,8 +250,8 @@ export async function executeSAFImport(
             normalBalance,
             allowPosting: true,
             isControlAccount: false,
-            level: 3,
-          },
+            level: 3
+          }
         });
         accountMap.set(code, account.id);
         result.accountsCreated++;
@@ -261,9 +272,38 @@ export async function executeSAFImport(
   // Find user for journal creation
   const entityUser = await prisma.entityUser.findFirst({
     where: { entityId: opts.entityId },
-    include: { user: true },
+    include: { user: true }
   });
   if (!entityUser) throw new Error("No entity user found");
+
+  // Determine file currency and entity functional currency for FX conversion
+  const fileCurrency = (parsed.currency ?? "USD").toUpperCase();
+  const entity = await prisma.entity.findUniqueOrThrow({
+    where: { id: opts.entityId },
+    select: { functionalCurrency: true }
+  });
+  const functionalCurrency = entity.functionalCurrency.toUpperCase();
+
+  // Look up FX rate if file currency ≠ functional currency
+  let fxRate = new Prisma.Decimal(1);
+  if (fileCurrency !== functionalCurrency) {
+    const rateRecord = await prisma.fXRate.findFirst({
+      where: {
+        fromCurrency: fileCurrency,
+        toCurrency: functionalCurrency,
+        rateType: "SPOT"
+      },
+      orderBy: { effectiveDate: "desc" }
+    });
+    if (rateRecord) {
+      fxRate = rateRecord.rate;
+    } else {
+      throw new Error(
+        `No FX rate found for ${fileCurrency}→${functionalCurrency}. ` +
+          `Please add a SPOT rate on the FX page before importing.`
+      );
+    }
+  }
 
   // Group lines per strategy
   const groups = groupLines(parsed.lines, opts.groupingStrategy);
@@ -290,7 +330,7 @@ export async function executeSAFImport(
         debit: new Prisma.Decimal(safLine.dcMarker === "D" ? safLine.amount : 0),
         credit: new Prisma.Decimal(safLine.dcMarker === "C" ? safLine.amount : 0),
         description: safLine.description,
-        lineNumber: lineNum++,
+        lineNumber: lineNum++
       });
       result.linesImported++;
     }
@@ -298,17 +338,24 @@ export async function executeSAFImport(
     if (journalLines.length === 0) continue;
 
     const txDate = safLines[0]?.transactionDate;
-    const journalDate = txDate && txDate.length === 8
-      ? new Date(txDate.substring(0, 4) + "-" + txDate.substring(4, 6) + "-" + txDate.substring(6, 8))
-      : new Date();
+    const journalDate =
+      txDate && txDate.length === 8
+        ? new Date(
+            txDate.substring(0, 4) + "-" + txDate.substring(4, 6) + "-" + txDate.substring(6, 8)
+          )
+        : new Date();
 
     // Map sourceModule to JournalSource enum
     const sourceMap: Record<string, string> = {
-      PROC: "MANUAL", OPERA: "PMS", PMS: "PMS", POS: "POS",
-      PAYROLL: "PAYROLL", AP: "AP", AR: "AR",
+      PROC: "MANUAL",
+      OPERA: "PMS",
+      PMS: "PMS",
+      POS: "POS",
+      PAYROLL: "PAYROLL",
+      AP: "AP",
+      AR: "AR"
     };
     const journalSource = sourceMap[opts.sourceModule] ?? "MANUAL";
-    const fileCurrency = parsed.currency ?? "USD";
 
     // Check for duplicate reference — skip if already imported
     const journalRef = `${opts.sourceModule}-${groupKey}`;
@@ -316,9 +363,9 @@ export async function executeSAFImport(
       where: {
         entityId: opts.entityId,
         reference: journalRef,
-        status: { not: "REVERSED" },
+        status: { not: "REVERSED" }
       },
-      select: { id: true },
+      select: { id: true }
     });
     if (existingJournal) {
       result.duplicatesSkipped++;
@@ -333,26 +380,26 @@ export async function executeSAFImport(
         periodId: period.id,
         reference: `${opts.sourceModule}-${groupKey}`,
         description: `${opts.descriptionPrefix} — ${groupKey}`,
-        functionalCurrency: fileCurrency,
+        functionalCurrency: functionalCurrency,
         source: journalSource as any,
         status: opts.autoPost ? "POSTED" : "DRAFT",
         postedAt: opts.autoPost ? journalDate : undefined,
         createdById: entityUser.userId,
         lines: {
-          create: journalLines.map(l => ({
+          create: journalLines.map((l) => ({
             accountId: l.accountId,
             debit: l.debit,
             credit: l.credit,
             currency: fileCurrency,
-            fxRate: new Prisma.Decimal(1),
-            debitFunctional: l.debit,
-            creditFunctional: l.credit,
+            fxRate: fxRate,
+            debitFunctional: l.debit.mul(fxRate),
+            creditFunctional: l.credit.mul(fxRate),
             description: l.description,
-            lineNumber: l.lineNumber,
-          })),
-        },
+            lineNumber: l.lineNumber
+          }))
+        }
       },
-      include: { lines: true },
+      include: { lines: true }
     });
 
     result.journalsCreated++;
@@ -366,8 +413,8 @@ export async function executeSAFImport(
             entityId_accountId_periodId: {
               entityId: opts.entityId,
               accountId: line.accountId,
-              periodId: period.id,
-            },
+              periodId: period.id
+            }
           },
           create: {
             entityId: opts.entityId,
@@ -376,13 +423,13 @@ export async function executeSAFImport(
             openingBalance: new Prisma.Decimal(0),
             periodDebits: line.debitFunctional,
             periodCredits: line.creditFunctional,
-            closingBalance: line.debitFunctional.sub(line.creditFunctional),
+            closingBalance: line.debitFunctional.sub(line.creditFunctional)
           },
           update: {
             periodDebits: { increment: line.debitFunctional },
             periodCredits: { increment: line.creditFunctional },
-            closingBalance: { increment: line.debitFunctional.sub(line.creditFunctional) },
-          },
+            closingBalance: { increment: line.debitFunctional.sub(line.creditFunctional) }
+          }
         });
       }
     }
@@ -390,7 +437,7 @@ export async function executeSAFImport(
     // ── Auto-create AP invoices for supplier (C-prefix) groups ─────────────
     // Find vendor credit lines in this group — these represent supplier invoices
     const vendorCredits = safLines.filter(
-      l => isVendorAccount(l.accountCode) && l.dcMarker === "C"
+      (l) => isVendorAccount(l.accountCode) && l.dcMarker === "C"
     );
 
     if (vendorCredits.length > 0 && opts.autoPost) {
@@ -408,17 +455,18 @@ export async function executeSAFImport(
 
       // Collect expense (debit) lines for invoice line items
       const expenseDebits = safLines.filter(
-        l => !isVendorAccount(l.accountCode) && l.dcMarker === "D" && accountMap.has(l.accountCode)
+        (l) =>
+          !isVendorAccount(l.accountCode) && l.dcMarker === "D" && accountMap.has(l.accountCode)
       );
 
       for (const [vendorCode, vendorData] of vendorMap) {
         // Find or create Supplier record
         let supplier = await prisma.supplier.findUnique({
-          where: { entityId_code: { entityId: opts.entityId, code: vendorCode } },
+          where: { entityId_code: { entityId: opts.entityId, code: vendorCode } }
         });
         if (!supplier) {
           // Look up the GL account name for a better supplier name
-          const vendorAccount = existingAccounts.find(a => a.code === vendorCode);
+          const vendorAccount = existingAccounts.find((a) => a.code === vendorCode);
           supplier = await prisma.supplier.create({
             data: {
               entityId: opts.entityId,
@@ -426,19 +474,19 @@ export async function executeSAFImport(
               code: vendorCode,
               currency: fileCurrency,
               paymentTermsDays: 30,
-              isActive: true,
-            },
+              isActive: true
+            }
           });
           result.suppliersCreated++;
         }
 
         // Build invoice line items from expense debits
-        const invoiceLines = expenseDebits.map(ed => ({
+        const invoiceLines = expenseDebits.map((ed) => ({
           description: ed.description || `${ed.accountCode} — ${groupKey}`,
           quantity: new Prisma.Decimal(1),
           unitPrice: new Prisma.Decimal(ed.amount),
           amount: new Prisma.Decimal(ed.amount),
-          glAccountId: accountMap.get(ed.accountCode) ?? null,
+          glAccountId: accountMap.get(ed.accountCode) ?? null
         }));
 
         // If no expense lines, create a single line from the vendor total
@@ -448,11 +496,12 @@ export async function executeSAFImport(
             quantity: new Prisma.Decimal(1),
             unitPrice: new Prisma.Decimal(vendorData.totalCredit),
             amount: new Prisma.Decimal(vendorData.totalCredit),
-            glAccountId: null,
+            glAccountId: null
           });
         }
 
         const netAmount = new Prisma.Decimal(vendorData.totalCredit);
+        const functionalAmount = netAmount.mul(fxRate);
         const dueDate = new Date(journalDate);
         dueDate.setDate(dueDate.getDate() + (supplier.paymentTermsDays ?? 30));
 
@@ -469,16 +518,16 @@ export async function executeSAFImport(
             grossAmount: netAmount,
             taxAmount: new Prisma.Decimal(0),
             netAmount,
-            functionalAmount: netAmount,
-            fxRate: new Prisma.Decimal(1),
+            functionalAmount: functionalAmount,
+            fxRate: fxRate,
             status: "POSTED",
             glJournalId: journal.id,
             createdById: entityUser.userId,
             approvedById: entityUser.userId,
             lines: {
-              create: invoiceLines,
-            },
-          },
+              create: invoiceLines
+            }
+          }
         });
         result.invoicesCreated++;
       }
@@ -527,6 +576,6 @@ async function findPeriod(
 
   return prisma.period.findFirst({
     where: { entityId, year, month },
-    select: { id: true },
+    select: { id: true }
   });
 }

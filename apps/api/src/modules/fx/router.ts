@@ -32,66 +32,92 @@ function mapError(reply: FastifyReply, error: unknown) {
 }
 
 export async function registerFXRouter(app: FastifyInstance): Promise<void> {
-  app.register(async (router) => {
-    router.addHook("preHandler", requireAuth);
+  app.register(
+    async (router) => {
+      router.addHook("preHandler", requireAuth);
 
-    // ── Currencies ─────────────────────────────────────────────────────────────
-    router.get("/currencies", async (_request, reply) => {
-      try {
-        const data = await fxService.listCurrencies();
-        return reply.send({ data, errors: [] });
-      } catch (error) { return mapError(reply, error); }
-    });
+      // ── Currencies ─────────────────────────────────────────────────────────────
+      router.get("/currencies", async (_request, reply) => {
+        try {
+          const data = await fxService.listCurrencies();
+          return reply.send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
 
-    router.post("/currencies", async (request, reply) => {
-      try {
-        const payload = currencyCreateSchema.parse(request.body);
-        const data = await fxService.upsertCurrency(payload);
-        return reply.code(201).send({ data, errors: [] });
-      } catch (error) { return mapError(reply, error); }
-    });
+      router.post("/currencies", async (request, reply) => {
+        try {
+          const payload = currencyCreateSchema.parse(request.body);
+          const data = await fxService.upsertCurrency(payload);
+          return reply.code(201).send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
 
-    // ── FX Rates ───────────────────────────────────────────────────────────────
-    router.get("/rates", async (request, reply) => {
-      try {
-        const query = fxRateQuerySchema.parse(request.query);
-        const data = await fxService.listRates(query);
-        return reply.send({ data, errors: [] });
-      } catch (error) { return mapError(reply, error); }
-    });
+      // ── FX Rates ───────────────────────────────────────────────────────────────
+      router.get("/rates", async (request, reply) => {
+        try {
+          const query = fxRateQuerySchema.parse(request.query);
+          const data = await fxService.listRates(query);
+          return reply.send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
 
-    router.post("/rates", async (request, reply) => {
-      try {
-        const payload = fxRateCreateSchema.parse(request.body);
-        const data = await fxService.upsertRate(payload);
-        return reply.code(201).send({ data, errors: [] });
-      } catch (error) { return mapError(reply, error); }
-    });
+      router.post("/rates", async (request, reply) => {
+        try {
+          const payload = fxRateCreateSchema.parse(request.body);
+          const data = await fxService.upsertRate(payload);
+          return reply.code(201).send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
 
-    // ── Convert ────────────────────────────────────────────────────────────────
-    router.get("/convert", async (request, reply) => {
-      try {
-        const query = convertQuerySchema.parse(request.query);
-        const data = await fxService.convert(query);
-        return reply.send({ data, errors: [] });
-      } catch (error) { return mapError(reply, error); }
-    });
+      router.delete<{ Params: { id: string } }>("/rates/:id", async (request, reply) => {
+        try {
+          await fxService.deleteRate(request.params.id);
+          return reply.send({ data: { deleted: true }, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
 
-    // ── ECB Import ─────────────────────────────────────────────────────────────
-    router.post("/ecb-import", async (_request, reply) => {
-      try {
-        const data = await fxService.importEcbRates();
-        return reply.send({ data, errors: [] });
-      } catch (error) { return mapError(reply, error); }
-    });
+      // ── Convert ────────────────────────────────────────────────────────────────
+      router.get("/convert", async (request, reply) => {
+        try {
+          const query = convertQuerySchema.parse(request.query);
+          const data = await fxService.convert(query);
+          return reply.send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
 
-    // ── Revaluation ────────────────────────────────────────────────────────────
-    router.post("/revaluation", async (request, reply) => {
-      try {
-        const payload = revaluationRequestSchema.parse(request.body);
-        const data = await fxService.runRevaluation(payload);
-        return reply.send({ data, errors: [] });
-      } catch (error) { return mapError(reply, error); }
-    });
-  }, { prefix: "/api/v1/fx" });
+      // ── ECB Import ─────────────────────────────────────────────────────────────
+      router.post("/ecb-import", async (_request, reply) => {
+        try {
+          const data = await fxService.importEcbRates();
+          return reply.send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      // ── Revaluation ────────────────────────────────────────────────────────────
+      router.post("/revaluation", async (request, reply) => {
+        try {
+          const payload = revaluationRequestSchema.parse(request.body);
+          const data = await fxService.runRevaluation(payload);
+          return reply.send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+    },
+    { prefix: "/api/v1/fx" }
+  );
 }

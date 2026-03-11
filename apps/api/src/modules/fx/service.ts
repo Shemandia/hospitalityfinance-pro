@@ -21,6 +21,9 @@ export class FXServiceError extends Error {
 
 type EcbRateEntry = { currency: string; rate: string };
 
+/** Only these currencies are active in the system. USD is the base/reporting currency. */
+const ALLOWED_CURRENCIES = new Set(["USD", "EUR", "GBP", "TZS"]);
+
 export class FXService {
   constructor(private readonly prisma: PrismaClient) {}
 
@@ -46,6 +49,10 @@ export class FXService {
 
   async upsertRate(input: FXRateCreateInput) {
     return this.repository(this.prisma).upsertRate(input);
+  }
+
+  async deleteRate(id: string) {
+    return this.repository(this.prisma).deleteRate(id);
   }
 
   async convert(query: ConvertQuery) {
@@ -94,8 +101,7 @@ export class FXService {
 
   async importEcbRates(): Promise<{ imported: number; date: string }> {
     const ecbUrl =
-      process.env.ECB_RATES_URL ??
-      "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml";
+      process.env.ECB_RATES_URL ?? "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml";
 
     let xml: string;
     try {
@@ -121,16 +127,47 @@ export class FXService {
     const effectiveDate = new Date(rateDate);
 
     const rateMatches = [...xml.matchAll(/currency='([A-Z]{3})' rate='([0-9.]+)'/g)];
-    const entries: EcbRateEntry[] = rateMatches.map((m) => ({
+    const allEntries: EcbRateEntry[] = rateMatches.map((m) => ({
       currency: m[1],
       rate: m[2]
     }));
 
+    // Only keep currencies in our allowed set (excluding EUR which is the ECB base)
+    const entries = allEntries.filter((e) => ALLOWED_CURRENCIES.has(e.currency));
+
+    // Also seed/ensure the 4 allowed currencies exist
+    const currencyMeta: Record<string, { name: string; symbol: string }> = {
+      USD: { name: "US Dollar", symbol: "$" },
+      EUR: { name: "Euro", symbol: "€" },
+      GBP: { name: "British Pound", symbol: "£" },
+      TZS: { name: "Tanzanian Shilling", symbol: "TSh" }
+    };
+    for (const [code, meta] of Object.entries(currencyMeta)) {
+      try {
+        await this.repository(this.prisma).upsertCurrency({
+          code,
+          name: meta.name,
+          symbol: meta.symbol,
+          decimalPlaces: code === "TZS" ? 0 : 2,
+          isActive: true
+        });
+      } catch {
+        /* already exists */
+      }
+    }
+
+    // Build EUR→X rate map for cross-rate derivation
+    const eurRateMap = new Map<string, Prisma.Decimal>();
     let imported = 0;
+    const repo = this.repository(this.prisma);
+
     for (const entry of entries) {
       try {
-        // EUR -> foreign currency
-        await this.repository(this.prisma).upsertRate({
+        const rateDecimal = new Prisma.Decimal(entry.rate);
+        eurRateMap.set(entry.currency, rateDecimal);
+
+        // EUR → X
+        await repo.upsertRate({
           fromCurrency: "EUR",
           toCurrency: entry.currency,
           rateType: "SPOT",
@@ -138,9 +175,9 @@ export class FXService {
           effectiveDate,
           source: "ECB"
         });
-        // Inverse: foreign -> EUR
-        const inverse = new Prisma.Decimal(1).div(new Prisma.Decimal(entry.rate));
-        await this.repository(this.prisma).upsertRate({
+        // X → EUR (inverse)
+        const inverse = new Prisma.Decimal(1).div(rateDecimal);
+        await repo.upsertRate({
           fromCurrency: entry.currency,
           toCurrency: "EUR",
           rateType: "SPOT",
@@ -150,7 +187,40 @@ export class FXService {
         });
         imported++;
       } catch {
-        // Skip individual failures; log if needed
+        // Skip individual failures
+      }
+    }
+
+    // Derive USD cross rates from EUR rates (USD is the base/reporting currency)
+    const eurUsd = eurRateMap.get("USD");
+    if (eurUsd) {
+      for (const [ccy, eurRate] of eurRateMap) {
+        if (ccy === "USD") continue;
+        try {
+          // USD → X = (EUR→X) / (EUR→USD)
+          const usdToX = eurRate.div(eurUsd);
+          await repo.upsertRate({
+            fromCurrency: "USD",
+            toCurrency: ccy,
+            rateType: "SPOT",
+            rate: usdToX.toDecimalPlaces(8).toFixed(8),
+            effectiveDate,
+            source: "ECB"
+          });
+          // X → USD = (EUR→USD) / (EUR→X)
+          const xToUsd = eurUsd.div(eurRate);
+          await repo.upsertRate({
+            fromCurrency: ccy,
+            toCurrency: "USD",
+            rateType: "SPOT",
+            rate: xToUsd.toDecimalPlaces(8).toFixed(8),
+            effectiveDate,
+            source: "ECB"
+          });
+          imported++;
+        } catch {
+          // Skip
+        }
       }
     }
 
@@ -281,7 +351,9 @@ export class FXService {
       if (!rateRecord) continue;
 
       const closingRate = new Prisma.Decimal(rateRecord.rate);
-      const outstanding = new Prisma.Decimal(invoice.amount).sub(new Prisma.Decimal(invoice.amountPaid));
+      const outstanding = new Prisma.Decimal(invoice.amount).sub(
+        new Prisma.Decimal(invoice.amountPaid)
+      );
       const bookedFunctional = new Prisma.Decimal(invoice.functionalAmount);
       const newFunctional = outstanding.mul(closingRate);
       const gainLoss = newFunctional.sub(bookedFunctional); // positive = gain for receivable
@@ -320,14 +392,8 @@ export class FXService {
     }
 
     // Balance the journal: net gain/loss entry to offset all individual lines
-    const totalDebit = journalLines.reduce(
-      (s, l) => s.add(l.debit),
-      new Prisma.Decimal(0)
-    );
-    const totalCredit = journalLines.reduce(
-      (s, l) => s.add(l.credit),
-      new Prisma.Decimal(0)
-    );
+    const totalDebit = journalLines.reduce((s, l) => s.add(l.debit), new Prisma.Decimal(0));
+    const totalCredit = journalLines.reduce((s, l) => s.add(l.credit), new Prisma.Decimal(0));
     const diff = totalDebit.sub(totalCredit);
     if (!diff.equals(0)) {
       if (diff.greaterThan(0)) {

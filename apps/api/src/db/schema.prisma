@@ -163,6 +163,9 @@ model Entity {
   reportingCurrency  String      @default("USD") @map("reporting_currency")
   timezone           String      @default("UTC")
   countryCode        String      @map("country_code")
+  address            String?
+  city               String?
+  postalCode         String?     @map("postal_code")
   isActive           Boolean     @default(true) @map("is_active")
   parentId           String?     @map("parent_id")
   parent             Entity?     @relation("EntityHierarchy", fields: [parentId], references: [id])

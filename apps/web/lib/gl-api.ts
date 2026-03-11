@@ -51,7 +51,12 @@ export type JournalDetail = {
   postedAt: string | null;
   lines: JournalLine[];
   period: { id: string; name: string; status: string };
-  approvals: Array<{ id: string; status: string; approver: { id: string; name: string; email: string }; reason?: string | null }>;
+  approvals: Array<{
+    id: string;
+    status: string;
+    approver: { id: string; name: string; email: string };
+    reason?: string | null;
+  }>;
 };
 
 export type GLAccount = {
@@ -119,70 +124,46 @@ export async function getGLJournals(
     search.set("search", params.search);
   }
   const query = search.toString();
-  return request<JournalSummary[]>(
-    context,
-    `/api/v1/gl/journals${query ? `?${query}` : ""}`
-  );
+  return request<JournalSummary[]>(context, `/api/v1/gl/journals${query ? `?${query}` : ""}`);
 }
 
 export async function getGLJournal(context: ApiContext, journalId: string) {
   return request<JournalDetail>(context, `/api/v1/gl/journals/${journalId}`);
 }
 
-export async function createGLJournal(
-  context: ApiContext,
-  payload: Record<string, unknown>
-) {
+export async function createGLJournal(context: ApiContext, payload: Record<string, unknown>) {
   return request<Record<string, unknown>>(context, "/api/v1/gl/journals", {
     method: "POST",
     body: JSON.stringify(payload)
   });
 }
 
-export async function approveGLJournal(
-  context: ApiContext,
-  journalId: string,
-  reason?: string
-) {
-  return request<Record<string, unknown>>(
-    context,
-    `/api/v1/gl/journals/${journalId}/approve`,
-    {
-      method: "POST",
-      body: JSON.stringify({ reason })
-    }
-  );
+export async function approveGLJournal(context: ApiContext, journalId: string, reason?: string) {
+  return request<Record<string, unknown>>(context, `/api/v1/gl/journals/${journalId}/approve`, {
+    method: "POST",
+    body: JSON.stringify({ reason })
+  });
 }
 
-export async function rejectGLJournal(
-  context: ApiContext,
-  journalId: string,
-  reason?: string
-) {
-  return request<Record<string, unknown>>(
-    context,
-    `/api/v1/gl/journals/${journalId}/reject`,
-    {
-      method: "POST",
-      body: JSON.stringify({ reason })
-    }
-  );
+export async function rejectGLJournal(context: ApiContext, journalId: string, reason?: string) {
+  return request<Record<string, unknown>>(context, `/api/v1/gl/journals/${journalId}/reject`, {
+    method: "POST",
+    body: JSON.stringify({ reason })
+  });
 }
 
 export async function reverseGLJournal(context: ApiContext, journalId: string) {
-  return request<Record<string, unknown>>(
-    context,
-    `/api/v1/gl/journals/${journalId}/reverse`,
-    { method: "POST", body: "{}" }
-  );
+  return request<Record<string, unknown>>(context, `/api/v1/gl/journals/${journalId}/reverse`, {
+    method: "POST",
+    body: "{}"
+  });
 }
 
 export async function postGLJournal(context: ApiContext, journalId: string) {
-  return request<Record<string, unknown>>(
-    context,
-    `/api/v1/gl/journals/${journalId}/post`,
-    { method: "POST", body: "{}" }
-  );
+  return request<Record<string, unknown>>(context, `/api/v1/gl/journals/${journalId}/post`, {
+    method: "POST",
+    body: "{}"
+  });
 }
 
 export async function getGLAccounts(context: ApiContext) {
@@ -270,10 +251,7 @@ export async function getAuditEvents(
   if (params.limit) {
     search.set("limit", String(params.limit));
   }
-  return request<AuditEvent[]>(
-    context,
-    `/api/v1/audit?${search.toString()}`
-  );
+  return request<AuditEvent[]>(context, `/api/v1/audit?${search.toString()}`);
 }
 
 export async function getReportDefinitions(context: ApiContext) {
@@ -315,10 +293,7 @@ export async function getTrialBalance(
   );
 }
 
-export async function getAPPaymentRuns(
-  context: ApiContext,
-  params: { limit?: number } = {}
-) {
+export async function getAPPaymentRuns(context: ApiContext, params: { limit?: number } = {}) {
   const search = new URLSearchParams();
   if (params.limit) {
     search.set("limit", String(params.limit));
@@ -377,6 +352,10 @@ export function getPaymentRunDownloadUrl(runId: string): string {
   return `${API_BASE_URL}/api/v1/ap/payment-runs/${runId}/download`;
 }
 
+export function getPaymentVoucherUrl(runId: string, supplierId: string): string {
+  return `${API_BASE_URL}/api/v1/ap/payment-runs/${runId}/voucher/${supplierId}`;
+}
+
 // ── AR ────────────────────────────────────────────────────────────────────────
 
 export async function getARCustomers(context: ApiContext) {
@@ -398,10 +377,7 @@ export async function getARInvoices(
   if (params.status) search.set("status", params.status);
   if (params.customerId) search.set("customerId", params.customerId);
   const q = search.toString();
-  return request<Array<Record<string, unknown>>>(
-    context,
-    `/api/v1/ar/invoices${q ? `?${q}` : ""}`
-  );
+  return request<Array<Record<string, unknown>>>(context, `/api/v1/ar/invoices${q ? `?${q}` : ""}`);
 }
 
 export async function createARInvoice(context: ApiContext, payload: Record<string, unknown>) {
@@ -477,16 +453,19 @@ export async function getFXRates(
   if (params.toCurrency) search.set("toCurrency", params.toCurrency);
   if (params.rateType) search.set("rateType", params.rateType);
   const q = search.toString();
-  return request<Array<Record<string, unknown>>>(
-    context,
-    `/api/v1/fx/rates${q ? `?${q}` : ""}`
-  );
+  return request<Array<Record<string, unknown>>>(context, `/api/v1/fx/rates${q ? `?${q}` : ""}`);
 }
 
 export async function upsertFXRate(context: ApiContext, payload: Record<string, unknown>) {
   return request<Record<string, unknown>>(context, "/api/v1/fx/rates", {
     method: "POST",
     body: JSON.stringify(payload)
+  });
+}
+
+export async function deleteFXRate(context: ApiContext, id: string) {
+  return request<Record<string, unknown>>(context, `/api/v1/fx/rates/${id}`, {
+    method: "DELETE"
   });
 }
 
@@ -531,7 +510,10 @@ export async function getBudgetDefinitions(context: ApiContext) {
   return request<BudgetDefinition[]>(context, "/api/v1/budget/definitions");
 }
 
-export async function createBudgetDefinition(context: ApiContext, payload: Record<string, unknown>) {
+export async function createBudgetDefinition(
+  context: ApiContext,
+  payload: Record<string, unknown>
+) {
   return request<Record<string, unknown>>(context, "/api/v1/budget/definitions", {
     method: "POST",
     body: JSON.stringify(payload)
@@ -554,7 +536,7 @@ export async function upsertBudgetLines(
     context,
     `/api/v1/budget/definitions/${definitionId}/lines`,
     {
-      method: "POST",
+      method: "PUT",
       body: JSON.stringify({ lines })
     }
   );
@@ -574,10 +556,7 @@ export async function getBudgetVariance(
 // ── KPI ───────────────────────────────────────────────────────────────────────
 
 export async function getKPIDashboard(context: ApiContext, periodId: string) {
-  return request<Record<string, unknown>>(
-    context,
-    `/api/v1/kpi/dashboard?periodId=${periodId}`
-  );
+  return request<Record<string, unknown>>(context, `/api/v1/kpi/dashboard?periodId=${periodId}`);
 }
 
 export async function getRevPAR(context: ApiContext, periodId: string) {
@@ -631,10 +610,7 @@ export type USALIReport = {
 };
 
 export async function getBalanceSheet(context: ApiContext, periodId: string) {
-  return request<BalanceSheetResult>(
-    context,
-    `/api/v1/kpi/balance-sheet?periodId=${periodId}`
-  );
+  return request<BalanceSheetResult>(context, `/api/v1/kpi/balance-sheet?periodId=${periodId}`);
 }
 
 export async function getCashFlow(context: ApiContext, periodId: string) {
@@ -647,30 +623,68 @@ export async function getUSALI(context: ApiContext, periodId: string) {
 
 export type USALIDepartmentComparative = {
   name: string;
-  revenue: string; expenses: string; departmentalIncome: string; incomePct: string;
-  ytdRevenue: string; ytdExpenses: string; ytdDeptIncome: string; ytdIncomePct: string;
-  priorRevenue: string; priorExpenses: string; priorDeptIncome: string; priorIncomePct: string;
-  budgetRevenue: string; budgetExpenses: string; budgetDeptIncome: string;
-  varianceAmount: string; variancePct: string;
+  revenue: string;
+  expenses: string;
+  departmentalIncome: string;
+  incomePct: string;
+  ytdRevenue: string;
+  ytdExpenses: string;
+  ytdDeptIncome: string;
+  ytdIncomePct: string;
+  priorRevenue: string;
+  priorExpenses: string;
+  priorDeptIncome: string;
+  priorIncomePct: string;
+  budgetRevenue: string;
+  budgetExpenses: string;
+  budgetDeptIncome: string;
+  varianceAmount: string;
+  variancePct: string;
 };
 
 export type USALIComparativeReport = {
-  periodId: string; periodName: string; year: number; month: number;
-  hasYTD: boolean; hasPriorYear: boolean; hasBudget: boolean;
+  periodId: string;
+  periodName: string;
+  year: number;
+  month: number;
+  hasYTD: boolean;
+  hasPriorYear: boolean;
+  hasBudget: boolean;
   departments: USALIDepartmentComparative[];
-  totalRevenue: string; totalDepartmentalExpenses: string; totalDepartmentalIncome: string;
-  undistributedExpenses: string; grossOperatingProfit: string; gopPct: string;
-  managementFees: string; ebitda: string; ebitdaPct: string;
-  ytdTotalRevenue: string; ytdGOP: string; ytdGOPPct: string; ytdEBITDA: string; ytdEBITDAPct: string;
-  priorTotalRevenue: string; priorGOP: string; priorGOPPct: string; priorEBITDA: string;
-  budgetTotalRevenue: string; budgetGOP: string; budgetEBITDA: string;
-  revenueVariance: string; revenueVariancePct: string;
-  gopVariance: string; gopVariancePct: string;
-  ebitdaVariance: string; ebitdaVariancePct: string;
+  totalRevenue: string;
+  totalDepartmentalExpenses: string;
+  totalDepartmentalIncome: string;
+  undistributedExpenses: string;
+  grossOperatingProfit: string;
+  gopPct: string;
+  managementFees: string;
+  ebitda: string;
+  ebitdaPct: string;
+  ytdTotalRevenue: string;
+  ytdGOP: string;
+  ytdGOPPct: string;
+  ytdEBITDA: string;
+  ytdEBITDAPct: string;
+  priorTotalRevenue: string;
+  priorGOP: string;
+  priorGOPPct: string;
+  priorEBITDA: string;
+  budgetTotalRevenue: string;
+  budgetGOP: string;
+  budgetEBITDA: string;
+  revenueVariance: string;
+  revenueVariancePct: string;
+  gopVariance: string;
+  gopVariancePct: string;
+  ebitdaVariance: string;
+  ebitdaVariancePct: string;
 };
 
 export async function getUSALIComparative(context: ApiContext, periodId: string) {
-  return request<USALIComparativeReport>(context, `/api/v1/kpi/usali-comparative?periodId=${periodId}`);
+  return request<USALIComparativeReport>(
+    context,
+    `/api/v1/kpi/usali-comparative?periodId=${periodId}`
+  );
 }
 
 export async function getRevPARTrend(context: ApiContext, periodId: string) {
@@ -707,7 +721,12 @@ export async function getCurrencyExposure(context: ApiContext) {
 }
 
 /** Override entity ID — used for multi-entity portfolio calls */
-export async function getEntitySummary(context: ApiContext, entityId: string, year: number, month: number) {
+export async function getEntitySummary(
+  context: ApiContext,
+  entityId: string,
+  year: number,
+  month: number
+) {
   return request<EntitySummary | null>(
     { ...context, entityId },
     `/api/v1/kpi/entity-summary?year=${year}&month=${month}`
@@ -723,7 +742,14 @@ export async function getAPInvoicesDue(context: ApiContext, dueBefore: string) {
 
 // ── AP full CRUD ──────────────────────────────────────────────────────────────
 
-export type APInvoiceStatus = "DRAFT" | "PENDING_APPROVAL" | "APPROVED" | "POSTED" | "PAID" | "DISPUTED" | "CANCELLED";
+export type APInvoiceStatus =
+  | "DRAFT"
+  | "PENDING_APPROVAL"
+  | "APPROVED"
+  | "POSTED"
+  | "PAID"
+  | "DISPUTED"
+  | "CANCELLED";
 
 export type APInvoice = {
   id: string;
@@ -765,7 +791,10 @@ export type Supplier = {
   isActive: boolean;
 };
 
-export function getAPInvoices(context: ApiContext, params?: { status?: string; supplierId?: string; limit?: number }) {
+export function getAPInvoices(
+  context: ApiContext,
+  params?: { status?: string; supplierId?: string; limit?: number }
+) {
   const qs = new URLSearchParams();
   if (params?.status) qs.set("status", params.status);
   if (params?.supplierId) qs.set("supplierId", params.supplierId);
@@ -778,15 +807,24 @@ export function getAPInvoice(context: ApiContext, id: string) {
 }
 
 export function createAPInvoice(context: ApiContext, payload: Record<string, unknown>) {
-  return request<APInvoice>(context, "/api/v1/ap/invoices", { method: "POST", body: JSON.stringify(payload) });
+  return request<APInvoice>(context, "/api/v1/ap/invoices", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
 }
 
 export function approveAPInvoice(context: ApiContext, id: string) {
-  return request<APInvoice>(context, `/api/v1/ap/invoices/${id}/approve`, { method: "POST", body: "{}" });
+  return request<APInvoice>(context, `/api/v1/ap/invoices/${id}/approve`, {
+    method: "POST",
+    body: "{}"
+  });
 }
 
 export function postAPInvoice(context: ApiContext, id: string) {
-  return request<APInvoice>(context, `/api/v1/ap/invoices/${id}/post`, { method: "POST", body: "{}" });
+  return request<APInvoice>(context, `/api/v1/ap/invoices/${id}/post`, {
+    method: "POST",
+    body: "{}"
+  });
 }
 
 export function getSuppliers(context: ApiContext) {
@@ -798,11 +836,17 @@ export function getSupplier(context: ApiContext, id: string) {
 }
 
 export function createSupplier(context: ApiContext, payload: Record<string, unknown>) {
-  return request<Supplier>(context, "/api/v1/ap/suppliers", { method: "POST", body: JSON.stringify(payload) });
+  return request<Supplier>(context, "/api/v1/ap/suppliers", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
 }
 
 export function updateSupplier(context: ApiContext, id: string, payload: Record<string, unknown>) {
-  return request<Supplier>(context, `/api/v1/ap/suppliers/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+  return request<Supplier>(context, `/api/v1/ap/suppliers/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
 }
 
 // ── Account types ────────────────────────────────────────────────────────────
@@ -977,10 +1021,7 @@ export async function runConsolidation(
 }
 
 export async function getConsolidationRuns(context: ApiContext, parentEntityId: string) {
-  return request<ConsolidationRun[]>(
-    context,
-    `/api/v1/consolidation/${parentEntityId}/runs`
-  );
+  return request<ConsolidationRun[]>(context, `/api/v1/consolidation/${parentEntityId}/runs`);
 }
 
 export async function getConsolidationRun(
@@ -1097,10 +1138,19 @@ export async function deleteConnectorMapping(context: ApiContext, id: string) {
 // ── Transfer Desk — Interface Definitions ─────────────────────────────────────
 
 export type TargetField =
-  | "postingDate" | "accountCode" | "debitAmount" | "creditAmount"
-  | "currency" | "reference" | "lineDescription"
-  | "dimension1" | "dimension2" | "dimension3"
-  | "dimension4" | "dimension5" | "dimension6";
+  | "postingDate"
+  | "accountCode"
+  | "debitAmount"
+  | "creditAmount"
+  | "currency"
+  | "reference"
+  | "lineDescription"
+  | "dimension1"
+  | "dimension2"
+  | "dimension3"
+  | "dimension4"
+  | "dimension5"
+  | "dimension6";
 
 export type SourceType = "CONSTANT" | "COLUMN" | "LOOKUP" | "FORMULA";
 export type FieldTransform = "NONE" | "UPPERCASE" | "LOWERCASE" | "ABS" | "NEGATE" | "DATE_FORMAT";
@@ -1108,41 +1158,41 @@ export type ConnectorType = "OPERA_CLOUD" | "OPERA_SUN" | "SKY_JANA" | "BANK" | 
 export type SourceFormat = "CSV" | "JSON" | "XML" | "MT940" | "FIXED_WIDTH" | "SAF";
 
 export type FieldMappingRule = {
-  targetField:   TargetField;
-  sourceType:    SourceType;
-  sourceValue:   string;
-  transform?:    FieldTransform;
+  targetField: TargetField;
+  sourceType: SourceType;
+  sourceValue: string;
+  transform?: FieldTransform;
   transformArg?: string;
   defaultValue?: string;
-  required:      boolean;
+  required: boolean;
 };
 
 export type InterfaceDefinition = {
-  id:            string;
-  entityId:      string;
-  name:          string;
+  id: string;
+  entityId: string;
+  name: string;
   connectorType: ConnectorType;
-  sourceFormat:  SourceFormat;
-  description:   string | null;
-  isActive:      boolean;
+  sourceFormat: SourceFormat;
+  description: string | null;
+  isActive: boolean;
   fieldMappings: FieldMappingRule[];
-  createdAt:     string;
-  updatedAt:     string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type InterfaceDefinitionPayload = {
-  name:          string;
+  name: string;
   connectorType: ConnectorType;
-  sourceFormat:  SourceFormat;
-  description?:  string;
-  isActive?:     boolean;
+  sourceFormat: SourceFormat;
+  description?: string;
+  isActive?: boolean;
   fieldMappings: FieldMappingRule[];
 };
 
 export type PreviewResult = {
-  parsedRows:      number;
-  mappedRows:      Array<Record<string, string | null>>;
-  errors:          Array<{ row: number; field: string; message: string }>;
+  parsedRows: number;
+  mappedRows: Array<Record<string, string | null>>;
+  errors: Array<{ row: number; field: string; message: string }>;
   unmappedLookups: string[];
 };
 
@@ -1155,7 +1205,10 @@ export async function getInterfaceDefinition(context: ApiContext, id: string) {
   return request<InterfaceDefinition>(context, `/api/v1/integration/interfaces/${id}`);
 }
 
-export async function createInterfaceDefinition(context: ApiContext, payload: InterfaceDefinitionPayload) {
+export async function createInterfaceDefinition(
+  context: ApiContext,
+  payload: InterfaceDefinitionPayload
+) {
   return request<InterfaceDefinition>(context, "/api/v1/integration/interfaces", {
     method: "POST",
     body: JSON.stringify(payload)
@@ -1229,10 +1282,14 @@ export async function executeInterfaceImport(
     periodId?: string;
   }
 ) {
-  return request<InterfaceExecuteResult>(context, `/api/v1/integration/interfaces/${interfaceId}/execute`, {
-    method: "POST",
-    body: JSON.stringify(payload)
-  });
+  return request<InterfaceExecuteResult>(
+    context,
+    `/api/v1/integration/interfaces/${interfaceId}/execute`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }
+  );
 }
 
 // ── COA Import ──────────────────────────────────────────────────────────────
@@ -1280,7 +1337,7 @@ export type COAFileInput = {
 export function previewCOAImport(context: ApiContext, input: COAFileInput) {
   return request<COAPreviewResult>(context, "/api/v1/gl/accounts/import/preview", {
     method: "POST",
-    body: JSON.stringify(input),
+    body: JSON.stringify(input)
   });
 }
 
@@ -1291,14 +1348,14 @@ export function executeCOAImport(
 ) {
   return request<COAImportResult>(context, "/api/v1/gl/accounts/import/execute", {
     method: "POST",
-    body: JSON.stringify({ ...input, ...options }),
+    body: JSON.stringify({ ...input, ...options })
   });
 }
 
 export function getExcelSheetNames(context: ApiContext, fileBase64: string) {
   return request<string[]>(context, "/api/v1/gl/accounts/import/sheets", {
     method: "POST",
-    body: JSON.stringify({ fileBase64 }),
+    body: JSON.stringify({ fileBase64 })
   });
 }
 
@@ -1365,20 +1422,20 @@ export type SAFExecuteOptions = {
 export function previewSAFFile(context: ApiContext, fileContent: string, filename?: string) {
   return request<SAFPreviewSummary>(context, "/api/v1/integration/import/saf/preview", {
     method: "POST",
-    body: JSON.stringify({ fileContent, filename }),
+    body: JSON.stringify({ fileContent, filename })
   });
 }
 
 export function getSAFAccountMapping(context: ApiContext, fileContent: string, filename?: string) {
   return request<SAFAccountMapping[]>(context, "/api/v1/integration/import/saf/account-mapping", {
     method: "POST",
-    body: JSON.stringify({ fileContent, filename }),
+    body: JSON.stringify({ fileContent, filename })
   });
 }
 
 export function executeSAFImport(context: ApiContext, options: SAFExecuteOptions) {
   return request<SAFExecuteResult>(context, "/api/v1/integration/import/saf/execute", {
     method: "POST",
-    body: JSON.stringify(options),
+    body: JSON.stringify(options)
   });
 }

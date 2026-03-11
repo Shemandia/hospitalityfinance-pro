@@ -21,9 +21,9 @@ export interface RevPARResult {
   occupiedRooms: number;
   availableRooms: number;
   occupancyPct: number;
-  adr: string;         // Average Daily Rate
-  revpar: string;      // Revenue Per Available Room
-  trevpar: string;     // Total Revenue Per Available Room
+  adr: string; // Average Daily Rate
+  revpar: string; // Revenue Per Available Room
+  trevpar: string; // Total Revenue Per Available Room
   roomRevenue: string;
   totalRevenue: string;
   fbRevenue: string;
@@ -31,7 +31,7 @@ export interface RevPARResult {
   fbCostPct: string;
   gopAmount: string;
   gopPct: string;
-  trevpac: string;     // Total Revenue Per Available Customer (as a reference metric)
+  trevpac: string; // Total Revenue Per Available Customer (as a reference metric)
 }
 
 export interface BalanceSheetResult {
@@ -196,14 +196,53 @@ export class KPIService {
         .reduce((sum, b) => sum.add(b.closing_balance), new Prisma.Decimal(0))
         .abs();
 
-    // USALI standard account code ranges
-    const roomRevenue = getBalance(["4100", "4101", "4102", "4103"]); // Rooms revenue
-    const fbRevenue = getBalance(["4200", "4201", "4202", "4203"]);    // F&B revenue
-    const otherRevenue = getBalance(["4300", "4400", "4500"]);          // Other operated depts
+    // Revenue accounts (30xxx–36xxx in actual COA)
+    const roomRevenue = getBalance(["301", "300"]); // Rooms revenue
+    const fbRevenue = getBalance(["311", "315", "316", "321", "322", "323", "325", "326", "331"]); // Food + Beverage + Other F&B
+    const otherRevenue = getBalance([
+      "341",
+      "342",
+      "343",
+      "344",
+      "345",
+      "346",
+      "351",
+      "352",
+      "353",
+      "361",
+      "362",
+      "363",
+      "364",
+      "365",
+      "366"
+    ]); // Spa + Boutique + OOD
     const totalRevenue = roomRevenue.add(fbRevenue).add(otherRevenue);
 
-    const fbCost = getBalance(["5200", "5201", "5202"]);               // F&B cost of sales
-    const operatingExpenses = getBalance(["5000", "5100", "5300", "6000", "6100", "6200"]); // Operating expenses
+    const fbCost = getBalance(["421", "427", "431", "432", "433", "434", "435"]); // Cost of Food + Beverage sales
+    const operatingExpenses = getBalance([
+      "511",
+      "551",
+      "552",
+      "553",
+      "554",
+      "601",
+      "611",
+      "621",
+      "631",
+      "6401",
+      "6501",
+      "660",
+      "661",
+      "662",
+      "663",
+      "664",
+      "665",
+      "666",
+      "671",
+      "681",
+      "682",
+      "683"
+    ]); // Payroll + Common + Dept + Undistributed
 
     const gop = totalRevenue.sub(fbCost).sub(operatingExpenses);
 
@@ -217,13 +256,9 @@ export class KPIService {
     const revpar = available.isZero() ? new Prisma.Decimal(0) : roomRevenue.div(available);
     const trevpar = available.isZero() ? new Prisma.Decimal(0) : totalRevenue.div(available);
 
-    const fbCostPct = fbRevenue.isZero()
-      ? new Prisma.Decimal(0)
-      : fbCost.div(fbRevenue).mul(100);
+    const fbCostPct = fbRevenue.isZero() ? new Prisma.Decimal(0) : fbCost.div(fbRevenue).mul(100);
 
-    const gopPct = totalRevenue.isZero()
-      ? new Prisma.Decimal(0)
-      : gop.div(totalRevenue).mul(100);
+    const gopPct = totalRevenue.isZero() ? new Prisma.Decimal(0) : gop.div(totalRevenue).mul(100);
 
     return {
       periodId: req.periodId,
@@ -254,7 +289,13 @@ export class KPIService {
       throw new KPIServiceError("KPI_PERIOD_NOT_FOUND", "Period not found.", 404);
     }
 
-    type BSRow = { id: string; code: string; name: string; account_type: string; closing_balance: Prisma.Decimal };
+    type BSRow = {
+      id: string;
+      code: string;
+      name: string;
+      account_type: string;
+      closing_balance: Prisma.Decimal;
+    };
     const rows = await this.prisma.$queryRaw<BSRow[]>`
       SELECT a.id, a.code, a.name, a.type as account_type, apb.closing_balance
       FROM account_period_balances apb
@@ -285,9 +326,7 @@ export class KPIService {
           name: a.name,
           balance: a.closing_balance.toFixed(2)
         })),
-        total: accts
-          .reduce((s, a) => s.add(a.closing_balance), new Prisma.Decimal(0))
-          .toFixed(2)
+        total: accts.reduce((s, a) => s.add(a.closing_balance), new Prisma.Decimal(0)).toFixed(2)
       }));
     };
 
@@ -326,7 +365,14 @@ export class KPIService {
     }
 
     // Indirect method: start with net income, add back non-cash items
-    type CFRow = { code: string; name: string; account_type: string; period_debits: Prisma.Decimal; period_credits: Prisma.Decimal; closing_balance: Prisma.Decimal };
+    type CFRow = {
+      code: string;
+      name: string;
+      account_type: string;
+      period_debits: Prisma.Decimal;
+      period_credits: Prisma.Decimal;
+      closing_balance: Prisma.Decimal;
+    };
     const rows = await this.prisma.$queryRaw<CFRow[]>`
       SELECT a.code, a.name, a.type as account_type,
              apb.period_debits, apb.period_credits, apb.closing_balance
@@ -340,9 +386,10 @@ export class KPIService {
     const netIncome = rows
       .filter((r) => ["REVENUE", "EXPENSE"].includes(r.account_type))
       .reduce((sum, r) => {
-        const net = r.account_type === "REVENUE"
-          ? r.period_credits.sub(r.period_debits)
-          : r.period_debits.sub(r.period_credits);
+        const net =
+          r.account_type === "REVENUE"
+            ? r.period_credits.sub(r.period_debits)
+            : r.period_debits.sub(r.period_credits);
         return sum.add(net);
       }, new Prisma.Decimal(0));
 
@@ -425,7 +472,13 @@ export class KPIService {
       throw new KPIServiceError("KPI_PERIOD_NOT_FOUND", "Period not found.", 404);
     }
 
-    type USALIRow = { code: string; name: string; period_debits: Prisma.Decimal; period_credits: Prisma.Decimal; account_type: string };
+    type USALIRow = {
+      code: string;
+      name: string;
+      period_debits: Prisma.Decimal;
+      period_credits: Prisma.Decimal;
+      account_type: string;
+    };
     const rows = await this.prisma.$queryRaw<USALIRow[]>`
       SELECT a.code, a.name, apb.period_debits, apb.period_credits, a.type as account_type
       FROM account_period_balances apb
@@ -435,52 +488,47 @@ export class KPIService {
       ORDER BY a.code
     `;
 
-    // USALI department mapping by account code prefix
-    const deptMap: Record<string, string> = {
-      "41": "Rooms",
-      "42": "Food & Beverage",
-      "43": "Other Operated Departments",
-      "44": "Rentals & Other Income",
-      "51": "Rooms",
-      "52": "Food & Beverage",
-      "53": "Other Operated Departments",
-      "60": "Administrative & General",
-      "61": "Information & Telecommunications",
-      "62": "Sales & Marketing",
-      "63": "Property Operations & Maintenance",
-      "64": "Utilities"
-    };
-
-    const undistributedCodes = ["60", "61", "62", "63", "64"];
-
     const deptRevenue = new Map<string, Prisma.Decimal>();
     const deptExpense = new Map<string, Prisma.Decimal>();
 
     for (const row of rows) {
-      const prefix = row.code.slice(0, 2);
-      const dept = deptMap[prefix];
-      if (!dept) continue;
+      const mapped = mapAccountToDepartment(row.code);
+      if (!mapped) continue;
 
-      const isRevenue = row.account_type === "REVENUE";
-      const isExpense = row.account_type === "EXPENSE";
-      if (!isRevenue && !isExpense) continue;
+      // Revenue accounts are credits-heavy, expense accounts are debits-heavy
+      const amount =
+        mapped.type === "revenue"
+          ? row.period_credits.sub(row.period_debits)
+          : row.period_debits.sub(row.period_credits);
 
-      const amount = isRevenue
-        ? row.period_credits.sub(row.period_debits)
-        : row.period_debits.sub(row.period_credits);
-
-      if (undistributedCodes.includes(prefix)) {
-        deptExpense.set(dept, (deptExpense.get(dept) ?? new Prisma.Decimal(0)).add(amount));
-      } else if (isRevenue) {
-        deptRevenue.set(dept, (deptRevenue.get(dept) ?? new Prisma.Decimal(0)).add(amount));
+      if (mapped.type === "revenue") {
+        deptRevenue.set(
+          mapped.dept,
+          (deptRevenue.get(mapped.dept) ?? new Prisma.Decimal(0)).add(amount)
+        );
       } else {
-        deptExpense.set(dept, (deptExpense.get(dept) ?? new Prisma.Decimal(0)).add(amount));
+        deptExpense.set(
+          mapped.dept,
+          (deptExpense.get(mapped.dept) ?? new Prisma.Decimal(0)).add(amount)
+        );
       }
     }
 
     // Build operated departments (revenue-generating)
-    const operatedDepts = ["Rooms", "Food & Beverage", "Other Operated Departments", "Rentals & Other Income"];
-    const undistDepts = ["Administrative & General", "Information & Telecommunications", "Sales & Marketing", "Property Operations & Maintenance", "Utilities"];
+    const operatedDepts = [
+      "Rooms",
+      "Food & Beverage",
+      "Other Operated Departments",
+      "Rentals & Other Income"
+    ];
+    const undistDepts = [
+      "Administrative & General",
+      "Information & Telecommunications",
+      "Sales & Marketing",
+      "Property Operations & Maintenance",
+      "Utilities",
+      "Payroll & Related"
+    ];
 
     const departments: USALIDepartment[] = operatedDepts.map((name) => {
       const rev = deptRevenue.get(name) ?? new Prisma.Decimal(0);
@@ -513,10 +561,8 @@ export class KPIService {
 
     const gop = totalDeptIncome.sub(undistExpenses);
 
-    // Management fees (account code 65xx)
-    const mgmtFees = rows
-      .filter((r) => r.code.startsWith("65"))
-      .reduce((s, r) => s.add(r.period_debits.sub(r.period_credits)), new Prisma.Decimal(0));
+    // Management fees — no specific code in this COA; placeholder
+    const mgmtFees = new Prisma.Decimal(0);
 
     const ebitda = gop.sub(mgmtFees);
 
@@ -535,57 +581,86 @@ export class KPIService {
 
   // ── Private helper: compute USALI aggregates from raw rows ────────────────
 
-  private computeUSALIData(rows: Array<{ code: string; period_debits: Prisma.Decimal; period_credits: Prisma.Decimal; account_type: string }>) {
-    const deptMap: Record<string, string> = {
-      "41": "Rooms", "42": "Food & Beverage", "43": "Other Operated Departments",
-      "44": "Rentals & Other Income", "51": "Rooms", "52": "Food & Beverage",
-      "53": "Other Operated Departments", "60": "Administrative & General",
-      "61": "Information & Telecommunications", "62": "Sales & Marketing",
-      "63": "Property Operations & Maintenance", "64": "Utilities"
-    };
-    const undistCodes = ["60", "61", "62", "63", "64"];
+  private computeUSALIData(
+    rows: Array<{
+      code: string;
+      period_debits: Prisma.Decimal;
+      period_credits: Prisma.Decimal;
+      account_type: string;
+    }>
+  ) {
     const deptRevenue = new Map<string, Prisma.Decimal>();
     const deptExpense = new Map<string, Prisma.Decimal>();
 
     for (const row of rows) {
-      const prefix = row.code.slice(0, 2);
-      const dept = deptMap[prefix];
-      if (!dept) continue;
-      const isRevenue = row.account_type === "REVENUE";
-      const isExpense = row.account_type === "EXPENSE";
-      if (!isRevenue && !isExpense) continue;
-      const amount = isRevenue
-        ? row.period_credits.sub(row.period_debits)
-        : row.period_debits.sub(row.period_credits);
-      if (undistCodes.includes(prefix)) {
-        deptExpense.set(dept, (deptExpense.get(dept) ?? new Prisma.Decimal(0)).add(amount));
-      } else if (isRevenue) {
-        deptRevenue.set(dept, (deptRevenue.get(dept) ?? new Prisma.Decimal(0)).add(amount));
+      const mapped = mapAccountToDepartment(row.code);
+      if (!mapped) continue;
+      const amount =
+        mapped.type === "revenue"
+          ? row.period_credits.sub(row.period_debits)
+          : row.period_debits.sub(row.period_credits);
+      if (mapped.type === "revenue") {
+        deptRevenue.set(
+          mapped.dept,
+          (deptRevenue.get(mapped.dept) ?? new Prisma.Decimal(0)).add(amount)
+        );
       } else {
-        deptExpense.set(dept, (deptExpense.get(dept) ?? new Prisma.Decimal(0)).add(amount));
+        deptExpense.set(
+          mapped.dept,
+          (deptExpense.get(mapped.dept) ?? new Prisma.Decimal(0)).add(amount)
+        );
       }
     }
 
-    const operatedDepts = ["Rooms", "Food & Beverage", "Other Operated Departments", "Rentals & Other Income"];
-    const undistDepts = ["Administrative & General", "Information & Telecommunications",
-      "Sales & Marketing", "Property Operations & Maintenance", "Utilities"];
+    const operatedDepts = [
+      "Rooms",
+      "Food & Beverage",
+      "Other Operated Departments",
+      "Rentals & Other Income"
+    ];
+    const undistDepts = [
+      "Administrative & General",
+      "Information & Telecommunications",
+      "Sales & Marketing",
+      "Property Operations & Maintenance",
+      "Utilities",
+      "Payroll & Related"
+    ];
 
     const totalRevenue = operatedDepts.reduce(
-      (s, n) => s.add(deptRevenue.get(n) ?? new Prisma.Decimal(0)), new Prisma.Decimal(0));
+      (s, n) => s.add(deptRevenue.get(n) ?? new Prisma.Decimal(0)),
+      new Prisma.Decimal(0)
+    );
     const totalDeptExpenses = operatedDepts.reduce(
-      (s, n) => s.add(deptExpense.get(n) ?? new Prisma.Decimal(0)), new Prisma.Decimal(0));
+      (s, n) => s.add(deptExpense.get(n) ?? new Prisma.Decimal(0)),
+      new Prisma.Decimal(0)
+    );
     const totalDeptIncome = totalRevenue.sub(totalDeptExpenses);
     const undistExpenses = undistDepts.reduce(
-      (s, n) => s.add(deptExpense.get(n) ?? new Prisma.Decimal(0)), new Prisma.Decimal(0));
+      (s, n) => s.add(deptExpense.get(n) ?? new Prisma.Decimal(0)),
+      new Prisma.Decimal(0)
+    );
     const gop = totalDeptIncome.sub(undistExpenses);
     const gopPct = totalRevenue.isZero() ? new Prisma.Decimal(0) : gop.div(totalRevenue).mul(100);
-    const mgmtFees = rows
-      .filter(r => r.code.startsWith("65"))
-      .reduce((s, r) => s.add(r.period_debits.sub(r.period_credits)), new Prisma.Decimal(0));
+    const mgmtFees = new Prisma.Decimal(0);
     const ebitda = gop.sub(mgmtFees);
-    const ebitdaPct = totalRevenue.isZero() ? new Prisma.Decimal(0) : ebitda.div(totalRevenue).mul(100);
+    const ebitdaPct = totalRevenue.isZero()
+      ? new Prisma.Decimal(0)
+      : ebitda.div(totalRevenue).mul(100);
 
-    return { deptRevenue, deptExpense, totalRevenue, totalDeptExpenses, totalDeptIncome, undistExpenses, gop, gopPct, mgmtFees, ebitda, ebitdaPct };
+    return {
+      deptRevenue,
+      deptExpense,
+      totalRevenue,
+      totalDeptExpenses,
+      totalDeptIncome,
+      undistExpenses,
+      gop,
+      gopPct,
+      mgmtFees,
+      ebitda,
+      ebitdaPct
+    };
   }
 
   // ── Comparative USALI (Current / YTD / Prior Year / Budget) ───────────────
@@ -601,7 +676,7 @@ export class KPIService {
       where: { entityId: req.entityId, year: period.year, month: { lte: period.month } },
       select: { id: true }
     });
-    const ytdPeriodIds = ytdPeriods.map(p => p.id);
+    const ytdPeriodIds = ytdPeriods.map((p) => p.id);
 
     // Prior year: same month, year-1
     const priorPeriod = await this.prisma.period.findFirst({
@@ -613,7 +688,13 @@ export class KPIService {
       where: { entityId: req.entityId, year: period.year, isActive: true }
     });
 
-    type USALIRow = { code: string; name: string; period_debits: Prisma.Decimal; period_credits: Prisma.Decimal; account_type: string };
+    type USALIRow = {
+      code: string;
+      name: string;
+      period_debits: Prisma.Decimal;
+      period_credits: Prisma.Decimal;
+      account_type: string;
+    };
 
     // Current period
     const currentRows = await this.prisma.$queryRaw<USALIRow[]>`
@@ -626,9 +707,10 @@ export class KPIService {
     `;
 
     // YTD (aggregate across periods)
-    const ytdRows: USALIRow[] = ytdPeriodIds.length > 0
-      ? await this.prisma.$queryRaw<USALIRow[]>(
-          Prisma.sql`
+    const ytdRows: USALIRow[] =
+      ytdPeriodIds.length > 0
+        ? await this.prisma.$queryRaw<USALIRow[]>(
+            Prisma.sql`
             SELECT a.code, a.name,
                    SUM(apb.period_debits)  AS period_debits,
                    SUM(apb.period_credits) AS period_credits,
@@ -640,8 +722,8 @@ export class KPIService {
             GROUP BY a.code, a.name, a.type
             ORDER BY a.code
           `
-        )
-      : [];
+          )
+        : [];
 
     // Prior year
     const priorRows: USALIRow[] = priorPeriod
@@ -656,7 +738,12 @@ export class KPIService {
       : [];
 
     // Budget for this month → convert to USALIRow-compatible shape
-    type BudgetRaw = { code: string; name: string; account_type: string; budget_amount: Prisma.Decimal };
+    type BudgetRaw = {
+      code: string;
+      name: string;
+      account_type: string;
+      budget_amount: Prisma.Decimal;
+    };
     const rawBudgetRows: BudgetRaw[] = budgetDef
       ? await this.prisma.$queryRaw<BudgetRaw[]>(
           Prisma.sql`
@@ -671,26 +758,31 @@ export class KPIService {
         )
       : [];
 
-    const budgetRows: USALIRow[] = rawBudgetRows.map(r => ({
+    const budgetRows: USALIRow[] = rawBudgetRows.map((r) => ({
       code: r.code,
       name: r.name,
       account_type: r.account_type,
-      period_debits:  r.account_type === "EXPENSE"  ? r.budget_amount : new Prisma.Decimal(0),
-      period_credits: r.account_type === "REVENUE"  ? r.budget_amount : new Prisma.Decimal(0),
+      period_debits: r.account_type === "EXPENSE" ? r.budget_amount : new Prisma.Decimal(0),
+      period_credits: r.account_type === "REVENUE" ? r.budget_amount : new Prisma.Decimal(0)
     }));
 
     const current = this.computeUSALIData(currentRows);
-    const ytd     = this.computeUSALIData(ytdRows);
-    const prior   = this.computeUSALIData(priorRows);
-    const budget  = this.computeUSALIData(budgetRows);
+    const ytd = this.computeUSALIData(ytdRows);
+    const prior = this.computeUSALIData(priorRows);
+    const budget = this.computeUSALIData(budgetRows);
 
-    const operatedDepts = ["Rooms", "Food & Beverage", "Other Operated Departments", "Rentals & Other Income"];
+    const operatedDepts = [
+      "Rooms",
+      "Food & Beverage",
+      "Other Operated Departments",
+      "Rentals & Other Income"
+    ];
 
-    const departments: USALIDepartmentComparative[] = operatedDepts.map(name => {
-      const rev  = current.deptRevenue.get(name) ?? new Prisma.Decimal(0);
-      const exp  = current.deptExpense.get(name) ?? new Prisma.Decimal(0);
-      const inc  = rev.sub(exp);
-      const pct  = rev.isZero() ? new Prisma.Decimal(0) : inc.div(rev).mul(100);
+    const departments: USALIDepartmentComparative[] = operatedDepts.map((name) => {
+      const rev = current.deptRevenue.get(name) ?? new Prisma.Decimal(0);
+      const exp = current.deptExpense.get(name) ?? new Prisma.Decimal(0);
+      const inc = rev.sub(exp);
+      const pct = rev.isZero() ? new Prisma.Decimal(0) : inc.div(rev).mul(100);
 
       const yRev = ytd.deptRevenue.get(name) ?? new Prisma.Decimal(0);
       const yExp = ytd.deptExpense.get(name) ?? new Prisma.Decimal(0);
@@ -710,21 +802,33 @@ export class KPIService {
 
       return {
         name,
-        revenue: rev.toFixed(2), expenses: exp.toFixed(2), departmentalIncome: inc.toFixed(2), incomePct: pct.toFixed(2),
-        ytdRevenue: yRev.toFixed(2), ytdExpenses: yExp.toFixed(2), ytdDeptIncome: yInc.toFixed(2), ytdIncomePct: yPct.toFixed(2),
-        priorRevenue: pRev.toFixed(2), priorExpenses: pExp.toFixed(2), priorDeptIncome: pInc.toFixed(2), priorIncomePct: pPct.toFixed(2),
-        budgetRevenue: bRev.toFixed(2), budgetExpenses: bExp.toFixed(2), budgetDeptIncome: bInc.toFixed(2),
-        varianceAmount: varAmt.toFixed(2), variancePct: varPct.toFixed(2),
+        revenue: rev.toFixed(2),
+        expenses: exp.toFixed(2),
+        departmentalIncome: inc.toFixed(2),
+        incomePct: pct.toFixed(2),
+        ytdRevenue: yRev.toFixed(2),
+        ytdExpenses: yExp.toFixed(2),
+        ytdDeptIncome: yInc.toFixed(2),
+        ytdIncomePct: yPct.toFixed(2),
+        priorRevenue: pRev.toFixed(2),
+        priorExpenses: pExp.toFixed(2),
+        priorDeptIncome: pInc.toFixed(2),
+        priorIncomePct: pPct.toFixed(2),
+        budgetRevenue: bRev.toFixed(2),
+        budgetExpenses: bExp.toFixed(2),
+        budgetDeptIncome: bInc.toFixed(2),
+        varianceAmount: varAmt.toFixed(2),
+        variancePct: varPct.toFixed(2)
       };
     });
 
     const varFn = (actual: Prisma.Decimal, bud: Prisma.Decimal) => ({
       amt: actual.sub(bud).toFixed(2),
-      pct: bud.isZero() ? "0.00" : actual.sub(bud).div(bud.abs()).mul(100).toFixed(2),
+      pct: bud.isZero() ? "0.00" : actual.sub(bud).div(bud.abs()).mul(100).toFixed(2)
     });
 
-    const revVar   = varFn(current.totalRevenue, budget.totalRevenue);
-    const gopVar   = varFn(current.gop, budget.gop);
+    const revVar = varFn(current.totalRevenue, budget.totalRevenue);
+    const gopVar = varFn(current.gop, budget.gop);
     const ebitdaVar = varFn(current.ebitda, budget.ebitda);
 
     return {
@@ -767,7 +871,7 @@ export class KPIService {
       gopVariance: gopVar.amt,
       gopVariancePct: gopVar.pct,
       ebitdaVariance: ebitdaVar.amt,
-      ebitdaVariancePct: ebitdaVar.pct,
+      ebitdaVariancePct: ebitdaVar.pct
     };
   }
 
@@ -792,15 +896,18 @@ export class KPIService {
       GROUP BY currency
     `;
 
-    const currencies = new Set([...arRows.map(r => r.currency), ...apRows.map(r => r.currency)]);
-    return Array.from(currencies).map(currency => {
-      const ar = arRows.find(r => r.currency === currency)?.outstanding ?? new Prisma.Decimal(0);
-      const ap = apRows.find(r => r.currency === currency)?.outstanding ?? new Prisma.Decimal(0);
+    const currencies = new Set([
+      ...arRows.map((r) => r.currency),
+      ...apRows.map((r) => r.currency)
+    ]);
+    return Array.from(currencies).map((currency) => {
+      const ar = arRows.find((r) => r.currency === currency)?.outstanding ?? new Prisma.Decimal(0);
+      const ap = apRows.find((r) => r.currency === currency)?.outstanding ?? new Prisma.Decimal(0);
       return {
         currency,
         arOutstanding: ar.toFixed(2),
         apOutstanding: ap.toFixed(2),
-        netExposure: ar.sub(ap).toFixed(2),
+        netExposure: ar.sub(ap).toFixed(2)
       };
     });
   }
@@ -810,14 +917,14 @@ export class KPIService {
   async getEntitySummary(entityId: string, year: number, month: number) {
     const period = await this.prisma.period.findFirst({
       where: { entityId, year, month },
-      include: { entity: { select: { name: true, functionalCurrency: true } } },
+      include: { entity: { select: { name: true, functionalCurrency: true } } }
     });
     if (!period) return null;
 
     const req = { entityId, periodId: period.id };
     const [revpar, usali] = await Promise.all([
       this.getRevPAR(req).catch(() => null),
-      this.getUSALI(req).catch(() => null),
+      this.getUSALI(req).catch(() => null)
     ]);
 
     return {
@@ -832,11 +939,13 @@ export class KPIService {
       totalRevenue: usali?.totalRevenue ?? "0",
       grossOperatingProfit: usali?.grossOperatingProfit ?? "0",
       gopPct: revpar?.gopPct ?? "0",
-      ebitda: usali?.ebitda ?? "0",
+      ebitda: usali?.ebitda ?? "0"
     };
   }
 
-  async getRevPARTrend(req: KPIRequest): Promise<Array<{ date: string; revpar: string; adr: string; occupancyPct: string }>> {
+  async getRevPARTrend(
+    req: KPIRequest
+  ): Promise<Array<{ date: string; revpar: string; adr: string; occupancyPct: string }>> {
     const period = await this.prisma.period.findFirst({
       where: { id: req.periodId, entityId: req.entityId }
     });
@@ -860,7 +969,7 @@ export class KPIService {
       JOIN accounts a ON a.id = apb.account_id
       WHERE apb.entity_id = ${req.entityId}
         AND apb.period_id = ${req.periodId}
-        AND a.code LIKE '41%'
+        AND (a.code LIKE '301%' OR a.code LIKE '300%')
     `;
 
     const totalRoomRevenue = revRows
@@ -868,14 +977,18 @@ export class KPIService {
       .abs();
 
     const daysWithData = new Prisma.Decimal(stats.length);
-    const dailyRevenue = daysWithData.isZero() ? new Prisma.Decimal(0) : totalRoomRevenue.div(daysWithData);
+    const dailyRevenue = daysWithData.isZero()
+      ? new Prisma.Decimal(0)
+      : totalRoomRevenue.div(daysWithData);
 
     return stats.map((s) => {
       const available = new Prisma.Decimal(s.availableRooms);
       const occupied = new Prisma.Decimal(s.occupiedRooms);
       const revpar = available.isZero() ? new Prisma.Decimal(0) : dailyRevenue.div(available);
       const adr = occupied.isZero() ? new Prisma.Decimal(0) : dailyRevenue.div(occupied);
-      const occupancyPct = available.isZero() ? new Prisma.Decimal(0) : occupied.div(available).mul(100);
+      const occupancyPct = available.isZero()
+        ? new Prisma.Decimal(0)
+        : occupied.div(available).mul(100);
       return {
         date: s.statDate.toISOString().split("T")[0],
         revpar: revpar.toFixed(2),
@@ -893,6 +1006,49 @@ export class KPIService {
     ]);
     return { revpar, balanceSheet, usali };
   }
+}
+
+/**
+ * Maps an account code to its USALI department based on the actual COA structure.
+ * Revenue: 30xxx–36xxx, Expenses: 42xxx–68xxx, Payroll: 51xxx/55xxx
+ */
+function mapAccountToDepartment(
+  code: string
+): { dept: string; type: "revenue" | "expense" } | null {
+  // Revenue accounts (30xxx–36xxx)
+  if (code.startsWith("301") || code.startsWith("300")) return { dept: "Rooms", type: "revenue" };
+  if (code.startsWith("31") || code.startsWith("32") || code.startsWith("33"))
+    return { dept: "Food & Beverage", type: "revenue" };
+  if (code.startsWith("34") || code.startsWith("35") || code.startsWith("36"))
+    return { dept: "Other Operated Departments", type: "revenue" };
+  if (code === "76100" || code === "76150")
+    return { dept: "Rentals & Other Income", type: "revenue" };
+
+  // Cost of Sales (42xxx–46xxx)
+  if (code.startsWith("42") || code.startsWith("43"))
+    return { dept: "Food & Beverage", type: "expense" };
+  if (code.startsWith("44") || code.startsWith("45") || code.startsWith("46"))
+    return { dept: "Other Operated Departments", type: "expense" };
+
+  // Departmental direct expenses
+  if (code.startsWith("61")) return { dept: "Rooms", type: "expense" };
+  if (code.startsWith("62")) return { dept: "Food & Beverage", type: "expense" };
+  if (code.startsWith("63")) return { dept: "Other Operated Departments", type: "expense" };
+
+  // Undistributed operating expenses (check longer prefixes first)
+  if (code.startsWith("640")) return { dept: "Administrative & General", type: "expense" };
+  if (code.startsWith("650") || code.startsWith("651"))
+    return { dept: "Information & Telecommunications", type: "expense" };
+  if (code.startsWith("66")) return { dept: "Sales & Marketing", type: "expense" };
+  if (code.startsWith("67")) return { dept: "Property Operations & Maintenance", type: "expense" };
+  if (code.startsWith("68")) return { dept: "Utilities", type: "expense" };
+
+  // Payroll & common accounts
+  if (code.startsWith("51") || code.startsWith("55"))
+    return { dept: "Payroll & Related", type: "expense" };
+  if (code.startsWith("60")) return { dept: "Administrative & General", type: "expense" };
+
+  return null;
 }
 
 function getSectionLabel(accountType: string, prefix: string): string {

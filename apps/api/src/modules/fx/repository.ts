@@ -78,6 +78,10 @@ export class FXRepository {
     });
   }
 
+  deleteRate(id: string) {
+    return this.db.fXRate.delete({ where: { id } });
+  }
+
   getLatestRate(
     fromCurrency: string,
     toCurrency: string,
