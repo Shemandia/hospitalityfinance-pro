@@ -1886,6 +1886,60 @@ export async function removeEntityUser(context: ApiContext, userId: string) {
   return request<null>(context, `/api/v1/admin/users/${userId}`, { method: "DELETE" });
 }
 
+// ── Entity Hierarchy & Scope Assignment ───────────────────────────────────────
+
+export async function getEntityTree(context: ApiContext) {
+  return request<{
+    flat: Array<{
+      id: string;
+      name: string;
+      code: string | null;
+      type: string;
+      parentId: string | null;
+      isActive: boolean;
+      _count: { children: number; users: number };
+    }>;
+    tree: unknown[];
+  }>(context, "/api/v1/admin/entity-tree");
+}
+
+export async function assignUserScope(
+  context: ApiContext,
+  payload: { userId: string; entityId: string; role: string; cascade: boolean }
+) {
+  return request<Record<string, unknown>>(context, "/api/v1/admin/users/assign-scope", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function revokeUserScope(
+  context: ApiContext,
+  payload: { userId: string; entityId: string; cascade: boolean }
+) {
+  return request<Record<string, unknown>>(context, "/api/v1/admin/users/revoke-scope", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function getUserEntityAssignments(context: ApiContext, userId: string) {
+  return request<
+    Array<{
+      entityId: string;
+      userId: string;
+      role: string;
+      entity: {
+        id: string;
+        name: string;
+        code: string | null;
+        type: string;
+        parentId: string | null;
+      };
+    }>
+  >(context, `/api/v1/admin/users/${userId}/entities`);
+}
+
 // ── User Profile & Login Audit ────────────────────────────────────────────────
 
 export type UserProfile = {

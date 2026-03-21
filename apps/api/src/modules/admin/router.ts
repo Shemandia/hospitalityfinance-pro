@@ -49,6 +49,21 @@ function requireEntityId(entityId: string | undefined): string {
 
 const db = prisma as unknown as PrismaClient;
 
+/** Recursively get all descendant entity IDs (children, grandchildren, etc.) */
+async function getDescendants(prismaClient: PrismaClient, parentId: string): Promise<string[]> {
+  const children = await prismaClient.entity.findMany({
+    where: { parentId },
+    select: { id: true }
+  });
+  const ids: string[] = [];
+  for (const child of children) {
+    ids.push(child.id);
+    const grandchildren = await getDescendants(prismaClient, child.id);
+    ids.push(...grandchildren);
+  }
+  return ids;
+}
+
 export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
   app.register(
     async (router) => {
@@ -324,6 +339,185 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
           }
         }
       );
+      // ── Entity Hierarchy (scope levels) ─────────────────────────────────────
+
+      router.get("/entity-tree", async (request, reply) => {
+        try {
+          // Return full entity hierarchy tree for assignment UI
+          const allEntities = await db.entity.findMany({
+            select: {
+              id: true,
+              name: true,
+              code: true,
+              type: true,
+              parentId: true,
+              isActive: true,
+              functionalCurrency: true,
+              _count: { select: { children: true, users: true } }
+            },
+            orderBy: [{ type: "asc" }, { name: "asc" }]
+          });
+
+          // Build tree structure
+          const entityMap = new Map(
+            allEntities.map((e) => [e.id, { ...e, children: [] as typeof allEntities }])
+          );
+          const roots: typeof allEntities = [];
+          for (const entity of allEntities) {
+            if (entity.parentId && entityMap.has(entity.parentId)) {
+              (entityMap.get(entity.parentId) as any).children.push(entityMap.get(entity.id));
+            } else {
+              roots.push(entityMap.get(entity.id) as any);
+            }
+          }
+
+          return reply.send({ data: { flat: allEntities, tree: roots }, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      // ── Scope-aware user assignment ───────────────────────────────────────
+
+      /**
+       * Assign a user to an entity AND all its descendants.
+       * - Assigning at CORPORATE → user gets access to all CLUSTERs + PROPERTYs
+       * - Assigning at CLUSTER → user gets access to all PROPERTYs in cluster
+       * - Assigning at PROPERTY → user gets access to that property only
+       */
+      router.post(
+        "/users/assign-scope",
+        {
+          preHandler: [requireRole(["SUPERADMIN"])]
+        },
+        async (request, reply) => {
+          try {
+            const body = request.body as {
+              userId: string;
+              entityId: string;
+              role: string;
+              cascade: boolean; // if true, also assign to all child entities
+            };
+
+            const user = await db.user.findUnique({ where: { id: body.userId } });
+            if (!user)
+              return reply.code(404).send({
+                data: null,
+                errors: [{ code: "USER_NOT_FOUND", message: "User not found." }]
+              });
+
+            const targetEntity = await db.entity.findUnique({
+              where: { id: body.entityId },
+              select: { id: true, name: true, type: true }
+            });
+            if (!targetEntity)
+              return reply.code(404).send({
+                data: null,
+                errors: [{ code: "ENTITY_NOT_FOUND", message: "Entity not found." }]
+              });
+
+            // Collect all entity IDs to assign
+            const entityIds: string[] = [body.entityId];
+
+            if (body.cascade) {
+              // Get all descendants recursively
+              const descendants = await getDescendants(db, body.entityId);
+              entityIds.push(...descendants);
+            }
+
+            // Upsert EntityUser for each entity
+            let assigned = 0;
+            for (const eid of entityIds) {
+              await db.entityUser.upsert({
+                where: { entityId_userId: { entityId: eid, userId: body.userId } },
+                create: { entityId: eid, userId: body.userId, role: body.role as any },
+                update: { role: body.role as any }
+              });
+              assigned++;
+            }
+
+            return reply.code(201).send({
+              data: {
+                userId: body.userId,
+                role: body.role,
+                assignedEntities: assigned,
+                scope: targetEntity.type,
+                cascade: body.cascade
+              },
+              errors: []
+            });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      /**
+       * Remove a user from an entity AND optionally all its descendants.
+       */
+      router.post(
+        "/users/revoke-scope",
+        {
+          preHandler: [requireRole(["SUPERADMIN"])]
+        },
+        async (request, reply) => {
+          try {
+            const body = request.body as {
+              userId: string;
+              entityId: string;
+              cascade: boolean;
+            };
+
+            const entityIds: string[] = [body.entityId];
+            if (body.cascade) {
+              const descendants = await getDescendants(db, body.entityId);
+              entityIds.push(...descendants);
+            }
+
+            const result = await db.entityUser.deleteMany({
+              where: { userId: body.userId, entityId: { in: entityIds } }
+            });
+
+            return reply.send({
+              data: { removedFrom: result.count, cascade: body.cascade },
+              errors: []
+            });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      /**
+       * Get all entity assignments for a specific user (across all entities).
+       */
+      router.get<{ Params: { userId: string } }>(
+        "/users/:userId/entities",
+        async (request, reply) => {
+          try {
+            const data = await db.entityUser.findMany({
+              where: { userId: request.params.userId },
+              include: {
+                entity: {
+                  select: {
+                    id: true,
+                    name: true,
+                    code: true,
+                    type: true,
+                    parentId: true,
+                    isActive: true
+                  }
+                }
+              },
+              orderBy: { createdAt: "asc" }
+            });
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
       // ── User Profile (own profile, any role) ──────────────────────────────
 
       router.get("/profile", async (request, reply) => {

@@ -10,8 +10,10 @@ datasource db {
 // ─── Enums ────────────────────────────────────────────────────────────────────
 
 enum EntityType {
-  GROUP
-  PROPERTY
+  CORPORATE  // Top-level corporate entity (HQ)
+  GROUP      // Legacy alias for CORPORATE (backwards compat)
+  CLUSTER    // Regional cluster (e.g. Middle East, Europe)
+  PROPERTY   // Individual hotel/resort
 }
 
 enum EntityRole {
