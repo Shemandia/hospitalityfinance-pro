@@ -173,6 +173,118 @@ export async function registerReportingRouter(app: FastifyInstance): Promise<voi
         }
       );
 
+      // ── Report Definition Schedule ─────────────────────────────────────
+
+      router.post<{ Params: { id: string } }>(
+        "/reports/definitions/:id/schedule",
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const body = request.body as Record<string, unknown> | null;
+            if (!body || typeof body.cron !== "string") {
+              return reply.code(400).send({
+                data: null,
+                errors: [
+                  {
+                    code: "VALIDATION_ERROR",
+                    message:
+                      "cron (string) is required. Optional: enabled (bool), notifyEmail (string), periodSelection ('AUTO'|'PREVIOUS')."
+                  }
+                ]
+              });
+            }
+
+            // Validate cron has 5 fields
+            const cronParts = (body.cron as string).trim().split(/\s+/);
+            if (cronParts.length !== 5) {
+              return reply.code(400).send({
+                data: null,
+                errors: [
+                  {
+                    code: "VALIDATION_ERROR",
+                    message:
+                      "cron must be a standard 5-field cron expression (minute hour dayOfMonth month dayOfWeek)."
+                  }
+                ]
+              });
+            }
+
+            const existing = await (prisma as unknown as PrismaClient).reportDefinition.findFirst({
+              where: { entityId, id: request.params.id }
+            });
+            if (!existing) {
+              return reply.code(404).send({
+                data: null,
+                errors: [{ code: "NOT_FOUND", message: "Report definition not found." }]
+              });
+            }
+
+            const currentTemplate =
+              existing.template && typeof existing.template === "object"
+                ? (existing.template as Record<string, unknown>)
+                : {};
+
+            const schedule: Record<string, unknown> = {
+              enabled: body.enabled !== false, // default true
+              cron: body.cron,
+              periodSelection: body.periodSelection === "PREVIOUS" ? "PREVIOUS" : "AUTO"
+            };
+            if (typeof body.notifyEmail === "string" && body.notifyEmail.length > 0) {
+              schedule.notifyEmail = body.notifyEmail;
+            }
+
+            const data = await (prisma as unknown as PrismaClient).reportDefinition.update({
+              where: { id: request.params.id },
+              data: {
+                template: { ...currentTemplate, schedule } as any
+              }
+            });
+
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      router.delete<{ Params: { id: string } }>(
+        "/reports/definitions/:id/schedule",
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+
+            const existing = await (prisma as unknown as PrismaClient).reportDefinition.findFirst({
+              where: { entityId, id: request.params.id }
+            });
+            if (!existing) {
+              return reply.code(404).send({
+                data: null,
+                errors: [{ code: "NOT_FOUND", message: "Report definition not found." }]
+              });
+            }
+
+            const currentTemplate =
+              existing.template && typeof existing.template === "object"
+                ? (existing.template as Record<string, unknown>)
+                : {};
+
+            // Remove the schedule key
+            const { schedule: _removed, ...rest } = currentTemplate;
+
+            const data = await (prisma as unknown as PrismaClient).reportDefinition.update({
+              where: { id: request.params.id },
+              data: {
+                template: (Object.keys(rest).length > 0 ? rest : {}) as any
+              }
+            });
+
+            return reply.code(200).send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
       // ── Report Runs ─────────────────────────────────────────────────────
 
       router.post("/reports/runs", async (request, reply) => {

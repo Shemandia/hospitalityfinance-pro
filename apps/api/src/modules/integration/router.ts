@@ -41,6 +41,7 @@ import {
   inboundJournalSchema
 } from "./connectors/inbound/inbound-types.js";
 import { runSimphonyImport } from "./connectors/simphony/simphony-import-job.js";
+import { runMewsImport } from "./connectors/mews/mews-import-job.js";
 import { importPayrollBatch, importPayrollFile } from "./connectors/payroll/payroll-service.js";
 import { payrollBatchSchema, payrollFileUploadSchema } from "./connectors/payroll/payroll-types.js";
 import { getOperaCloudCredentials } from "./connectors/opera-cloud/opera-cloud-auth.js";
@@ -172,6 +173,7 @@ const interfaceDefinitionCreateSchema = z.object({
     "OPERA_CLOUD",
     "OPERA_SUN",
     "SIMPHONY_POS",
+    "MEWS_PMS",
     "SKY_JANA",
     "BANK",
     "PAYROLL",
@@ -1529,6 +1531,45 @@ export async function registerIntegrationRouter(app: FastifyInstance): Promise<v
           const entityId = requireEntityId(request.entityId);
           const logs = await prisma.importLog.findMany({
             where: { entityId, connectorType: "PAYROLL" },
+            orderBy: { createdAt: "desc" },
+            take: 200
+          });
+          return reply.send({ data: logs, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      // ── Mews PMS ────────────────────────────────────────────────────────────
+
+      router.post("/mews/import", async (request, reply) => {
+        try {
+          const entityId = requireEntityId(request.entityId);
+          const body = z
+            .object({
+              startUtc: z.string().min(1),
+              endUtc: z.string().min(1),
+              notifyEmail: z.string().email().optional()
+            })
+            .parse(request.body);
+
+          const data = await runMewsImport(prisma as unknown as PrismaClient, {
+            entityId,
+            startUtc: body.startUtc,
+            endUtc: body.endUtc,
+            notifyEmail: body.notifyEmail
+          });
+          return reply.code(201).send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      router.get("/mews/logs", async (request, reply) => {
+        try {
+          const entityId = requireEntityId(request.entityId);
+          const logs = await prisma.importLog.findMany({
+            where: { entityId, connectorType: "MEWS_PMS" },
             orderBy: { createdAt: "desc" },
             take: 200
           });

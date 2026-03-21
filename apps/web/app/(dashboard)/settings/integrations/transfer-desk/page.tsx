@@ -147,6 +147,7 @@ const CONNECTOR_TYPES: { value: ConnectorType; label: string }[] = [
   { value: "OPERA_CLOUD", label: "Opera Cloud (OHIP)" },
   { value: "OPERA_SUN", label: "Opera SUN" },
   { value: "SIMPHONY_POS" as ConnectorType, label: "Simphony POS" },
+  { value: "MEWS_PMS" as ConnectorType, label: "Mews PMS" },
   { value: "SKY_JANA", label: "Sky Jana" },
   { value: "BANK", label: "Bank Feed" },
   { value: "PAYROLL" as ConnectorType, label: "Payroll" },

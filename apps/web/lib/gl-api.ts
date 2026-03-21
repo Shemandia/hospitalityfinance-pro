@@ -1404,6 +1404,7 @@ export type ConnectorType =
   | "OPERA_CLOUD"
   | "OPERA_SUN"
   | "SIMPHONY_POS"
+  | "MEWS_PMS"
   | "SKY_JANA"
   | "BANK"
   | "PAYROLL"
@@ -1883,6 +1884,42 @@ export async function updateEntityUserRole(context: ApiContext, userId: string, 
 
 export async function removeEntityUser(context: ApiContext, userId: string) {
   return request<null>(context, `/api/v1/admin/users/${userId}`, { method: "DELETE" });
+}
+
+// ── Mews PMS ─────────────────────────────────────────────────────────────────
+
+export async function runMewsImport(
+  context: ApiContext,
+  payload: { startUtc: string; endUtc: string; notifyEmail?: string }
+) {
+  return request<Record<string, unknown>>(context, "/api/v1/integration/mews/import", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function getMewsLogs(context: ApiContext) {
+  return request<Array<Record<string, unknown>>>(context, "/api/v1/integration/mews/logs");
+}
+
+// ── Report Scheduling ────────────────────────────────────────────────────────
+
+export async function setReportSchedule(
+  context: ApiContext,
+  definitionId: string,
+  schedule: { enabled: boolean; cron: string; notifyEmail?: string; periodSelection?: string }
+) {
+  return request<Record<string, unknown>>(
+    context,
+    `/api/v1/reports/definitions/${definitionId}/schedule`,
+    { method: "POST", body: JSON.stringify(schedule) }
+  );
+}
+
+export async function removeReportSchedule(context: ApiContext, definitionId: string) {
+  return request<null>(context, `/api/v1/reports/definitions/${definitionId}/schedule`, {
+    method: "DELETE"
+  });
 }
 
 // ── Simphony POS ─────────────────────────────────────────────────────────────
