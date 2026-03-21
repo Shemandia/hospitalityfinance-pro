@@ -40,8 +40,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                 name: "Dev User",
                 // Attach dev token fields used by session callback
                 accessToken: "dev-token",
-                roles: ["admin"],
-                entityIds: credentials.entityId ? [String(credentials.entityId)] : []
+                roles: ["admin", "superadmin"],
+                entityIds: [] // empty = superadmin, access all entities
               };
             }
           })

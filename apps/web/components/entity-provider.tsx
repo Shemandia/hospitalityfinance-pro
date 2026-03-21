@@ -45,18 +45,26 @@ export function EntityProvider({ children }: { children: ReactNode }) {
   const { data: entities = [], isLoading } = useQuery({
     queryKey: ["entities", accessToken],
     queryFn: () => {
-      if (!accessToken || !sessionEntityIds[0]) throw new Error("No session");
-      return getEntities({ accessToken, entityId: sessionEntityIds[0] }).then((res) => res.data);
+      if (!accessToken) throw new Error("No session");
+      // Use first granted entity or a placeholder for superadmin (empty entityIds)
+      const contextEntityId = sessionEntityIds[0] ?? "00000000-0000-0000-0000-000000000001";
+      return getEntities({ accessToken, entityId: contextEntityId }).then((res) => res.data);
     },
-    enabled: !!accessToken && sessionEntityIds.length > 0,
+    enabled: !!accessToken,
     staleTime: 5 * 60 * 1000
   });
 
-  // Filter to only entities the user has access to (from JWT claims)
+  // Filter to entities the user has access to
+  // Superadmin (empty entityIds) sees all; others see granted entities + their children
   const userEntities = useMemo(() => {
-    if (sessionEntityIds.length === 0) return entities;
-    // If session has specific entity IDs, filter. Otherwise show all (superadmin).
-    return entities.filter((e) => sessionEntityIds.includes(e.id));
+    if (sessionEntityIds.length === 0) return entities; // superadmin
+    const granted = new Set(sessionEntityIds);
+    return entities.filter((e) => {
+      if (granted.has(e.id)) return true;
+      // Include children of granted parents
+      if (e.parentId && granted.has(e.parentId)) return true;
+      return false;
+    });
   }, [entities, sessionEntityIds]);
 
   // Selected entity ID — initialize from localStorage or first entity

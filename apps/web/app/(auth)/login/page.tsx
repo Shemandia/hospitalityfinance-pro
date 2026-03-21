@@ -86,16 +86,9 @@ export default function LoginPage() {
                     </p>
                   )}
                 </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="entityId">
-                    Entity ID <span className="text-muted-foreground font-normal">(optional)</span>
-                  </Label>
-                  <Input
-                    id="entityId"
-                    placeholder="Leave blank to set later"
-                    {...form.register("entityId")}
-                  />
-                </div>
+                <p className="text-xs text-muted-foreground bg-muted/50 rounded px-2 py-1.5">
+                  After login, use the entity switcher in the sidebar to select your property.
+                </p>
                 {error && <p className="text-xs text-destructive">{error}</p>}
                 <Button type="submit" variant="teal" className="w-full" disabled={loading}>
                   {loading ? "Signing in…" : "Sign In"}
