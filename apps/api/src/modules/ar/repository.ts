@@ -121,20 +121,29 @@ export class ARRepository {
     });
   }
 
-  updateInvoice(entityId: string, invoiceId: string, input: Partial<{
-    dueDate: Date;
-    notes: string;
-    status: "DRAFT" | "POSTED" | "PARTIALLY_PAID" | "PAID" | "OVERDUE" | "CANCELLED";
-    amountPaid: Prisma.Decimal;
-    glJournalId: string;
-  }>) {
+  updateInvoice(
+    entityId: string,
+    invoiceId: string,
+    input: Partial<{
+      dueDate: Date;
+      notes: string;
+      status: "DRAFT" | "POSTED" | "PARTIALLY_PAID" | "PAID" | "OVERDUE" | "CANCELLED";
+      amountPaid: Prisma.Decimal;
+      glJournalId: string;
+    }>
+  ) {
     return this.db.aRInvoice.updateMany({
       where: { entityId, id: invoiceId },
       data: input
     });
   }
 
-  setInvoiceStatus(entityId: string, invoiceId: string, status: "DRAFT" | "POSTED" | "PARTIALLY_PAID" | "PAID" | "OVERDUE" | "CANCELLED", glJournalId?: string) {
+  setInvoiceStatus(
+    entityId: string,
+    invoiceId: string,
+    status: "DRAFT" | "POSTED" | "PARTIALLY_PAID" | "PAID" | "OVERDUE" | "CANCELLED",
+    glJournalId?: string
+  ) {
     return this.db.aRInvoice.updateMany({
       where: { entityId, id: invoiceId },
       data: {
@@ -275,7 +284,8 @@ export class ARRepository {
       fxRate: Prisma.Decimal;
       lineNumber: number;
       description: string;
-    }>
+    }>,
+    journalSource: "AR" | "PMS" | "POS" = "AR"
   ) {
     return this.db.journal.create({
       data: {
@@ -283,7 +293,7 @@ export class ARRepository {
         periodId,
         reference: `AR-${invoiceId.slice(0, 8)}`,
         description,
-        source: "AR",
+        source: journalSource,
         status: "POSTED",
         functionalCurrency: currency,
         createdById: actorId,

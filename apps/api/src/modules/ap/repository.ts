@@ -54,9 +54,7 @@ export class APRepository {
       taxId: input.taxId,
       currency: input.currency?.toUpperCase(),
       paymentTermsDays: input.paymentTermsDays,
-      bankDetails: input.bankDetails
-        ? (input.bankDetails as Prisma.InputJsonValue)
-        : undefined,
+      bankDetails: input.bankDetails ? (input.bankDetails as Prisma.InputJsonValue) : undefined,
       isActive: input.isActive
     };
 
@@ -96,23 +94,13 @@ export class APRepository {
       include: {
         supplier: true,
         period: true,
-        lines: true,
-        purchaseOrder: {
-          include: {
-            lines: true,
-            goodsReceivedNotes: {
-              include: {
-                lines: true
-              }
-            }
-          }
-        }
+        lines: true
       }
     });
   }
 
   createInvoice(entityId: string, createdById: string | null, input: APInvoiceCreateInput) {
-    return this.db.aPInvoice.create({
+    return (this.db.aPInvoice as any).create({
       data: {
         entityId,
         supplierId: input.supplierId,
@@ -127,7 +115,7 @@ export class APRepository {
         functionalAmount: new Prisma.Decimal(input.functionalAmount),
         fxRate: new Prisma.Decimal(input.fxRate),
         status: "DRAFT",
-        poId: input.poId,
+        externalPoRef: input.externalPoRef ?? null,
         paymentTerms: input.paymentTerms,
         createdById,
         lines: {
@@ -365,12 +353,8 @@ export class APRepository {
       return;
     }
 
-    const periodDebits = new Prisma.Decimal(existing.periodDebits).add(
-      debitFunctional
-    );
-    const periodCredits = new Prisma.Decimal(existing.periodCredits).add(
-      creditFunctional
-    );
+    const periodDebits = new Prisma.Decimal(existing.periodDebits).add(debitFunctional);
+    const periodCredits = new Prisma.Decimal(existing.periodCredits).add(creditFunctional);
     const closing = isDebitNormal
       ? new Prisma.Decimal(existing.openingBalance).add(periodDebits).sub(periodCredits)
       : new Prisma.Decimal(existing.openingBalance).sub(periodDebits).add(periodCredits);
@@ -415,9 +399,7 @@ export class APRepository {
           gte: startDate,
           lte: endDate
         },
-        ...(supplierIds && supplierIds.length > 0
-          ? { supplierId: { in: supplierIds } }
-          : {}),
+        ...(supplierIds && supplierIds.length > 0 ? { supplierId: { in: supplierIds } } : {}),
         paymentRuns: {
           none: {
             paymentRun: {

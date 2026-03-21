@@ -1,12 +1,9 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 
 export function requireRole(requiredRoles: string[]) {
-  return async function roleHandler(
-    request: FastifyRequest,
-    reply: FastifyReply
-  ): Promise<void> {
-    const userRoles = request.user?.roles ?? [];
-    const allowed = requiredRoles.some((role) => userRoles.includes(role));
+  return async function roleHandler(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    const userRoles = (request.user?.roles ?? []).map((r: string) => r.toUpperCase());
+    const allowed = requiredRoles.some((role) => userRoles.includes(role.toUpperCase()));
 
     if (allowed) {
       return;

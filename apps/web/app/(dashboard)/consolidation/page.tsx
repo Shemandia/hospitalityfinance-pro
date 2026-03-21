@@ -7,7 +7,7 @@ import {
   getPeriodList,
   runConsolidation,
   getConsolidationRuns,
-  getEntities,
+  getEntities
 } from "../../../lib/gl-api";
 import type { ConsolidationResult, ConsolidationRun, ConsolidatedLine } from "../../../lib/gl-api";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
@@ -15,7 +15,13 @@ import { Button } from "../../../components/ui/button";
 import { Badge } from "../../../components/ui/badge";
 import { Input } from "../../../components/ui/input";
 import { Label } from "../../../components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../../../components/ui/select";
 import { Separator } from "../../../components/ui/separator";
 import {
   Building2,
@@ -26,7 +32,7 @@ import {
   ChevronDown,
   ChevronRight,
   History,
-  Download,
+  Download
 } from "lucide-react";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -44,7 +50,7 @@ const TYPE_LABELS: Record<string, string> = {
   LIABILITY: "Liabilities",
   EQUITY: "Equity",
   REVENUE: "Revenue",
-  EXPENSE: "Expenses",
+  EXPENSE: "Expenses"
 };
 
 const TYPE_COLORS: Record<string, string> = {
@@ -52,7 +58,7 @@ const TYPE_COLORS: Record<string, string> = {
   LIABILITY: "bg-slate-600",
   EQUITY: "bg-emerald-600",
   REVENUE: "bg-teal-600",
-  EXPENSE: "bg-red-700",
+  EXPENSE: "bg-red-700"
 };
 
 // Entity type alias used in the page
@@ -64,19 +70,18 @@ function TypeSection({
   accountType,
   lines,
   entityIds,
+  entities,
   open,
-  onToggle,
+  onToggle
 }: {
   accountType: string;
   lines: ConsolidatedLine[];
   entityIds: string[];
+  entities: Array<{ id: string; name: string }>;
   open: boolean;
   onToggle: () => void;
 }) {
-  const sectionTotal = lines.reduce(
-    (sum, l) => sum + Number(l.consolidatedAmount),
-    0
-  );
+  const sectionTotal = lines.reduce((sum, l) => sum + Number(l.consolidatedAmount), 0);
 
   return (
     <div className="border border-slate-200 rounded-lg overflow-hidden">
@@ -85,17 +90,23 @@ function TypeSection({
         className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-50 hover:bg-slate-100 transition-colors"
       >
         <div className="flex items-center gap-2">
-          <span className={`inline-block w-2 h-2 rounded-full ${TYPE_COLORS[accountType] ?? "bg-slate-400"}`} />
+          <span
+            className={`inline-block w-2 h-2 rounded-full ${TYPE_COLORS[accountType] ?? "bg-slate-400"}`}
+          />
           <span className="text-sm font-semibold text-slate-700">
             {TYPE_LABELS[accountType] ?? accountType}
           </span>
-          <Badge variant="outline" className="text-[10px]">{lines.length}</Badge>
+          <Badge variant="outline" className="text-[10px]">
+            {lines.length}
+          </Badge>
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-sm font-bold text-slate-800 tabular-nums">
-            {fmt(sectionTotal)}
-          </span>
-          {open ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
+          <span className="text-sm font-bold text-slate-800 tabular-nums">{fmt(sectionTotal)}</span>
+          {open ? (
+            <ChevronDown className="h-4 w-4 text-slate-400" />
+          ) : (
+            <ChevronRight className="h-4 w-4 text-slate-400" />
+          )}
         </div>
       </button>
 
@@ -109,7 +120,10 @@ function TypeSection({
                 {entityIds.map((eid) => {
                   const entity = entities.find((e) => e.id === eid);
                   return (
-                    <th key={eid} className="py-2 px-3 text-right font-semibold text-slate-500 whitespace-nowrap">
+                    <th
+                      key={eid}
+                      className="py-2 px-3 text-right font-semibold text-slate-500 whitespace-nowrap"
+                    >
                       {entity?.name ?? eid.slice(0, 8)}
                     </th>
                   );
@@ -128,7 +142,9 @@ function TypeSection({
                       {fmt(line.entityAmounts[eid] ?? "0")}
                     </td>
                   ))}
-                  <td className={`py-1.5 px-3 text-right tabular-nums ${Number(line.eliminationsAmount) !== 0 ? "text-amber-600" : "text-slate-400"}`}>
+                  <td
+                    className={`py-1.5 px-3 text-right tabular-nums ${Number(line.eliminationsAmount) !== 0 ? "text-amber-600" : "text-slate-400"}`}
+                  >
                     {Number(line.eliminationsAmount) !== 0 ? fmt(line.eliminationsAmount) : "—"}
                   </td>
                   <td className="py-1.5 px-3 text-right tabular-nums font-medium text-slate-800">
@@ -148,7 +164,11 @@ function TypeSection({
 
 function RunRow({ run }: { run: ConsolidationRun }) {
   const date = new Date(run.runAt).toLocaleDateString("en-US", {
-    year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
   });
 
   return (
@@ -158,7 +178,10 @@ function RunRow({ run }: { run: ConsolidationRun }) {
       <td className="py-2.5 px-4 text-sm text-slate-600">{run.entityResults.length} entities</td>
       <td className="py-2.5 px-4 text-xs text-slate-500">{date}</td>
       <td className="py-2.5 px-4">
-        <Badge variant={run.status === "COMPLETE" ? "default" : "secondary"} className="text-[10px]">
+        <Badge
+          variant={run.status === "COMPLETE" ? "default" : "secondary"}
+          className="text-[10px]"
+        >
           {run.status}
         </Badge>
       </td>
@@ -187,7 +210,7 @@ export default function ConsolidationPage() {
       const res = await getEntities(apiContext);
       return (res.data ?? []) as EntityItem[];
     },
-    enabled: Boolean(apiContext),
+    enabled: Boolean(apiContext)
   });
   const entities = entitiesQuery.data ?? [];
 
@@ -198,7 +221,7 @@ export default function ConsolidationPage() {
       const res = await getPeriodList(apiContext);
       return res.data ?? [];
     },
-    enabled: Boolean(apiContext),
+    enabled: Boolean(apiContext)
   });
 
   const runHistoryQuery = useQuery({
@@ -208,7 +231,7 @@ export default function ConsolidationPage() {
       const res = await getConsolidationRuns(apiContext, parentEntityId);
       return res.data ?? [];
     },
-    enabled: Boolean(apiContext && parentEntityId !== "NONE"),
+    enabled: Boolean(apiContext && parentEntityId !== "NONE")
   });
 
   const runMutation = useMutation({
@@ -218,20 +241,18 @@ export default function ConsolidationPage() {
         parentEntityId,
         childEntityIds,
         reportingCurrency,
-        periodId,
+        periodId
       });
       return res.data as ConsolidationResult;
     },
     onSuccess: (data) => {
       setResult(data);
       queryClient.invalidateQueries({ queryKey: ["consolidation-runs", parentEntityId] });
-    },
+    }
   });
 
   const toggleChild = (id: string) => {
-    setChildEntityIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    );
+    setChildEntityIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
 
   const canRun =
@@ -255,7 +276,8 @@ export default function ConsolidationPage() {
   const toggleSection = (type: string) => {
     setOpenSections((prev) => {
       const next = new Set(prev);
-      if (next.has(type)) next.delete(type); else next.add(type);
+      if (next.has(type)) next.delete(type);
+      else next.add(type);
       return next;
     });
   };
@@ -263,9 +285,14 @@ export default function ConsolidationPage() {
   function exportCSV() {
     if (!result) return;
     const rows: string[][] = [
-      ["Account Code", "Account Name", "Type", ...childEntityIds.map(
-        (eid) => entities.find((e) => e.id === eid)?.name ?? eid
-      ), "Eliminations", "Consolidated"],
+      [
+        "Account Code",
+        "Account Name",
+        "Type",
+        ...childEntityIds.map((eid) => entities.find((e) => e.id === eid)?.name ?? eid),
+        "Eliminations",
+        "Consolidated"
+      ]
     ];
     for (const line of result.consolidatedLines) {
       rows.push([
@@ -274,7 +301,7 @@ export default function ConsolidationPage() {
         line.accountType,
         ...childEntityIds.map((eid) => line.entityAmounts[eid] ?? "0"),
         line.eliminationsAmount,
-        line.consolidatedAmount,
+        line.consolidatedAmount
       ]);
     }
     const csv = rows.map((r) => r.join(",")).join("\n");
@@ -326,9 +353,13 @@ export default function ConsolidationPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="NONE">Select group entity…</SelectItem>
-                  {entities.filter((e) => e.parentId === null).map((e) => (
-                    <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>
-                  ))}
+                  {entities
+                    .filter((e) => e.parentId === null)
+                    .map((e) => (
+                      <SelectItem key={e.id} value={e.id}>
+                        {e.name}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </div>
@@ -339,17 +370,19 @@ export default function ConsolidationPage() {
                 Child Entities
               </Label>
               <div className="space-y-1.5 rounded-md border border-border p-2.5">
-                {entities.filter((e) => e.parentId !== null).map((e) => (
-                  <label key={e.id} className="flex items-center gap-2 cursor-pointer text-sm">
-                    <input
-                      type="checkbox"
-                      checked={childEntityIds.includes(e.id)}
-                      onChange={() => toggleChild(e.id)}
-                      className="rounded border-border"
-                    />
-                    {e.name}
-                  </label>
-                ))}
+                {entities
+                  .filter((e) => e.parentId !== null)
+                  .map((e) => (
+                    <label key={e.id} className="flex items-center gap-2 cursor-pointer text-sm">
+                      <input
+                        type="checkbox"
+                        checked={childEntityIds.includes(e.id)}
+                        onChange={() => toggleChild(e.id)}
+                        className="rounded border-border"
+                      />
+                      {e.name}
+                    </label>
+                  ))}
               </div>
             </div>
 
@@ -381,7 +414,9 @@ export default function ConsolidationPage() {
                   {(periodsQuery.data ?? []).map((p) => (
                     <SelectItem key={p.id} value={p.id}>
                       {p.name}
-                      <Badge variant="outline" className="ml-2 text-[10px]">{p.status}</Badge>
+                      <Badge variant="outline" className="ml-2 text-[10px]">
+                        {p.status}
+                      </Badge>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -393,10 +428,15 @@ export default function ConsolidationPage() {
               disabled={!canRun}
               onClick={() => runMutation.mutate()}
             >
-              {runMutation.isPending
-                ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Running…</>
-                : <><Play className="h-3.5 w-3.5" /> Run Consolidation</>
-              }
+              {runMutation.isPending ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Running…
+                </>
+              ) : (
+                <>
+                  <Play className="h-3.5 w-3.5" /> Run Consolidation
+                </>
+              )}
             </Button>
 
             {runMutation.isError && (
@@ -439,11 +479,11 @@ export default function ConsolidationPage() {
                   variant="ghost"
                   size="sm"
                   className="text-xs"
-                  onClick={() => setOpenSections(
-                    openSections.size === TYPE_ORDER.length
-                      ? new Set()
-                      : new Set(TYPE_ORDER)
-                  )}
+                  onClick={() =>
+                    setOpenSections(
+                      openSections.size === TYPE_ORDER.length ? new Set() : new Set(TYPE_ORDER)
+                    )
+                  }
                 >
                   {openSections.size === TYPE_ORDER.length ? "Collapse all" : "Expand all"}
                 </Button>
@@ -455,6 +495,7 @@ export default function ConsolidationPage() {
                     accountType={type}
                     lines={groupedLines.get(type)!}
                     entityIds={childEntityIds}
+                    entities={entities}
                     open={openSections.has(type)}
                     onToggle={() => toggleSection(type)}
                   />
@@ -489,11 +530,21 @@ export default function ConsolidationPage() {
                 <table className="w-full">
                   <thead>
                     <tr className="bg-slate-50 border-b border-slate-200">
-                      <th className="py-2 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Run ID</th>
-                      <th className="py-2 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Currency</th>
-                      <th className="py-2 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Entities</th>
-                      <th className="py-2 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Date</th>
-                      <th className="py-2 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
+                      <th className="py-2 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                        Run ID
+                      </th>
+                      <th className="py-2 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                        Currency
+                      </th>
+                      <th className="py-2 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                        Entities
+                      </th>
+                      <th className="py-2 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                        Date
+                      </th>
+                      <th className="py-2 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                        Status
+                      </th>
                     </tr>
                   </thead>
                   <tbody>

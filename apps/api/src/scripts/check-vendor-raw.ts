@@ -29,7 +29,9 @@ async function run() {
   console.log("─".repeat(100));
   for (const r of rows) {
     const ref = (r.reference ?? "").padEnd(30);
-    console.log(`  ${ref} debit=${Number(r.debit).toLocaleString().padStart(12)} credit=${Number(r.credit).toLocaleString().padStart(12)} | Dr_func=${Number(r.debit_functional).toLocaleString().padStart(12)} Cr_func=${Number(r.credit_functional).toLocaleString().padStart(12)}`);
+    console.log(
+      `  ${ref} debit=${Number(r.debit).toLocaleString().padStart(12)} credit=${Number(r.credit).toLocaleString().padStart(12)} | Dr_func=${Number(r.debit_functional).toLocaleString().padStart(12)} Cr_func=${Number(r.credit_functional).toLocaleString().padStart(12)}`
+    );
   }
 
   await p.$disconnect();

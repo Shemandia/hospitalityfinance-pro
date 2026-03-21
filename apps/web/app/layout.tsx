@@ -8,9 +8,7 @@ export const metadata: Metadata = {
   description: "Multi-tenant hospitality finance platform"
 };
 
-export default function RootLayout({
-  children
-}: Readonly<{ children: ReactNode }>) {
+export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="en" suppressHydrationWarning>
       <body suppressHydrationWarning>

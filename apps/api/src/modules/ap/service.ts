@@ -13,20 +13,7 @@ import type {
   SupplierUpdateInput
 } from "./types.js";
 
-type MatchStatus = "MATCH" | "PARTIAL_MATCH" | "MISMATCH";
-
-type MatchResult = {
-  status: MatchStatus;
-  tolerancePct: number;
-  lineComparisons: Array<{
-    invoiceLineId: string;
-    invoiceAmount: string;
-    expectedAmount: string;
-    variancePct: string;
-    withinTolerance: boolean;
-    note?: string;
-  }>;
-};
+// PO matching removed — handled by external Material Management system
 
 type CandidateInvoice = Awaited<ReturnType<APRepository["listInvoicesForPaymentRun"]>>[number];
 type PaymentRunDetail = NonNullable<Awaited<ReturnType<APRepository["getPaymentRun"]>>>;
@@ -72,7 +59,10 @@ export class APService {
   }
 
   private normalizeReferencePrefix(prefix: string): string {
-    const normalized = prefix.trim().toUpperCase().replace(/[^A-Z0-9-]/g, "");
+    const normalized = prefix
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9-]/g, "");
     return normalized.length > 0 ? normalized : "PAYRUN";
   }
 
@@ -181,9 +171,9 @@ export class APService {
       <PmtMtd>TRF</PmtMtd>
       <ReqdExctnDt>${executionDate}</ReqdExctnDt>
 ${transactions
-        .split("\n")
-        .map((line) => `      ${line}`)
-        .join("\n")}
+  .split("\n")
+  .map((line) => `      ${line}`)
+  .join("\n")}
     </PmtInf>
   </CstmrCdtTrfInitn>
 </Document>`;
@@ -207,10 +197,7 @@ ${transactions
   }
 
   async createSupplier(entityId: string, input: SupplierCreateInput) {
-    const existing = await this.repository(this.prisma).getSupplierByCode(
-      entityId,
-      input.code
-    );
+    const existing = await this.repository(this.prisma).getSupplierByCode(entityId, input.code);
     if (existing) {
       throw new APServiceError(
         "AP_SUPPLIER_CODE_EXISTS",
@@ -221,17 +208,10 @@ ${transactions
     return this.repository(this.prisma).createSupplier(entityId, input);
   }
 
-  async updateSupplier(
-    entityId: string,
-    supplierId: string,
-    input: SupplierUpdateInput
-  ) {
+  async updateSupplier(entityId: string, supplierId: string, input: SupplierUpdateInput) {
     await this.getSupplier(entityId, supplierId);
     if (input.code) {
-      const existing = await this.repository(this.prisma).getSupplierByCode(
-        entityId,
-        input.code
-      );
+      const existing = await this.repository(this.prisma).getSupplierByCode(entityId, input.code);
       if (existing && existing.id !== supplierId) {
         throw new APServiceError(
           "AP_SUPPLIER_CODE_EXISTS",
@@ -241,11 +221,7 @@ ${transactions
       }
     }
 
-    const updated = await this.repository(this.prisma).updateSupplier(
-      entityId,
-      supplierId,
-      input
-    );
+    const updated = await this.repository(this.prisma).updateSupplier(entityId, supplierId, input);
     if (updated.count === 0) {
       throw new APServiceError("AP_SUPPLIER_NOT_FOUND", "Supplier not found.", 404);
     }
@@ -292,11 +268,7 @@ ${transactions
     }
   }
 
-  async createInvoice(
-    entityId: string,
-    actorUserId: string | null,
-    input: APInvoiceCreateInput
-  ) {
+  async createInvoice(entityId: string, actorUserId: string | null, input: APInvoiceCreateInput) {
     await this.getSupplier(entityId, input.supplierId);
     const period = await this.repository(this.prisma).getPeriod(entityId, input.periodId);
     if (!period) {
@@ -311,11 +283,7 @@ ${transactions
     return this.createInvoice(entityId, null, input);
   }
 
-  async updateInvoice(
-    entityId: string,
-    invoiceId: string,
-    input: APInvoiceUpdateInput
-  ) {
+  async updateInvoice(entityId: string, invoiceId: string, input: APInvoiceUpdateInput) {
     const existing = await this.getInvoice(entityId, invoiceId);
     if (!["DRAFT", "DISPUTED", "PENDING_APPROVAL"].includes(existing.status)) {
       throw new APServiceError(
@@ -326,11 +294,7 @@ ${transactions
     }
 
     this.validateInvoiceLineTotals(input);
-    const updated = await this.repository(this.prisma).updateInvoice(
-      entityId,
-      invoiceId,
-      input
-    );
+    const updated = await this.repository(this.prisma).updateInvoice(entityId, invoiceId, input);
     if (updated.count === 0) {
       throw new APServiceError("AP_INVOICE_NOT_FOUND", "Invoice not found.", 404);
     }
@@ -350,86 +314,6 @@ ${transactions
 
     await this.repository(this.prisma).deleteInvoice(entityId, invoiceId);
     return { id: invoiceId, cancelled: true };
-  }
-
-  async matchInvoiceToPO(
-    entityId: string,
-    invoiceId: string,
-    tolerancePct = Number(process.env.AP_MATCH_TOLERANCE_PCT ?? "2")
-  ): Promise<MatchResult> {
-    const invoice = await this.getInvoice(entityId, invoiceId);
-    if (!invoice.purchaseOrder) {
-      return {
-        status: "MISMATCH",
-        tolerancePct,
-        lineComparisons: invoice.lines.map((line) => ({
-          invoiceLineId: line.id,
-          invoiceAmount: line.amount.toFixed(4),
-          expectedAmount: "0.0000",
-          variancePct: "100.0000",
-          withinTolerance: false,
-          note: "No purchase order linked."
-        }))
-      };
-    }
-
-    const poLines = [...invoice.purchaseOrder.lines];
-    const receivedByPoLineId = new Map<string, Prisma.Decimal>();
-
-    for (const grn of invoice.purchaseOrder.goodsReceivedNotes) {
-      for (const line of grn.lines) {
-        const current = receivedByPoLineId.get(line.purchaseOrderLineId) ?? new Prisma.Decimal(0);
-        receivedByPoLineId.set(
-          line.purchaseOrderLineId,
-          current.add(new Prisma.Decimal(line.amountReceived))
-        );
-      }
-    }
-
-    const lineComparisons = invoice.lines.map((line, index) => {
-      const poLine = poLines[index];
-      if (!poLine) {
-        return {
-          invoiceLineId: line.id,
-          invoiceAmount: line.amount.toFixed(4),
-          expectedAmount: "0.0000",
-          variancePct: "100.0000",
-          withinTolerance: false,
-          note: "No corresponding PO line found."
-        };
-      }
-
-      const poAmount = new Prisma.Decimal(poLine.amount);
-      const receivedAmount = receivedByPoLineId.get(poLine.id) ?? poAmount;
-      const expectedAmount = Prisma.Decimal.min(poAmount, receivedAmount);
-      const variance = new Prisma.Decimal(line.amount).sub(expectedAmount).abs();
-      const variancePct = expectedAmount.equals(0)
-        ? new Prisma.Decimal(100)
-        : variance.div(expectedAmount).mul(100);
-      const withinTolerance = variancePct.lessThanOrEqualTo(tolerancePct);
-
-      return {
-        invoiceLineId: line.id,
-        invoiceAmount: line.amount.toFixed(4),
-        expectedAmount: expectedAmount.toFixed(4),
-        variancePct: variancePct.toFixed(4),
-        withinTolerance
-      };
-    });
-
-    const matchedCount = lineComparisons.filter((line) => line.withinTolerance).length;
-    const status: MatchStatus =
-      matchedCount === lineComparisons.length
-        ? "MATCH"
-        : matchedCount > 0
-          ? "PARTIAL_MATCH"
-          : "MISMATCH";
-
-    return {
-      status,
-      tolerancePct,
-      lineComparisons
-    };
   }
 
   private async resolveJournalActorId(entityId: string, subject: string): Promise<string> {
@@ -590,11 +474,7 @@ ${transactions
     });
   }
 
-  async proposePaymentRun(
-    entityId: string,
-    actorSubject: string,
-    input: PaymentRunProposalInput
-  ) {
+  async proposePaymentRun(entityId: string, actorSubject: string, input: PaymentRunProposalInput) {
     if (input.startDate > input.endDate) {
       throw new APServiceError(
         "AP_PAYMENT_RUN_INVALID_DATES",
@@ -701,7 +581,13 @@ ${transactions
       }))
     );
 
-    return this.repository(this.prisma).createPaymentRun(entityId, actorId, input, items, runInvoices);
+    return this.repository(this.prisma).createPaymentRun(
+      entityId,
+      actorId,
+      input,
+      items,
+      runInvoices
+    );
   }
 
   async listPaymentRuns(entityId: string, limit?: number) {

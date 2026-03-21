@@ -10,7 +10,7 @@ import {
   ChevronRight,
   Download,
   Filter,
-  ExternalLink,
+  ExternalLink
 } from "lucide-react";
 import { Card, CardContent, CardHeader } from "../../../../../components/ui/card";
 import { Button } from "../../../../../components/ui/button";
@@ -20,7 +20,7 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
+  SelectValue
 } from "../../../../../components/ui/select";
 import { useApiContext } from "../../../../../components/use-api-context";
 import {
@@ -28,7 +28,7 @@ import {
   getPeriodList,
   type AccountLedgerResult,
   type LedgerLine,
-  type AccountType,
+  type AccountType
 } from "../../../../../lib/gl-api";
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -40,14 +40,14 @@ const STATUS_OPTIONS = [
   { value: "POSTED", label: "Posted" },
   { value: "DRAFT", label: "Draft" },
   { value: "PENDING_APPROVAL", label: "Pending Approval" },
-  { value: "REVERSED", label: "Reversed" },
+  { value: "REVERSED", label: "Reversed" }
 ];
 
 const STATUS_COLORS: Record<string, string> = {
   POSTED: "bg-emerald-100 text-emerald-800",
   DRAFT: "bg-slate-100 text-slate-700",
   PENDING_APPROVAL: "bg-amber-100 text-amber-800",
-  REVERSED: "bg-red-100 text-red-800",
+  REVERSED: "bg-red-100 text-red-800"
 };
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -57,7 +57,7 @@ const SOURCE_LABELS: Record<string, string> = {
   PAYROLL: "Payroll",
   FX_REVAL: "FX Reval",
   AP: "AP",
-  AR: "AR",
+  AR: "AR"
 };
 
 const TYPE_COLORS: Record<AccountType, string> = {
@@ -65,7 +65,7 @@ const TYPE_COLORS: Record<AccountType, string> = {
   LIABILITY: "bg-amber-100 text-amber-800",
   EQUITY: "bg-teal-100 text-teal-800",
   REVENUE: "bg-emerald-100 text-emerald-800",
-  EXPENSE: "bg-slate-100 text-slate-700",
+  EXPENSE: "bg-slate-100 text-slate-700"
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -75,7 +75,7 @@ function formatAmount(value: string): string {
   if (num === 0) return "—";
   return num.toLocaleString("en-US", {
     minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+    maximumFractionDigits: 2
   });
 }
 
@@ -83,7 +83,7 @@ function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString("en-GB", {
     day: "2-digit",
     month: "short",
-    year: "numeric",
+    year: "numeric"
   });
 }
 
@@ -100,7 +100,7 @@ function exportCSV(account: AccountLedgerResult["account"], lines: LedgerLine[])
         l.periodName ?? "",
         l.debitFunctional,
         l.creditFunctional,
-        l.currency,
+        l.currency
       ].join(",")
     )
     .join("\n");
@@ -131,21 +131,25 @@ export default function AccountLedgerPage() {
   const { data: periodsRes } = useQuery({
     queryKey: ["periods", ctx?.entityId],
     queryFn: () => getPeriodList(ctx!),
-    enabled: !!ctx,
+    enabled: !!ctx
   });
   const periods = (periodsRes?.data ?? []) as Array<{ id: string; name: string }>;
 
   // Fetch ledger data
-  const { data: ledgerRes, isLoading, error } = useQuery({
+  const {
+    data: ledgerRes,
+    isLoading,
+    error
+  } = useQuery({
     queryKey: ["account-ledger", accountId, periodFilter, statusFilter, page, ctx?.entityId],
     queryFn: () =>
       getAccountLedger(ctx!, accountId, {
         periodId: periodFilter !== "ALL" ? periodFilter : undefined,
         status: statusFilter !== "ALL" ? statusFilter : undefined,
         limit: PAGE_SIZE,
-        offset: page * PAGE_SIZE,
+        offset: page * PAGE_SIZE
       }),
-    enabled: !!ctx && !!accountId,
+    enabled: !!ctx && !!accountId
   });
 
   const ledger = ledgerRes?.data;
@@ -214,9 +218,7 @@ export default function AccountLedgerPage() {
               <span className="font-mono text-lg font-semibold">{account.code}</span>
               <span className="text-lg text-muted-foreground">—</span>
               <span className="text-lg">{account.name}</span>
-              <Badge className={`ml-2 text-xs ${TYPE_COLORS[account.type]}`}>
-                {account.type}
-              </Badge>
+              <Badge className={`ml-2 text-xs ${TYPE_COLORS[account.type]}`}>{account.type}</Badge>
               <Badge variant="outline" className="text-xs">
                 {account.normalBalance === "DEBIT" ? "Dr" : "Cr"} Normal
               </Badge>
@@ -246,23 +248,35 @@ export default function AccountLedgerPage() {
         <div className="grid grid-cols-3 gap-4">
           <Card>
             <CardContent className="pt-4 pb-3">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Total Transactions</p>
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Total Transactions
+              </p>
               <p className="text-2xl font-bold mt-1">{total.toLocaleString()}</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-4 pb-3">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Page Debits</p>
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Page Debits
+              </p>
               <p className="text-2xl font-bold mt-1 text-sky-700">
-                {pageTotals.totalDebit.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {pageTotals.totalDebit.toLocaleString("en-US", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2
+                })}
               </p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-4 pb-3">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Page Credits</p>
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Page Credits
+              </p>
               <p className="text-2xl font-bold mt-1 text-violet-700">
-                {pageTotals.totalCredit.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {pageTotals.totalCredit.toLocaleString("en-US", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2
+                })}
               </p>
             </CardContent>
           </Card>
@@ -276,7 +290,10 @@ export default function AccountLedgerPage() {
             <Filter className="h-4 w-4 text-muted-foreground" />
             <Select
               value={periodFilter}
-              onValueChange={(v) => { setPeriodFilter(v); setPage(0); }}
+              onValueChange={(v) => {
+                setPeriodFilter(v);
+                setPage(0);
+              }}
             >
               <SelectTrigger className="w-52">
                 <SelectValue placeholder="All Periods" />
@@ -284,21 +301,28 @@ export default function AccountLedgerPage() {
               <SelectContent>
                 <SelectItem value="ALL">All Periods</SelectItem>
                 {periods.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
 
             <Select
               value={statusFilter}
-              onValueChange={(v) => { setStatusFilter(v); setPage(0); }}
+              onValueChange={(v) => {
+                setStatusFilter(v);
+                setPage(0);
+              }}
             >
               <SelectTrigger className="w-44">
                 <SelectValue placeholder="All Statuses" />
               </SelectTrigger>
               <SelectContent>
                 {STATUS_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -308,7 +332,11 @@ export default function AccountLedgerPage() {
                 variant="ghost"
                 size="sm"
                 className="text-xs"
-                onClick={() => { setPeriodFilter("ALL"); setStatusFilter("ALL"); setPage(0); }}
+                onClick={() => {
+                  setPeriodFilter("ALL");
+                  setStatusFilter("ALL");
+                  setPage(0);
+                }}
               >
                 Clear filters
               </Button>
@@ -345,7 +373,9 @@ export default function AccountLedgerPage() {
 
         <CardContent className="p-0">
           {isLoading && (
-            <div className="py-16 text-center text-sm text-muted-foreground">Loading transactions...</div>
+            <div className="py-16 text-center text-sm text-muted-foreground">
+              Loading transactions...
+            </div>
           )}
 
           {error && (
@@ -385,53 +415,58 @@ export default function AccountLedgerPage() {
                       ? line.journalRef.split("-").slice(1).join("-")
                       : line.journalRef;
                     return (
-                    <tr
-                      key={line.id}
-                      className={`group border-b border-border/50 hover:bg-muted/40 transition-colors ${isReversed ? "opacity-50 line-through decoration-muted-foreground/40" : ""}`}
-                    >
-                      <td className="py-2 px-3 text-sm text-muted-foreground whitespace-nowrap">
-                        {formatDate(line.journalDate)}
-                      </td>
-                      <td className="py-2 px-3 text-sm font-mono" title={line.journalRef ?? ""}>
-                        {invoiceNum ?? "—"}
-                      </td>
-                      <td className="py-2 px-3 text-sm truncate max-w-xs" title={line.description ?? line.journalDescription ?? ""}>
-                        {line.description ?? line.journalDescription ?? "—"}
-                      </td>
-                      <td className="py-2 px-3 text-xs text-muted-foreground">
-                        {SOURCE_LABELS[line.journalSource] ?? line.journalSource}
-                      </td>
-                      <td className="py-2 px-3 text-center">
-                        <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium ${STATUS_COLORS[line.journalStatus] ?? "bg-gray-100 text-gray-700"}`}>
-                          {line.journalStatus.replace("_", " ")}
-                        </span>
-                      </td>
-                      <td className="py-2 px-3 text-xs text-muted-foreground">
-                        {line.periodName ?? "—"}
-                      </td>
-                      <td className="py-2 px-3 text-sm text-right font-mono text-sky-700">
-                        {formatAmount(String(line.effectiveDebit))}
-                      </td>
-                      <td className="py-2 px-3 text-sm text-right font-mono text-violet-700">
-                        {formatAmount(String(line.effectiveCredit))}
-                      </td>
-                      <td className="py-2 px-3 text-sm text-right font-mono font-medium">
-                        {line.runningBalance.toLocaleString("en-US", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
-                      </td>
-                      <td className="py-2 px-3 text-center">
-                        <button
-                          onClick={() => router.push(`/gl/journals?highlight=${line.journalId}`)}
-                          className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
-                          title="View journal"
+                      <tr
+                        key={line.id}
+                        className={`group border-b border-border/50 hover:bg-muted/40 transition-colors ${isReversed ? "opacity-50 line-through decoration-muted-foreground/40" : ""}`}
+                      >
+                        <td className="py-2 px-3 text-sm text-muted-foreground whitespace-nowrap">
+                          {formatDate(line.journalDate)}
+                        </td>
+                        <td className="py-2 px-3 text-sm font-mono" title={line.journalRef ?? ""}>
+                          {invoiceNum ?? "—"}
+                        </td>
+                        <td
+                          className="py-2 px-3 text-sm truncate max-w-xs"
+                          title={line.description ?? line.journalDescription ?? ""}
                         >
-                          <ExternalLink className="h-3.5 w-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  );
+                          {line.description ?? line.journalDescription ?? "—"}
+                        </td>
+                        <td className="py-2 px-3 text-xs text-muted-foreground">
+                          {SOURCE_LABELS[line.journalSource] ?? line.journalSource}
+                        </td>
+                        <td className="py-2 px-3 text-center">
+                          <span
+                            className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium ${STATUS_COLORS[line.journalStatus] ?? "bg-gray-100 text-gray-700"}`}
+                          >
+                            {line.journalStatus.replace("_", " ")}
+                          </span>
+                        </td>
+                        <td className="py-2 px-3 text-xs text-muted-foreground">
+                          {line.periodName ?? "—"}
+                        </td>
+                        <td className="py-2 px-3 text-sm text-right font-mono text-sky-700">
+                          {formatAmount(String(line.effectiveDebit))}
+                        </td>
+                        <td className="py-2 px-3 text-sm text-right font-mono text-violet-700">
+                          {formatAmount(String(line.effectiveCredit))}
+                        </td>
+                        <td className="py-2 px-3 text-sm text-right font-mono font-medium">
+                          {line.runningBalance.toLocaleString("en-US", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2
+                          })}
+                        </td>
+                        <td className="py-2 px-3 text-center">
+                          <button
+                            onClick={() => router.push(`/gl/journals?highlight=${line.journalId}`)}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                            title="View journal"
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
                   })}
                 </tbody>
                 <tfoot>
@@ -440,10 +475,16 @@ export default function AccountLedgerPage() {
                       Page Total
                     </td>
                     <td className="py-2 px-3 text-sm text-right font-mono text-sky-700">
-                      {pageTotals.totalDebit.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {pageTotals.totalDebit.toLocaleString("en-US", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2
+                      })}
                     </td>
                     <td className="py-2 px-3 text-sm text-right font-mono text-violet-700">
-                      {pageTotals.totalCredit.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {pageTotals.totalCredit.toLocaleString("en-US", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2
+                      })}
                     </td>
                     <td></td>
                     <td></td>
@@ -459,7 +500,8 @@ export default function AccountLedgerPage() {
       {totalPages > 1 && (
         <div className="flex items-center justify-between">
           <span className="text-sm text-muted-foreground">
-            Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} of {total} transactions
+            Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} of {total}{" "}
+            transactions
           </span>
           <div className="flex items-center gap-2">
             <Button

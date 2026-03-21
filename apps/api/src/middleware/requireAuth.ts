@@ -1,10 +1,7 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { updateRequestContext } from "../db/requestContext.js";
 
-export async function requireAuth(
-  request: FastifyRequest,
-  reply: FastifyReply
-): Promise<void> {
+export async function requireAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   try {
     await request.server.verifyAccessToken(request);
     updateRequestContext({
@@ -21,8 +18,7 @@ export async function requireAuth(
         ? (error as { statusCode: number }).statusCode
         : 401;
 
-    const message =
-      error instanceof Error ? error.message : "Authentication failed.";
+    const message = error instanceof Error ? error.message : "Authentication failed.";
 
     reply.code(statusCode).send({
       data: null,

@@ -41,7 +41,9 @@ async function run() {
     const cr = Number(r.credit);
     runningBalance += dr - cr;
     const ref = (r.reference ?? "").padEnd(30);
-    console.log(`  ${ref} Dr ${dr.toLocaleString().padStart(14)} Cr ${cr.toLocaleString().padStart(14)}  running: ${runningBalance.toLocaleString()}`);
+    console.log(
+      `  ${ref} Dr ${dr.toLocaleString().padStart(14)} Cr ${cr.toLocaleString().padStart(14)}  running: ${runningBalance.toLocaleString()}`
+    );
   }
   if (currentCode) console.log(`  NET BALANCE: ${runningBalance.toLocaleString()}`);
 

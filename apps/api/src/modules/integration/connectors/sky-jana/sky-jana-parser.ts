@@ -18,7 +18,7 @@ export {
   type SAFTransactionLine,
   type SAFParseResult,
   type SAFParseError,
-  type SAFControlRecord,
+  type SAFControlRecord
 } from "../saf/saf-parser.js";
 
 import {
@@ -27,7 +27,7 @@ import {
   isVendorAccount,
   isGLAccount,
   type SAFTransactionLine,
-  type SAFParseResult,
+  type SAFParseResult
 } from "../saf/saf-parser.js";
 
 // ── Jana-specific types ───────────────────────────────────────────────────────
@@ -51,13 +51,13 @@ export interface JanaExpenseLine {
   accountCode: string;
   amount: number;
   description: string;
-  department: string;      // T1 analysis code
-  vatRate: string;         // T0 analysis code
+  department: string; // T1 analysis code
+  vatRate: string; // T0 analysis code
   lineNumber: number;
 }
 
 export interface JanaVendorLine {
-  vendorCode: string;      // e.g. CGRAN001
+  vendorCode: string; // e.g. CGRAN001
   amount: number;
   description: string;
   reference: string;
@@ -68,11 +68,11 @@ export interface JanaVendorLine {
 
 export const JANA_JOURNAL_TYPES: Record<string, string> = {
   MFMCP: "Materials F&B Misc Cost Posting",
-  MFMCR: "Materials F&B Cost Reversal/Credit",
+  MFMCR: "Materials F&B Cost Reversal/Credit"
 };
 
 export function isJanaFile(result: SAFParseResult): boolean {
-  return result.journalTypes.some(jt => jt in JANA_JOURNAL_TYPES);
+  return result.journalTypes.some((jt) => jt in JANA_JOURNAL_TYPES);
 }
 
 // ── Extract vouchers from parsed SAF ──────────────────────────────────────────
@@ -86,12 +86,12 @@ export function extractJanaVouchers(result: SAFParseResult): JanaPurchasingVouch
   const vouchers: JanaPurchasingVoucher[] = [];
 
   for (const [ref, lines] of groups) {
-    const debits = lines.filter(l => l.dcMarker === "D");
-    const credits = lines.filter(l => l.dcMarker === "C");
+    const debits = lines.filter((l) => l.dcMarker === "D");
+    const credits = lines.filter((l) => l.dcMarker === "C");
 
     // Separate expense lines from VAT lines (VAT accounts typically start with 23)
-    const expenseDebits = debits.filter(l => !l.accountCode.startsWith("23"));
-    const vatDebits = debits.filter(l => l.accountCode.startsWith("23"));
+    const expenseDebits = debits.filter((l) => !l.accountCode.startsWith("23"));
+    const vatDebits = debits.filter((l) => l.accountCode.startsWith("23"));
 
     const totalDebits = debits.reduce((s, l) => s + l.amount, 0);
     const totalCredits = credits.reduce((s, l) => s + l.amount, 0);
@@ -102,7 +102,7 @@ export function extractJanaVouchers(result: SAFParseResult): JanaPurchasingVouch
       description: l.description,
       department: l.t1,
       vatRate: l.t0,
-      lineNumber: i + 1,
+      lineNumber: i + 1
     }));
 
     const vendorLines: JanaVendorLine[] = credits.map((l, i) => ({
@@ -110,7 +110,7 @@ export function extractJanaVouchers(result: SAFParseResult): JanaPurchasingVouch
       amount: l.amount,
       description: l.description,
       reference: l.transactionReference,
-      lineNumber: i + 1,
+      lineNumber: i + 1
     }));
 
     const totalVAT = vatDebits.reduce((s, l) => s + l.amount, 0);
@@ -127,7 +127,7 @@ export function extractJanaVouchers(result: SAFParseResult): JanaPurchasingVouch
       totalGross: totalCredits,
       totalNet,
       totalVAT,
-      isBalanced: Math.abs(Math.round(totalDebits * 100) - Math.round(totalCredits * 100)) === 0,
+      isBalanced: Math.abs(Math.round(totalDebits * 100) - Math.round(totalCredits * 100)) === 0
     });
   }
 

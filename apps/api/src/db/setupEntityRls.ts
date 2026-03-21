@@ -4,9 +4,7 @@ import { executeSqlFile } from "./sqlRunner.js";
 
 async function main() {
   if (!process.env.DATABASE_URL) {
-    throw new Error(
-      "DATABASE_URL is required. Set it before running db:setup:rls."
-    );
+    throw new Error("DATABASE_URL is required. Set it before running db:setup:rls.");
   }
 
   const sqlPath = join(process.cwd(), "src", "db", "sql", "entity-rls.sql");

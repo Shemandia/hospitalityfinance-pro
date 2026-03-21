@@ -10,7 +10,7 @@ import {
   TrendingDown,
   Minus,
   ChevronDown,
-  ChevronRight,
+  ChevronRight
 } from "lucide-react";
 import { Card, CardContent, CardHeader } from "../../../../components/ui/card";
 import { Button } from "../../../../components/ui/button";
@@ -20,14 +20,14 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
+  SelectValue
 } from "../../../../components/ui/select";
 import {
   getBudgetDefinitions,
   getBudgetVariance,
   getPeriodList,
   type VarianceLine,
-  type ApiContext,
+  type ApiContext
 } from "../../../../lib/gl-api";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -50,20 +50,27 @@ function sum(rows: VarianceLine[], field: keyof VarianceLine) {
   return rows.reduce((s, r) => s + parseFloat(String(r[field] ?? "0")), 0);
 }
 
-function exportToCsv(
-  rows: VarianceLine[],
-  budgetName: string,
-  periodName: string
-) {
+function exportToCsv(rows: VarianceLine[], budgetName: string, periodName: string) {
   const headers = [
-    "Account Code", "Account Name", "USALI Category", "USALI Department",
-    "Budget", "Actual", "Variance", "Variance %",
+    "Account Code",
+    "Account Name",
+    "USALI Category",
+    "USALI Department",
+    "Budget",
+    "Actual",
+    "Variance",
+    "Variance %"
   ];
   const body = rows.map((r) =>
     [
-      r.accountCode, r.accountName,
-      r.usaliCategory ?? "", r.usaliDepartment ?? "",
-      r.budgetAmount, r.actualAmount, r.variance, r.variancePct ?? "",
+      r.accountCode,
+      r.accountName,
+      r.usaliCategory ?? "",
+      r.usaliDepartment ?? "",
+      r.budgetAmount,
+      r.actualAmount,
+      r.variance,
+      r.variancePct ?? ""
     ]
       .map((f) => `"${String(f).replace(/"/g, '""')}"`)
       .join(",")
@@ -73,7 +80,7 @@ function exportToCsv(
   const url = URL.createObjectURL(blob);
   const a = Object.assign(document.createElement("a"), {
     href: url,
-    download: `variance-${budgetName}-${periodName}.csv`.replace(/\s+/g, "-"),
+    download: `variance-${budgetName}-${periodName}.csv`.replace(/\s+/g, "-")
   });
   document.body.appendChild(a);
   a.click();
@@ -107,7 +114,8 @@ function VarianceBar({ variancePct }: { variancePct: string | null }) {
           isPositive ? "text-emerald-700" : "text-red-700"
         }`}
       >
-        {isPositive ? "+" : ""}{p.toFixed(1)}%
+        {isPositive ? "+" : ""}
+        {p.toFixed(1)}%
       </span>
     </div>
   );
@@ -115,21 +123,14 @@ function VarianceBar({ variancePct }: { variancePct: string | null }) {
 
 // ── USALI group ───────────────────────────────────────────────────────────────
 
-function UsaliGroup({
-  label,
-  rows,
-}: {
-  label: string;
-  rows: VarianceLine[];
-}) {
+function UsaliGroup({ label, rows }: { label: string; rows: VarianceLine[] }) {
   const [expanded, setExpanded] = useState(true);
 
-  const totalBudget  = sum(rows, "budgetAmount");
-  const totalActual  = sum(rows, "actualAmount");
+  const totalBudget = sum(rows, "budgetAmount");
+  const totalActual = sum(rows, "actualAmount");
   const totalVariance = sum(rows, "variance");
-  const groupVariancePct = totalBudget !== 0
-    ? ((totalActual - totalBudget) / Math.abs(totalBudget)) * 100
-    : null;
+  const groupVariancePct =
+    totalBudget !== 0 ? ((totalActual - totalBudget) / Math.abs(totalBudget)) * 100 : null;
 
   const isPositive = totalVariance >= 0;
 
@@ -151,53 +152,64 @@ function UsaliGroup({
               {rows.length} account{rows.length !== 1 ? "s" : ""}
             </Badge>
             <span className="ml-auto flex items-center gap-6 text-sm">
-              <span className="text-muted-foreground w-32 text-right tabular-nums">{fmt(totalBudget)}</span>
+              <span className="text-muted-foreground w-32 text-right tabular-nums">
+                {fmt(totalBudget)}
+              </span>
               <span className="w-32 text-right tabular-nums">{fmt(totalActual)}</span>
-              <span className={`w-32 text-right tabular-nums font-semibold ${isPositive ? "text-emerald-700" : "text-red-700"}`}>
-                {isPositive ? "+" : ""}{fmt(totalVariance)}
+              <span
+                className={`w-32 text-right tabular-nums font-semibold ${isPositive ? "text-emerald-700" : "text-red-700"}`}
+              >
+                {isPositive ? "+" : ""}
+                {fmt(totalVariance)}
               </span>
               <span className="w-36">
-                <VarianceBar variancePct={groupVariancePct !== null ? String(groupVariancePct) : null} />
+                <VarianceBar
+                  variancePct={groupVariancePct !== null ? String(groupVariancePct) : null}
+                />
               </span>
             </span>
           </div>
         </td>
       </tr>
-      {expanded && rows.map((row) => {
-        const v = parseFloat(row.variance);
-        const isRowPos = v >= 0;
-        return (
-          <tr key={row.accountId} className="border-b border-border/40 hover:bg-muted/20 transition-colors group">
-            <td className="py-2 px-4 text-xs font-mono text-muted-foreground w-28">
-              {row.accountCode}
-            </td>
-            <td className="py-2 px-4 text-sm">
-              {row.accountName}
-            </td>
-            <td className="py-2 px-4 text-xs text-muted-foreground">
-              {row.usaliDepartment ?? "—"}
-            </td>
-            <td className="py-2 px-4 text-right tabular-nums text-sm text-muted-foreground">
-              {fmt(row.budgetAmount)}
-            </td>
-            <td className="py-2 px-4 text-right tabular-nums text-sm">
-              {fmt(row.actualAmount)}
-            </td>
-            <td className={`py-2 px-4 text-right tabular-nums text-sm font-medium ${isRowPos ? "text-emerald-700" : "text-red-700"}`}>
-              <span className="flex items-center justify-end gap-1">
-                {isRowPos
-                  ? <TrendingUp className="h-3 w-3 opacity-70" />
-                  : <TrendingDown className="h-3 w-3 opacity-70" />
-                }
-                {isRowPos ? "+" : ""}{fmt(row.variance)}
-              </span>
-            </td>
-            <td className="py-2 px-4">
-              <VarianceBar variancePct={row.variancePct} />
-            </td>
-          </tr>
-        );
-      })}
+      {expanded &&
+        rows.map((row) => {
+          const v = parseFloat(row.variance);
+          const isRowPos = v >= 0;
+          return (
+            <tr
+              key={row.accountId}
+              className="border-b border-border/40 hover:bg-muted/20 transition-colors group"
+            >
+              <td className="py-2 px-4 text-xs font-mono text-muted-foreground w-28">
+                {row.accountCode}
+              </td>
+              <td className="py-2 px-4 text-sm">{row.accountName}</td>
+              <td className="py-2 px-4 text-xs text-muted-foreground">
+                {row.usaliDepartment ?? "—"}
+              </td>
+              <td className="py-2 px-4 text-right tabular-nums text-sm text-muted-foreground">
+                {fmt(row.budgetAmount)}
+              </td>
+              <td className="py-2 px-4 text-right tabular-nums text-sm">{fmt(row.actualAmount)}</td>
+              <td
+                className={`py-2 px-4 text-right tabular-nums text-sm font-medium ${isRowPos ? "text-emerald-700" : "text-red-700"}`}
+              >
+                <span className="flex items-center justify-end gap-1">
+                  {isRowPos ? (
+                    <TrendingUp className="h-3 w-3 opacity-70" />
+                  ) : (
+                    <TrendingDown className="h-3 w-3 opacity-70" />
+                  )}
+                  {isRowPos ? "+" : ""}
+                  {fmt(row.variance)}
+                </span>
+              </td>
+              <td className="py-2 px-4">
+                <VarianceBar variancePct={row.variancePct} />
+              </td>
+            </tr>
+          );
+        })}
     </>
   );
 }
@@ -210,7 +222,7 @@ export default function BudgetVariancePage() {
   const ctx: ApiContext | null = session?.user?.entityIds?.[0]
     ? {
         accessToken: (session as unknown as { accessToken?: string }).accessToken ?? "dev-token",
-        entityId: session.user.entityIds[0],
+        entityId: session.user.entityIds[0]
       }
     : null;
 
@@ -226,19 +238,19 @@ export default function BudgetVariancePage() {
   const defsQ = useQuery({
     queryKey: ["budget-defs", ctx?.entityId],
     queryFn: () => getBudgetDefinitions(ctx!),
-    enabled: !!ctx,
+    enabled: !!ctx
   });
 
   const periodsQ = useQuery({
     queryKey: ["periods", ctx?.entityId],
     queryFn: () => getPeriodList(ctx!),
-    enabled: !!ctx,
+    enabled: !!ctx
   });
 
   const varianceQ = useQuery({
     queryKey: ["budget-variance", ctx?.entityId, activeDefId, activePeriodId],
     queryFn: () => getBudgetVariance(ctx!, activeDefId!, activePeriodId!),
-    enabled: !!ctx && !!activeDefId && !!activePeriodId,
+    enabled: !!ctx && !!activeDefId && !!activePeriodId
   });
 
   const defs = defsQ.data?.data ?? [];
@@ -271,8 +283,8 @@ export default function BudgetVariancePage() {
   // ── Summary totals ────────────────────────────────────────────────────────
 
   const totals = useMemo(() => {
-    const budget  = sum(rows, "budgetAmount");
-    const actual  = sum(rows, "actualAmount");
+    const budget = sum(rows, "budgetAmount");
+    const actual = sum(rows, "actualAmount");
     const variance = sum(rows, "variance");
     const variancePct = budget !== 0 ? ((actual - budget) / Math.abs(budget)) * 100 : null;
     const overBudget = rows.filter((r) => parseFloat(r.variance) > 0).length;
@@ -316,10 +328,7 @@ export default function BudgetVariancePage() {
           <div className="flex items-end gap-4 flex-wrap">
             <div className="space-y-1.5 min-w-[240px]">
               <label className="text-sm font-medium">Budget Definition</label>
-              <Select
-                value={selectedDefId}
-                onValueChange={setSelectedDefId}
-              >
+              <Select value={selectedDefId} onValueChange={setSelectedDefId}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select budget…" />
                 </SelectTrigger>
@@ -336,10 +345,7 @@ export default function BudgetVariancePage() {
 
             <div className="space-y-1.5 min-w-[200px]">
               <label className="text-sm font-medium">Period</label>
-              <Select
-                value={selectedPeriodId}
-                onValueChange={setSelectedPeriodId}
-              >
+              <Select value={selectedPeriodId} onValueChange={setSelectedPeriodId}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select period…" />
                 </SelectTrigger>
@@ -361,13 +367,9 @@ export default function BudgetVariancePage() {
               Run Report
             </Button>
 
-            {varianceQ.isLoading && (
-              <span className="text-sm text-muted-foreground">Loading…</span>
-            )}
+            {varianceQ.isLoading && <span className="text-sm text-muted-foreground">Loading…</span>}
             {varianceQ.isError && (
-              <span className="text-sm text-destructive">
-                {(varianceQ.error as Error).message}
-              </span>
+              <span className="text-sm text-destructive">{(varianceQ.error as Error).message}</span>
             )}
           </div>
         </CardContent>
@@ -381,7 +383,8 @@ export default function BudgetVariancePage() {
             <div>
               <p className="font-semibold text-lg">{report.budgetName}</p>
               <p className="text-sm text-muted-foreground">
-                Period: <strong>{report.periodName}</strong> · FY {report.year} · {rows.length} accounts
+                Period: <strong>{report.periodName}</strong> · FY {report.year} · {rows.length}{" "}
+                accounts
               </p>
             </div>
           </div>
@@ -389,26 +392,42 @@ export default function BudgetVariancePage() {
           {/* KPI cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="rounded-lg border border-border bg-card p-4">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Total Budget</p>
+              <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium">
+                Total Budget
+              </p>
               <p className="text-xl font-bold mt-1 tabular-nums">{fmt(totals.budget)}</p>
             </div>
             <div className="rounded-lg border border-border bg-card p-4">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Total Actual</p>
+              <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium">
+                Total Actual
+              </p>
               <p className="text-xl font-bold mt-1 tabular-nums">{fmt(totals.actual)}</p>
             </div>
-            <div className={`rounded-lg border p-4 ${totals.variance >= 0 ? "border-emerald-200 bg-emerald-50/50" : "border-red-200 bg-red-50/50"}`}>
-              <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Net Variance</p>
-              <p className={`text-xl font-bold mt-1 tabular-nums flex items-center gap-1.5 ${totals.variance >= 0 ? "text-emerald-700" : "text-red-700"}`}>
-                {totals.variance >= 0
-                  ? <TrendingUp className="h-5 w-5" />
-                  : <TrendingDown className="h-5 w-5" />
-                }
-                {totals.variance >= 0 ? "+" : ""}{fmt(totals.variance)}
+            <div
+              className={`rounded-lg border p-4 ${totals.variance >= 0 ? "border-emerald-200 bg-emerald-50/50" : "border-red-200 bg-red-50/50"}`}
+            >
+              <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium">
+                Net Variance
+              </p>
+              <p
+                className={`text-xl font-bold mt-1 tabular-nums flex items-center gap-1.5 ${totals.variance >= 0 ? "text-emerald-700" : "text-red-700"}`}
+              >
+                {totals.variance >= 0 ? (
+                  <TrendingUp className="h-5 w-5" />
+                ) : (
+                  <TrendingDown className="h-5 w-5" />
+                )}
+                {totals.variance >= 0 ? "+" : ""}
+                {fmt(totals.variance)}
               </p>
             </div>
             <div className="rounded-lg border border-border bg-card p-4">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Variance %</p>
-              <p className={`text-xl font-bold mt-1 ${totals.variancePct !== null && totals.variancePct >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+              <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium">
+                Variance %
+              </p>
+              <p
+                className={`text-xl font-bold mt-1 ${totals.variancePct !== null && totals.variancePct >= 0 ? "text-emerald-700" : "text-red-700"}`}
+              >
                 {totals.variancePct !== null
                   ? `${totals.variancePct >= 0 ? "+" : ""}${totals.variancePct.toFixed(1)}%`
                   : "—"}
@@ -433,13 +452,27 @@ export default function BudgetVariancePage() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border bg-muted/30 text-xs uppercase tracking-wide">
-                        <th className="py-2.5 px-4 text-left font-medium text-muted-foreground w-28">Code</th>
-                        <th className="py-2.5 px-4 text-left font-medium text-muted-foreground">Account</th>
-                        <th className="py-2.5 px-4 text-left font-medium text-muted-foreground w-36">Department</th>
-                        <th className="py-2.5 px-4 text-right font-medium text-muted-foreground w-32">Budget</th>
-                        <th className="py-2.5 px-4 text-right font-medium text-muted-foreground w-32">Actual</th>
-                        <th className="py-2.5 px-4 text-right font-medium text-muted-foreground w-32">Variance</th>
-                        <th className="py-2.5 px-4 text-left font-medium text-muted-foreground w-44">Variance %</th>
+                        <th className="py-2.5 px-4 text-left font-medium text-muted-foreground w-28">
+                          Code
+                        </th>
+                        <th className="py-2.5 px-4 text-left font-medium text-muted-foreground">
+                          Account
+                        </th>
+                        <th className="py-2.5 px-4 text-left font-medium text-muted-foreground w-36">
+                          Department
+                        </th>
+                        <th className="py-2.5 px-4 text-right font-medium text-muted-foreground w-32">
+                          Budget
+                        </th>
+                        <th className="py-2.5 px-4 text-right font-medium text-muted-foreground w-32">
+                          Actual
+                        </th>
+                        <th className="py-2.5 px-4 text-right font-medium text-muted-foreground w-32">
+                          Variance
+                        </th>
+                        <th className="py-2.5 px-4 text-left font-medium text-muted-foreground w-44">
+                          Variance %
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -449,15 +482,24 @@ export default function BudgetVariancePage() {
 
                       {/* Grand total */}
                       <tr className="border-t-2 border-border bg-muted/60 font-bold text-sm">
-                        <td colSpan={3} className="py-3 px-4">Grand Total</td>
-                        <td className="py-3 px-4 text-right tabular-nums text-muted-foreground">{fmt(totals.budget)}</td>
+                        <td colSpan={3} className="py-3 px-4">
+                          Grand Total
+                        </td>
+                        <td className="py-3 px-4 text-right tabular-nums text-muted-foreground">
+                          {fmt(totals.budget)}
+                        </td>
                         <td className="py-3 px-4 text-right tabular-nums">{fmt(totals.actual)}</td>
-                        <td className={`py-3 px-4 text-right tabular-nums ${totals.variance >= 0 ? "text-emerald-700" : "text-red-700"}`}>
-                          {totals.variance >= 0 ? "+" : ""}{fmt(totals.variance)}
+                        <td
+                          className={`py-3 px-4 text-right tabular-nums ${totals.variance >= 0 ? "text-emerald-700" : "text-red-700"}`}
+                        >
+                          {totals.variance >= 0 ? "+" : ""}
+                          {fmt(totals.variance)}
                         </td>
                         <td className="py-3 px-4">
                           <VarianceBar
-                            variancePct={totals.variancePct !== null ? String(totals.variancePct) : null}
+                            variancePct={
+                              totals.variancePct !== null ? String(totals.variancePct) : null
+                            }
                           />
                         </td>
                       </tr>
@@ -480,7 +522,10 @@ export default function BudgetVariancePage() {
           {defs.length === 0 && !defsQ.isLoading && (
             <p className="text-xs text-muted-foreground">
               No budget definitions found. Create one on the{" "}
-              <a href="/budget" className="underline hover:text-foreground">Budget page</a>.
+              <a href="/budget" className="underline hover:text-foreground">
+                Budget page
+              </a>
+              .
             </p>
           )}
         </div>

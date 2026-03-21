@@ -8,14 +8,20 @@ import { z } from "zod";
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
 import { Label } from "../../../components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle
+} from "../../../components/ui/card";
 import { Building2, AlertTriangle } from "lucide-react";
 
 const isDev = process.env.NODE_ENV !== "production";
 
 const schema = z.object({
   email: z.string().email("Valid email required"),
-  entityId: z.string().optional(),
+  entityId: z.string().optional()
 });
 
 export default function LoginPage() {
@@ -24,7 +30,7 @@ export default function LoginPage() {
 
   const form = useForm<z.infer<typeof schema>>({
     resolver: zodResolver(schema),
-    defaultValues: { email: "admin@localhost", entityId: "00000000-0000-0000-0000-000000000002" },
+    defaultValues: { email: "admin@localhost", entityId: "00000000-0000-0000-0000-000000000002" }
   });
 
   async function handleDevLogin(values: z.infer<typeof schema>) {
@@ -34,7 +40,7 @@ export default function LoginPage() {
       email: values.email,
       entityId: values.entityId ?? "",
       redirect: true,
-      callbackUrl: "/",
+      callbackUrl: "/"
     });
     if (result?.error) {
       setError(result.error);
@@ -75,12 +81,20 @@ export default function LoginPage() {
                   <Label htmlFor="email">Email</Label>
                   <Input id="email" type="email" autoComplete="email" {...form.register("email")} />
                   {form.formState.errors.email && (
-                    <p className="text-xs text-destructive">{form.formState.errors.email.message}</p>
+                    <p className="text-xs text-destructive">
+                      {form.formState.errors.email.message}
+                    </p>
                   )}
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="entityId">Entity ID <span className="text-muted-foreground font-normal">(optional)</span></Label>
-                  <Input id="entityId" placeholder="Leave blank to set later" {...form.register("entityId")} />
+                  <Label htmlFor="entityId">
+                    Entity ID <span className="text-muted-foreground font-normal">(optional)</span>
+                  </Label>
+                  <Input
+                    id="entityId"
+                    placeholder="Leave blank to set later"
+                    {...form.register("entityId")}
+                  />
                 </div>
                 {error && <p className="text-xs text-destructive">{error}</p>}
                 <Button type="submit" variant="teal" className="w-full" disabled={loading}>

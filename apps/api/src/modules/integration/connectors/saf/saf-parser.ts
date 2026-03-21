@@ -37,19 +37,19 @@ export interface SAFControlRecord {
 export interface SAFTransactionLine {
   recordType: "L" | "M";
   accountCode: string;
-  accountingPeriod: string;      // YYYYPPP
+  accountingPeriod: string; // YYYYPPP
   fiscalYear: number;
   periodNumber: number;
-  transactionDate: string;       // YYYYMMDD
+  transactionDate: string; // YYYYMMDD
   journalNumber: string;
   lineNumber: string;
-  amount: number;                // Always positive
-  dcMarker: "D" | "C";          // Debit or Credit
-  signedAmount: number;          // Positive for debit, negative for credit
+  amount: number; // Always positive
+  dcMarker: "D" | "C"; // Debit or Credit
+  signedAmount: number; // Positive for debit, negative for credit
   allocationIndicator: string;
-  journalType: string;           // e.g. MFMCP, FIDEL, FIDMS, FIDST
+  journalType: string; // e.g. MFMCP, FIDEL, FIDMS, FIDST
   journalSource: string;
-  transactionReference: string;  // PO number, invoice ref, Opera tx code
+  transactionReference: string; // PO number, invoice ref, Opera tx code
   description: string;
   entryDate: string;
   entryPeriod: string;
@@ -60,7 +60,7 @@ export interface SAFTransactionLine {
   assetIndicator: string;
   assetCode: string;
   assetSubCode: string;
-  conversionCode: string;        // Currency code (TZS, USD, EUR)
+  conversionCode: string; // Currency code (TZS, USD, EUR)
   // Extended fields
   otherAmount: number;
   otherAmountCurrency: string;
@@ -68,10 +68,10 @@ export interface SAFTransactionLine {
   // Analysis codes T0–T9
   // Fixed-width: positional fields at 242+
   // Pipe-delimited: fields [31]=property, [32]=dept, [33]=dept2, [34]=outlet
-  t0: string;   // Jana MFMCP: VAT/tax rate | Jana MCTRF: department code | Opera: property code
-  t1: string;   // Jana: Department   | Opera: department code
-  t2: string;   // Jana: T2           | Opera: department 2 (echo)
-  t3: string;   // Jana: T3           | Opera: outlet code
+  t0: string; // Jana MFMCP: VAT/tax rate | Jana MCTRF: department code | Opera: property code
+  t1: string; // Jana: Department   | Opera: department code
+  t2: string; // Jana: T2           | Opera: department 2 (echo)
+  t3: string; // Jana: T3           | Opera: outlet code
   t4: string;
   t5: string;
   t6: string;
@@ -110,18 +110,24 @@ export interface SAFParseError {
 // ── Opera journal type → file type mapping ───────────────────────────────────
 
 const OPERA_JOURNAL_TYPES: Record<string, OperaFileType> = {
-  FIDEL: "revenue",   // Also used for city ledger — disambiguated by source
+  FIDEL: "revenue", // Also used for city ledger — disambiguated by source
   FIDMS: "market_stats",
-  FIDST: "daily_stats",
+  FIDST: "daily_stats"
 };
 
 /** Detect Jana file type from filename prefix or journal type/source */
-function detectJanaFileType(filename?: string, journalTypes?: string[], journalSources?: string[]): JanaFileType {
+function detectJanaFileType(
+  filename?: string,
+  journalTypes?: string[],
+  journalSources?: string[]
+): JanaFileType {
   // Primary: filename prefix
   if (filename) {
     const upper = filename.toUpperCase();
-    if (upper.includes("INTERNAL_MOVEMENTS") || upper.includes("INTERNAL-MOVEMENTS")) return "internal_movements";
-    if (upper.includes("INVENTORY_DIFFERENCES") || upper.includes("INVENTORY-DIFFERENCES")) return "inventory_differences";
+    if (upper.includes("INTERNAL_MOVEMENTS") || upper.includes("INTERNAL-MOVEMENTS"))
+      return "internal_movements";
+    if (upper.includes("INVENTORY_DIFFERENCES") || upper.includes("INVENTORY-DIFFERENCES"))
+      return "inventory_differences";
   }
   // Secondary: journal source — MCTRF = internal movements or inventory differences
   // (can't distinguish without filename, default to internal_movements)
@@ -243,7 +249,11 @@ function parsePipeLine(
 
   // Need at least 10 fields for a valid line
   if (fields.length < 10) {
-    errors.push({ line: lineNum, message: `Too few pipe-delimited fields (${fields.length})`, raw });
+    errors.push({
+      line: lineNum,
+      message: `Too few pipe-delimited fields (${fields.length})`,
+      raw
+    });
     return null;
   }
 
@@ -255,8 +265,8 @@ function parsePipeLine(
     return null;
   }
 
-  const accountingPeriod = f(1);  // YYYYPPP
-  const transactionDate = f(2);   // YYYYMMDD
+  const accountingPeriod = f(1); // YYYYPPP
+  const transactionDate = f(2); // YYYYMMDD
   const journalNumber = f(3);
   const lineNumber = f(4);
   const recordType = f(5).toUpperCase() || "L";
@@ -293,10 +303,10 @@ function parsePipeLine(
   const baseAmount = baseAmountRaw ? parseAmountOpera(baseAmountRaw) : amount;
 
   // Analysis codes: fields 31-34 for Opera (property, dept, dept2, outlet)
-  const t0 = f(31);  // Property code (e.g. EZZ)
-  const t1 = f(32);  // Department code
-  const t2 = f(33);  // Department 2 (echo)
-  const t3 = f(34);  // Outlet code
+  const t0 = f(31); // Property code (e.g. EZZ)
+  const t1 = f(32); // Department code
+  const t2 = f(33); // Department 2 (echo)
+  const t3 = f(34); // Outlet code
   const t4 = f(35);
   const t5 = f(36);
   const t6 = f(37);
@@ -305,7 +315,7 @@ function parsePipeLine(
   const t9 = f(40);
 
   return {
-    recordType: (recordType === "L" || recordType === "M") ? recordType : "L",
+    recordType: recordType === "L" || recordType === "M" ? recordType : "L",
     accountCode,
     accountingPeriod,
     fiscalYear,
@@ -334,9 +344,18 @@ function parsePipeLine(
     otherAmount: 0,
     otherAmountCurrency: f(23),
     baseAmount,
-    t0, t1, t2, t3, t4, t5, t6, t7, t8, t9,
+    t0,
+    t1,
+    t2,
+    t3,
+    t4,
+    t5,
+    t6,
+    t7,
+    t8,
+    t9,
     rawLine: raw,
-    rawLineNumber: lineNum,
+    rawLineNumber: lineNum
   };
 }
 
@@ -351,7 +370,13 @@ function parseFixedWidthLine(
   const line = raw.padEnd(512);
   const recordType = field(line, 33, 1).toUpperCase();
 
-  if (recordType !== "L" && recordType !== "M" && recordType !== "E" && recordType !== "T" && recordType !== "N") {
+  if (
+    recordType !== "L" &&
+    recordType !== "M" &&
+    recordType !== "E" &&
+    recordType !== "T" &&
+    recordType !== "N"
+  ) {
     return null; // Not a transaction line — caller handles control/unknown
   }
 
@@ -390,7 +415,7 @@ function parseFixedWidthLine(
   }
 
   return {
-    recordType: (recordType === "L" || recordType === "M") ? recordType : "L",
+    recordType: recordType === "L" || recordType === "M" ? recordType : "L",
     accountCode,
     accountingPeriod,
     fiscalYear,
@@ -430,7 +455,7 @@ function parseFixedWidthLine(
     t8: field(line, 362, 15),
     t9: field(line, 377, 15),
     rawLine: raw,
-    rawLineNumber: lineNum,
+    rawLineNumber: lineNum
   };
 }
 
@@ -481,42 +506,51 @@ export function parseSAFFile(content: string, filename?: string): SAFParseResult
           recordType: "C",
           highestJournalNumber: field(line, 34, 7),
           lastCleardownSequence: field(line, 41, 5),
-          languageId: field(line, 48, 2),
+          languageId: field(line, 48, 2)
         };
         continue;
       }
 
-      if (recordType === "L" || recordType === "M" || recordType === "E" || recordType === "T" || recordType === "N") {
+      if (
+        recordType === "L" ||
+        recordType === "M" ||
+        recordType === "E" ||
+        recordType === "T" ||
+        recordType === "N"
+      ) {
         const txLine = parseFixedWidthLine(raw, lineNum, errors);
         if (txLine) txLines.push(txLine);
         continue;
       }
 
       if (raw.trim().length > 0) {
-        errors.push({ line: lineNum, message: `Unrecognised record type "${recordType}" at position 33`, raw });
+        errors.push({
+          line: lineNum,
+          message: `Unrecognised record type "${recordType}" at position 33`,
+          raw
+        });
       }
     }
   }
 
   // ── Summaries ──
-  const totalDebits = txLines
-    .filter(l => l.dcMarker === "D")
-    .reduce((s, l) => s + l.amount, 0);
-  const totalCredits = txLines
-    .filter(l => l.dcMarker === "C")
-    .reduce((s, l) => s + l.amount, 0);
+  const totalDebits = txLines.filter((l) => l.dcMarker === "D").reduce((s, l) => s + l.amount, 0);
+  const totalCredits = txLines.filter((l) => l.dcMarker === "C").reduce((s, l) => s + l.amount, 0);
 
   // Balance check — round to 3 decimal places (Opera uses 3 implied decimals)
-  const isBalanced = Math.abs(Math.round(totalDebits * 1000) - Math.round(totalCredits * 1000)) === 0;
+  const isBalanced =
+    Math.abs(Math.round(totalDebits * 1000) - Math.round(totalCredits * 1000)) === 0;
 
   // Date range
-  const dates = txLines.map(l => l.transactionDate).filter(d => d.length === 8).sort();
-  const dateRange = dates.length > 0
-    ? { earliest: dates[0], latest: dates[dates.length - 1] }
-    : null;
+  const dates = txLines
+    .map((l) => l.transactionDate)
+    .filter((d) => d.length === 8)
+    .sort();
+  const dateRange =
+    dates.length > 0 ? { earliest: dates[0], latest: dates[dates.length - 1] } : null;
 
   // Unique accounts
-  const uniqueAccounts = [...new Set(txLines.map(l => l.accountCode))].sort();
+  const uniqueAccounts = [...new Set(txLines.map((l) => l.accountCode))].sort();
 
   // Currency — take the most common non-empty conversion code
   const currencyCounts = new Map<string, number>();
@@ -528,11 +562,14 @@ export function parseSAFFile(content: string, filename?: string): SAFParseResult
   let currency: string | null = null;
   let maxCount = 0;
   for (const [code, count] of currencyCounts) {
-    if (count > maxCount) { currency = code; maxCount = count; }
+    if (count > maxCount) {
+      currency = code;
+      maxCount = count;
+    }
   }
 
   // Journal types
-  const journalTypes = [...new Set(txLines.map(l => l.journalType).filter(Boolean))].sort();
+  const journalTypes = [...new Set(txLines.map((l) => l.journalType).filter(Boolean))].sort();
 
   // Determine Opera file type from filename or journal types
   let operaFileType: OperaFileType = null;
@@ -542,12 +579,15 @@ export function parseSAFFile(content: string, filename?: string): SAFParseResult
     if (!operaFileType && journalTypes.length > 0) {
       for (const jt of journalTypes) {
         const mapped = OPERA_JOURNAL_TYPES[jt];
-        if (mapped) { operaFileType = mapped; break; }
+        if (mapped) {
+          operaFileType = mapped;
+          break;
+        }
       }
     }
   } else {
     // Fixed-width: detect Jana file type from filename and journal type/source
-    const journalSources = [...new Set(txLines.map(l => l.journalSource).filter(Boolean))];
+    const journalSources = [...new Set(txLines.map((l) => l.journalSource).filter(Boolean))];
     janaFileType = detectJanaFileType(filename, journalTypes, journalSources);
   }
 
@@ -566,7 +606,7 @@ export function parseSAFFile(content: string, filename?: string): SAFParseResult
     uniqueAccounts,
     currency,
     journalTypes,
-    errors,
+    errors
   };
 }
 
@@ -620,9 +660,15 @@ export function groupByJournalType(lines: SAFTransactionLine[]): Map<string, SAF
  */
 export function buildPreviewSummary(result: SAFParseResult) {
   const debitAccounts = result.lines
-    .filter(l => l.dcMarker === "D")
+    .filter((l) => l.dcMarker === "D")
     .reduce((acc, l) => {
-      if (!acc.has(l.accountCode)) acc.set(l.accountCode, { code: l.accountCode, total: 0, lines: 0, sampleDesc: l.description });
+      if (!acc.has(l.accountCode))
+        acc.set(l.accountCode, {
+          code: l.accountCode,
+          total: 0,
+          lines: 0,
+          sampleDesc: l.description
+        });
       const entry = acc.get(l.accountCode)!;
       entry.total += l.amount;
       entry.lines++;
@@ -630,9 +676,15 @@ export function buildPreviewSummary(result: SAFParseResult) {
     }, new Map<string, { code: string; total: number; lines: number; sampleDesc: string }>());
 
   const creditAccounts = result.lines
-    .filter(l => l.dcMarker === "C")
+    .filter((l) => l.dcMarker === "C")
     .reduce((acc, l) => {
-      if (!acc.has(l.accountCode)) acc.set(l.accountCode, { code: l.accountCode, total: 0, lines: 0, sampleDesc: l.description });
+      if (!acc.has(l.accountCode))
+        acc.set(l.accountCode, {
+          code: l.accountCode,
+          total: 0,
+          lines: 0,
+          sampleDesc: l.description
+        });
       const entry = acc.get(l.accountCode)!;
       entry.total += l.amount;
       entry.lines++;
@@ -655,6 +707,6 @@ export function buildPreviewSummary(result: SAFParseResult) {
     debitAccounts: [...debitAccounts.values()].sort((a, b) => b.total - a.total),
     creditAccounts: [...creditAccounts.values()].sort((a, b) => b.total - a.total),
     uniqueAccountCount: result.uniqueAccounts.length,
-    errors: result.errors,
+    errors: result.errors
   };
 }

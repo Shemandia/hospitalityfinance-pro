@@ -1,12 +1,14 @@
 import { Prisma, PrismaClient } from "@prisma/client";
 import { setEntityDbContext } from "../../db/tenantContext.js";
 import { sendApprovalEmail } from "../../shared/email.js";
-import { GLRepository } from "./repository.js";
+import { GLRepository, JournalTypeRepository } from "./repository.js";
 import type {
   AccountCreateInput,
   AccountUpdateInput,
   JournalCreateInput,
-  JournalListQuery
+  JournalListQuery,
+  JournalTypeCreateInput,
+  JournalTypeUpdateInput
 } from "./types.js";
 
 type AccountTreeNode = {
@@ -18,6 +20,7 @@ type AccountTreeNode = {
   usaliCategory: string | null;
   usaliDepartment: string | null;
   allowPosting: boolean;
+  allowedSources: string[];
   level: number;
   parentId: string | null;
   children: AccountTreeNode[];
@@ -28,6 +31,7 @@ type PostingJournal = {
   entityId: string;
   periodId: string;
   functionalCurrency: string;
+  source: string;
   status: string;
   period: {
     id: string;
@@ -50,6 +54,7 @@ type PostingJournal = {
     dimension4: string | null;
     dimension5: string | null;
     dimension6: string | null;
+    account: { type: string };
   }>;
 };
 
@@ -70,6 +75,10 @@ export class GLService {
     return new GLRepository(client);
   }
 
+  private journalTypeRepo(client: PrismaClient | Prisma.TransactionClient = this.prisma) {
+    return new JournalTypeRepository(client);
+  }
+
   async listAccounts(entityId: string): Promise<AccountTreeNode[]> {
     const accounts = await this.repository(this.prisma).listAccounts(entityId);
     const byId = new Map<string, AccountTreeNode>();
@@ -84,6 +93,7 @@ export class GLService {
         usaliCategory: account.usaliCategory,
         usaliDepartment: account.usaliDepartment,
         allowPosting: account.allowPosting,
+        allowedSources: (account as any).allowedSources ?? [],
         level: account.level,
         parentId: account.parentId,
         children: []
@@ -133,11 +143,7 @@ export class GLService {
     if (input.parentId) {
       const parent = await repository.findAccountById(entityId, input.parentId);
       if (!parent) {
-        throw new GLServiceError(
-          "GL_PARENT_ACCOUNT_NOT_FOUND",
-          "Parent account not found.",
-          404
-        );
+        throw new GLServiceError("GL_PARENT_ACCOUNT_NOT_FOUND", "Parent account not found.", 404);
       }
     }
 
@@ -162,11 +168,7 @@ export class GLService {
     if (input.parentId) {
       const parent = await repository.findAccountById(entityId, input.parentId);
       if (!parent) {
-        throw new GLServiceError(
-          "GL_PARENT_ACCOUNT_NOT_FOUND",
-          "Parent account not found.",
-          404
-        );
+        throw new GLServiceError("GL_PARENT_ACCOUNT_NOT_FOUND", "Parent account not found.", 404);
       }
     }
 
@@ -182,10 +184,7 @@ export class GLService {
     const repository = this.repository(this.prisma);
     await this.getAccount(entityId, id);
 
-    const journalUsageCount = await repository.countJournalLinesByAccount(
-      entityId,
-      id
-    );
+    const journalUsageCount = await repository.countJournalLinesByAccount(entityId, id);
     if (journalUsageCount > 0) {
       throw new GLServiceError(
         "GL_ACCOUNT_HAS_TRANSACTIONS",
@@ -224,9 +223,7 @@ export class GLService {
 
   private computeJournalAmount(lines: JournalCreateInput["lines"]): Prisma.Decimal {
     return lines.reduce((total, line) => {
-      const debitFunctional = new Prisma.Decimal(line.debit).mul(
-        new Prisma.Decimal(line.fxRate)
-      );
+      const debitFunctional = new Prisma.Decimal(line.debit).mul(new Prisma.Decimal(line.fxRate));
       return total.add(debitFunctional.abs());
     }, new Prisma.Decimal(0));
   }
@@ -278,15 +275,138 @@ export class GLService {
     }
   }
 
-  async createJournal(
+  /**
+   * Validates that the journal source is allowed for every account in the journal.
+   * Revenue accounts default to PMS/POS only when allowedSources is empty (convention).
+   * A sourceOverrideReason permits CONTROLLER/ADMIN to bypass the restriction with audit trail.
+   */
+  private async validateSourceRestrictions(
     entityId: string,
-    createdById: string,
+    source: string,
+    lines: JournalCreateInput["lines"],
+    sourceOverrideReason?: string
+  ): Promise<void> {
+    const accountIds = [...new Set(lines.map((l) => l.accountId))];
+    const accounts = await this.repository(this.prisma).findAccountsByIds(entityId, accountIds);
+
+    const violations: string[] = [];
+    for (const account of accounts) {
+      // Determine effective allowed sources:
+      // - If explicitly set on the account, use those
+      // - If account is REVENUE type and no explicit sources → default to PMS, POS
+      const acctSources = ((account as any).allowedSources ?? []) as string[];
+      const effectiveSources =
+        acctSources.length > 0 ? acctSources : account.type === "REVENUE" ? ["PMS", "POS"] : []; // empty = no restriction
+
+      if (effectiveSources.length === 0) continue;
+      if (effectiveSources.includes(source)) continue;
+
+      violations.push(
+        `${account.code} (${account.name}) only accepts sources: ${effectiveSources.join(", ")}`
+      );
+    }
+
+    if (violations.length === 0) return;
+
+    // Allow override with reason (for write-offs, corrections, etc.)
+    if (sourceOverrideReason && sourceOverrideReason.trim().length > 0) {
+      console.info(
+        `[GLService] Source restriction override for entity=${entityId}, source=${source}, reason="${sourceOverrideReason}", accounts: ${violations.join("; ")}`
+      );
+      return;
+    }
+
+    throw new GLServiceError(
+      "GL_SOURCE_RESTRICTED",
+      `Journal source "${source}" is not allowed for the following accounts: ${violations.join("; ")}. ` +
+        `Revenue accounts require PMS or POS source. Provide a sourceOverrideReason to bypass with CONTROLLER approval.`,
+      403
+    );
+  }
+
+  /**
+   * If a journalTypeId is provided, validate source + account type restrictions
+   * and auto-generate the reference number from the type's prefix + sequence.
+   */
+  private async applyJournalTypeRules(
+    entityId: string,
     input: JournalCreateInput
-  ) {
+  ): Promise<{ autoReverse: boolean; generatedRef?: string }> {
+    if (!input.journalTypeId) {
+      return { autoReverse: false };
+    }
+
+    const jtRepo = this.journalTypeRepo();
+    const jt = await jtRepo.getJournalType(entityId, input.journalTypeId);
+    if (!jt) {
+      throw new GLServiceError("GL_JOURNAL_TYPE_NOT_FOUND", "Journal type not found.", 404);
+    }
+    if (!jt.isActive) {
+      throw new GLServiceError(
+        "GL_JOURNAL_TYPE_INACTIVE",
+        `Journal type "${jt.code}" is inactive.`,
+        422
+      );
+    }
+
+    // Enforce allowed sources
+    const allowedSrc = (jt.allowedSources ?? []) as string[];
+    if (allowedSrc.length > 0 && !allowedSrc.includes(input.source)) {
+      throw new GLServiceError(
+        "GL_JOURNAL_TYPE_SOURCE_MISMATCH",
+        `Journal type "${jt.code}" only allows sources: ${allowedSrc.join(", ")}. Got "${input.source}".`,
+        422
+      );
+    }
+
+    // Enforce allowed account types on every line
+    const allowedAcctTypes = (jt.allowedAccountTypes ?? []) as string[];
+    if (allowedAcctTypes.length > 0) {
+      const accountIds = [...new Set(input.lines.map((l) => l.accountId))];
+      const accounts = await this.repository(this.prisma).findAccountsByIds(entityId, accountIds);
+      const violations = accounts.filter((a) => !allowedAcctTypes.includes(a.type));
+      if (violations.length > 0) {
+        const names = violations.map((a) => `${a.code} (${a.type})`).join(", ");
+        throw new GLServiceError(
+          "GL_JOURNAL_TYPE_ACCOUNT_MISMATCH",
+          `Journal type "${jt.code}" only allows account types: ${allowedAcctTypes.join(", ")}. Violations: ${names}.`,
+          422
+        );
+      }
+    }
+
+    // Skip balance validation for statistical types
+    if (!jt.requireBalance) {
+      // Don't validate balance — statistical journals are intentionally unbalanced
+    } else {
+      this.validateBalance(input.lines);
+    }
+
+    // Auto-generate reference from type prefix + sequence
+    const generatedRef = await jtRepo.getNextReference(entityId, jt.id);
+
+    return { autoReverse: jt.autoReverse, generatedRef };
+  }
+
+  async createJournal(entityId: string, createdById: string, input: JournalCreateInput) {
     const period = await this.repository(this.prisma).getPeriod(entityId, input.periodId);
     if (!period) {
       throw new GLServiceError("GL_PERIOD_NOT_FOUND", "Period not found.", 404);
     }
+
+    // Apply journal type rules (source lock, account type restriction, auto-numbering)
+    const typeRules = await this.applyJournalTypeRules(entityId, input);
+    if (typeRules.generatedRef && !input.reference) {
+      input = { ...input, reference: typeRules.generatedRef };
+    }
+
+    // Enforce source restrictions (revenue accounts → PMS/POS only)
+    await this.validateSourceRestrictions(
+      entityId,
+      input.source,
+      input.lines,
+      input.sourceOverrideReason
+    );
 
     const journalAmount = this.computeJournalAmount(input.lines);
 
@@ -297,7 +417,10 @@ export class GLService {
       const rule = await repository.getApprovalRuleForAmount(entityId, "GL", journalAmount);
 
       if (!rule || rule.requiredApprovers.length === 0) {
-        return { journal: created, approvalRecipients: [] as Array<{ id: string; email: string; name: string }> };
+        return {
+          journal: created,
+          approvalRecipients: [] as Array<{ id: string; email: string; name: string }>
+        };
       }
 
       await repository.setJournalStatus(entityId, created.id, "PENDING_APPROVAL", null);
@@ -338,7 +461,7 @@ export class GLService {
       console.warn(
         "[GLService] Approval email failures:",
         emailFailures.length,
-        emailFailures.map(f => f.reason?.message ?? "unknown")
+        emailFailures.map((f) => f.reason?.message ?? "unknown")
       );
     }
 
@@ -368,12 +491,7 @@ export class GLService {
     });
   }
 
-  async approveJournal(
-    entityId: string,
-    journalId: string,
-    approverId: string,
-    reason?: string
-  ) {
+  async approveJournal(entityId: string, journalId: string, approverId: string, reason?: string) {
     return this.prisma.$transaction(async (transaction) => {
       await setEntityDbContext(transaction, entityId);
       const repository = this.repository(transaction);
@@ -421,12 +539,7 @@ export class GLService {
     });
   }
 
-  async rejectJournal(
-    entityId: string,
-    journalId: string,
-    approverId: string,
-    reason?: string
-  ) {
+  async rejectJournal(entityId: string, journalId: string, approverId: string, reason?: string) {
     return this.prisma.$transaction(async (transaction) => {
       await setEntityDbContext(transaction, entityId);
       const repository = this.repository(transaction);
@@ -460,8 +573,8 @@ export class GLService {
             entityId,
             line.accountId,
             journal.periodId,
-            line.creditFunctional,  // swapped: credits become debits
-            line.debitFunctional,   // swapped: debits become credits
+            line.creditFunctional, // swapped: credits become debits
+            line.debitFunctional, // swapped: debits become credits
             line.account.type
           );
         }
@@ -495,9 +608,9 @@ export class GLService {
         periodId: existing.periodId,
         reference: `REV-${existing.reference ?? existing.id}`,
         description: `Reversal of journal ${existing.id}`,
-        source: "MANUAL",
+        source: existing.source as JournalCreateInput["source"],
         functionalCurrency: existing.functionalCurrency,
-        lines: existing.lines.map((line) => ({
+        lines: existing.lines.map((line: any) => ({
           accountId: line.accountId,
           debit: line.credit.toString(),
           credit: line.debit.toString(),
@@ -615,9 +728,7 @@ export class GLService {
       { debits: new Prisma.Decimal(0), credits: new Prisma.Decimal(0) }
     );
 
-    const isBalanced = totals.debits
-      .toDecimalPlaces(4)
-      .equals(totals.credits.toDecimalPlaces(4));
+    const isBalanced = totals.debits.toDecimalPlaces(4).equals(totals.credits.toDecimalPlaces(4));
 
     return {
       data: rows.map((row) => ({
@@ -634,5 +745,125 @@ export class GLService {
       })),
       isBalanced
     };
+  }
+
+  // ── Approval Rule CRUD ──────────────────────────────────────────────────
+
+  listApprovalRules(entityId: string) {
+    return this.repository(this.prisma).listApprovalRules(entityId);
+  }
+
+  async getApprovalRule(entityId: string, ruleId: string) {
+    const rule = await this.repository(this.prisma).getApprovalRule(entityId, ruleId);
+    if (!rule) {
+      throw new GLServiceError("GL_APPROVAL_RULE_NOT_FOUND", "Approval rule not found.", 404);
+    }
+    return rule;
+  }
+
+  createApprovalRule(
+    entityId: string,
+    data: {
+      module: "GL" | "AP" | "AR";
+      minAmount: number;
+      maxAmount?: number;
+      requiredApprovers: string[];
+      requireAll: boolean;
+      isActive: boolean;
+    }
+  ) {
+    return this.repository(this.prisma).createApprovalRule(entityId, data);
+  }
+
+  async updateApprovalRule(
+    entityId: string,
+    ruleId: string,
+    data: {
+      module?: "GL" | "AP" | "AR";
+      minAmount?: number;
+      maxAmount?: number | null;
+      requiredApprovers?: string[];
+      requireAll?: boolean;
+      isActive?: boolean;
+    }
+  ) {
+    const existing = await this.repository(this.prisma).getApprovalRule(entityId, ruleId);
+    if (!existing) {
+      throw new GLServiceError("GL_APPROVAL_RULE_NOT_FOUND", "Approval rule not found.", 404);
+    }
+    return this.repository(this.prisma).updateApprovalRule(entityId, ruleId, data);
+  }
+
+  async deleteApprovalRule(entityId: string, ruleId: string) {
+    const existing = await this.repository(this.prisma).getApprovalRule(entityId, ruleId);
+    if (!existing) {
+      throw new GLServiceError("GL_APPROVAL_RULE_NOT_FOUND", "Approval rule not found.", 404);
+    }
+    return this.repository(this.prisma).deleteApprovalRule(entityId, ruleId);
+  }
+
+  // ── Journal Type CRUD ────────────────────────────────────────────────────
+
+  listJournalTypes(entityId: string) {
+    return this.journalTypeRepo().listJournalTypes(entityId);
+  }
+
+  async getJournalType(entityId: string, id: string) {
+    const jt = await this.journalTypeRepo().getJournalType(entityId, id);
+    if (!jt) {
+      throw new GLServiceError("GL_JOURNAL_TYPE_NOT_FOUND", "Journal type not found.", 404);
+    }
+    return jt;
+  }
+
+  async createJournalType(entityId: string, input: JournalTypeCreateInput) {
+    const repo = this.journalTypeRepo();
+    const existing = await repo.getJournalTypeByCode(entityId, input.code);
+    if (existing) {
+      throw new GLServiceError(
+        "GL_JOURNAL_TYPE_CODE_EXISTS",
+        `Journal type code "${input.code}" already exists.`,
+        409
+      );
+    }
+    return repo.createJournalType(entityId, input);
+  }
+
+  async updateJournalType(entityId: string, id: string, input: JournalTypeUpdateInput) {
+    const repo = this.journalTypeRepo();
+    const existing = await repo.getJournalType(entityId, id);
+    if (!existing) {
+      throw new GLServiceError("GL_JOURNAL_TYPE_NOT_FOUND", "Journal type not found.", 404);
+    }
+    if (input.code && input.code !== existing.code) {
+      const byCode = await repo.getJournalTypeByCode(entityId, input.code);
+      if (byCode && byCode.id !== id) {
+        throw new GLServiceError(
+          "GL_JOURNAL_TYPE_CODE_EXISTS",
+          `Journal type code "${input.code}" already exists.`,
+          409
+        );
+      }
+    }
+    await repo.updateJournalType(entityId, id, input);
+    return this.getJournalType(entityId, id);
+  }
+
+  async deleteJournalType(entityId: string, id: string) {
+    const repo = this.journalTypeRepo();
+    const existing = await repo.getJournalType(entityId, id);
+    if (!existing) {
+      throw new GLServiceError("GL_JOURNAL_TYPE_NOT_FOUND", "Journal type not found.", 404);
+    }
+    const usageCount = await repo.countJournalsByType(entityId, id);
+    if (usageCount > 0) {
+      throw new GLServiceError(
+        "GL_JOURNAL_TYPE_IN_USE",
+        `Journal type "${existing.code}" has ${usageCount} journals. Deactivate it instead.`,
+        409
+      );
+    }
+    await repo.deleteJournalType(entityId, id);
+    return { id, deleted: true };
   }
 }

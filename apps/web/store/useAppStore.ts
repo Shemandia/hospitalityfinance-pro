@@ -1,7 +1,14 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type UserRole = "GM" | "CONTROLLER" | "CFO" | "AP_CLERK" | "AR_CLERK" | "ADMIN" | "SUPERADMIN";
+export type UserRole =
+  | "GM"
+  | "CONTROLLER"
+  | "CFO"
+  | "AP_CLERK"
+  | "AR_CLERK"
+  | "ADMIN"
+  | "SUPERADMIN";
 
 interface AppState {
   // Entity / chain context
@@ -34,7 +41,8 @@ export const useAppStore = create<AppState>()(
     (set) => ({
       activeEntityId: null,
       activeChainId: null,
-      setActiveEntity: (entityId, chainId) => set({ activeEntityId: entityId, activeChainId: chainId }),
+      setActiveEntity: (entityId, chainId) =>
+        set({ activeEntityId: entityId, activeChainId: chainId }),
 
       userId: null,
       userEmail: null,
@@ -49,7 +57,7 @@ export const useAppStore = create<AppState>()(
 
       activePeriodId: null,
       activePeriodLabel: null,
-      setActivePeriod: (id, label) => set({ activePeriodId: id, activePeriodLabel: label }),
+      setActivePeriod: (id, label) => set({ activePeriodId: id, activePeriodLabel: label })
     }),
     {
       name: "hfp-app-store",
@@ -57,8 +65,8 @@ export const useAppStore = create<AppState>()(
         activeEntityId: state.activeEntityId,
         activeChainId: state.activeChainId,
         dashboardView: state.dashboardView,
-        sidebarOpen: state.sidebarOpen,
-      }),
+        sidebarOpen: state.sidebarOpen
+      })
     }
   )
 );

@@ -173,13 +173,67 @@ export async function getGLAccounts(context: ApiContext) {
 export type EntitySummaryItem = {
   id: string;
   name: string;
-  code: string;
-  currency: string;
+  type: "GROUP" | "PROPERTY";
+  functionalCurrency: string;
+  reportingCurrency: string;
+  timezone: string;
+  countryCode: string;
+  address: string | null;
+  city: string | null;
+  postalCode: string | null;
+  isActive: boolean;
   parentId: string | null;
+  parent: { id: string; name: string } | null;
+  _count: { children: number; users: number };
+  createdAt: string;
+  updatedAt: string;
+  // Backwards compat aliases
+  code: string | null;
+  currency: string;
+};
+
+export type EntityPayload = {
+  name: string;
+  type: "GROUP" | "PROPERTY";
+  parentId?: string | null;
+  functionalCurrency?: string;
+  reportingCurrency?: string;
+  timezone?: string;
+  countryCode: string;
+  address?: string | null;
+  city?: string | null;
+  postalCode?: string | null;
+  isActive?: boolean;
 };
 
 export async function getEntities(context: ApiContext) {
   return request<EntitySummaryItem[]>(context, "/api/v1/entities");
+}
+
+export async function getEntityById(context: ApiContext, id: string) {
+  return request<EntitySummaryItem>(context, `/api/v1/entities/${id}`);
+}
+
+export async function createEntity(context: ApiContext, payload: EntityPayload) {
+  return request<EntitySummaryItem>(context, "/api/v1/entities", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateEntity(
+  context: ApiContext,
+  id: string,
+  payload: Partial<EntityPayload>
+) {
+  return request<EntitySummaryItem>(context, `/api/v1/entities/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function deleteEntity(context: ApiContext, id: string) {
+  return request<null>(context, `/api/v1/entities/${id}`, { method: "DELETE" });
 }
 
 export type PeriodStatus = "OPEN" | "CLOSED" | "LOCKED";
@@ -254,22 +308,96 @@ export async function getAuditEvents(
   return request<AuditEvent[]>(context, `/api/v1/audit?${search.toString()}`);
 }
 
+// ── Report Definitions ────────────────────────────────────────────────────────
+
+export type ReportDefinitionSummary = {
+  id: string;
+  name: string;
+  type: string;
+  isSystem: boolean;
+  template: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type ReportRunSummary = {
+  id: string;
+  definitionId: string;
+  status: string;
+  outputUrl: string | null;
+  errorMessage: string | null;
+  runAt: string | null;
+  createdAt: string;
+  definition?: { id: string; name: string; type: string };
+};
+
 export async function getReportDefinitions(context: ApiContext) {
-  return request<Array<Record<string, unknown>>>(context, "/api/v1/reports/definitions");
+  return request<ReportDefinitionSummary[]>(context, "/api/v1/reports/definitions");
+}
+
+export async function getReportDefinition(context: ApiContext, id: string) {
+  return request<ReportDefinitionSummary & { _count: { runs: number } }>(
+    context,
+    `/api/v1/reports/definitions/${id}`
+  );
+}
+
+export async function createReportDefinition(
+  context: ApiContext,
+  payload: Record<string, unknown>
+) {
+  return request<ReportDefinitionSummary>(context, "/api/v1/reports/definitions", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateReportDefinition(
+  context: ApiContext,
+  id: string,
+  payload: Record<string, unknown>
+) {
+  return request<ReportDefinitionSummary>(context, `/api/v1/reports/definitions/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function deleteReportDefinition(context: ApiContext, id: string) {
+  return request<null>(context, `/api/v1/reports/definitions/${id}`, { method: "DELETE" });
 }
 
 export async function createReportRun(
   context: ApiContext,
   payload: { definitionId: string; parameters: Record<string, unknown> }
 ) {
-  return request<Record<string, unknown>>(context, "/api/v1/reports/runs", {
+  return request<ReportRunSummary>(context, "/api/v1/reports/runs", {
     method: "POST",
     body: JSON.stringify(payload)
   });
 }
 
 export async function getReportRun(context: ApiContext, runId: string) {
-  return request<Record<string, unknown>>(context, `/api/v1/reports/runs/${runId}`);
+  return request<ReportRunSummary>(context, `/api/v1/reports/runs/${runId}`);
+}
+
+export async function getReportHistory(
+  context: ApiContext,
+  params?: { definitionId?: string; status?: string; limit?: number }
+) {
+  const search = new URLSearchParams();
+  if (params?.definitionId) search.set("definitionId", params.definitionId);
+  if (params?.status) search.set("status", params.status);
+  if (params?.limit) search.set("limit", String(params.limit));
+  const qs = search.toString();
+  return request<ReportRunSummary[]>(context, `/api/v1/reports/history${qs ? `?${qs}` : ""}`);
+}
+
+export function getReportDownloadUrl(runId: string): string {
+  return `${API_BASE_URL}/api/v1/reports/runs/${runId}/download`;
+}
+
+export async function getReportTypes(context: ApiContext) {
+  return request<Record<string, unknown>>(context, "/api/v1/reports/types");
 }
 
 export async function getTrialBalance(
@@ -354,6 +482,20 @@ export function getPaymentRunDownloadUrl(runId: string): string {
 
 export function getPaymentVoucherUrl(runId: string, supplierId: string): string {
   return `${API_BASE_URL}/api/v1/ap/payment-runs/${runId}/voucher/${supplierId}`;
+}
+
+// ── Report PDF URLs ──────────────────────────────────────────────────────────
+
+export function getUSALIPdfUrl(periodId: string): string {
+  return `${API_BASE_URL}/api/v1/kpi/usali-comparative/pdf?periodId=${periodId}`;
+}
+
+export function getBalanceSheetPdfUrl(periodId: string): string {
+  return `${API_BASE_URL}/api/v1/kpi/balance-sheet/pdf?periodId=${periodId}`;
+}
+
+export function getCashFlowPdfUrl(periodId: string): string {
+  return `${API_BASE_URL}/api/v1/kpi/cash-flow/pdf?periodId=${periodId}`;
 }
 
 // ── AR ────────────────────────────────────────────────────────────────────────
@@ -550,6 +692,52 @@ export async function getBudgetVariance(
   return request<VarianceReport>(
     context,
     `/api/v1/budget/variance?budgetDefinitionId=${budgetDefinitionId}&periodId=${periodId}`
+  );
+}
+
+export type BudgetExcelPreview = {
+  rows: Array<{
+    rowNumber: number;
+    accountCode: string;
+    month: number;
+    amount: string;
+    notes: string | null;
+  }>;
+  totalRows: number;
+  mappedCodes: string[];
+  unmappedCodes: string[];
+  errors: string[];
+};
+
+export type BudgetExcelImportResult = {
+  upserted: number;
+  skipped: number;
+  errors: string[];
+};
+
+export async function previewBudgetExcelImport(
+  context: ApiContext,
+  definitionId: string,
+  file: string,
+  filename: string
+) {
+  return request<BudgetExcelPreview>(
+    context,
+    `/api/v1/budget/definitions/${definitionId}/import-excel/preview`,
+    { method: "POST", body: JSON.stringify({ file, filename }) }
+  );
+}
+
+export async function executeBudgetExcelImport(
+  context: ApiContext,
+  definitionId: string,
+  file: string,
+  filename: string
+) {
+  return request<BudgetExcelImportResult>(
+    context,
+    `/api/v1/budget/definitions/${definitionId}/import-excel/execute`,
+    { method: "POST", body: JSON.stringify({ file, filename }) }
   );
 }
 
@@ -1138,6 +1326,7 @@ export async function deleteConnectorMapping(context: ApiContext, id: string) {
 // ── Transfer Desk — Interface Definitions ─────────────────────────────────────
 
 export type TargetField =
+  // GL Journal
   | "postingDate"
   | "accountCode"
   | "debitAmount"
@@ -1150,12 +1339,78 @@ export type TargetField =
   | "dimension3"
   | "dimension4"
   | "dimension5"
-  | "dimension6";
+  | "dimension6"
+  // AP Invoice
+  | "supplierCode"
+  | "invoiceNumber"
+  | "invoiceDate"
+  | "dueDate"
+  | "grossAmount"
+  | "taxAmount"
+  | "netAmount"
+  | "lineAmount"
+  | "lineGLAccountCode"
+  | "lineTaxCode"
+  | "lineCostCentre"
+  | "lineDepartment"
+  | "externalPoRef"
+  | "paymentTerms"
+  // Supplier Sync
+  | "code"
+  | "name"
+  | "taxId"
+  | "paymentTermsDays"
+  | "bankAccountName"
+  | "bankAccountNumber"
+  | "bankRoutingCode"
+  | "bankSwiftCode"
+  | "isActive"
+  | "contactEmail"
+  | "contactPhone"
+  | "address";
 
-export type SourceType = "CONSTANT" | "COLUMN" | "LOOKUP" | "FORMULA";
-export type FieldTransform = "NONE" | "UPPERCASE" | "LOWERCASE" | "ABS" | "NEGATE" | "DATE_FORMAT";
-export type ConnectorType = "OPERA_CLOUD" | "OPERA_SUN" | "SKY_JANA" | "BANK" | "CUSTOM";
-export type SourceFormat = "CSV" | "JSON" | "XML" | "MT940" | "FIXED_WIDTH" | "SAF";
+export type SourceType =
+  | "CONSTANT"
+  | "COLUMN"
+  | "LOOKUP"
+  | "FORMULA"
+  | "EXPRESSION"
+  | "CONDITIONAL";
+export type FieldTransform =
+  | "NONE"
+  | "UPPERCASE"
+  | "LOWERCASE"
+  | "TRIM"
+  | "ABS"
+  | "NEGATE"
+  | "ROUND"
+  | "SUBSTRING"
+  | "LEFT"
+  | "RIGHT"
+  | "PAD_LEFT"
+  | "PAD_RIGHT"
+  | "REPLACE"
+  | "SPLIT"
+  | "CONCAT"
+  | "DATE_FORMAT"
+  | "DATE_PARSE"
+  | "MULTIPLY"
+  | "DIVIDE"
+  | "ADD"
+  | "MAP_VALUE"
+  | "STRIP_NON_NUMERIC"
+  | "DEFAULT_IF_EMPTY";
+export type ConnectorType =
+  | "OPERA_CLOUD"
+  | "OPERA_SUN"
+  | "SIMPHONY_POS"
+  | "SKY_JANA"
+  | "BANK"
+  | "PAYROLL"
+  | "PROCUREMENT"
+  | "CUSTOM";
+export type SourceFormat = "CSV" | "JSON" | "XML" | "EXCEL" | "MT940" | "FIXED_WIDTH" | "SAF";
+export type TargetType = "GL_JOURNAL" | "AP_INVOICE" | "SUPPLIER_SYNC";
 
 export type FieldMappingRule = {
   targetField: TargetField;
@@ -1195,6 +1450,10 @@ export type PreviewResult = {
   errors: Array<{ row: number; field: string; message: string }>;
   unmappedLookups: string[];
 };
+
+export async function getTransferDeskMetadata(context: ApiContext) {
+  return request<Record<string, unknown>>(context, "/api/v1/integration/transfer-desk/metadata");
+}
 
 export async function listInterfaceDefinitions(context: ApiContext, connectorType?: ConnectorType) {
   const q = connectorType ? `?connectorType=${connectorType}` : "";
@@ -1438,4 +1697,326 @@ export function executeSAFImport(context: ApiContext, options: SAFExecuteOptions
     method: "POST",
     body: JSON.stringify(options)
   });
+}
+
+// ── Approval Rules ──────────────────────────────────────────────────────────
+
+export type ApprovalRule = {
+  id: string;
+  entityId: string;
+  module: "GL" | "AP" | "AR";
+  minAmount: string;
+  maxAmount: string | null;
+  requiredApprovers: string[];
+  requireAll: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ApprovalRulePayload = {
+  module: "GL" | "AP" | "AR";
+  minAmount: number;
+  maxAmount?: number;
+  requiredApprovers: string[];
+  requireAll: boolean;
+  isActive: boolean;
+};
+
+export type EntityUser = {
+  id: string;
+  name: string;
+  email: string;
+};
+
+export function getApprovalRules(context: ApiContext) {
+  return request<ApprovalRule[]>(context, "/api/v1/gl/approval-rules");
+}
+
+export function getApprovalRule(context: ApiContext, id: string) {
+  return request<ApprovalRule>(context, `/api/v1/gl/approval-rules/${id}`);
+}
+
+export function createApprovalRule(context: ApiContext, payload: ApprovalRulePayload) {
+  return request<ApprovalRule>(context, "/api/v1/gl/approval-rules", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateApprovalRule(
+  context: ApiContext,
+  id: string,
+  payload: Partial<ApprovalRulePayload>
+) {
+  return request<ApprovalRule>(context, `/api/v1/gl/approval-rules/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function deleteApprovalRule(context: ApiContext, id: string) {
+  return request<void>(context, `/api/v1/gl/approval-rules/${id}`, {
+    method: "DELETE"
+  });
+}
+
+export function getEntityUsers(context: ApiContext) {
+  return request<EntityUser[]>(context, "/api/v1/gl/users");
+}
+
+// ── Bank Reconciliation ─────────────────────────────────────────────────────
+
+export type ReconciliationSummary = {
+  statementId: string;
+  accountCode: string;
+  accountName: string;
+  statementDate: string;
+  openingBalance: string;
+  closingBalance: string;
+  currency: string;
+  totalTransactions: number;
+  reconciledCount: number;
+  unreconciledCount: number;
+  reconciledAmount: string;
+  unreconciledAmount: string;
+};
+
+export type BankTransactionRow = {
+  id: string;
+  bankStatementId: string;
+  valueDate: string;
+  description: string;
+  amount: string;
+  currency: string;
+  reference: string | null;
+  isReconciled: boolean;
+  journalLineId: string | null;
+};
+
+export type MatchCandidate = {
+  journalLineId: string;
+  journalId: string;
+  journalRef: string | null;
+  journalDescription: string | null;
+  journalDate: string;
+  accountCode: string;
+  amount: string;
+  description: string | null;
+  score: number;
+  matchReason: string;
+};
+
+export type AutoMatchResult = {
+  matched: number;
+  unmatched: number;
+  details: Array<{
+    bankTransactionId: string;
+    journalLineId: string;
+    amount: string;
+    matchReason: string;
+  }>;
+};
+
+// ── Admin — Roles, Permissions, Users ─────────────────────────────────────────
+
+export async function getAdminRoles(context: ApiContext) {
+  return request<Array<Record<string, unknown>>>(context, "/api/v1/admin/roles");
+}
+
+export async function getAdminRole(context: ApiContext, id: string) {
+  return request<Record<string, unknown>>(context, `/api/v1/admin/roles/${id}`);
+}
+
+export async function createAdminRole(context: ApiContext, payload: Record<string, unknown>) {
+  return request<Record<string, unknown>>(context, "/api/v1/admin/roles", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function deleteAdminRole(context: ApiContext, id: string) {
+  return request<null>(context, `/api/v1/admin/roles/${id}`, { method: "DELETE" });
+}
+
+export async function getAdminPermissions(context: ApiContext) {
+  return request<Array<Record<string, unknown>>>(context, "/api/v1/admin/permissions");
+}
+
+export async function addRolePermission(context: ApiContext, roleId: string, permissionId: string) {
+  return request<Record<string, unknown>>(context, `/api/v1/admin/roles/${roleId}/permissions`, {
+    method: "POST",
+    body: JSON.stringify({ permissionId })
+  });
+}
+
+export async function removeRolePermission(
+  context: ApiContext,
+  roleId: string,
+  permissionId: string
+) {
+  return request<null>(context, `/api/v1/admin/roles/${roleId}/permissions/${permissionId}`, {
+    method: "DELETE"
+  });
+}
+
+export async function getAdminEntityUsers(context: ApiContext) {
+  return request<Array<Record<string, unknown>>>(context, "/api/v1/admin/users");
+}
+
+export async function inviteEntityUser(
+  context: ApiContext,
+  payload: { email: string; name: string; role: string }
+) {
+  return request<Record<string, unknown>>(context, "/api/v1/admin/users/invite", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateEntityUserRole(context: ApiContext, userId: string, role: string) {
+  return request<Record<string, unknown>>(context, `/api/v1/admin/users/${userId}/role`, {
+    method: "PUT",
+    body: JSON.stringify({ role })
+  });
+}
+
+export async function removeEntityUser(context: ApiContext, userId: string) {
+  return request<null>(context, `/api/v1/admin/users/${userId}`, { method: "DELETE" });
+}
+
+// ── Simphony POS ─────────────────────────────────────────────────────────────
+
+export async function runSimphonyImport(
+  context: ApiContext,
+  payload: { locationId: string; businessDate: string; notifyEmail?: string }
+) {
+  return request<Record<string, unknown>>(context, "/api/v1/integration/simphony/import", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function getSimphonyLogs(context: ApiContext) {
+  return request<Array<Record<string, unknown>>>(context, "/api/v1/integration/simphony/logs");
+}
+
+// ── Opera PMS Enhanced ───────────────────────────────────────────────────────
+
+export async function getOperaStatistics(
+  context: ApiContext,
+  hotelId: string,
+  businessDate: string
+) {
+  return request<Record<string, unknown>>(
+    context,
+    `/api/v1/integration/opera-cloud/statistics?hotelId=${hotelId}&businessDate=${businessDate}`
+  );
+}
+
+export async function getOperaCashierReport(
+  context: ApiContext,
+  hotelId: string,
+  businessDate: string
+) {
+  return request<Record<string, unknown>>(
+    context,
+    `/api/v1/integration/opera-cloud/cashier-report?hotelId=${hotelId}&businessDate=${businessDate}`
+  );
+}
+
+export async function getOperaCityLedger(
+  context: ApiContext,
+  hotelId: string,
+  businessDate: string
+) {
+  return request<Record<string, unknown>>(
+    context,
+    `/api/v1/integration/opera-cloud/city-ledger?hotelId=${hotelId}&businessDate=${businessDate}`
+  );
+}
+
+// ── Payroll Integration ──────────────────────────────────────────────────────
+
+export async function importPayrollBatch(context: ApiContext, payload: Record<string, unknown>) {
+  return request<Record<string, unknown>>(context, "/api/v1/integration/payroll/import", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function importPayrollFile(
+  context: ApiContext,
+  payload: {
+    file: string;
+    filename: string;
+    postingDate: string;
+    currency: string;
+    autoPost: boolean;
+  }
+) {
+  return request<Record<string, unknown>>(context, "/api/v1/integration/payroll/import-file", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function getPayrollLogs(context: ApiContext) {
+  return request<Array<Record<string, unknown>>>(context, "/api/v1/integration/payroll/logs");
+}
+
+// ── Bank Reconciliation ──────────────────────────────────────────────────────
+
+export function getReconciliationSummary(context: ApiContext, statementId: string) {
+  return request<ReconciliationSummary>(
+    context,
+    `/api/v1/integration/bank/statements/${statementId}/reconciliation`
+  );
+}
+
+export function getUnreconciledTransactions(context: ApiContext, statementId: string) {
+  return request<BankTransactionRow[]>(
+    context,
+    `/api/v1/integration/bank/statements/${statementId}/unreconciled`
+  );
+}
+
+export function getMatchCandidates(
+  context: ApiContext,
+  transactionId: string,
+  dateTolerance?: number
+) {
+  const qs = dateTolerance ? `?dateTolerance=${dateTolerance}` : "";
+  return request<MatchCandidate[]>(
+    context,
+    `/api/v1/integration/bank/transactions/${transactionId}/candidates${qs}`
+  );
+}
+
+export function matchBankTransaction(
+  context: ApiContext,
+  transactionId: string,
+  journalLineId: string
+) {
+  return request<{ matched: boolean }>(
+    context,
+    `/api/v1/integration/bank/transactions/${transactionId}/match`,
+    { method: "POST", body: JSON.stringify({ journalLineId }) }
+  );
+}
+
+export function unmatchBankTransaction(context: ApiContext, transactionId: string) {
+  return request<{ unmatched: boolean }>(
+    context,
+    `/api/v1/integration/bank/transactions/${transactionId}/unmatch`,
+    { method: "POST", body: "{}" }
+  );
+}
+
+export function autoMatchStatement(context: ApiContext, statementId: string, minScore?: number) {
+  return request<AutoMatchResult>(
+    context,
+    `/api/v1/integration/bank/statements/${statementId}/auto-match`,
+    { method: "POST", body: JSON.stringify({ minScore: minScore ?? 70 }) }
+  );
 }

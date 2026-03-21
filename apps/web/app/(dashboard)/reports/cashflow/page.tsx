@@ -3,13 +3,19 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useApiContext } from "../../../../components/use-api-context";
-import { getPeriodList, getCashFlow } from "../../../../lib/gl-api";
+import { getPeriodList, getCashFlow, getCashFlowPdfUrl } from "../../../../lib/gl-api";
 import type { CashFlowResult, CashFlowSection } from "../../../../lib/gl-api";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../../components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../../components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../../../../components/ui/select";
 import { Badge } from "../../../../components/ui/badge";
 import { Button } from "../../../../components/ui/button";
-import { Activity, Download, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { Activity, Download, TrendingUp, TrendingDown, Minus, FileText } from "lucide-react";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -28,7 +34,7 @@ function exportCSV(report: CashFlowResult, periodName: string) {
     ["Cash Flow Statement"],
     [`Period: ${periodName}`],
     [],
-    ["Section", "Description", "Amount"],
+    ["Section", "Description", "Amount"]
   ];
   const addSection = (s: CashFlowSection) => {
     rows.push([s.label, "", ""]);
@@ -55,13 +61,7 @@ function exportCSV(report: CashFlowResult, periodName: string) {
 
 // ── Section card ──────────────────────────────────────────────────────────────
 
-function SectionCard({
-  section,
-  accentClass,
-}: {
-  section: CashFlowSection;
-  accentClass: string;
-}) {
+function SectionCard({ section, accentClass }: { section: CashFlowSection; accentClass: string }) {
   const total = Number(section.total);
   return (
     <Card className="overflow-hidden">
@@ -99,7 +99,7 @@ function RecRow({
   label,
   amount,
   bold = false,
-  separator = false,
+  separator = false
 }: {
   label: string;
   amount: string;
@@ -107,9 +107,15 @@ function RecRow({
   separator?: boolean;
 }) {
   return (
-    <div className={`flex items-center justify-between px-4 py-2.5 ${separator ? "border-t-2 border-slate-300 bg-slate-50" : "border-b border-slate-50"}`}>
-      <span className={`text-sm ${bold ? "font-bold text-slate-800" : "text-slate-600"}`}>{label}</span>
-      <span className={`text-sm tabular-nums ${bold ? "font-bold " + amountColor(amount) : amountColor(amount)}`}>
+    <div
+      className={`flex items-center justify-between px-4 py-2.5 ${separator ? "border-t-2 border-slate-300 bg-slate-50" : "border-b border-slate-50"}`}
+    >
+      <span className={`text-sm ${bold ? "font-bold text-slate-800" : "text-slate-600"}`}>
+        {label}
+      </span>
+      <span
+        className={`text-sm tabular-nums ${bold ? "font-bold " + amountColor(amount) : amountColor(amount)}`}
+      >
         {fmt(amount)}
       </span>
     </div>
@@ -129,7 +135,7 @@ export default function CashFlowPage() {
       const res = await getPeriodList(apiContext);
       return res.data ?? [];
     },
-    enabled: Boolean(apiContext),
+    enabled: Boolean(apiContext)
   });
 
   const activePeriodId = periodId === "NONE" ? undefined : periodId;
@@ -141,7 +147,7 @@ export default function CashFlowPage() {
       const res = await getCashFlow(apiContext, activePeriodId);
       return res.data as CashFlowResult;
     },
-    enabled: Boolean(apiContext && activePeriodId),
+    enabled: Boolean(apiContext && activePeriodId)
   });
 
   const report = reportQuery.data ?? null;
@@ -155,18 +161,47 @@ export default function CashFlowPage() {
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold text-(--color-primary)">Cash Flow Statement</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Indirect method — operating, investing, financing</p>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Indirect method — operating, investing, financing
+          </p>
         </div>
         {report && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            onClick={() => exportCSV(report, selectedPeriod?.name ?? "")}
-          >
-            <Download className="h-3.5 w-3.5" />
-            Export CSV
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => exportCSV(report, selectedPeriod?.name ?? "")}
+            >
+              <Download className="h-3.5 w-3.5" />
+              Export CSV
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={async () => {
+                if (!apiContext || !activePeriodId) return;
+                const url = getCashFlowPdfUrl(activePeriodId);
+                const res = await fetch(url, {
+                  headers: {
+                    Authorization: `Bearer ${apiContext.accessToken}`,
+                    "X-Entity-ID": apiContext.entityId
+                  }
+                });
+                if (!res.ok) return;
+                const blob = await res.blob();
+                const a = document.createElement("a");
+                a.href = URL.createObjectURL(blob);
+                a.download = `cashflow-${selectedPeriod?.name ?? "report"}.pdf`;
+                a.click();
+                URL.revokeObjectURL(a.href);
+              }}
+            >
+              <FileText className="h-3.5 w-3.5" />
+              Export PDF
+            </Button>
+          </div>
         )}
       </div>
 
@@ -187,20 +222,25 @@ export default function CashFlowPage() {
                   {(periodsQuery.data ?? []).map((p) => (
                     <SelectItem key={p.id} value={p.id}>
                       {p.name}
-                      <Badge variant="outline" className="ml-2 text-[10px]">{p.status}</Badge>
+                      <Badge variant="outline" className="ml-2 text-[10px]">
+                        {p.status}
+                      </Badge>
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             {report && (
-              <div className={`flex items-center gap-1.5 pt-5 text-sm font-medium ${netChangeVal >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-                {netChangeVal > 0
-                  ? <TrendingUp className="h-4 w-4" />
-                  : netChangeVal < 0
-                  ? <TrendingDown className="h-4 w-4" />
-                  : <Minus className="h-4 w-4" />
-                }
+              <div
+                className={`flex items-center gap-1.5 pt-5 text-sm font-medium ${netChangeVal >= 0 ? "text-emerald-600" : "text-red-600"}`}
+              >
+                {netChangeVal > 0 ? (
+                  <TrendingUp className="h-4 w-4" />
+                ) : netChangeVal < 0 ? (
+                  <TrendingDown className="h-4 w-4" />
+                ) : (
+                  <Minus className="h-4 w-4" />
+                )}
                 Net change: {fmt(report.netChange)}
               </div>
             )}
@@ -210,7 +250,9 @@ export default function CashFlowPage() {
 
       {/* Loading / error */}
       {reportQuery.isLoading && (
-        <div className="flex items-center justify-center h-48 text-muted-foreground">Loading report…</div>
+        <div className="flex items-center justify-center h-48 text-muted-foreground">
+          Loading report…
+        </div>
       )}
       {reportQuery.isError && (
         <div className="flex items-center justify-center h-48 text-red-600">
@@ -225,14 +267,18 @@ export default function CashFlowPage() {
             {[
               { label: "Operating Cash Flow", value: report.operating.total, icon: TrendingUp },
               { label: "Investing Cash Flow", value: report.investing.total, icon: TrendingDown },
-              { label: "Financing Cash Flow", value: report.financing.total, icon: Activity },
+              { label: "Financing Cash Flow", value: report.financing.total, icon: Activity }
             ].map(({ label, value, icon: Icon }) => {
               const n = Number(value);
               return (
                 <Card key={label}>
                   <CardContent className="pt-5 pb-4">
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
-                    <p className={`text-xl font-bold mt-1 ${n >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                      {label}
+                    </p>
+                    <p
+                      className={`text-xl font-bold mt-1 ${n >= 0 ? "text-emerald-600" : "text-red-600"}`}
+                    >
                       {fmt(value)}
                     </p>
                   </CardContent>

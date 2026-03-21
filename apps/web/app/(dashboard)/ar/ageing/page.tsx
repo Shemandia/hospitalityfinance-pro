@@ -3,24 +3,12 @@
 import { useState, useMemo } from "react";
 import { useSession } from "next-auth/react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import {
-  Clock,
-  Download,
-  RefreshCw,
-  Mail,
-  AlertTriangle,
-  TrendingDown,
-} from "lucide-react";
+import { Clock, Download, RefreshCw, Mail, AlertTriangle, TrendingDown } from "lucide-react";
 import { Card, CardContent, CardHeader } from "../../../../components/ui/card";
 import { Button } from "../../../../components/ui/button";
 import { Badge } from "../../../../components/ui/badge";
 import { Input } from "../../../../components/ui/input";
-import {
-  getARAgeing,
-  runARDunning,
-  type AgeingRow,
-  type ApiContext,
-} from "../../../../lib/gl-api";
+import { getARAgeing, runARDunning, type AgeingRow, type ApiContext } from "../../../../lib/gl-api";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -46,21 +34,35 @@ function sumBucket(rows: AgeingRow[], field: keyof AgeingRow) {
 
 function exportToCsv(rows: AgeingRow[], asOf: string) {
   const headers = [
-    "Customer Code", "Customer Name", "Currency",
-    "0–30 days", "31–60 days", "61–90 days", "91+ days", "Total Outstanding",
+    "Customer Code",
+    "Customer Name",
+    "Currency",
+    "0–30 days",
+    "31–60 days",
+    "61–90 days",
+    "91+ days",
+    "Total Outstanding"
   ];
   const body = rows.map((r) =>
     [
-      r.customerCode, r.customerName, r.currency,
-      r.bucket0to30, r.bucket31to60, r.bucket61to90, r.bucket91Plus, r.totalOutstanding,
-    ].map((f) => `"${String(f ?? "").replace(/"/g, '""')}"`).join(",")
+      r.customerCode,
+      r.customerName,
+      r.currency,
+      r.bucket0to30,
+      r.bucket31to60,
+      r.bucket61to90,
+      r.bucket91Plus,
+      r.totalOutstanding
+    ]
+      .map((f) => `"${String(f ?? "").replace(/"/g, '""')}"`)
+      .join(",")
   );
   const csv = [headers.join(","), ...body].join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const a = Object.assign(document.createElement("a"), {
     href: url,
-    download: `ar-ageing-${asOf}.csv`,
+    download: `ar-ageing-${asOf}.csv`
   });
   document.body.appendChild(a);
   a.click();
@@ -71,10 +73,30 @@ function exportToCsv(rows: AgeingRow[], asOf: string) {
 // ── Bucket config ─────────────────────────────────────────────────────────────
 
 const BUCKETS = [
-  { key: "bucket0to30" as keyof AgeingRow,  label: "0–30 days",  headerClass: "text-emerald-700", cellClass: "text-emerald-700" },
-  { key: "bucket31to60" as keyof AgeingRow, label: "31–60 days", headerClass: "text-amber-600",  cellClass: "text-amber-600"  },
-  { key: "bucket61to90" as keyof AgeingRow, label: "61–90 days", headerClass: "text-orange-600", cellClass: "text-orange-600" },
-  { key: "bucket91Plus" as keyof AgeingRow, label: "91+ days",   headerClass: "text-red-700",    cellClass: "text-red-700 font-semibold" },
+  {
+    key: "bucket0to30" as keyof AgeingRow,
+    label: "0–30 days",
+    headerClass: "text-emerald-700",
+    cellClass: "text-emerald-700"
+  },
+  {
+    key: "bucket31to60" as keyof AgeingRow,
+    label: "31–60 days",
+    headerClass: "text-amber-600",
+    cellClass: "text-amber-600"
+  },
+  {
+    key: "bucket61to90" as keyof AgeingRow,
+    label: "61–90 days",
+    headerClass: "text-orange-600",
+    cellClass: "text-orange-600"
+  },
+  {
+    key: "bucket91Plus" as keyof AgeingRow,
+    label: "91+ days",
+    headerClass: "text-red-700",
+    cellClass: "text-red-700 font-semibold"
+  }
 ];
 
 // ── Summary card ──────────────────────────────────────────────────────────────
@@ -83,7 +105,7 @@ function SummaryCard({
   label,
   amount,
   className,
-  pct,
+  pct
 }: {
   label: string;
   amount: number;
@@ -109,7 +131,7 @@ export default function AgeingPage() {
   const ctx: ApiContext | null = session?.user?.entityIds?.[0]
     ? {
         accessToken: (session as unknown as { accessToken?: string }).accessToken ?? "dev-token",
-        entityId: session.user.entityIds[0],
+        entityId: session.user.entityIds[0]
       }
     : null;
 
@@ -119,10 +141,15 @@ export default function AgeingPage() {
 
   // ── Data ──────────────────────────────────────────────────────────────────
 
-  const { data: ageingRes, isLoading, error: loadError, refetch } = useQuery({
+  const {
+    data: ageingRes,
+    isLoading,
+    error: loadError,
+    refetch
+  } = useQuery({
     queryKey: ["ar-ageing", ctx?.entityId, asOf],
     queryFn: () => getARAgeing(ctx!, asOf),
-    enabled: !!ctx,
+    enabled: !!ctx
   });
 
   const report = ageingRes?.data;
@@ -134,21 +161,22 @@ export default function AgeingPage() {
     if (!search.trim()) return rows;
     const q = search.toLowerCase();
     return rows.filter(
-      (r) =>
-        r.customerName.toLowerCase().includes(q) ||
-        r.customerCode.toLowerCase().includes(q)
+      (r) => r.customerName.toLowerCase().includes(q) || r.customerCode.toLowerCase().includes(q)
     );
   }, [rows, search]);
 
   // ── Totals ────────────────────────────────────────────────────────────────
 
-  const totals = useMemo(() => ({
-    bucket0to30:  sumBucket(filtered, "bucket0to30"),
-    bucket31to60: sumBucket(filtered, "bucket31to60"),
-    bucket61to90: sumBucket(filtered, "bucket61to90"),
-    bucket91Plus: sumBucket(filtered, "bucket91Plus"),
-    total:        sumBucket(filtered, "totalOutstanding"),
-  }), [filtered]);
+  const totals = useMemo(
+    () => ({
+      bucket0to30: sumBucket(filtered, "bucket0to30"),
+      bucket31to60: sumBucket(filtered, "bucket31to60"),
+      bucket61to90: sumBucket(filtered, "bucket61to90"),
+      bucket91Plus: sumBucket(filtered, "bucket91Plus"),
+      total: sumBucket(filtered, "totalOutstanding")
+    }),
+    [filtered]
+  );
 
   const overdue = totals.bucket31to60 + totals.bucket61to90 + totals.bucket91Plus;
 
@@ -156,7 +184,7 @@ export default function AgeingPage() {
 
   const dunningMutation = useMutation({
     mutationFn: () => runARDunning(ctx!),
-    onSuccess: (res) => setDunningResult({ sent: res.data.dunningEmailsSent }),
+    onSuccess: (res) => setDunningResult({ sent: res.data.dunningEmailsSent })
   });
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -202,7 +230,10 @@ export default function AgeingPage() {
             variant="outline"
             size="sm"
             className="gap-1.5 border-amber-300 text-amber-700 hover:bg-amber-50"
-            onClick={() => { setDunningResult(null); dunningMutation.mutate(); }}
+            onClick={() => {
+              setDunningResult(null);
+              dunningMutation.mutate();
+            }}
             disabled={dunningMutation.isPending}
             title="Send overdue payment reminder emails (7, 14, 30 days overdue)"
           >
@@ -216,8 +247,14 @@ export default function AgeingPage() {
       {dunningResult && (
         <div className="flex items-center gap-2 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-4 py-2.5">
           <Mail className="h-4 w-4 flex-shrink-0" />
-          Dunning run complete — {dunningResult.sent} reminder email{dunningResult.sent !== 1 ? "s" : ""} sent.
-          <button onClick={() => setDunningResult(null)} className="ml-auto text-emerald-600 hover:text-emerald-800 underline text-xs">Dismiss</button>
+          Dunning run complete — {dunningResult.sent} reminder email
+          {dunningResult.sent !== 1 ? "s" : ""} sent.
+          <button
+            onClick={() => setDunningResult(null)}
+            className="ml-auto text-emerald-600 hover:text-emerald-800 underline text-xs"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 
@@ -230,7 +267,11 @@ export default function AgeingPage() {
       {/* Summary cards */}
       {!isLoading && !loadError && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-          <SummaryCard label="Total Outstanding" amount={totals.total} className="border-primary/20" />
+          <SummaryCard
+            label="Total Outstanding"
+            amount={totals.total}
+            className="border-primary/20"
+          />
           <SummaryCard
             label="0–30 days (current)"
             amount={totals.bucket0to30}
@@ -263,7 +304,27 @@ export default function AgeingPage() {
         <div className="flex items-center gap-2 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-4 py-2.5">
           <AlertTriangle className="h-4 w-4 flex-shrink-0" />
           <span>
-            <strong>{fmtTotal(overdue)}</strong> is overdue (31+ days) across {filtered.filter((r) => parseFloat(r.bucket31to60) + parseFloat(r.bucket61to90) + parseFloat(r.bucket91Plus) > 0).length} customer{filtered.filter((r) => parseFloat(r.bucket31to60) + parseFloat(r.bucket61to90) + parseFloat(r.bucket91Plus) > 0).length !== 1 ? "s" : ""}.
+            <strong>{fmtTotal(overdue)}</strong> is overdue (31+ days) across{" "}
+            {
+              filtered.filter(
+                (r) =>
+                  parseFloat(r.bucket31to60) +
+                    parseFloat(r.bucket61to90) +
+                    parseFloat(r.bucket91Plus) >
+                  0
+              ).length
+            }{" "}
+            customer
+            {filtered.filter(
+              (r) =>
+                parseFloat(r.bucket31to60) +
+                  parseFloat(r.bucket61to90) +
+                  parseFloat(r.bucket91Plus) >
+                0
+            ).length !== 1
+              ? "s"
+              : ""}
+            .
           </span>
           {totals.total > 0 && (
             <Badge variant="warning" className="ml-1 text-xs">
@@ -293,14 +354,17 @@ export default function AgeingPage() {
             )}
             <span className="ml-auto text-xs text-muted-foreground">
               {filtered.length} customer{filtered.length !== 1 ? "s" : ""}
-              {report?.asOfDate && ` · as of ${new Date(report.asOfDate).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" })}`}
+              {report?.asOfDate &&
+                ` · as of ${new Date(report.asOfDate).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" })}`}
             </span>
           </div>
         </CardHeader>
 
         <CardContent className="p-0">
           {isLoading && (
-            <div className="py-16 text-center text-sm text-muted-foreground">Loading ageing data…</div>
+            <div className="py-16 text-center text-sm text-muted-foreground">
+              Loading ageing data…
+            </div>
           )}
 
           {loadError && (
@@ -314,22 +378,35 @@ export default function AgeingPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-muted/30 text-xs uppercase tracking-wide">
-                    <th className="py-2.5 px-4 text-left font-medium text-muted-foreground">Customer</th>
-                    <th className="py-2.5 px-4 text-left font-medium text-muted-foreground w-24">Code</th>
-                    <th className="py-2.5 px-4 text-left font-medium text-muted-foreground w-20">CCY</th>
+                    <th className="py-2.5 px-4 text-left font-medium text-muted-foreground">
+                      Customer
+                    </th>
+                    <th className="py-2.5 px-4 text-left font-medium text-muted-foreground w-24">
+                      Code
+                    </th>
+                    <th className="py-2.5 px-4 text-left font-medium text-muted-foreground w-20">
+                      CCY
+                    </th>
                     {BUCKETS.map((b) => (
-                      <th key={b.key} className={`py-2.5 px-4 text-right font-medium w-32 ${b.headerClass}`}>
+                      <th
+                        key={b.key}
+                        className={`py-2.5 px-4 text-right font-medium w-32 ${b.headerClass}`}
+                      >
                         {b.label}
                       </th>
                     ))}
-                    <th className="py-2.5 px-4 text-right font-medium text-muted-foreground w-36">Total</th>
+                    <th className="py-2.5 px-4 text-right font-medium text-muted-foreground w-36">
+                      Total
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="py-16 text-center text-sm text-muted-foreground">
-                        {search ? `No customers match "${search}"` : "No outstanding receivables for this date."}
+                        {search
+                          ? `No customers match "${search}"`
+                          : "No outstanding receivables for this date."}
                       </td>
                     </tr>
                   ) : (
@@ -346,7 +423,9 @@ export default function AgeingPage() {
                           >
                             <td className="py-2.5 px-4 font-medium">
                               <div className="flex items-center gap-1.5">
-                                {isHighRisk && <TrendingDown className="h-3.5 w-3.5 text-red-500 flex-shrink-0" />}
+                                {isHighRisk && (
+                                  <TrendingDown className="h-3.5 w-3.5 text-red-500 flex-shrink-0" />
+                                )}
                                 {row.customerName}
                               </div>
                             </td>
@@ -357,7 +436,10 @@ export default function AgeingPage() {
                               {row.currency}
                             </td>
                             {BUCKETS.map((b) => (
-                              <td key={b.key} className={`py-2.5 px-4 text-right tabular-nums ${b.cellClass}`}>
+                              <td
+                                key={b.key}
+                                className={`py-2.5 px-4 text-right tabular-nums ${b.cellClass}`}
+                              >
                                 {fmt(row[b.key] as string)}
                               </td>
                             ))}
@@ -374,7 +456,10 @@ export default function AgeingPage() {
                           Totals ({filtered.length} customer{filtered.length !== 1 ? "s" : ""})
                         </td>
                         {BUCKETS.map((b) => (
-                          <td key={b.key} className={`py-2.5 px-4 text-right tabular-nums ${b.headerClass}`}>
+                          <td
+                            key={b.key}
+                            className={`py-2.5 px-4 text-right tabular-nums ${b.headerClass}`}
+                          >
                             {fmtTotal(totals[b.key as keyof typeof totals] as number)}
                           </td>
                         ))}

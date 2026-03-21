@@ -36,10 +36,7 @@ export async function publishEvent(
   const exchangeName = process.env.RABBITMQ_EVENTS_EXCHANGE ?? "hfp.events";
 
   await eventChannel.assertExchange(exchangeName, "topic", { durable: true });
-  eventChannel.publish(
-    exchangeName,
-    routingKey,
-    Buffer.from(JSON.stringify(payload)),
-    { persistent: true }
-  );
+  eventChannel.publish(exchangeName, routingKey, Buffer.from(JSON.stringify(payload)), {
+    persistent: true
+  });
 }

@@ -1,8 +1,4 @@
-import {
-  Prisma,
-  PrismaClient,
-  type Prisma as PrismaNamespace
-} from "@prisma/client";
+import { Prisma, PrismaClient, type Prisma as PrismaNamespace } from "@prisma/client";
 import { createEntityScopeExtension } from "./entityScope.js";
 import { serializeForAudit } from "./auditSerialization.js";
 import { getRequestContext, runWithAuditDisabled } from "./requestContext.js";
@@ -132,6 +128,4 @@ export function setEntityContext(entityId: string | null): void {
   fallbackEntityContext = entityId;
 }
 
-export const prisma = baseClient.$extends(
-  createEntityScopeExtension(() => getEntityFromContext())
-);
+export const prisma = baseClient.$extends(createEntityScopeExtension(() => getEntityFromContext()));

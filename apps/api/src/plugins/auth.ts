@@ -93,78 +93,76 @@ async function isEntityAllowedByClaims(
 }
 
 export default fp(async (fastify: FastifyInstance) => {
-  const issuerUrl =
-    process.env.KEYCLOAK_ISSUER_URL ?? "http://localhost:8080/realms/hfp";
+  const issuerUrl = process.env.KEYCLOAK_ISSUER_URL ?? "http://localhost:8080/realms/hfp";
   const audience = process.env.KEYCLOAK_CLIENT_ID ?? "hfp-api";
-  const jwksUrl =
-    process.env.KEYCLOAK_JWKS_URL ??
-    `${issuerUrl}/protocol/openid-connect/certs`;
+  const jwksUrl = process.env.KEYCLOAK_JWKS_URL ?? `${issuerUrl}/protocol/openid-connect/certs`;
   const jwks = createRemoteJWKSet(new URL(jwksUrl));
 
-  fastify.decorate(
-    "verifyAccessToken",
-    async (request: FastifyRequest): Promise<void> => {
-      try {
-        const token = extractBearerToken(request.headers.authorization);
+  fastify.decorate("verifyAccessToken", async (request: FastifyRequest): Promise<void> => {
+    try {
+      const token = extractBearerToken(request.headers.authorization);
 
-        // Dev-mode bypass: accept "dev-token" without Keycloak verification
-        if (process.env.NODE_ENV !== "production" && token === "dev-token") {
-          const headerEntityId = request.headers["x-entity-id"];
-          if (typeof headerEntityId !== "string" || headerEntityId.length === 0) {
-            throw buildError(400, "X-Entity-ID header is required.");
-          }
-          // Use actual admin user ID so FK constraints (e.g. approvedById) work
-          request.user = { sub: "a15c0667-e920-4e66-8b15-e1a561b965c4", roles: ["admin", "superadmin"], entityIds: [] };
-          request.entityId = headerEntityId;
-          // Best-effort chain resolution — skip on DB error in dev
-          try {
-            request.chainId = await resolveChainEntityId(headerEntityId);
-          } catch {
-            request.chainId = headerEntityId;
-          }
-          return;
-        }
-        const { payload } = await jwtVerify(token, jwks, {
-          issuer: issuerUrl,
-          audience
-        });
-
-        const realmAccess = (payload.realm_access ?? {}) as {
-          roles?: unknown;
-        };
-
-        const roles = toStringArray(realmAccess.roles);
-        const entityIds = toStringArray(payload.entity_ids);
-
-        request.user = {
-          ...payload,
-          roles,
-          entityIds
-        };
-
+      // Dev-mode bypass: accept "dev-token" without Keycloak verification
+      if (process.env.NODE_ENV !== "production" && token === "dev-token") {
         const headerEntityId = request.headers["x-entity-id"];
-        if (typeof headerEntityId === "string" && headerEntityId.length > 0) {
-          request.entityId = headerEntityId;
-        } else if (entityIds.length === 1) {
-          request.entityId = entityIds[0];
-        }
-
-        if (!request.entityId) {
+        if (typeof headerEntityId !== "string" || headerEntityId.length === 0) {
           throw buildError(400, "X-Entity-ID header is required.");
         }
-
-        const allowed = await isEntityAllowedByClaims(request.entityId, entityIds);
-        if (!allowed) {
-          throw buildError(403, "Entity access is not allowed for this token.");
+        // Use actual admin user ID so FK constraints (e.g. approvedById) work
+        request.user = {
+          sub: "a15c0667-e920-4e66-8b15-e1a561b965c4",
+          roles: ["admin", "superadmin"],
+          entityIds: []
+        };
+        request.entityId = headerEntityId;
+        // Best-effort chain resolution — skip on DB error in dev
+        try {
+          request.chainId = await resolveChainEntityId(headerEntityId);
+        } catch {
+          request.chainId = headerEntityId;
         }
-
-        request.chainId = await resolveChainEntityId(request.entityId);
-      } catch (error) {
-        if (typeof error === "object" && error !== null && "statusCode" in error) {
-          throw error;
-        }
-        throw buildError(401, "Token verification failed.");
+        return;
       }
+      const { payload } = await jwtVerify(token, jwks, {
+        issuer: issuerUrl,
+        audience
+      });
+
+      const realmAccess = (payload.realm_access ?? {}) as {
+        roles?: unknown;
+      };
+
+      const roles = toStringArray(realmAccess.roles);
+      const entityIds = toStringArray(payload.entity_ids);
+
+      request.user = {
+        ...payload,
+        roles,
+        entityIds
+      };
+
+      const headerEntityId = request.headers["x-entity-id"];
+      if (typeof headerEntityId === "string" && headerEntityId.length > 0) {
+        request.entityId = headerEntityId;
+      } else if (entityIds.length === 1) {
+        request.entityId = entityIds[0];
+      }
+
+      if (!request.entityId) {
+        throw buildError(400, "X-Entity-ID header is required.");
+      }
+
+      const allowed = await isEntityAllowedByClaims(request.entityId, entityIds);
+      if (!allowed) {
+        throw buildError(403, "Entity access is not allowed for this token.");
+      }
+
+      request.chainId = await resolveChainEntityId(request.entityId);
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "statusCode" in error) {
+        throw error;
+      }
+      throw buildError(401, "Token verification failed.");
     }
-  );
+  });
 });

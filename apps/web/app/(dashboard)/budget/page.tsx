@@ -13,7 +13,11 @@ import {
   getBudgetVariance,
   getGLAccounts,
   getPeriods,
-  upsertBudgetLines
+  upsertBudgetLines,
+  previewBudgetExcelImport,
+  executeBudgetExcelImport,
+  type BudgetExcelPreview,
+  type VarianceReport
 } from "../../../lib/gl-api";
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
@@ -97,6 +101,10 @@ export default function BudgetPage() {
   const [lineMonth, setLineMonth] = useState("");
   const [lineAmount, setLineAmount] = useState("");
   const [variancePeriodId, setVariancePeriodId] = useState("");
+  const [excelFile, setExcelFile] = useState<{ base64: string; name: string } | null>(null);
+  const [excelPreview, setExcelPreview] = useState<BudgetExcelPreview | null>(null);
+  const [excelImporting, setExcelImporting] = useState(false);
+  const [excelPreviewing, setExcelPreviewing] = useState(false);
 
   const form = useForm<z.infer<typeof defSchema>>({
     resolver: zodResolver(defSchema),
@@ -123,11 +131,10 @@ export default function BudgetPage() {
     queryFn: () =>
       apiContext && selectedDefId && variancePeriodId
         ? getBudgetVariance(apiContext, selectedDefId, variancePeriodId)
-        : Promise.resolve({ data: null }),
+        : Promise.resolve({ data: null as unknown as VarianceReport }),
     enabled: Boolean(apiContext && selectedDefId && variancePeriodId),
-    select: (r) => {
-      const outer = r.data as unknown as { data: VarianceLine[] } | null;
-      return outer?.data ?? [];
+    select: (r: { data: VarianceReport | null }) => {
+      return (r.data as unknown as { data: VarianceLine[] } | null)?.data ?? [];
     }
   });
   const periodsQ = useQuery({
@@ -196,6 +203,9 @@ export default function BudgetPage() {
               </TabsTrigger>
               <TabsTrigger value="variance" disabled={!selectedDefId}>
                 Variance Report
+              </TabsTrigger>
+              <TabsTrigger value="import" disabled={!selectedDefId}>
+                Excel Import
               </TabsTrigger>
             </TabsList>
 
@@ -377,7 +387,7 @@ export default function BudgetPage() {
                             </TableCell>
                           </TableRow>
                         ) : (
-                          (varianceQ.data ?? []).map((line) => (
+                          ((varianceQ.data ?? []) as VarianceLine[]).map((line: VarianceLine) => (
                             <TableRow key={line.accountId}>
                               <TableCell>
                                 {line.accountCode} – {line.accountName}
@@ -413,6 +423,175 @@ export default function BudgetPage() {
                     </Table>
                   )}
                 </>
+              )}
+            </TabsContent>
+
+            <TabsContent value="import">
+              {selectedDefId && (
+                <div className="space-y-4">
+                  <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
+                    <p className="text-sm text-muted-foreground">
+                      Upload an Excel (.xlsx) or CSV file with columns: <strong>accountCode</strong>
+                      , <strong>month</strong> (1–12 or name), <strong>amount</strong>, and
+                      optionally <strong>notes</strong>.
+                    </p>
+                    <div className="flex items-center gap-3">
+                      <Input
+                        type="file"
+                        accept=".xlsx,.xls,.csv"
+                        className="max-w-sm"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const arrayBuffer = await file.arrayBuffer();
+                          const base64 = btoa(
+                            new Uint8Array(arrayBuffer).reduce(
+                              (data, byte) => data + String.fromCharCode(byte),
+                              ""
+                            )
+                          );
+                          setExcelFile({ base64, name: file.name });
+                          setExcelPreview(null);
+                          setFeedback("");
+                        }}
+                      />
+                      <Button
+                        variant="outline"
+                        disabled={!excelFile || excelPreviewing}
+                        onClick={async () => {
+                          if (!excelFile || !apiContext || !selectedDefId) return;
+                          setExcelPreviewing(true);
+                          setFeedback("");
+                          try {
+                            const res = await previewBudgetExcelImport(
+                              apiContext,
+                              selectedDefId,
+                              excelFile.base64,
+                              excelFile.name
+                            );
+                            setExcelPreview(res.data as unknown as BudgetExcelPreview);
+                          } catch (err) {
+                            setFeedback((err as Error).message);
+                          } finally {
+                            setExcelPreviewing(false);
+                          }
+                        }}
+                      >
+                        {excelPreviewing ? "Previewing…" : "Preview"}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {excelPreview && (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-4">
+                        <Badge variant="outline">{excelPreview.totalRows} rows parsed</Badge>
+                        <Badge variant="success">
+                          {excelPreview.mappedCodes.length} accounts matched
+                        </Badge>
+                        {excelPreview.unmappedCodes.length > 0 && (
+                          <Badge variant="destructive">
+                            {excelPreview.unmappedCodes.length} unmapped
+                          </Badge>
+                        )}
+                      </div>
+
+                      {excelPreview.unmappedCodes.length > 0 && (
+                        <div className="rounded border border-amber-200 bg-amber-50 p-3 text-sm">
+                          <strong>Unmapped account codes:</strong>{" "}
+                          {excelPreview.unmappedCodes.join(", ")}
+                          <p className="text-muted-foreground mt-1">
+                            These rows will be skipped during import.
+                          </p>
+                        </div>
+                      )}
+
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Row</TableHead>
+                            <TableHead>Account Code</TableHead>
+                            <TableHead>Month</TableHead>
+                            <TableHead className="text-right">Amount</TableHead>
+                            <TableHead>Notes</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {excelPreview.rows.slice(0, 50).map((row) => (
+                            <TableRow
+                              key={`${row.rowNumber}-${row.accountCode}-${row.month}`}
+                              className={
+                                excelPreview.unmappedCodes.includes(row.accountCode)
+                                  ? "bg-amber-50/50 text-muted-foreground"
+                                  : ""
+                              }
+                            >
+                              <TableCell className="text-xs">{row.rowNumber}</TableCell>
+                              <TableCell className="font-mono text-xs">{row.accountCode}</TableCell>
+                              <TableCell>{MONTHS[row.month - 1] ?? row.month}</TableCell>
+                              <TableCell className="text-right font-mono text-xs">
+                                {fmt(row.amount)}
+                              </TableCell>
+                              <TableCell className="text-xs text-muted-foreground">
+                                {row.notes ?? ""}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                          {excelPreview.rows.length > 50 && (
+                            <TableRow>
+                              <TableCell
+                                colSpan={5}
+                                className="text-center text-sm text-muted-foreground"
+                              >
+                                … and {excelPreview.rows.length - 50} more rows
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
+
+                      <Button
+                        variant="teal"
+                        disabled={excelImporting || excelPreview.mappedCodes.length === 0}
+                        onClick={async () => {
+                          if (!excelFile || !apiContext || !selectedDefId) return;
+                          setExcelImporting(true);
+                          setFeedback("");
+                          try {
+                            const res = await executeBudgetExcelImport(
+                              apiContext,
+                              selectedDefId,
+                              excelFile.base64,
+                              excelFile.name
+                            );
+                            const result = res.data as unknown as {
+                              upserted: number;
+                              skipped: number;
+                              errors: string[];
+                            };
+                            setFeedback(
+                              `Import complete: ${result.upserted} lines upserted, ${result.skipped} skipped.` +
+                                (result.errors.length > 0
+                                  ? ` Errors: ${result.errors.slice(0, 5).join("; ")}`
+                                  : "")
+                            );
+                            setExcelPreview(null);
+                            setExcelFile(null);
+                            qc.invalidateQueries({ queryKey: ["budget-lines"] });
+                          } catch (err) {
+                            setFeedback((err as Error).message);
+                          } finally {
+                            setExcelImporting(false);
+                          }
+                        }}
+                      >
+                        {excelImporting
+                          ? "Importing…"
+                          : `Import ${excelPreview.mappedCodes.length > 0 ? excelPreview.rows.filter((r) => !excelPreview.unmappedCodes.includes(r.accountCode)).length : 0} lines`}
+                      </Button>
+                    </div>
+                  )}
+                </div>
               )}
             </TabsContent>
           </Tabs>

@@ -14,6 +14,10 @@ import {
   getConnectorMappings,
   upsertConnectorMapping,
   deleteConnectorMapping,
+  runSimphonyImport,
+  getSimphonyLogs,
+  importPayrollFile,
+  getPayrollLogs
 } from "../../../../lib/gl-api";
 import type { ImportLog, BankStatement, ConnectorMapping } from "../../../../lib/gl-api";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../../components/ui/card";
@@ -21,7 +25,13 @@ import { Button } from "../../../../components/ui/button";
 import { Badge } from "../../../../components/ui/badge";
 import { Input } from "../../../../components/ui/input";
 import { Label } from "../../../../components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../../components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../../../../components/ui/select";
 import { Separator } from "../../../../components/ui/separator";
 import Link from "next/link";
 import {
@@ -39,17 +49,22 @@ import {
   Network,
   Landmark,
   GitBranch,
+  UtensilsCrossed,
+  Wallet
 } from "lucide-react";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, { variant: "default" | "secondary" | "destructive" | "outline"; icon: React.ReactNode }> = {
+  const map: Record<
+    string,
+    { variant: "default" | "secondary" | "destructive" | "outline"; icon: React.ReactNode }
+  > = {
     SUCCESS: { variant: "default", icon: <CheckCircle2 className="h-3 w-3" /> },
     COMPLETE: { variant: "default", icon: <CheckCircle2 className="h-3 w-3" /> },
     FAILED: { variant: "destructive", icon: <XCircle className="h-3 w-3" /> },
     RUNNING: { variant: "secondary", icon: <Loader2 className="h-3 w-3 animate-spin" /> },
-    PENDING: { variant: "outline", icon: <Clock className="h-3 w-3" /> },
+    PENDING: { variant: "outline", icon: <Clock className="h-3 w-3" /> }
   };
   const cfg = map[status] ?? { variant: "outline" as const, icon: null };
   return (
@@ -62,13 +77,15 @@ function StatusBadge({ status }: { status: string }) {
 
 // ── Tab types ─────────────────────────────────────────────────────────────────
 
-type Tab = "opera" | "skyjana" | "bank" | "mappings";
+type Tab = "opera" | "simphony" | "skyjana" | "bank" | "payroll" | "mappings";
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
-  { id: "opera", label: "Opera Cloud (OHIP)", icon: <Building2 className="h-4 w-4" /> },
+  { id: "opera", label: "Opera PMS (OHIP)", icon: <Building2 className="h-4 w-4" /> },
+  { id: "simphony", label: "Simphony POS", icon: <UtensilsCrossed className="h-4 w-4" /> },
   { id: "skyjana", label: "Sky Jana", icon: <Network className="h-4 w-4" /> },
   { id: "bank", label: "Bank Feeds", icon: <Landmark className="h-4 w-4" /> },
-  { id: "mappings", label: "Connector Mappings", icon: <ArrowDownToLine className="h-4 w-4" /> },
+  { id: "payroll", label: "Payroll", icon: <Wallet className="h-4 w-4" /> },
+  { id: "mappings", label: "Connector Mappings", icon: <ArrowDownToLine className="h-4 w-4" /> }
 ];
 
 // ── Opera Cloud tab ───────────────────────────────────────────────────────────
@@ -87,7 +104,7 @@ function OperaTab() {
       const res = await getOperaCloudLogs(apiContext);
       return (res.data as ImportLog[]) ?? [];
     },
-    enabled: Boolean(apiContext),
+    enabled: Boolean(apiContext)
   });
 
   const importMutation = useMutation({
@@ -96,14 +113,14 @@ function OperaTab() {
       const res = await runOperaCloudImport(apiContext, {
         hotelId,
         businessDate,
-        notifyEmail: notifyEmail || undefined,
+        notifyEmail: notifyEmail || undefined
       });
       return res.data as Record<string, unknown>;
     },
     onSuccess: (data) => {
       setImportResult(data);
       logsQuery.refetch();
-    },
+    }
   });
 
   return (
@@ -118,12 +135,24 @@ function OperaTab() {
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <div className="space-y-1.5">
-            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Hotel ID</Label>
-            <Input value={hotelId} onChange={(e) => setHotelId(e.target.value)} placeholder="e.g. JUMEIRAH_001" />
+            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Hotel ID
+            </Label>
+            <Input
+              value={hotelId}
+              onChange={(e) => setHotelId(e.target.value)}
+              placeholder="e.g. JUMEIRAH_001"
+            />
           </div>
           <div className="space-y-1.5">
-            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Business Date</Label>
-            <Input type="date" value={businessDate} onChange={(e) => setBusinessDate(e.target.value)} />
+            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Business Date
+            </Label>
+            <Input
+              type="date"
+              value={businessDate}
+              onChange={(e) => setBusinessDate(e.target.value)}
+            />
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
@@ -142,10 +171,15 @@ function OperaTab() {
               onClick={() => importMutation.mutate()}
               className="gap-1.5"
             >
-              {importMutation.isPending
-                ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Importing…</>
-                : <><ArrowDownToLine className="h-3.5 w-3.5" /> Run Import</>
-              }
+              {importMutation.isPending ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Importing…
+                </>
+              ) : (
+                <>
+                  <ArrowDownToLine className="h-3.5 w-3.5" /> Run Import
+                </>
+              )}
             </Button>
             {importMutation.isError && (
               <p className="text-sm text-red-600">{(importMutation.error as Error).message}</p>
@@ -180,23 +214,46 @@ function OperaTab() {
             <table className="w-full">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200">
-                  <th className="py-2 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Date</th>
-                  <th className="py-2 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Business Date</th>
-                  <th className="py-2 px-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wide">Imported</th>
-                  <th className="py-2 px-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wide">Failed</th>
-                  <th className="py-2 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
+                  <th className="py-2 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                    Date
+                  </th>
+                  <th className="py-2 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                    Business Date
+                  </th>
+                  <th className="py-2 px-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                    Imported
+                  </th>
+                  <th className="py-2 px-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                    Failed
+                  </th>
+                  <th className="py-2 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                    Status
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {(logsQuery.data ?? []).map((log) => (
                   <tr key={log.id} className="hover:bg-slate-50/40">
                     <td className="py-2.5 px-4 text-xs text-slate-500">
-                      {new Date(log.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      {new Date(log.createdAt).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit"
+                      })}
                     </td>
-                    <td className="py-2.5 px-4 text-sm text-slate-700">{log.businessDate ?? "—"}</td>
-                    <td className="py-2.5 px-4 text-sm text-right text-emerald-700">{log.recordsImported}</td>
-                    <td className="py-2.5 px-4 text-sm text-right text-red-600">{log.recordsFailed}</td>
-                    <td className="py-2.5 px-4"><StatusBadge status={log.status} /></td>
+                    <td className="py-2.5 px-4 text-sm text-slate-700">
+                      {log.businessDate ?? "—"}
+                    </td>
+                    <td className="py-2.5 px-4 text-sm text-right text-emerald-700">
+                      {log.recordsImported}
+                    </td>
+                    <td className="py-2.5 px-4 text-sm text-right text-red-600">
+                      {log.recordsFailed}
+                    </td>
+                    <td className="py-2.5 px-4">
+                      <StatusBadge status={log.status} />
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -220,7 +277,7 @@ function SkyJanaTab() {
       const res = await runSkyJanaSync(apiContext);
       return res.data as Record<string, unknown>;
     },
-    onSuccess: (data) => setSyncResult(data),
+    onSuccess: (data) => setSyncResult(data)
   });
 
   return (
@@ -228,19 +285,24 @@ function SkyJanaTab() {
       <CardHeader className="pb-2">
         <CardTitle className="text-base">Sky Jana Procurement Connector</CardTitle>
         <p className="text-xs text-muted-foreground">
-          Polls the Sky Jana SFTP for new POs, GRNs, and supplier invoices. Runs three-way matching on new GRNs.
+          Polls the Sky Jana SFTP for new POs, GRNs, and supplier invoices. Runs three-way matching
+          on new GRNs.
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="rounded-lg border border-slate-200 p-4 bg-slate-50 space-y-2">
-          <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Connector Status</p>
+          <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+            Connector Status
+          </p>
           <div className="flex items-center gap-2">
             <Badge variant="outline">SFTP Poll</Badge>
             <span className="text-xs text-slate-500">Every 15 minutes via BullMQ job</span>
           </div>
           <div className="flex items-center gap-2">
             <Badge variant="outline">Auto-Matching</Badge>
-            <span className="text-xs text-slate-500">3-way match on GRN receipt with ±2% tolerance</span>
+            <span className="text-xs text-slate-500">
+              3-way match on GRN receipt with ±2% tolerance
+            </span>
           </div>
         </div>
 
@@ -249,10 +311,15 @@ function SkyJanaTab() {
           disabled={syncMutation.isPending}
           className="gap-1.5"
         >
-          {syncMutation.isPending
-            ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Syncing…</>
-            : <><RefreshCw className="h-3.5 w-3.5" /> Trigger Sync Now</>
-          }
+          {syncMutation.isPending ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Syncing…
+            </>
+          ) : (
+            <>
+              <RefreshCw className="h-3.5 w-3.5" /> Trigger Sync Now
+            </>
+          )}
         </Button>
 
         {syncMutation.isError && (
@@ -292,7 +359,7 @@ function BankTab() {
       const res = await getBankStatements(apiContext);
       return (res.data as BankStatement[]) ?? [];
     },
-    enabled: Boolean(apiContext),
+    enabled: Boolean(apiContext)
   });
 
   const txQuery = useQuery({
@@ -302,7 +369,7 @@ function BankTab() {
       const res = await getBankTransactions(apiContext, expandedStatement);
       return (res.data as Array<Record<string, unknown>>) ?? [];
     },
-    enabled: Boolean(apiContext && expandedStatement),
+    enabled: Boolean(apiContext && expandedStatement)
   });
 
   const importMutation = useMutation({
@@ -315,7 +382,7 @@ function BankTab() {
       setImportResult(data);
       setFileContent("");
       statementsQuery.refetch();
-    },
+    }
   });
 
   return (
@@ -323,12 +390,16 @@ function BankTab() {
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Upload Bank Statement</CardTitle>
-          <p className="text-xs text-muted-foreground">Paste MT940 or OFX file content to import transactions.</p>
+          <p className="text-xs text-muted-foreground">
+            Paste MT940 or OFX file content to import transactions.
+          </p>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Format</Label>
+              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Format
+              </Label>
               <Select value={format} onValueChange={(v) => setFormat(v as "MT940" | "OFX")}>
                 <SelectTrigger>
                   <SelectValue />
@@ -340,18 +411,30 @@ function BankTab() {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Bank Account Ref</Label>
-              <Input value={bankAccountRef} onChange={(e) => setBankAccountRef(e.target.value)} placeholder="e.g. HSBC-001-AED" />
+              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Bank Account Ref
+              </Label>
+              <Input
+                value={bankAccountRef}
+                onChange={(e) => setBankAccountRef(e.target.value)}
+                placeholder="e.g. HSBC-001-AED"
+              />
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">File Content</Label>
+            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              File Content
+            </Label>
             <textarea
               value={fileContent}
               onChange={(e) => setFileContent(e.target.value)}
               rows={8}
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono resize-y"
-              placeholder={format === "MT940" ? ":20:STMT001\n:25:AE123456789\n:28C:001/001\n:60F:C260101USD10000,00\n..." : "<OFX>...</OFX>"}
+              placeholder={
+                format === "MT940"
+                  ? ":20:STMT001\n:25:AE123456789\n:28C:001/001\n:60F:C260101USD10000,00\n..."
+                  : "<OFX>...</OFX>"
+              }
             />
           </div>
           <div className="flex items-center gap-3">
@@ -360,10 +443,15 @@ function BankTab() {
               onClick={() => importMutation.mutate()}
               className="gap-1.5"
             >
-              {importMutation.isPending
-                ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Importing…</>
-                : <><Upload className="h-3.5 w-3.5" /> Import</>
-              }
+              {importMutation.isPending ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Importing…
+                </>
+              ) : (
+                <>
+                  <Upload className="h-3.5 w-3.5" /> Import
+                </>
+              )}
             </Button>
             {importMutation.isError && (
               <p className="text-sm text-red-600">{(importMutation.error as Error).message}</p>
@@ -393,19 +481,30 @@ function BankTab() {
               {(statementsQuery.data ?? []).map((stmt) => (
                 <div key={stmt.id} className="border-b border-slate-100 last:border-0">
                   <button
-                    onClick={() => setExpandedStatement(expandedStatement === stmt.id ? null : stmt.id)}
+                    onClick={() =>
+                      setExpandedStatement(expandedStatement === stmt.id ? null : stmt.id)
+                    }
                     className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-50/60 transition-colors"
                   >
                     <div className="flex items-center gap-4 text-sm">
-                      <span className="font-medium text-slate-800">{stmt.account?.code ?? stmt.accountId.slice(0, 8)}</span>
-                      <Badge variant="outline" className="text-[10px]">{stmt.currency}</Badge>
+                      <span className="font-medium text-slate-800">
+                        {stmt.account?.code ?? stmt.accountId.slice(0, 8)}
+                      </span>
+                      <Badge variant="outline" className="text-[10px]">
+                        {stmt.currency}
+                      </Badge>
                       <span className="text-slate-500">{stmt._count?.transactions ?? 0} txns</span>
                     </div>
                     <div className="flex items-center gap-3 text-sm">
                       <span className="text-slate-500">
-                        {new Date(stmt.statementDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                        {new Date(stmt.statementDate).toLocaleDateString("en-US", {
+                          month: "short",
+                          day: "numeric"
+                        })}
                       </span>
-                      <ChevronRight className={`h-4 w-4 text-slate-400 transition-transform ${expandedStatement === stmt.id ? "rotate-90" : ""}`} />
+                      <ChevronRight
+                        className={`h-4 w-4 text-slate-400 transition-transform ${expandedStatement === stmt.id ? "rotate-90" : ""}`}
+                      />
                     </div>
                   </button>
 
@@ -417,22 +516,41 @@ function BankTab() {
                         <table className="w-full text-xs">
                           <thead>
                             <tr className="border-b border-slate-200">
-                              <th className="py-2 px-4 text-left text-slate-500 font-semibold">Date</th>
-                              <th className="py-2 px-4 text-left text-slate-500 font-semibold">Description</th>
-                              <th className="py-2 px-4 text-right text-slate-500 font-semibold">Amount</th>
-                              <th className="py-2 px-4 text-left text-slate-500 font-semibold">Status</th>
+                              <th className="py-2 px-4 text-left text-slate-500 font-semibold">
+                                Date
+                              </th>
+                              <th className="py-2 px-4 text-left text-slate-500 font-semibold">
+                                Description
+                              </th>
+                              <th className="py-2 px-4 text-right text-slate-500 font-semibold">
+                                Amount
+                              </th>
+                              <th className="py-2 px-4 text-left text-slate-500 font-semibold">
+                                Status
+                              </th>
                             </tr>
                           </thead>
                           <tbody>
                             {(txQuery.data ?? []).map((tx, i) => (
                               <tr key={i} className="border-b border-slate-50 hover:bg-white/60">
-                                <td className="py-1.5 px-4 text-slate-500">{String(tx.valueDate ?? "").slice(0, 10)}</td>
-                                <td className="py-1.5 px-4 text-slate-700">{String(tx.description ?? "")}</td>
-                                <td className={`py-1.5 px-4 text-right tabular-nums ${Number(tx.amount) >= 0 ? "text-emerald-700" : "text-red-700"}`}>
-                                  {Number(tx.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                <td className="py-1.5 px-4 text-slate-500">
+                                  {String(tx.valueDate ?? "").slice(0, 10)}
+                                </td>
+                                <td className="py-1.5 px-4 text-slate-700">
+                                  {String(tx.description ?? "")}
+                                </td>
+                                <td
+                                  className={`py-1.5 px-4 text-right tabular-nums ${Number(tx.amount) >= 0 ? "text-emerald-700" : "text-red-700"}`}
+                                >
+                                  {Number(tx.amount).toLocaleString(undefined, {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2
+                                  })}
                                 </td>
                                 <td className="py-1.5 px-4">
-                                  <StatusBadge status={String(tx.reconciliationStatus ?? "UNMATCHED")} />
+                                  <StatusBadge
+                                    status={String(tx.reconciliationStatus ?? "UNMATCHED")}
+                                  />
                                 </td>
                               </tr>
                             ))}
@@ -469,7 +587,7 @@ function MappingsTab() {
       const res = await getConnectorMappings(apiContext, connectorType);
       return (res.data as ConnectorMapping[]) ?? [];
     },
-    enabled: Boolean(apiContext),
+    enabled: Boolean(apiContext)
   });
 
   const accountsQuery = useQuery({
@@ -488,7 +606,7 @@ function MappingsTab() {
       walk(res.data);
       return flat;
     },
-    enabled: Boolean(apiContext),
+    enabled: Boolean(apiContext)
   });
 
   const addMutation = useMutation({
@@ -498,15 +616,17 @@ function MappingsTab() {
         connectorType,
         sourceCode: newSourceCode,
         notes: newNotes || undefined,
-        glAccountId: newGlAccountId,
+        glAccountId: newGlAccountId
       });
     },
     onSuccess: () => {
       setNewSourceCode("");
       setNewNotes("");
       setNewGlAccountId("NONE");
-      queryClient.invalidateQueries({ queryKey: ["connector-mappings", apiContext?.entityId, connectorType] });
-    },
+      queryClient.invalidateQueries({
+        queryKey: ["connector-mappings", apiContext?.entityId, connectorType]
+      });
+    }
   });
 
   const deleteMutation = useMutation({
@@ -515,8 +635,10 @@ function MappingsTab() {
       await deleteConnectorMapping(apiContext, id);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["connector-mappings", apiContext?.entityId, connectorType] });
-    },
+      queryClient.invalidateQueries({
+        queryKey: ["connector-mappings", apiContext?.entityId, connectorType]
+      });
+    }
   });
 
   const canAdd = newSourceCode && newGlAccountId !== "NONE" && !addMutation.isPending;
@@ -525,7 +647,9 @@ function MappingsTab() {
     <div className="space-y-4">
       {/* Filter */}
       <div className="flex items-center gap-3">
-        <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide shrink-0">Connector</Label>
+        <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide shrink-0">
+          Connector
+        </Label>
         <Select value={connectorType} onValueChange={setConnectorType}>
           <SelectTrigger className="w-52">
             <SelectValue />
@@ -544,19 +668,28 @@ function MappingsTab() {
         <CardHeader className="pb-2">
           <CardTitle className="text-base">
             {connectorType.replace("_", " ")} Mappings
-            <Badge variant="outline" className="ml-2 text-[10px]">{(mappingsQuery.data ?? []).length}</Badge>
+            <Badge variant="outline" className="ml-2 text-[10px]">
+              {(mappingsQuery.data ?? []).length}
+            </Badge>
           </CardTitle>
           <p className="text-xs text-muted-foreground">
-            Map external revenue/cost codes to GL accounts. Unmapped codes are flagged during import.
+            Map external revenue/cost codes to GL accounts. Unmapped codes are flagged during
+            import.
           </p>
         </CardHeader>
         <CardContent className="p-0">
           <table className="w-full">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
-                <th className="py-2 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Source Code</th>
-                <th className="py-2 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Notes</th>
-                <th className="py-2 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">GL Account</th>
+                <th className="py-2 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                  Source Code
+                </th>
+                <th className="py-2 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                  Notes
+                </th>
+                <th className="py-2 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                  GL Account
+                </th>
                 <th className="py-2 px-4 w-12" />
               </tr>
             </thead>
@@ -566,10 +699,14 @@ function MappingsTab() {
                   <td className="py-2.5 px-4 text-sm font-mono text-slate-700">{m.sourceCode}</td>
                   <td className="py-2.5 px-4 text-sm text-slate-500">{m.notes ?? "—"}</td>
                   <td className="py-2.5 px-4 text-sm text-slate-700">
-                    {m.glAccount
-                      ? <><span className="font-mono text-slate-400 mr-1">{m.glAccount.code}</span>{m.glAccount.name}</>
-                      : m.glAccountId.slice(0, 8) + "…"
-                    }
+                    {m.glAccount ? (
+                      <>
+                        <span className="font-mono text-slate-400 mr-1">{m.glAccount.code}</span>
+                        {m.glAccount.name}
+                      </>
+                    ) : (
+                      m.glAccountId.slice(0, 8) + "…"
+                    )}
                   </td>
                   <td className="py-2.5 px-4">
                     <button
@@ -610,7 +747,8 @@ function MappingsTab() {
                       <SelectItem value="NONE">Select GL account…</SelectItem>
                       {(accountsQuery.data ?? []).map((a) => (
                         <SelectItem key={a.id} value={a.id}>
-                          <span className="font-mono text-slate-400 mr-1">{a.code}</span>{a.name}
+                          <span className="font-mono text-slate-400 mr-1">{a.code}</span>
+                          {a.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -623,7 +761,11 @@ function MappingsTab() {
                     onClick={() => addMutation.mutate()}
                     className="h-7 gap-1 text-xs"
                   >
-                    {addMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
+                    {addMutation.isPending ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Plus className="h-3 w-3" />
+                    )}
                     Add
                   </Button>
                 </td>
@@ -632,6 +774,289 @@ function MappingsTab() {
           </table>
           {addMutation.isError && (
             <p className="px-4 py-2 text-xs text-red-600">{(addMutation.error as Error).message}</p>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ── Simphony POS tab ──────────────────────────────────────────────────────────
+
+function SimphonyTab() {
+  const apiContext = useApiContext();
+  const qc = useQueryClient();
+  const [locationId, setLocationId] = useState("");
+  const [businessDate, setBusinessDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [notifyEmail, setNotifyEmail] = useState("");
+
+  const logsQ = useQuery({
+    queryKey: ["simphony-logs", apiContext?.entityId],
+    queryFn: () => (apiContext ? getSimphonyLogs(apiContext) : Promise.resolve({ data: [] })),
+    enabled: Boolean(apiContext),
+    select: (r) => (r.data ?? []) as Array<Record<string, unknown>>
+  });
+
+  const importMut = useMutation({
+    mutationFn: () =>
+      runSimphonyImport(apiContext!, {
+        locationId,
+        businessDate,
+        notifyEmail: notifyEmail || undefined
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["simphony-logs"] })
+  });
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">Simphony POS Import (OHIP)</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Fetch daily F&B POS transactions from Oracle Simphony via OHIP API. Revenue class codes
+            are mapped to GL accounts using Connector Mappings (type: SIMPHONY_POS).
+          </p>
+          <div className="grid grid-cols-3 gap-3 items-end">
+            <div className="space-y-1">
+              <Label className="text-xs">Location ID</Label>
+              <Input
+                value={locationId}
+                onChange={(e) => setLocationId(e.target.value)}
+                placeholder="e.g. LOC001"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Business Date</Label>
+              <Input
+                type="date"
+                value={businessDate}
+                onChange={(e) => setBusinessDate(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Notify Email (optional)</Label>
+              <Input
+                value={notifyEmail}
+                onChange={(e) => setNotifyEmail(e.target.value)}
+                placeholder="user@hotel.com"
+              />
+            </div>
+          </div>
+          <Button
+            variant="teal"
+            size="sm"
+            disabled={importMut.isPending || !locationId || !businessDate}
+            onClick={() => importMut.mutate()}
+          >
+            {importMut.isPending ? (
+              <>
+                <Loader2 className="mr-1 h-3 w-3 animate-spin" /> Importing…
+              </>
+            ) : (
+              <>
+                <Upload className="mr-1 h-3 w-3" /> Run POS Import
+              </>
+            )}
+          </Button>
+          {importMut.isSuccess && (
+            <p className="text-xs text-emerald-700">Simphony import complete.</p>
+          )}
+          {importMut.isError && (
+            <p className="text-xs text-destructive">{(importMut.error as Error).message}</p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">Import History</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {logsQ.isLoading ? (
+            <p className="text-xs text-muted-foreground">Loading…</p>
+          ) : (logsQ.data ?? []).length === 0 ? (
+            <p className="text-xs text-muted-foreground">No Simphony imports yet.</p>
+          ) : (
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {(logsQ.data ?? []).slice(0, 20).map((log: Record<string, unknown>) => (
+                <div
+                  key={log.id as string}
+                  className="flex items-center justify-between text-xs border-b border-slate-100 pb-1.5"
+                >
+                  <div>
+                    <span className="font-mono">{(log.businessDate as string)?.split("T")[0]}</span>
+                    <span className="ml-2 text-muted-foreground">
+                      {log.recordsImported as number} imported / {log.recordsFailed as number}{" "}
+                      failed
+                    </span>
+                  </div>
+                  <StatusBadge status={log.status as string} />
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ── Payroll tab ───────────────────────────────────────────────────────────────
+
+function PayrollTab() {
+  const apiContext = useApiContext();
+  const qc = useQueryClient();
+  const [postingDate, setPostingDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [currency, setCurrency] = useState("USD");
+  const [autoPost, setAutoPost] = useState(false);
+  const [file, setFile] = useState<{ base64: string; name: string } | null>(null);
+
+  const logsQ = useQuery({
+    queryKey: ["payroll-logs", apiContext?.entityId],
+    queryFn: () => (apiContext ? getPayrollLogs(apiContext) : Promise.resolve({ data: [] })),
+    enabled: Boolean(apiContext),
+    select: (r) => (r.data ?? []) as Array<Record<string, unknown>>
+  });
+
+  const importMut = useMutation({
+    mutationFn: () =>
+      importPayrollFile(apiContext!, {
+        file: file!.base64,
+        filename: file!.name,
+        postingDate,
+        currency,
+        autoPost
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["payroll-logs"] });
+      setFile(null);
+    }
+  });
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">Payroll Journal Import</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Upload payroll journals from your HR system. Excel/CSV with columns:
+            <strong> accountCode</strong>, <strong>debit</strong>, <strong>credit</strong>, and
+            optionally <strong>description</strong>, <strong>department</strong>,{" "}
+            <strong>costCentre</strong>. Account codes map to GL via Chart of Accounts or Connector
+            Mappings (type: PAYROLL).
+          </p>
+          <div className="grid grid-cols-4 gap-3 items-end">
+            <div className="space-y-1">
+              <Label className="text-xs">Payroll File</Label>
+              <Input
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                onChange={async (e) => {
+                  const f = e.target.files?.[0];
+                  if (!f) return;
+                  const arrayBuffer = await f.arrayBuffer();
+                  const base64 = btoa(
+                    new Uint8Array(arrayBuffer).reduce(
+                      (data, byte) => data + String.fromCharCode(byte),
+                      ""
+                    )
+                  );
+                  setFile({ base64, name: f.name });
+                }}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Posting Date</Label>
+              <Input
+                type="date"
+                value={postingDate}
+                onChange={(e) => setPostingDate(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Currency</Label>
+              <Input
+                value={currency}
+                onChange={(e) => setCurrency(e.target.value.toUpperCase())}
+                maxLength={3}
+              />
+            </div>
+            <div className="flex items-center gap-2 pb-0.5">
+              <input
+                type="checkbox"
+                id="payroll-auto-post"
+                checked={autoPost}
+                onChange={(e) => setAutoPost(e.target.checked)}
+                className="rounded border-border"
+              />
+              <Label htmlFor="payroll-auto-post" className="text-xs cursor-pointer">
+                Auto-post to GL
+              </Label>
+            </div>
+          </div>
+          <Button
+            variant="teal"
+            size="sm"
+            disabled={importMut.isPending || !file}
+            onClick={() => importMut.mutate()}
+          >
+            {importMut.isPending ? (
+              <>
+                <Loader2 className="mr-1 h-3 w-3 animate-spin" /> Importing…
+              </>
+            ) : (
+              <>
+                <Upload className="mr-1 h-3 w-3" /> Import Payroll
+              </>
+            )}
+          </Button>
+          {importMut.isSuccess && (
+            <p className="text-xs text-emerald-700">
+              Payroll import complete: {((importMut.data as any)?.data as any)?.created ?? 0}{" "}
+              journals created.
+            </p>
+          )}
+          {importMut.isError && (
+            <p className="text-xs text-destructive">{(importMut.error as Error).message}</p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3 flex flex-row items-center justify-between">
+          <CardTitle className="text-sm">Payroll Import History</CardTitle>
+          <p className="text-[10px] text-muted-foreground">
+            Also accepts API push:{" "}
+            <code className="bg-muted px-1 rounded">POST /api/v1/integration/payroll/import</code>
+          </p>
+        </CardHeader>
+        <CardContent>
+          {logsQ.isLoading ? (
+            <p className="text-xs text-muted-foreground">Loading…</p>
+          ) : (logsQ.data ?? []).length === 0 ? (
+            <p className="text-xs text-muted-foreground">No payroll imports yet.</p>
+          ) : (
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {(logsQ.data ?? []).slice(0, 20).map((log: Record<string, unknown>) => (
+                <div
+                  key={log.id as string}
+                  className="flex items-center justify-between text-xs border-b border-slate-100 pb-1.5"
+                >
+                  <div>
+                    <span className="font-mono">{(log.businessDate as string)?.split("T")[0]}</span>
+                    <span className="ml-2 text-muted-foreground">
+                      {log.recordsImported as number} imported / {log.recordsFailed as number}{" "}
+                      failed
+                    </span>
+                  </div>
+                  <StatusBadge status={log.status as string} />
+                </div>
+              ))}
+            </div>
           )}
         </CardContent>
       </Card>
@@ -675,8 +1100,10 @@ export default function IntegrationsPage() {
       {/* Tab content */}
       <div>
         {activeTab === "opera" && <OperaTab />}
+        {activeTab === "simphony" && <SimphonyTab />}
         {activeTab === "skyjana" && <SkyJanaTab />}
         {activeTab === "bank" && <BankTab />}
+        {activeTab === "payroll" && <PayrollTab />}
         {activeTab === "mappings" && <MappingsTab />}
       </div>
 
@@ -694,7 +1121,8 @@ export default function IntegrationsPage() {
           <div>
             <p className="text-sm font-semibold text-(--color-primary)">Transfer Desk</p>
             <p className="text-xs text-muted-foreground">
-              Build field transformation rules for Opera Cloud & Sky Jana imports (Infor SunSystems–style interface definitions)
+              Build field transformation rules for Opera Cloud & Sky Jana imports (Infor
+              SunSystems–style interface definitions)
             </p>
           </div>
         </div>

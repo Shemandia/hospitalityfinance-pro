@@ -3,6 +3,8 @@ import type { PrismaClient } from "@prisma/client";
 import { ZodError } from "zod";
 import { prisma } from "../../db/prisma.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
+import { requireRole } from "../../middleware/requireRole.js";
+import { requireWriteAccess } from "../../middleware/requireWriteAccess.js";
 import { periodListQuerySchema, periodCreateSchema } from "./types.js";
 import { PeriodService, PeriodServiceError } from "./service.js";
 
@@ -12,7 +14,9 @@ function mapError(reply: FastifyReply, error: unknown) {
   if (error instanceof ZodError) {
     return reply.code(400).send({
       data: null,
-      errors: [{ code: "VALIDATION_ERROR", message: error.issues.map((issue) => issue.message).join("; ") }]
+      errors: [
+        { code: "VALIDATION_ERROR", message: error.issues.map((issue) => issue.message).join("; ") }
+      ]
     });
   }
 
@@ -43,11 +47,7 @@ function requireEntityId(entityId: string | undefined): string {
 
 function requireUserId(sub: unknown): string {
   if (typeof sub !== "string" || sub.length === 0) {
-    throw new PeriodServiceError(
-      "PERIOD_USER_CONTEXT_REQUIRED",
-      "Token subject is required.",
-      401
-    );
+    throw new PeriodServiceError("PERIOD_USER_CONTEXT_REQUIRED", "Token subject is required.", 401);
   }
   return sub;
 }
@@ -56,6 +56,7 @@ export async function registerPeriodRouter(app: FastifyInstance): Promise<void> 
   app.register(
     async (router) => {
       router.addHook("preHandler", requireAuth);
+      router.addHook("preHandler", requireWriteAccess);
 
       router.post("/periods", async (request, reply) => {
         try {
@@ -100,16 +101,20 @@ export async function registerPeriodRouter(app: FastifyInstance): Promise<void> 
         }
       });
 
-      router.post<{ Params: { id: string } }>("/periods/:id/reopen", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const userRoles = request.user?.roles ?? [];
-          const data = await periodService.reopenPeriod(entityId, request.params.id, userRoles);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.post<{ Params: { id: string } }>(
+        "/periods/:id/reopen",
+        { preHandler: [requireRole(["SUPERADMIN"])] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const userRoles = request.user?.roles ?? [];
+            const data = await periodService.reopenPeriod(entityId, request.params.id, userRoles);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
     },
     { prefix: "/api/v1" }
   );

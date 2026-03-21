@@ -4,8 +4,13 @@ import { useCallback, useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useApiContext } from "../../../../../components/use-api-context";
 import {
-  previewCOAImport, executeCOAImport, getExcelSheetNames,
-  type COAPreviewResult, type COAImportResult, type COAPreviewRow, type COAFileInput,
+  previewCOAImport,
+  executeCOAImport,
+  getExcelSheetNames,
+  type COAPreviewResult,
+  type COAImportResult,
+  type COAPreviewRow,
+  type COAFileInput
 } from "../../../../../lib/gl-api";
 import { Button } from "../../../../../components/ui/button";
 import { Badge } from "../../../../../components/ui/badge";
@@ -14,20 +19,35 @@ import { Label } from "../../../../../components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../../../components/ui/card";
 import { Separator } from "../../../../../components/ui/separator";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
 } from "../../../../../components/ui/table";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
 } from "../../../../../components/ui/select";
 import {
-  Upload, FileSpreadsheet, CheckCircle, AlertTriangle, XCircle,
-  ArrowRight, Download, RefreshCw,
+  Upload,
+  FileSpreadsheet,
+  CheckCircle,
+  AlertTriangle,
+  XCircle,
+  ArrowRight,
+  Download,
+  RefreshCw
 } from "lucide-react";
 
 const EXCEL_EXTENSIONS = [".xlsx", ".xls", ".xlsm"];
 
 function isExcelFile(name: string) {
-  return EXCEL_EXTENSIONS.some(ext => name.toLowerCase().endsWith(ext));
+  return EXCEL_EXTENSIONS.some((ext) => name.toLowerCase().endsWith(ext));
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
@@ -70,20 +90,26 @@ function StepIndicator({ current }: { current: number }) {
   const steps = [
     { num: 1, label: "Upload" },
     { num: 2, label: "Preview" },
-    { num: 3, label: "Import" },
+    { num: 3, label: "Import" }
   ];
   return (
     <div className="flex items-center gap-2 mb-6">
       {steps.map((s, i) => (
         <div key={s.num} className="flex items-center gap-2">
-          <div className={`h-8 w-8 rounded-full flex items-center justify-center text-sm font-medium ${
-            current === s.num ? "bg-(--color-primary) text-white" :
-            current > s.num ? "bg-emerald-600 text-white" :
-            "bg-muted text-muted-foreground"
-          }`}>
+          <div
+            className={`h-8 w-8 rounded-full flex items-center justify-center text-sm font-medium ${
+              current === s.num
+                ? "bg-(--color-primary) text-white"
+                : current > s.num
+                  ? "bg-emerald-600 text-white"
+                  : "bg-muted text-muted-foreground"
+            }`}
+          >
             {current > s.num ? <CheckCircle className="h-4 w-4" /> : s.num}
           </div>
-          <span className={`text-sm ${current >= s.num ? "font-medium" : "text-muted-foreground"}`}>{s.label}</span>
+          <span className={`text-sm ${current >= s.num ? "font-medium" : "text-muted-foreground"}`}>
+            {s.label}
+          </span>
           {i < steps.length - 1 && <ArrowRight className="h-4 w-4 text-muted-foreground mx-2" />}
         </div>
       ))}
@@ -94,14 +120,21 @@ function StepIndicator({ current }: { current: number }) {
 // ── Status badge ──────────────────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: COAPreviewRow["status"] }) {
-  const conf: Record<string, { variant: "default" | "success" | "secondary" | "destructive"; label: string }> = {
+  const conf: Record<
+    string,
+    { variant: "default" | "success" | "secondary" | "destructive"; label: string }
+  > = {
     new: { variant: "success", label: "New" },
     update: { variant: "default", label: "Update" },
     exists: { variant: "secondary", label: "Exists" },
-    error: { variant: "destructive", label: "Error" },
+    error: { variant: "destructive", label: "Error" }
   };
   const c = conf[status] ?? conf.error;
-  return <Badge variant={c.variant} className="text-[10px]">{c.label}</Badge>;
+  return (
+    <Badge variant={c.variant} className="text-[10px]">
+      {c.label}
+    </Badge>
+  );
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
@@ -135,51 +168,60 @@ export default function COAImportPage() {
 
   // ── File handling ─────────────────────────────────────────────────────
 
-  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setFileName(file.name);
-    setPreview(null);
-    setImportResult(null);
-    setPreviewError(null);
-    setSheetNames([]);
-    setSheetName("");
+  const handleFileSelect = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      setFileName(file.name);
+      setPreview(null);
+      setImportResult(null);
+      setPreviewError(null);
+      setSheetNames([]);
+      setSheetName("");
 
-    const excel = isExcelFile(file.name);
-    setIsExcel(excel);
+      const excel = isExcelFile(file.name);
+      setIsExcel(excel);
 
-    if (excel) {
-      // Read as ArrayBuffer → base64
-      setFileContent("");
-      const buffer = await file.arrayBuffer();
-      const b64 = arrayBufferToBase64(buffer);
-      setFileBase64(b64);
+      if (excel) {
+        // Read as ArrayBuffer → base64
+        setFileContent("");
+        const buffer = await file.arrayBuffer();
+        const b64 = arrayBufferToBase64(buffer);
+        setFileBase64(b64);
 
-      // Fetch sheet names
-      if (apiContext) {
-        try {
-          const res = await getExcelSheetNames(apiContext, b64);
-          const names = res.data as unknown as string[];
-          setSheetNames(names);
-          if (names.length === 1) setSheetName(names[0]);
-        } catch {
-          // non-fatal — user can still try preview
+        // Fetch sheet names
+        if (apiContext) {
+          try {
+            const res = await getExcelSheetNames(apiContext, b64);
+            const names = res.data as unknown as string[];
+            setSheetNames(names);
+            if (names.length === 1) setSheetName(names[0]);
+          } catch {
+            // non-fatal — user can still try preview
+          }
         }
+      } else {
+        // CSV/text — read as text
+        setFileBase64("");
+        const reader = new FileReader();
+        reader.onload = () => setFileContent(reader.result as string);
+        reader.readAsText(file);
       }
-    } else {
-      // CSV/text — read as text
-      setFileBase64("");
-      const reader = new FileReader();
-      reader.onload = () => setFileContent(reader.result as string);
-      reader.readAsText(file);
-    }
-  }, [apiContext]);
+    },
+    [apiContext]
+  );
 
   function downloadTemplate() {
     const blob = new Blob([SAMPLE_CSV], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
-    const a = Object.assign(document.createElement("a"), { href: url, download: "coa-template.csv" });
-    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    const a = Object.assign(document.createElement("a"), {
+      href: url,
+      download: "coa-template.csv"
+    });
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   }
 
   // ── Preview mutation ──────────────────────────────────────────────────
@@ -191,18 +233,19 @@ export default function COAImportPage() {
       setPreviewError(null);
       setStep(2);
     },
-    onError: (e: Error) => setPreviewError(e.message),
+    onError: (e: Error) => setPreviewError(e.message)
   });
 
   // ── Execute mutation ──────────────────────────────────────────────────
 
   const executeMutation = useMutation({
-    mutationFn: () => executeCOAImport(apiContext!, fileInput, { updateExisting, reactivateInactive, skipErrors }),
+    mutationFn: () =>
+      executeCOAImport(apiContext!, fileInput, { updateExisting, reactivateInactive, skipErrors }),
     onSuccess: (res) => {
       setImportResult(res.data as unknown as COAImportResult);
       setStep(3);
     },
-    onError: (e: Error) => setPreviewError(e.message),
+    onError: (e: Error) => setPreviewError(e.message)
   });
 
   // ── Filtered rows ─────────────────────────────────────────────────────
@@ -211,11 +254,12 @@ export default function COAImportPage() {
     if (!preview) return [];
     if (!search.trim()) return preview.rows;
     const q = search.toLowerCase();
-    return preview.rows.filter(r =>
-      r.code.toLowerCase().includes(q) ||
-      r.name.toLowerCase().includes(q) ||
-      r.type.toLowerCase().includes(q) ||
-      r.status.includes(q)
+    return preview.rows.filter(
+      (r) =>
+        r.code.toLowerCase().includes(q) ||
+        r.name.toLowerCase().includes(q) ||
+        r.type.toLowerCase().includes(q) ||
+        r.status.includes(q)
     );
   }, [preview, search]);
 
@@ -266,19 +310,32 @@ export default function COAImportPage() {
               <Button variant="outline" size="sm" onClick={downloadTemplate} className="gap-1">
                 <Download className="h-3.5 w-3.5" /> Download Template
               </Button>
-              <span className="text-xs text-muted-foreground">Use this template as a starting point</span>
+              <span className="text-xs text-muted-foreground">
+                Use this template as a starting point
+              </span>
             </div>
 
             <Separator />
 
             <div className="space-y-2">
               <Label>Select file (CSV or Excel)</Label>
-              <Input type="file" accept=".csv,.txt,.tsv,.xlsx,.xls,.xlsm" onChange={handleFileSelect} />
+              <Input
+                type="file"
+                accept=".csv,.txt,.tsv,.xlsx,.xls,.xlsm"
+                onChange={handleFileSelect}
+              />
               {fileName && (
                 <p className="text-xs text-muted-foreground">
                   Selected: <span className="font-mono font-medium">{fileName}</span>
-                  {!isExcel && fileContent && <span> — {fileContent.split("\n").filter(l => l.trim()).length - 1} data rows</span>}
-                  {isExcel && fileBase64 && <span> — Excel file ({Math.round(fileBase64.length * 0.75 / 1024)} KB)</span>}
+                  {!isExcel && fileContent && (
+                    <span>
+                      {" "}
+                      — {fileContent.split("\n").filter((l) => l.trim()).length - 1} data rows
+                    </span>
+                  )}
+                  {isExcel && fileBase64 && (
+                    <span> — Excel file ({Math.round((fileBase64.length * 0.75) / 1024)} KB)</span>
+                  )}
                 </p>
               )}
             </div>
@@ -292,8 +349,10 @@ export default function COAImportPage() {
                     <SelectValue placeholder="Choose a sheet…" />
                   </SelectTrigger>
                   <SelectContent>
-                    {sheetNames.map(name => (
-                      <SelectItem key={name} value={name}>{name}</SelectItem>
+                    {sheetNames.map((name) => (
+                      <SelectItem key={name} value={name}>
+                        {name}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -304,28 +363,56 @@ export default function COAImportPage() {
             <div className="rounded-md bg-muted/50 p-3">
               <p className="text-xs font-medium mb-1.5">Expected CSV columns:</p>
               <div className="flex flex-wrap gap-1.5">
-                {["code *", "name *", "type *", "normalBalance", "allowPosting", "parentCode", "level", "usaliCategory", "usaliDepartment"].map(col => (
-                  <span key={col} className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-mono ${col.includes("*") ? "bg-primary/10 font-semibold" : "bg-muted"}`}>
+                {[
+                  "code *",
+                  "name *",
+                  "type *",
+                  "normalBalance",
+                  "allowPosting",
+                  "parentCode",
+                  "level",
+                  "usaliCategory",
+                  "usaliDepartment"
+                ].map((col) => (
+                  <span
+                    key={col}
+                    className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-mono ${col.includes("*") ? "bg-primary/10 font-semibold" : "bg-muted"}`}
+                  >
                     {col}
                   </span>
                 ))}
               </div>
               <p className="text-[10px] text-muted-foreground mt-1.5">
-                Type: ASSET | LIABILITY | EQUITY | REVENUE | EXPENSE — Header names are flexible (e.g. &quot;Account Code&quot;, &quot;Acct Name&quot;, &quot;GL Code&quot; all work).
+                Type: ASSET | LIABILITY | EQUITY | REVENUE | EXPENSE — Header names are flexible
+                (e.g. &quot;Account Code&quot;, &quot;Acct Name&quot;, &quot;GL Code&quot; all
+                work).
               </p>
             </div>
 
             {previewError && (
-              <p className="text-sm text-destructive rounded border border-destructive/30 bg-destructive/10 px-3 py-2">{previewError}</p>
+              <p className="text-sm text-destructive rounded border border-destructive/30 bg-destructive/10 px-3 py-2">
+                {previewError}
+              </p>
             )}
 
             <div className="flex justify-end">
               <Button
                 onClick={() => previewMutation.mutate()}
-                disabled={!hasFile || !apiContext || previewMutation.isPending || (isExcel && sheetNames.length > 1 && !sheetName)}
+                disabled={
+                  !hasFile ||
+                  !apiContext ||
+                  previewMutation.isPending ||
+                  (isExcel && sheetNames.length > 1 && !sheetName)
+                }
                 className="gap-1"
               >
-                {previewMutation.isPending ? "Parsing…" : <><Upload className="h-3.5 w-3.5" /> Preview Import</>}
+                {previewMutation.isPending ? (
+                  "Parsing…"
+                ) : (
+                  <>
+                    <Upload className="h-3.5 w-3.5" /> Preview Import
+                  </>
+                )}
               </Button>
             </div>
           </CardContent>
@@ -351,7 +438,11 @@ export default function COAImportPage() {
             </Card>
             <Card className="p-4">
               <p className="text-xs text-muted-foreground">Errors</p>
-              <p className={`text-xl font-bold mt-0.5 ${preview.errorRows > 0 ? "text-destructive" : ""}`}>{preview.errorRows}</p>
+              <p
+                className={`text-xl font-bold mt-0.5 ${preview.errorRows > 0 ? "text-destructive" : ""}`}
+              >
+                {preview.errorRows}
+              </p>
             </Card>
           </div>
 
@@ -368,7 +459,12 @@ export default function COAImportPage() {
                   {preview.errors.slice(0, 20).map((e, i) => (
                     <div key={i} className="flex gap-2">
                       <span className="text-muted-foreground shrink-0">Row {e.row}:</span>
-                      <span>{e.column && <span className="font-mono text-muted-foreground">{e.column} — </span>}{e.message}</span>
+                      <span>
+                        {e.column && (
+                          <span className="font-mono text-muted-foreground">{e.column} — </span>
+                        )}
+                        {e.message}
+                      </span>
                     </div>
                   ))}
                   {preview.errors.length > 20 && (
@@ -385,7 +481,7 @@ export default function COAImportPage() {
               <CardTitle className="text-base">Account Preview</CardTitle>
               <Input
                 value={search}
-                onChange={e => setSearch(e.target.value)}
+                onChange={(e) => setSearch(e.target.value)}
                 placeholder="Filter by code, name, type…"
                 className="max-w-xs"
               />
@@ -409,27 +505,57 @@ export default function COAImportPage() {
                   </TableHeader>
                   <TableBody>
                     {filteredRows.length === 0 ? (
-                      <TableRow><TableCell colSpan={10} className="text-center py-8 text-muted-foreground">No rows to show</TableCell></TableRow>
-                    ) : filteredRows.map(row => (
-                      <TableRow key={row.rowNumber} className={row.status === "error" ? "bg-destructive/5" : row.status === "new" ? "bg-emerald-50/50" : ""}>
-                        <TableCell className="text-xs text-muted-foreground">{row.rowNumber}</TableCell>
-                        <TableCell><StatusBadge status={row.status} /></TableCell>
-                        <TableCell className="font-mono text-xs font-medium">{row.code}</TableCell>
-                        <TableCell className="text-sm">{row.name}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{row.type}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{row.normalBalance === "DEBIT" ? "DR" : "CR"}</TableCell>
-                        <TableCell className="text-xs text-center">{row.level}</TableCell>
-                        <TableCell className="text-xs font-mono text-muted-foreground">{row.parentCode || "—"}</TableCell>
-                        <TableCell className="text-xs">{row.allowPosting ? "Yes" : "No"}</TableCell>
-                        <TableCell className="text-xs">
-                          {row.issues.length > 0 && (
-                            <span className="text-amber-700" title={row.issues.join("\n")}>
-                              <AlertTriangle className="h-3 w-3 inline mr-0.5" />{row.issues.length}
-                            </span>
-                          )}
+                      <TableRow>
+                        <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                          No rows to show
                         </TableCell>
                       </TableRow>
-                    ))}
+                    ) : (
+                      filteredRows.map((row) => (
+                        <TableRow
+                          key={row.rowNumber}
+                          className={
+                            row.status === "error"
+                              ? "bg-destructive/5"
+                              : row.status === "new"
+                                ? "bg-emerald-50/50"
+                                : ""
+                          }
+                        >
+                          <TableCell className="text-xs text-muted-foreground">
+                            {row.rowNumber}
+                          </TableCell>
+                          <TableCell>
+                            <StatusBadge status={row.status} />
+                          </TableCell>
+                          <TableCell className="font-mono text-xs font-medium">
+                            {row.code}
+                          </TableCell>
+                          <TableCell className="text-sm">{row.name}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {row.type}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {row.normalBalance === "DEBIT" ? "DR" : "CR"}
+                          </TableCell>
+                          <TableCell className="text-xs text-center">{row.level}</TableCell>
+                          <TableCell className="text-xs font-mono text-muted-foreground">
+                            {row.parentCode || "—"}
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            {row.allowPosting ? "Yes" : "No"}
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            {row.issues.length > 0 && (
+                              <span className="text-amber-700" title={row.issues.join("\n")}>
+                                <AlertTriangle className="h-3 w-3 inline mr-0.5" />
+                                {row.issues.length}
+                              </span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
                   </TableBody>
                 </Table>
               </div>
@@ -442,34 +568,57 @@ export default function COAImportPage() {
               <p className="text-sm font-medium">Import Options</p>
               <div className="flex flex-wrap gap-4">
                 <label className="flex items-center gap-1.5 text-sm cursor-pointer select-none">
-                  <input type="checkbox" checked={updateExisting} onChange={e => setUpdateExisting(e.target.checked)} className="h-4 w-4 rounded border-border" />
+                  <input
+                    type="checkbox"
+                    checked={updateExisting}
+                    onChange={(e) => setUpdateExisting(e.target.checked)}
+                    className="h-4 w-4 rounded border-border"
+                  />
                   Update existing accounts
                 </label>
                 <label className="flex items-center gap-1.5 text-sm cursor-pointer select-none">
-                  <input type="checkbox" checked={reactivateInactive} onChange={e => setReactivateInactive(e.target.checked)} className="h-4 w-4 rounded border-border" />
+                  <input
+                    type="checkbox"
+                    checked={reactivateInactive}
+                    onChange={(e) => setReactivateInactive(e.target.checked)}
+                    className="h-4 w-4 rounded border-border"
+                  />
                   Reactivate inactive accounts
                 </label>
                 <label className="flex items-center gap-1.5 text-sm cursor-pointer select-none">
-                  <input type="checkbox" checked={skipErrors} onChange={e => setSkipErrors(e.target.checked)} className="h-4 w-4 rounded border-border" />
+                  <input
+                    type="checkbox"
+                    checked={skipErrors}
+                    onChange={(e) => setSkipErrors(e.target.checked)}
+                    className="h-4 w-4 rounded border-border"
+                  />
                   Skip error rows (don't abort)
                 </label>
               </div>
 
               {previewError && (
-                <p className="text-sm text-destructive rounded border border-destructive/30 bg-destructive/10 px-3 py-2">{previewError}</p>
+                <p className="text-sm text-destructive rounded border border-destructive/30 bg-destructive/10 px-3 py-2">
+                  {previewError}
+                </p>
               )}
 
               <div className="flex justify-between items-center pt-2">
-                <Button variant="outline" onClick={() => setStep(1)}>Back</Button>
+                <Button variant="outline" onClick={() => setStep(1)}>
+                  Back
+                </Button>
                 <Button
                   onClick={() => executeMutation.mutate()}
                   disabled={!apiContext || executeMutation.isPending || preview.validRows === 0}
                   className="gap-1"
                 >
-                  {executeMutation.isPending
-                    ? "Importing…"
-                    : <><CheckCircle className="h-3.5 w-3.5" /> Import {preview.validRows} Account{preview.validRows !== 1 ? "s" : ""}</>
-                  }
+                  {executeMutation.isPending ? (
+                    "Importing…"
+                  ) : (
+                    <>
+                      <CheckCircle className="h-3.5 w-3.5" /> Import {preview.validRows} Account
+                      {preview.validRows !== 1 ? "s" : ""}
+                    </>
+                  )}
                 </Button>
               </div>
             </CardContent>
@@ -506,7 +655,8 @@ export default function COAImportPage() {
                 <Separator />
                 <div>
                   <p className="text-sm font-medium text-destructive mb-2 flex items-center gap-1.5">
-                    <XCircle className="h-4 w-4" /> {importResult.errors.length} Error{importResult.errors.length !== 1 ? "s" : ""}
+                    <XCircle className="h-4 w-4" /> {importResult.errors.length} Error
+                    {importResult.errors.length !== 1 ? "s" : ""}
                   </p>
                   <div className="max-h-32 overflow-y-auto space-y-0.5 text-xs">
                     {importResult.errors.map((e, i) => (
@@ -525,7 +675,11 @@ export default function COAImportPage() {
               <Button variant="outline" onClick={reset} className="gap-1">
                 <RefreshCw className="h-3.5 w-3.5" /> Import Another File
               </Button>
-              <Button variant="outline" onClick={() => window.location.href = "/gl/accounts"} className="gap-1">
+              <Button
+                variant="outline"
+                onClick={() => (window.location.href = "/gl/accounts")}
+                className="gap-1"
+              >
                 View Chart of Accounts
               </Button>
             </div>

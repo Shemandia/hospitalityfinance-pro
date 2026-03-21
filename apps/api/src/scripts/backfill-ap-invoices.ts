@@ -18,24 +18,24 @@ async function main() {
       where: {
         entityId: ENTITY_ID,
         status: "POSTED",
-        reference: { startsWith: "PROC-" },
+        reference: { startsWith: "PROC-" }
       },
       include: {
         lines: {
           include: {
-            account: { select: { id: true, code: true, name: true, type: true } },
-          },
+            account: { select: { id: true, code: true, name: true, type: true } }
+          }
         },
-        period: true,
+        period: true
       },
-      orderBy: { createdAt: "asc" },
+      orderBy: { createdAt: "asc" }
     });
 
     console.log(`Found ${journals.length} PROC journals to check`);
 
     // Find the entity user for createdById
     const entityUser = await prisma.entityUser.findFirst({
-      where: { entityId: ENTITY_ID },
+      where: { entityId: ENTITY_ID }
     });
     if (!entityUser) throw new Error("No entity user found");
 
@@ -77,7 +77,7 @@ async function main() {
 
         // Find or create Supplier record
         let supplier = await prisma.supplier.findUnique({
-          where: { entityId_code: { entityId: ENTITY_ID, code: vendorCode } },
+          where: { entityId_code: { entityId: ENTITY_ID, code: vendorCode } }
         });
 
         if (!supplier) {
@@ -88,8 +88,8 @@ async function main() {
               code: vendorCode,
               currency: journal.functionalCurrency || "TZS",
               paymentTermsDays: 30,
-              isActive: true,
-            },
+              isActive: true
+            }
           });
           console.log(`  + Supplier: ${vendorCode} (${vendorName})`);
           suppliersCreated++;
@@ -101,9 +101,9 @@ async function main() {
             entityId_supplierId_invoiceNumber: {
               entityId: ENTITY_ID,
               supplierId: supplier.id,
-              invoiceNumber,
-            },
-          },
+              invoiceNumber
+            }
+          }
         });
 
         if (existingInvoice) {
@@ -124,7 +124,7 @@ async function main() {
           quantity: new Prisma.Decimal(1),
           unitPrice: ed.debit,
           amount: ed.debit,
-          glAccountId: ed.accountId,
+          glAccountId: ed.accountId
         }));
 
         // Fallback: if no expense lines, use the vendor credit amount
@@ -134,7 +134,7 @@ async function main() {
             quantity: new Prisma.Decimal(1),
             unitPrice: vendorLine.credit,
             amount: vendorLine.credit,
-            glAccountId: undefined,
+            glAccountId: undefined
           });
         }
 
@@ -162,9 +162,9 @@ async function main() {
             createdById: entityUser.userId,
             approvedById: entityUser.userId,
             lines: {
-              create: invoiceLines,
-            },
-          },
+              create: invoiceLines
+            }
+          }
         });
 
         console.log(`  + Invoice: ${invoiceNumber} → ${vendorCode} (${vendorName}) — ${netAmount}`);

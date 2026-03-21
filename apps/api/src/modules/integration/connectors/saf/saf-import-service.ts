@@ -347,7 +347,7 @@ export async function executeSAFImport(
 
     // Map sourceModule to JournalSource enum
     const sourceMap: Record<string, string> = {
-      PROC: "MANUAL",
+      PROC: "AP",
       OPERA: "PMS",
       PMS: "PMS",
       POS: "POS",

@@ -4,18 +4,10 @@ import { executeSqlFile } from "./sqlRunner.js";
 
 async function main() {
   if (!process.env.DATABASE_URL) {
-    throw new Error(
-      "DATABASE_URL is required. Set it before running db:setup:audit."
-    );
+    throw new Error("DATABASE_URL is required. Set it before running db:setup:audit.");
   }
 
-  const sqlPath = join(
-    process.cwd(),
-    "src",
-    "db",
-    "sql",
-    "audit-events-immutable.sql"
-  );
+  const sqlPath = join(process.cwd(), "src", "db", "sql", "audit-events-immutable.sql");
   const statementCount = await executeSqlFile(prisma, sqlPath);
   console.log(`Audit immutability trigger configured (${statementCount} statements).`);
 }

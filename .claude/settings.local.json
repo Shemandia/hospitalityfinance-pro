@@ -92,7 +92,27 @@
       "Bash(npx next lint)",
       "Bash(npx tsx src/scripts/fix-payment-run-balances.ts)",
       "Bash(npx tsx src/scripts/recalculate-balances.ts)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(npm install:*)",
+      "Bash(pnpm remove:*)",
+      "Bash(pnpm add:*)",
+      "Bash(pnpm ls:*)",
+      "Bash(tasklist)",
+      "Bash(curl -s http://localhost:4000/api/v1/budget/definitions -H 'Authorization: Bearer dev-token' -H 'X-Entity-ID: 00000000-0000-0000-0000-000000000002')",
+      "Bash(curl -s http://localhost:4000/api/v1/fx/currencies -H 'Authorization: Bearer dev-token' -H 'X-Entity-ID: 00000000-0000-0000-0000-000000000002')",
+      "Bash(cp \"d:/FINANCIAL PROJECT/HospitalityFinance/hospitalityfinance-pro/.claude/worktrees/nifty-stonebraker/apps/api/src/modules/ap/number-to-words.ts\" \"d:/FINANCIAL PROJECT/HospitalityFinance/hospitalityfinance-pro/apps/api/src/modules/ap/number-to-words.ts\")",
+      "Bash(cp \"d:/FINANCIAL PROJECT/HospitalityFinance/hospitalityfinance-pro/.claude/worktrees/nifty-stonebraker/apps/api/src/modules/ap/payment-voucher-pdf.ts\" \"d:/FINANCIAL PROJECT/HospitalityFinance/hospitalityfinance-pro/apps/api/src/modules/ap/payment-voucher-pdf.ts\")",
+      "Bash(npx prisma@5 migrate dev --schema src/db/schema.prisma --name add_entity_address_fields)",
+      "Bash(npx prisma@5 db push --schema src/db/schema.prisma --accept-data-loss)",
+      "Bash(npx prisma@5 db push --schema src/db/schema.prisma)",
+      "Bash(npx prettier:*)",
+      "Bash(curl -s http://localhost:4000/api/v1/gl/accounts -H 'Authorization: Bearer dev-token' -H 'X-Entity-ID: 00000000-0000-0000-0000-000000000002')",
+      "Bash(taskkill //PID 29752 //F)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:4000/api/v1/gl/accounts -H \"Authorization: Bearer dev-token\" -H \"X-Entity-ID: 00000000-0000-0000-0000-000000000002\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:4000/api/v1/gl/approval-rules -H \"Authorization: Bearer dev-token\" -H \"X-Entity-ID: 00000000-0000-0000-0000-000000000002\")",
+      "Bash(taskkill //PID 32748 //F)",
+      "Bash(cat:*)",
+      "Bash(ls:*)"
     ]
   }
 }

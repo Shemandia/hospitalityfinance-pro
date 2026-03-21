@@ -61,11 +61,7 @@ export class PeriodService {
     }
 
     if (period.status !== "OPEN") {
-      throw new PeriodServiceError(
-        "PERIOD_NOT_OPEN",
-        "Only OPEN periods can be closed.",
-        409
-      );
+      throw new PeriodServiceError("PERIOD_NOT_OPEN", "Only OPEN periods can be closed.", 409);
     }
 
     const updated = await this.prisma.period.update({
@@ -96,11 +92,7 @@ export class PeriodService {
     }
 
     if (period.status !== "CLOSED") {
-      throw new PeriodServiceError(
-        "PERIOD_NOT_CLOSED",
-        "Only CLOSED periods can be locked.",
-        409
-      );
+      throw new PeriodServiceError("PERIOD_NOT_CLOSED", "Only CLOSED periods can be locked.", 409);
     }
 
     return this.prisma.period.update({

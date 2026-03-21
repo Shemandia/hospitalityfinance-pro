@@ -12,7 +12,7 @@ import {
   Search,
   X,
   Building2,
-  BookOpen,
+  BookOpen
 } from "lucide-react";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../../components/ui/card";
@@ -25,14 +25,14 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
+  DialogFooter
 } from "../../../../components/ui/dialog";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
+  SelectValue
 } from "../../../../components/ui/select";
 import {
   getGLAccountTree,
@@ -43,7 +43,7 @@ import {
   type AccountType,
   type NormalBalance,
   type AccountFormPayload,
-  type ApiContext,
+  type ApiContext
 } from "../../../../lib/gl-api";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -55,20 +55,23 @@ const TYPE_LABELS: Record<AccountType, string> = {
   LIABILITY: "Liabilities",
   EQUITY: "Equity",
   REVENUE: "Revenue",
-  EXPENSE: "Expenses",
+  EXPENSE: "Expenses"
 };
 
-const TYPE_BADGE_VARIANT: Record<AccountType, "info" | "success" | "warning" | "teal" | "secondary"> = {
+const TYPE_BADGE_VARIANT: Record<
+  AccountType,
+  "info" | "success" | "warning" | "teal" | "secondary"
+> = {
   ASSET: "info",
   LIABILITY: "warning",
   EQUITY: "teal",
   REVENUE: "success",
-  EXPENSE: "secondary",
+  EXPENSE: "secondary"
 };
 
 const NORMAL_BALANCE_LABELS: Record<NormalBalance, string> = {
   DEBIT: "Debit",
-  CREDIT: "Credit",
+  CREDIT: "Credit"
 };
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
@@ -102,7 +105,7 @@ const EMPTY_FORM = {
   isControlAccount: false,
   parentId: "NONE",
   usaliCategory: "",
-  usaliDepartment: "",
+  usaliDepartment: ""
 };
 
 // ── Account form dialog ───────────────────────────────────────────────────────
@@ -117,7 +120,7 @@ function AccountFormDialog({
   onClose,
   onSubmit,
   isSubmitting,
-  error,
+  error
 }: {
   open: boolean;
   mode: "create" | "edit";
@@ -131,18 +134,23 @@ function AccountFormDialog({
   const [form, setForm] = useState<FormState>(initial);
 
   // Reset form when the dialog opens with a new initial value
-  useEffect(() => { setForm(initial); }, [initial]);
+  useEffect(() => {
+    setForm(initial);
+  }, [initial]);
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
-  const parentOptions = flatAccounts.filter(
-    (a) => a.type === form.type
-  );
+  const parentOptions = flatAccounts.filter((a) => a.type === form.type);
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) onClose();
+      }}
+    >
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>{mode === "create" ? "New Account" : "Edit Account"}</DialogTitle>
@@ -152,7 +160,9 @@ function AccountFormDialog({
           {/* Code + Name */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label htmlFor="ac-code">Account Code <span className="text-destructive">*</span></Label>
+              <Label htmlFor="ac-code">
+                Account Code <span className="text-destructive">*</span>
+              </Label>
               <Input
                 id="ac-code"
                 value={form.code}
@@ -162,7 +172,9 @@ function AccountFormDialog({
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="ac-name">Account Name <span className="text-destructive">*</span></Label>
+              <Label htmlFor="ac-name">
+                Account Name <span className="text-destructive">*</span>
+              </Label>
               <Input
                 id="ac-name"
                 value={form.name}
@@ -176,7 +188,9 @@ function AccountFormDialog({
           {/* Type + Normal Balance */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>Account Type <span className="text-destructive">*</span></Label>
+              <Label>
+                Account Type <span className="text-destructive">*</span>
+              </Label>
               <Select
                 value={form.type}
                 onValueChange={(v) => {
@@ -189,13 +203,17 @@ function AccountFormDialog({
                 </SelectTrigger>
                 <SelectContent>
                   {ACCOUNT_TYPES.map((t) => (
-                    <SelectItem key={t} value={t}>{TYPE_LABELS[t]}</SelectItem>
+                    <SelectItem key={t} value={t}>
+                      {TYPE_LABELS[t]}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>Normal Balance <span className="text-destructive">*</span></Label>
+              <Label>
+                Normal Balance <span className="text-destructive">*</span>
+              </Label>
               <Select
                 value={form.normalBalance}
                 onValueChange={(v) => set("normalBalance", v as NormalBalance)}
@@ -214,10 +232,7 @@ function AccountFormDialog({
           {/* Parent account */}
           <div className="space-y-1.5">
             <Label>Parent Account</Label>
-            <Select
-              value={form.parentId}
-              onValueChange={(v) => set("parentId", v)}
-            >
+            <Select value={form.parentId} onValueChange={(v) => set("parentId", v)}>
               <SelectTrigger>
                 <SelectValue placeholder="No parent (top-level)" />
               </SelectTrigger>
@@ -305,7 +320,7 @@ function DeleteDialog({
   onClose,
   onConfirm,
   isDeleting,
-  error,
+  error
 }: {
   account: AccountNode | null;
   onClose: () => void;
@@ -316,20 +331,28 @@ function DeleteDialog({
   if (!account) return null;
   const hasChildren = account.children.length > 0;
   return (
-    <Dialog open={!!account} onOpenChange={(v) => { if (!v) onClose(); }}>
+    <Dialog
+      open={!!account}
+      onOpenChange={(v) => {
+        if (!v) onClose();
+      }}
+    >
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle>Deactivate Account</DialogTitle>
         </DialogHeader>
         <div className="space-y-3 py-2">
           <p className="text-sm text-muted-foreground">
-            Deactivate <span className="font-semibold text-foreground">{account.code} — {account.name}</span>?
-            The account will be hidden from pickers but historical data is preserved.
+            Deactivate{" "}
+            <span className="font-semibold text-foreground">
+              {account.code} — {account.name}
+            </span>
+            ? The account will be hidden from pickers but historical data is preserved.
           </p>
           {hasChildren && (
             <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
-              This account has {countDescendants(account)} child account{countDescendants(account) !== 1 ? "s" : ""}.
-              They will not be affected.
+              This account has {countDescendants(account)} child account
+              {countDescendants(account) !== 1 ? "s" : ""}. They will not be affected.
             </p>
           )}
           {error && (
@@ -339,7 +362,9 @@ function DeleteDialog({
           )}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={isDeleting}>Cancel</Button>
+          <Button variant="outline" onClick={onClose} disabled={isDeleting}>
+            Cancel
+          </Button>
           <Button variant="destructive" onClick={onConfirm} disabled={isDeleting}>
             {isDeleting ? "Deactivating…" : "Deactivate"}
           </Button>
@@ -357,7 +382,7 @@ function AccountRow({
   expanded,
   onToggle,
   onEdit,
-  onDelete,
+  onDelete
 }: {
   node: AccountNode;
   depth: number;
@@ -415,7 +440,9 @@ function AccountRow({
 
         {/* Normal balance */}
         <td className="py-2 px-3 text-sm text-center">
-          <span className={`text-xs font-medium ${node.normalBalance === "DEBIT" ? "text-sky-700" : "text-violet-700"}`}>
+          <span
+            className={`text-xs font-medium ${node.normalBalance === "DEBIT" ? "text-sky-700" : "text-violet-700"}`}
+          >
             {NORMAL_BALANCE_LABELS[node.normalBalance as NormalBalance]}
           </span>
         </td>
@@ -423,16 +450,20 @@ function AccountRow({
         {/* Allow posting */}
         <td className="py-2 px-3 text-sm text-center">
           {node.allowPosting ? (
-            <span className="inline-block w-2 h-2 rounded-full bg-emerald-500" title="Posting allowed" />
+            <span
+              className="inline-block w-2 h-2 rounded-full bg-emerald-500"
+              title="Posting allowed"
+            />
           ) : (
-            <span className="inline-block w-2 h-2 rounded-full bg-muted-foreground/30" title="No posting" />
+            <span
+              className="inline-block w-2 h-2 rounded-full bg-muted-foreground/30"
+              title="No posting"
+            />
           )}
         </td>
 
         {/* USALI */}
-        <td className="py-2 px-3 text-xs text-muted-foreground">
-          {node.usaliCategory ?? "—"}
-        </td>
+        <td className="py-2 px-3 text-xs text-muted-foreground">{node.usaliCategory ?? "—"}</td>
 
         {/* Actions */}
         <td className="py-2 px-3 text-right">
@@ -460,17 +491,19 @@ function AccountRow({
       </tr>
 
       {/* Children */}
-      {isExpanded && hasChildren && node.children.map((child) => (
-        <AccountRow
-          key={child.id}
-          node={child}
-          depth={depth + 1}
-          expanded={expanded}
-          onToggle={onToggle}
-          onEdit={onEdit}
-          onDelete={onDelete}
-        />
-      ))}
+      {isExpanded &&
+        hasChildren &&
+        node.children.map((child) => (
+          <AccountRow
+            key={child.id}
+            node={child}
+            depth={depth + 1}
+            expanded={expanded}
+            onToggle={onToggle}
+            onEdit={onEdit}
+            onDelete={onDelete}
+          />
+        ))}
     </>
   );
 }
@@ -485,7 +518,7 @@ function TypeSection({
   onToggle,
   onToggleSection,
   onEdit,
-  onDelete,
+  onDelete
 }: {
   type: AccountType;
   roots: AccountNode[];
@@ -500,10 +533,7 @@ function TypeSection({
 
   return (
     <>
-      <tr
-        className="bg-muted/60 cursor-pointer select-none"
-        onClick={() => onToggleSection(type)}
-      >
+      <tr className="bg-muted/60 cursor-pointer select-none" onClick={() => onToggleSection(type)}>
         <td colSpan={6} className="py-2 px-3">
           <div className="flex items-center gap-2">
             {sectionExpanded ? (
@@ -514,21 +544,24 @@ function TypeSection({
             <Badge variant={TYPE_BADGE_VARIANT[type]} className="text-xs">
               {TYPE_LABELS[type]}
             </Badge>
-            <span className="text-xs text-muted-foreground">{totalCount} account{totalCount !== 1 ? "s" : ""}</span>
+            <span className="text-xs text-muted-foreground">
+              {totalCount} account{totalCount !== 1 ? "s" : ""}
+            </span>
           </div>
         </td>
       </tr>
-      {sectionExpanded && roots.map((root) => (
-        <AccountRow
-          key={root.id}
-          node={root}
-          depth={0}
-          expanded={expanded}
-          onToggle={onToggle}
-          onEdit={onEdit}
-          onDelete={onDelete}
-        />
-      ))}
+      {sectionExpanded &&
+        roots.map((root) => (
+          <AccountRow
+            key={root.id}
+            node={root}
+            depth={0}
+            expanded={expanded}
+            onToggle={onToggle}
+            onEdit={onEdit}
+            onDelete={onDelete}
+          />
+        ))}
     </>
   );
 }
@@ -540,15 +573,22 @@ export default function AccountsPage() {
   const queryClient = useQueryClient();
 
   const ctx: ApiContext | null = session?.user?.entityIds?.[0]
-    ? { accessToken: (session as unknown as { accessToken?: string }).accessToken ?? "dev-token", entityId: session.user.entityIds[0] }
+    ? {
+        accessToken: (session as unknown as { accessToken?: string }).accessToken ?? "dev-token",
+        entityId: session.user.entityIds[0]
+      }
     : null;
 
   // ── Data ──────────────────────────────────────────────────────────────────
 
-  const { data: treeRes, isLoading, error: loadError } = useQuery({
+  const {
+    data: treeRes,
+    isLoading,
+    error: loadError
+  } = useQuery({
     queryKey: ["gl-accounts", ctx?.entityId],
     queryFn: () => getGLAccountTree(ctx!),
-    enabled: !!ctx,
+    enabled: !!ctx
   });
 
   const tree = treeRes?.data ?? [];
@@ -637,7 +677,7 @@ export default function AccountsPage() {
       LIABILITY: [],
       EQUITY: [],
       REVENUE: [],
-      EXPENSE: [],
+      EXPENSE: []
     };
     for (const root of filteredTree) {
       if (root.type in groups) {
@@ -658,10 +698,13 @@ export default function AccountsPage() {
         normalBalance: form.normalBalance,
         allowPosting: form.allowPosting,
         isControlAccount: form.isControlAccount,
-        level: form.parentId === "NONE" ? 1 : (flatAccounts.find((a) => a.id === form.parentId)?.level ?? 0) + 1,
+        level:
+          form.parentId === "NONE"
+            ? 1
+            : (flatAccounts.find((a) => a.id === form.parentId)?.level ?? 0) + 1,
         ...(form.parentId !== "NONE" ? { parentId: form.parentId } : {}),
         ...(form.usaliCategory.trim() ? { usaliCategory: form.usaliCategory.trim() } : {}),
-        ...(form.usaliDepartment.trim() ? { usaliDepartment: form.usaliDepartment.trim() } : {}),
+        ...(form.usaliDepartment.trim() ? { usaliDepartment: form.usaliDepartment.trim() } : {})
       };
       return createGLAccount(ctx!, payload);
     },
@@ -670,7 +713,7 @@ export default function AccountsPage() {
       setDialogMode(null);
       setFormError(null);
     },
-    onError: (err: Error) => setFormError(err.message),
+    onError: (err: Error) => setFormError(err.message)
   });
 
   const updateMutation = useMutation({
@@ -682,10 +725,13 @@ export default function AccountsPage() {
         normalBalance: form.normalBalance,
         allowPosting: form.allowPosting,
         isControlAccount: form.isControlAccount,
-        level: form.parentId === "NONE" ? 1 : (flatAccounts.find((a) => a.id === form.parentId)?.level ?? 0) + 1,
+        level:
+          form.parentId === "NONE"
+            ? 1
+            : (flatAccounts.find((a) => a.id === form.parentId)?.level ?? 0) + 1,
         ...(form.parentId !== "NONE" ? { parentId: form.parentId } : { parentId: undefined }),
         usaliCategory: form.usaliCategory.trim() || undefined,
-        usaliDepartment: form.usaliDepartment.trim() || undefined,
+        usaliDepartment: form.usaliDepartment.trim() || undefined
       };
       return updateGLAccount(ctx!, id, payload);
     },
@@ -695,7 +741,7 @@ export default function AccountsPage() {
       setEditTarget(null);
       setFormError(null);
     },
-    onError: (err: Error) => setFormError(err.message),
+    onError: (err: Error) => setFormError(err.message)
   });
 
   const deleteMutation = useMutation({
@@ -705,7 +751,7 @@ export default function AccountsPage() {
       setDeleteTarget(null);
       setDeleteError(null);
     },
-    onError: (err: Error) => setDeleteError(err.message),
+    onError: (err: Error) => setDeleteError(err.message)
   });
 
   // ── Dialog helpers ────────────────────────────────────────────────────────
@@ -747,7 +793,7 @@ export default function AccountsPage() {
       isControlAccount: false,
       parentId: editTarget.parentId ?? "NONE",
       usaliCategory: editTarget.usaliCategory ?? "",
-      usaliDepartment: editTarget.usaliDepartment ?? "",
+      usaliDepartment: editTarget.usaliDepartment ?? ""
     };
   }, [editTarget]);
 
@@ -856,7 +902,10 @@ export default function AccountsPage() {
                     <>
                       {searchResults.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="py-12 text-center text-sm text-muted-foreground">
+                          <td
+                            colSpan={6}
+                            className="py-12 text-center text-sm text-muted-foreground"
+                          >
                             No accounts match &ldquo;{search}&rdquo;
                           </td>
                         </tr>
@@ -887,13 +936,18 @@ export default function AccountsPage() {
                                 >
                                   <BookOpen className="h-3.5 w-3.5" />
                                 </Link>
-                                <Badge variant={TYPE_BADGE_VARIANT[node.type]} className="text-[10px] px-1.5 py-0 ml-1">
+                                <Badge
+                                  variant={TYPE_BADGE_VARIANT[node.type]}
+                                  className="text-[10px] px-1.5 py-0 ml-1"
+                                >
                                   {TYPE_LABELS[node.type]}
                                 </Badge>
                               </span>
                             </td>
                             <td className="py-2 px-3 text-sm text-center">
-                              <span className={`text-xs font-medium ${node.normalBalance === "DEBIT" ? "text-sky-700" : "text-violet-700"}`}>
+                              <span
+                                className={`text-xs font-medium ${node.normalBalance === "DEBIT" ? "text-sky-700" : "text-violet-700"}`}
+                              >
                                 {NORMAL_BALANCE_LABELS[node.normalBalance as NormalBalance]}
                               </span>
                             </td>
@@ -909,14 +963,22 @@ export default function AccountsPage() {
                             </td>
                             <td className="py-2 px-3 text-right">
                               <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEdit(node)}>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 w-7 p-0"
+                                  onClick={() => openEdit(node)}
+                                >
                                   <Pencil className="h-3.5 w-3.5" />
                                 </Button>
                                 <Button
                                   variant="ghost"
                                   size="sm"
                                   className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-                                  onClick={() => { setDeleteError(null); setDeleteTarget(node); }}
+                                  onClick={() => {
+                                    setDeleteError(null);
+                                    setDeleteTarget(node);
+                                  }}
                                 >
                                   <Trash2 className="h-3.5 w-3.5" />
                                 </Button>
@@ -929,23 +991,27 @@ export default function AccountsPage() {
                   )}
 
                   {/* Tree mode — grouped by type */}
-                  {searchResults === null && ACCOUNT_TYPES.map((type) => {
-                    const roots = rootsByType[type];
-                    if (roots.length === 0) return null;
-                    return (
-                      <TypeSection
-                        key={type}
-                        type={type}
-                        roots={roots}
-                        expanded={expanded}
-                        sectionExpanded={sectionExpanded.has(type)}
-                        onToggle={toggleRow}
-                        onToggleSection={toggleSection}
-                        onEdit={openEdit}
-                        onDelete={(node) => { setDeleteError(null); setDeleteTarget(node); }}
-                      />
-                    );
-                  })}
+                  {searchResults === null &&
+                    ACCOUNT_TYPES.map((type) => {
+                      const roots = rootsByType[type];
+                      if (roots.length === 0) return null;
+                      return (
+                        <TypeSection
+                          key={type}
+                          type={type}
+                          roots={roots}
+                          expanded={expanded}
+                          sectionExpanded={sectionExpanded.has(type)}
+                          onToggle={toggleRow}
+                          onToggleSection={toggleSection}
+                          onEdit={openEdit}
+                          onDelete={(node) => {
+                            setDeleteError(null);
+                            setDeleteTarget(node);
+                          }}
+                        />
+                      );
+                    })}
 
                   {/* Empty state */}
                   {searchResults === null && flatAccounts.length === 0 && !isLoading && (
@@ -969,7 +1035,10 @@ export default function AccountsPage() {
           mode={dialogMode}
           initial={formInitial}
           flatAccounts={flatAccounts}
-          onClose={() => { setDialogMode(null); setFormError(null); }}
+          onClose={() => {
+            setDialogMode(null);
+            setFormError(null);
+          }}
           onSubmit={handleFormSubmit}
           isSubmitting={createMutation.isPending || updateMutation.isPending}
           error={formError}

@@ -9,7 +9,7 @@ export interface SkyJanaSftpConfig {
   username: string;
   password?: string;
   privateKey?: string;
-  inboundPath: string;  // Path on SFTP where Sky Jana drops files (GRN, invoices)
+  inboundPath: string; // Path on SFTP where Sky Jana drops files (GRN, invoices)
   outboundPath: string; // Path on SFTP where we upload PO acknowledgements
 }
 
@@ -53,7 +53,9 @@ export class SkyJanaSftpClientWrapper {
 
   /** Lists inbound files. Default pattern matches .txt and .saf (SAF flat files). */
   async listInboundFiles(pattern?: RegExp): Promise<string[]> {
-    const list: Array<{ type: string; name: string }> = await this.sftp.list(this.config.inboundPath);
+    const list: Array<{ type: string; name: string }> = await this.sftp.list(
+      this.config.inboundPath
+    );
     const files = list
       .filter((f: { type: string }) => f.type === "-")
       .map((f: { name: string }) => f.name);

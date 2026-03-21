@@ -4,7 +4,7 @@ import { Prisma, PrismaClient } from "@prisma/client";
 // Parses SWIFT MT940 bank statement format (colon-tag based)
 
 export interface MT940Transaction {
-  valueDate: string;   // YYYYMMDD
+  valueDate: string; // YYYYMMDD
   bookingDate: string; // MMDD (relative to statement date)
   debitCredit: "D" | "C" | "RD" | "RC";
   currency: string;
@@ -68,15 +68,20 @@ export function parseMT940(raw: string): MT940Statement[] {
     const txBlocks: string[] = [];
 
     // Find all :61: blocks and associated :86: narrative
-    const allTxMatches = [...block.matchAll(/:61:(\d{6})(\d{4})?(C|D|RC|RD)([A-Z]?)([0-9,]+)([A-Z]{4})([^\r\n]*)/g)];
+    const allTxMatches = [
+      ...block.matchAll(/:61:(\d{6})(\d{4})?(C|D|RC|RD)([A-Z]?)([0-9,]+)([A-Z]{4})([^\r\n]*)/g)
+    ];
     for (let i = 0; i < allTxMatches.length; i++) {
       const start = allTxMatches[i].index ?? 0;
-      const end = i + 1 < allTxMatches.length ? (allTxMatches[i + 1].index ?? block.length) : block.length;
+      const end =
+        i + 1 < allTxMatches.length ? (allTxMatches[i + 1].index ?? block.length) : block.length;
       txBlocks.push(block.slice(start, end));
     }
 
     for (const txBlock of txBlocks) {
-      const m = txBlock.match(/:61:(\d{6})(\d{0,4})?(C|D|RC|RD)([A-Z]?)([0-9,]+)([A-Z]{4})([^\r\n]*)/);
+      const m = txBlock.match(
+        /:61:(\d{6})(\d{0,4})?(C|D|RC|RD)([A-Z]?)([0-9,]+)([A-Z]{4})([^\r\n]*)/
+      );
       if (!m) continue;
 
       const narrativeMatch = txBlock.match(/:86:([^:]*)/s);
@@ -211,15 +216,14 @@ async function importMT940Statement(
 ): Promise<BankImportResult> {
   // Resolve the GL bank account by code (bankAccountRef) or fallback
   const bankAccount = await prisma.account.findFirst({
-    where: { entityId, code: bankAccountRef, isActive: true },
+    where: { entityId, code: bankAccountRef, isActive: true }
   });
   if (!bankAccount) {
     throw new Error(`Bank account with code "${bankAccountRef}" not found for entity.`);
   }
 
-  const statementDate = stmt.transactions.length > 0
-    ? parseMT940Date(stmt.transactions[0].valueDate)
-    : new Date();
+  const statementDate =
+    stmt.transactions.length > 0 ? parseMT940Date(stmt.transactions[0].valueDate) : new Date();
 
   const bankStatement = await prisma.bankStatement.create({
     data: {
@@ -228,7 +232,7 @@ async function importMT940Statement(
       statementDate,
       currency: stmt.currency,
       openingBalance: new Prisma.Decimal(stmt.openingBalance),
-      closingBalance: new Prisma.Decimal(stmt.closingBalance),
+      closingBalance: new Prisma.Decimal(stmt.closingBalance)
     }
   });
 
@@ -261,7 +265,7 @@ async function importMT940Statement(
         description: tx.narrative || tx.reference,
         amount: isDebit ? amount.neg() : amount,
         currency: stmt.currency,
-        reference: tx.reference,
+        reference: tx.reference
       }
     });
     transactionsImported++;
@@ -282,7 +286,7 @@ async function importOFXStatement(
 ): Promise<BankImportResult> {
   // Resolve the GL bank account by code
   const bankAccount = await prisma.account.findFirst({
-    where: { entityId, code: bankAccountRef, isActive: true },
+    where: { entityId, code: bankAccountRef, isActive: true }
   });
   if (!bankAccount) {
     throw new Error(`Bank account with code "${bankAccountRef}" not found for entity.`);
@@ -297,7 +301,7 @@ async function importOFXStatement(
       statementDate: startDate,
       currency: stmt.currency,
       openingBalance: new Prisma.Decimal(0),
-      closingBalance: new Prisma.Decimal(0),
+      closingBalance: new Prisma.Decimal(0)
     }
   });
 
@@ -324,7 +328,7 @@ async function importOFXStatement(
         description: tx.memo || tx.name,
         amount,
         currency: stmt.currency,
-        reference: tx.fitId,
+        reference: tx.fitId
       }
     });
     transactionsImported++;

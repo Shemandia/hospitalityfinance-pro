@@ -8,7 +8,13 @@ import { getPeriods, getTrialBalance } from "../../../../lib/gl-api";
 import { Button } from "../../../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../../components/ui/card";
 import { Badge } from "../../../../components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../../components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../../../../components/ui/select";
 
 type TrialBalanceRow = {
   accountId: string;
@@ -29,14 +35,14 @@ const TYPE_LABELS: Record<string, string> = {
   LIABILITY: "Liabilities",
   EQUITY: "Equity",
   REVENUE: "Revenue",
-  EXPENSE: "Expenses",
+  EXPENSE: "Expenses"
 };
 const TYPE_COLORS: Record<string, string> = {
   ASSET: "text-blue-700",
   LIABILITY: "text-red-700",
   EQUITY: "text-purple-700",
   REVENUE: "text-emerald-700",
-  EXPENSE: "text-amber-700",
+  EXPENSE: "text-amber-700"
 };
 
 function fmt(v: string | number) {
@@ -50,10 +56,28 @@ function sectionTotal(rows: TrialBalanceRow[], field: keyof TrialBalanceRow) {
 }
 
 function exportToCsv(rows: TrialBalanceRow[]) {
-  const headers = ["Account Code", "Account Name", "Type", "Opening Balance", "Period Debits", "Period Credits", "Closing Balance", "Comparative Closing"];
-  const body = rows.map(r =>
-    [r.accountCode, r.accountName, r.accountType, r.openingBalance, r.periodDebits, r.periodCredits, r.closingBalance, r.comparativeClosingBalance ?? ""]
-      .map(f => `"${String(f).replace(/"/g, '""')}"`)
+  const headers = [
+    "Account Code",
+    "Account Name",
+    "Type",
+    "Opening Balance",
+    "Period Debits",
+    "Period Credits",
+    "Closing Balance",
+    "Comparative Closing"
+  ];
+  const body = rows.map((r) =>
+    [
+      r.accountCode,
+      r.accountName,
+      r.accountType,
+      r.openingBalance,
+      r.periodDebits,
+      r.periodCredits,
+      r.closingBalance,
+      r.comparativeClosingBalance ?? ""
+    ]
+      .map((f) => `"${String(f).replace(/"/g, '""')}"`)
       .join(",")
   );
   const csv = [headers.join(","), ...body].join("\n");
@@ -69,8 +93,10 @@ function exportToCsv(rows: TrialBalanceRow[]) {
 }
 
 function exportToExcel(rows: TrialBalanceRow[], periodName: string) {
-  const tableRows = rows.map(r =>
-    `<tr>
+  const tableRows = rows
+    .map(
+      (r) =>
+        `<tr>
       <td>${r.accountCode}</td>
       <td>${r.accountName}</td>
       <td>${r.accountType}</td>
@@ -80,7 +106,8 @@ function exportToExcel(rows: TrialBalanceRow[], periodName: string) {
       <td style="mso-number-format:'#,##0.00'">${r.closingBalance}</td>
       <td style="mso-number-format:'#,##0.00'">${r.comparativeClosingBalance ?? ""}</td>
     </tr>`
-  ).join("");
+    )
+    .join("");
 
   const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">
 <head><meta charset="UTF-8">
@@ -116,12 +143,18 @@ function SectionRow({ row, hasComparative }: { row: TrialBalanceRow; hasComparat
   const indent = Math.max(0, (row.accountLevel ?? 1) - 1) * 16;
   return (
     <tr className="hover:bg-muted/30 transition-colors">
-      <td className="py-1.5 px-3 text-sm font-mono text-muted-foreground w-24">{row.accountCode}</td>
-      <td className="py-1.5 px-3 text-sm" style={{ paddingLeft: `${12 + indent}px` }}>{row.accountName}</td>
+      <td className="py-1.5 px-3 text-sm font-mono text-muted-foreground w-24">
+        {row.accountCode}
+      </td>
+      <td className="py-1.5 px-3 text-sm" style={{ paddingLeft: `${12 + indent}px` }}>
+        {row.accountName}
+      </td>
       <td className="py-1.5 px-3 text-sm text-right tabular-nums">{fmt(row.openingBalance)}</td>
       <td className="py-1.5 px-3 text-sm text-right tabular-nums">{fmt(row.periodDebits)}</td>
       <td className="py-1.5 px-3 text-sm text-right tabular-nums">{fmt(row.periodCredits)}</td>
-      <td className="py-1.5 px-3 text-sm text-right tabular-nums font-medium">{fmt(row.closingBalance)}</td>
+      <td className="py-1.5 px-3 text-sm text-right tabular-nums font-medium">
+        {fmt(row.closingBalance)}
+      </td>
       {hasComparative && (
         <td className="py-1.5 px-3 text-sm text-right tabular-nums text-muted-foreground">
           {row.comparativeClosingBalance != null ? fmt(row.comparativeClosingBalance) : "–"}
@@ -134,7 +167,7 @@ function SectionRow({ row, hasComparative }: { row: TrialBalanceRow; hasComparat
 function SectionGroup({
   type,
   rows,
-  hasComparative,
+  hasComparative
 }: {
   type: string;
   rows: TrialBalanceRow[];
@@ -147,20 +180,22 @@ function SectionGroup({
     opening: sectionTotal(rows, "openingBalance"),
     debits: sectionTotal(rows, "periodDebits"),
     credits: sectionTotal(rows, "periodCredits"),
-    closing: sectionTotal(rows, "closingBalance"),
+    closing: sectionTotal(rows, "closingBalance")
   };
 
   return (
     <>
       <tr
         className="cursor-pointer select-none bg-muted/50 hover:bg-muted/70 transition-colors"
-        onClick={() => setOpen(o => !o)}
+        onClick={() => setOpen((o) => !o)}
       >
         <td colSpan={hasComparative ? 7 : 6} className="py-2 px-3">
           <div className="flex items-center gap-2">
-            {open
-              ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-              : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
+            {open ? (
+              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+            )}
             <span className={`text-sm font-semibold ${TYPE_COLORS[type] ?? "text-foreground"}`}>
               {TYPE_LABELS[type] ?? type}
             </span>
@@ -169,18 +204,27 @@ function SectionGroup({
         </td>
       </tr>
 
-      {open && rows.map(row => (
-        <SectionRow key={row.accountId} row={row} hasComparative={hasComparative} />
-      ))}
+      {open &&
+        rows.map((row) => (
+          <SectionRow key={row.accountId} row={row} hasComparative={hasComparative} />
+        ))}
 
       <tr className="bg-muted/20 border-t border-border/60">
         <td className="py-1.5 px-3 text-xs text-muted-foreground font-medium" colSpan={2}>
           Total {TYPE_LABELS[type] ?? type}
         </td>
-        <td className="py-1.5 px-3 text-xs text-right tabular-nums font-semibold">{fmt(totals.opening)}</td>
-        <td className="py-1.5 px-3 text-xs text-right tabular-nums font-semibold">{fmt(totals.debits)}</td>
-        <td className="py-1.5 px-3 text-xs text-right tabular-nums font-semibold">{fmt(totals.credits)}</td>
-        <td className="py-1.5 px-3 text-xs text-right tabular-nums font-semibold">{fmt(totals.closing)}</td>
+        <td className="py-1.5 px-3 text-xs text-right tabular-nums font-semibold">
+          {fmt(totals.opening)}
+        </td>
+        <td className="py-1.5 px-3 text-xs text-right tabular-nums font-semibold">
+          {fmt(totals.debits)}
+        </td>
+        <td className="py-1.5 px-3 text-xs text-right tabular-nums font-semibold">
+          {fmt(totals.credits)}
+        </td>
+        <td className="py-1.5 px-3 text-xs text-right tabular-nums font-semibold">
+          {fmt(totals.closing)}
+        </td>
         {hasComparative && <td />}
       </tr>
     </>
@@ -200,7 +244,7 @@ export default function TrialBalancePage() {
       const r = await getPeriods(apiContext);
       return (r.data as unknown as Array<{ id: string; name: string; status: string }>) ?? [];
     },
-    enabled: Boolean(apiContext),
+    enabled: Boolean(apiContext)
   });
   const periods = periodsQuery.data ?? [];
 
@@ -211,19 +255,20 @@ export default function TrialBalancePage() {
       const r = await getTrialBalance(apiContext, {
         periodId,
         comparativePeriodId: comparativePeriodId || undefined,
-        showZeroBalances: showZero,
+        showZeroBalances: showZero
       });
       return {
         rows: (r.data as unknown as TrialBalanceRow[]) ?? [],
-        isBalanced: Boolean(r.meta?.isBalanced),
+        isBalanced: Boolean(r.meta?.isBalanced)
       };
     },
-    enabled: Boolean(apiContext && periodId),
+    enabled: Boolean(apiContext && periodId)
   });
 
   const rows = trialBalanceQuery.data?.rows ?? [];
   const isBalanced = trialBalanceQuery.data?.isBalanced ?? true;
-  const hasComparative = Boolean(comparativePeriodId) && rows.some(r => r.comparativeClosingBalance != null);
+  const hasComparative =
+    Boolean(comparativePeriodId) && rows.some((r) => r.comparativeClosingBalance != null);
 
   const grouped = useMemo(() => {
     const map = new Map<string, TrialBalanceRow[]>();
@@ -236,14 +281,17 @@ export default function TrialBalancePage() {
     return map;
   }, [rows]);
 
-  const grandTotals = useMemo(() => ({
-    opening: rows.reduce((s, r) => s + parseFloat(r.openingBalance), 0),
-    debits: rows.reduce((s, r) => s + parseFloat(r.periodDebits), 0),
-    credits: rows.reduce((s, r) => s + parseFloat(r.periodCredits), 0),
-    closing: rows.reduce((s, r) => s + parseFloat(r.closingBalance), 0),
-  }), [rows]);
+  const grandTotals = useMemo(
+    () => ({
+      opening: rows.reduce((s, r) => s + parseFloat(r.openingBalance), 0),
+      debits: rows.reduce((s, r) => s + parseFloat(r.periodDebits), 0),
+      credits: rows.reduce((s, r) => s + parseFloat(r.periodCredits), 0),
+      closing: rows.reduce((s, r) => s + parseFloat(r.closingBalance), 0)
+    }),
+    [rows]
+  );
 
-  const selectedPeriod = periods.find(p => p.id === periodId);
+  const selectedPeriod = periods.find((p) => p.id === periodId);
 
   return (
     <div className="space-y-4">
@@ -252,14 +300,20 @@ export default function TrialBalancePage() {
         <CardContent className="flex flex-wrap items-center gap-4 py-3 px-6">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium whitespace-nowrap">Period</span>
-            <Select value={periodId || "NONE"} onValueChange={v => setPeriodId(v === "NONE" ? "" : v)}>
+            <Select
+              value={periodId || "NONE"}
+              onValueChange={(v) => setPeriodId(v === "NONE" ? "" : v)}
+            >
               <SelectTrigger className="h-8 w-48">
                 <SelectValue placeholder="Select period" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="NONE">Select period</SelectItem>
-                {periods.map(p => (
-                  <SelectItem key={p.id} value={p.id}>{p.name}{p.status === "OPEN" ? " (Open)" : ""}</SelectItem>
+                {periods.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                    {p.status === "OPEN" ? " (Open)" : ""}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -267,14 +321,19 @@ export default function TrialBalancePage() {
 
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium whitespace-nowrap">Compare to</span>
-            <Select value={comparativePeriodId || "NONE"} onValueChange={v => setComparativePeriodId(v === "NONE" ? "" : v)}>
+            <Select
+              value={comparativePeriodId || "NONE"}
+              onValueChange={(v) => setComparativePeriodId(v === "NONE" ? "" : v)}
+            >
               <SelectTrigger className="h-8 w-48">
                 <SelectValue placeholder="None" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="NONE">None</SelectItem>
-                {periods.map(p => (
-                  <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                {periods.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -284,7 +343,7 @@ export default function TrialBalancePage() {
             <input
               type="checkbox"
               checked={showZero}
-              onChange={e => setShowZero(e.target.checked)}
+              onChange={(e) => setShowZero(e.target.checked)}
               className="rounded"
             />
             Show zero balances
@@ -320,11 +379,9 @@ export default function TrialBalancePage() {
             {isBalanced ? "Balanced" : "Not Balanced"}
           </Badge>
           <span className="text-sm text-muted-foreground">
-            Period Debits:{" "}
-            <strong className="text-foreground">{fmt(grandTotals.debits)}</strong>
+            Period Debits: <strong className="text-foreground">{fmt(grandTotals.debits)}</strong>
             {" · "}
-            Period Credits:{" "}
-            <strong className="text-foreground">{fmt(grandTotals.credits)}</strong>
+            Period Credits: <strong className="text-foreground">{fmt(grandTotals.credits)}</strong>
           </span>
           <span className="text-sm text-muted-foreground ml-auto">{rows.length} accounts</span>
         </div>
@@ -336,35 +393,55 @@ export default function TrialBalancePage() {
           <CardTitle className="text-primary text-base">
             Trial Balance
             {selectedPeriod && (
-              <Badge variant="info" className="ml-2 font-normal">{selectedPeriod.name}</Badge>
+              <Badge variant="info" className="ml-2 font-normal">
+                {selectedPeriod.name}
+              </Badge>
             )}
           </CardTitle>
         </CardHeader>
         <CardContent className="px-0 pb-0">
           {!periodId ? (
-            <p className="text-sm text-muted-foreground px-6 pb-6">Select a period to load the trial balance.</p>
+            <p className="text-sm text-muted-foreground px-6 pb-6">
+              Select a period to load the trial balance.
+            </p>
           ) : trialBalanceQuery.isLoading ? (
             <p className="text-sm text-muted-foreground px-6 pb-6">Loading…</p>
           ) : rows.length === 0 ? (
-            <p className="text-sm text-muted-foreground px-6 pb-6">No data for the selected period.</p>
+            <p className="text-sm text-muted-foreground px-6 pb-6">
+              No data for the selected period.
+            </p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-border bg-muted/30">
-                    <th className="py-2 px-3 text-xs font-semibold text-muted-foreground w-24">Code</th>
-                    <th className="py-2 px-3 text-xs font-semibold text-muted-foreground">Account</th>
-                    <th className="py-2 px-3 text-xs font-semibold text-muted-foreground text-right">Opening</th>
-                    <th className="py-2 px-3 text-xs font-semibold text-muted-foreground text-right">Debits</th>
-                    <th className="py-2 px-3 text-xs font-semibold text-muted-foreground text-right">Credits</th>
-                    <th className="py-2 px-3 text-xs font-semibold text-muted-foreground text-right">Closing</th>
+                    <th className="py-2 px-3 text-xs font-semibold text-muted-foreground w-24">
+                      Code
+                    </th>
+                    <th className="py-2 px-3 text-xs font-semibold text-muted-foreground">
+                      Account
+                    </th>
+                    <th className="py-2 px-3 text-xs font-semibold text-muted-foreground text-right">
+                      Opening
+                    </th>
+                    <th className="py-2 px-3 text-xs font-semibold text-muted-foreground text-right">
+                      Debits
+                    </th>
+                    <th className="py-2 px-3 text-xs font-semibold text-muted-foreground text-right">
+                      Credits
+                    </th>
+                    <th className="py-2 px-3 text-xs font-semibold text-muted-foreground text-right">
+                      Closing
+                    </th>
                     {hasComparative && (
-                      <th className="py-2 px-3 text-xs font-semibold text-muted-foreground text-right">Comparative</th>
+                      <th className="py-2 px-3 text-xs font-semibold text-muted-foreground text-right">
+                        Comparative
+                      </th>
                     )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/40">
-                  {TYPE_ORDER.map(type => (
+                  {TYPE_ORDER.map((type) => (
                     <SectionGroup
                       key={type}
                       type={type}
@@ -378,10 +455,18 @@ export default function TrialBalancePage() {
                     <td className="py-2.5 px-3 text-sm font-bold text-primary" colSpan={2}>
                       Grand Total
                     </td>
-                    <td className="py-2.5 px-3 text-sm text-right tabular-nums font-bold">{fmt(grandTotals.opening)}</td>
-                    <td className="py-2.5 px-3 text-sm text-right tabular-nums font-bold">{fmt(grandTotals.debits)}</td>
-                    <td className="py-2.5 px-3 text-sm text-right tabular-nums font-bold">{fmt(grandTotals.credits)}</td>
-                    <td className="py-2.5 px-3 text-sm text-right tabular-nums font-bold">{fmt(grandTotals.closing)}</td>
+                    <td className="py-2.5 px-3 text-sm text-right tabular-nums font-bold">
+                      {fmt(grandTotals.opening)}
+                    </td>
+                    <td className="py-2.5 px-3 text-sm text-right tabular-nums font-bold">
+                      {fmt(grandTotals.debits)}
+                    </td>
+                    <td className="py-2.5 px-3 text-sm text-right tabular-nums font-bold">
+                      {fmt(grandTotals.credits)}
+                    </td>
+                    <td className="py-2.5 px-3 text-sm text-right tabular-nums font-bold">
+                      {fmt(grandTotals.closing)}
+                    </td>
                     {hasComparative && <td />}
                   </tr>
                 </tfoot>

@@ -15,12 +15,13 @@ import { registerBudgetRouter } from "./modules/budget/router.js";
 import { registerConsolidationRouter } from "./modules/consolidation/router.js";
 import { registerIntegrationRouter } from "./modules/integration/router.js";
 import { registerKPIRouter } from "./modules/kpi/router.js";
+import { registerAdminRouter } from "./modules/admin/router.js";
 import authPlugin from "./plugins/auth.js";
 
 export async function createApp(): Promise<FastifyInstance> {
   const app = Fastify({
     logger: true,
-    bodyLimit: 10 * 1024 * 1024  // 10 MB for file imports
+    bodyLimit: 10 * 1024 * 1024 // 10 MB for file imports
   });
 
   await app.register(cors, {
@@ -58,12 +59,289 @@ export async function createApp(): Promise<FastifyInstance> {
     };
   });
 
+  // ── Entity CRUD ──────────────────────────────────────────────────────────────
+
   app.get("/api/v1/entities", { preHandler: [requireAuth] }, async (request) => {
-    const entities = await (prisma as any).entity.findMany({
-      select: { id: true, name: true, code: true, currency: true, parentId: true },
+    // Filter entities by user's JWT claim — only return entities the user has access to
+    const userEntityIds = (request.user as any)?.entityIds as string[] | undefined;
+    const where = userEntityIds && userEntityIds.length > 0 ? { id: { in: userEntityIds } } : {}; // superadmin (empty entityIds) sees all
+
+    const entities = await prisma.entity.findMany({
+      where,
+      include: {
+        parent: { select: { id: true, name: true } },
+        _count: { select: { children: true, users: true } }
+      },
       orderBy: { name: "asc" }
     });
-    return { data: entities, errors: [] };
+
+    // Also include child entities of granted parents (for GROUP → PROPERTY hierarchy)
+    const grantedIds = new Set(entities.map((e) => e.id));
+    const childEntities =
+      userEntityIds && userEntityIds.length > 0
+        ? await prisma.entity.findMany({
+            where: { parentId: { in: userEntityIds }, id: { notIn: [...grantedIds] } },
+            include: {
+              parent: { select: { id: true, name: true } },
+              _count: { select: { children: true, users: true } }
+            },
+            orderBy: { name: "asc" }
+          })
+        : [];
+
+    return { data: [...entities, ...childEntities], errors: [] };
+  });
+
+  app.get<{ Params: { id: string } }>(
+    "/api/v1/entities/:id",
+    { preHandler: [requireAuth] },
+    async (request, reply) => {
+      // Verify the user has access to this entity
+      const userEntityIds = (request.user as any)?.entityIds as string[] | undefined;
+      const requestedId = request.params.id;
+
+      if (userEntityIds && userEntityIds.length > 0) {
+        // Check direct access or parent-child lineage
+        const entity = await prisma.entity.findFirst({
+          where: { id: requestedId },
+          select: { id: true, parentId: true }
+        });
+        if (!entity)
+          return reply
+            .code(404)
+            .send({ data: null, errors: [{ code: "NOT_FOUND", message: "Entity not found." }] });
+
+        const hasAccess =
+          userEntityIds.includes(entity.id) ||
+          (entity.parentId && userEntityIds.includes(entity.parentId));
+        if (!hasAccess) {
+          return reply.code(403).send({
+            data: null,
+            errors: [{ code: "FORBIDDEN", message: "You do not have access to this entity." }]
+          });
+        }
+      }
+
+      const entity = await prisma.entity.findFirst({
+        where: { id: requestedId },
+        include: {
+          parent: { select: { id: true, name: true } },
+          children: {
+            select: { id: true, name: true, type: true, isActive: true, functionalCurrency: true }
+          },
+          _count: { select: { children: true, users: true, accounts: true, journals: true } }
+        }
+      });
+      if (!entity)
+        return reply
+          .code(404)
+          .send({ data: null, errors: [{ code: "NOT_FOUND", message: "Entity not found." }] });
+      return { data: entity, errors: [] };
+    }
+  );
+
+  app.post<{
+    Body: {
+      name: string;
+      code?: string;
+      type: "GROUP" | "PROPERTY";
+      parentId?: string | null;
+      functionalCurrency?: string;
+      reportingCurrency?: string;
+      timezone?: string;
+      countryCode: string;
+      address?: string;
+      city?: string;
+      postalCode?: string;
+      maxProperties?: number;
+    };
+  }>(
+    "/api/v1/entities",
+    { preHandler: [requireAuth, requireRole(["ADMIN", "SUPERADMIN"])] },
+    async (request, reply) => {
+      const b = request.body;
+
+      // Enforce property license limit when adding a PROPERTY to a GROUP
+      if (b.type === "PROPERTY" && b.parentId) {
+        const parentGroup = await (prisma.entity as any).findFirst({
+          where: { id: b.parentId, type: "GROUP" },
+          select: { id: true, maxProperties: true }
+        });
+
+        if (parentGroup && (parentGroup as any).maxProperties > 0) {
+          const currentCount = await prisma.entity.count({
+            where: { parentId: b.parentId, type: "PROPERTY", isActive: true }
+          });
+          if (currentCount >= (parentGroup as any).maxProperties) {
+            reply.code(403);
+            return {
+              data: null,
+              errors: [
+                {
+                  code: "PROPERTY_LIMIT_REACHED",
+                  message: `This group is licensed for ${(parentGroup as any).maxProperties} properties. Current: ${currentCount}. Contact support to upgrade your license.`
+                }
+              ]
+            };
+          }
+        }
+      }
+
+      const entity = await (prisma.entity as any).create({
+        data: {
+          name: b.name,
+          code: b.code ?? null,
+          type: b.type,
+          parentId: b.parentId ?? null,
+          functionalCurrency: b.functionalCurrency ?? "USD",
+          reportingCurrency: b.reportingCurrency ?? "USD",
+          timezone: b.timezone ?? "UTC",
+          countryCode: b.countryCode,
+          address: b.address,
+          city: b.city,
+          postalCode: b.postalCode,
+          maxProperties: b.type === "GROUP" ? (b.maxProperties ?? 0) : 0
+        }
+      });
+      // Auto-assign requesting user to new entity
+      const userId = (request as any).user?.id ?? (request as any).userId;
+      if (userId) {
+        await prisma.entityUser
+          .create({
+            data: { entityId: entity.id, userId, role: "ADMIN" }
+          })
+          .catch(() => {});
+      }
+      reply.code(201);
+      return { data: entity, errors: [] };
+    }
+  );
+
+  app.put<{
+    Params: { id: string };
+    Body: {
+      name?: string;
+      code?: string;
+      parentId?: string | null;
+      functionalCurrency?: string;
+      maxProperties?: number;
+      reportingCurrency?: string;
+      timezone?: string;
+      countryCode?: string;
+      address?: string | null;
+      city?: string | null;
+      postalCode?: string | null;
+      isActive?: boolean;
+    };
+  }>(
+    "/api/v1/entities/:id",
+    { preHandler: [requireAuth, requireRole(["ADMIN", "SUPERADMIN"])] },
+    async (request, reply) => {
+      const existing = await prisma.entity.findFirst({ where: { id: request.params.id } });
+      if (!existing)
+        return reply
+          .code(404)
+          .send({ data: null, errors: [{ code: "NOT_FOUND", message: "Entity not found." }] });
+
+      // Verify user has access to this entity
+      const userEntityIds = (request.user as any)?.entityIds as string[] | undefined;
+      if (userEntityIds && userEntityIds.length > 0) {
+        const hasAccess =
+          userEntityIds.includes(existing.id) ||
+          (existing.parentId && userEntityIds.includes(existing.parentId));
+        if (!hasAccess) {
+          return reply.code(403).send({
+            data: null,
+            errors: [{ code: "FORBIDDEN", message: "You do not have access to this entity." }]
+          });
+        }
+      }
+
+      const b = request.body;
+      const entity = await (prisma.entity as any).update({
+        where: { id: request.params.id },
+        data: {
+          ...(b.name !== undefined && { name: b.name }),
+          ...(b.code !== undefined && { code: b.code }),
+          ...(b.parentId !== undefined && { parentId: b.parentId }),
+          ...(b.functionalCurrency !== undefined && { functionalCurrency: b.functionalCurrency }),
+          ...(b.reportingCurrency !== undefined && { reportingCurrency: b.reportingCurrency }),
+          ...(b.timezone !== undefined && { timezone: b.timezone }),
+          ...(b.countryCode !== undefined && { countryCode: b.countryCode }),
+          ...(b.address !== undefined && { address: b.address }),
+          ...(b.city !== undefined && { city: b.city }),
+          ...(b.postalCode !== undefined && { postalCode: b.postalCode }),
+          ...(b.isActive !== undefined && { isActive: b.isActive }),
+          ...(b.maxProperties !== undefined &&
+            existing.type === "GROUP" && { maxProperties: b.maxProperties })
+        }
+      });
+      return { data: entity, errors: [] };
+    }
+  );
+
+  app.delete<{ Params: { id: string } }>(
+    "/api/v1/entities/:id",
+    { preHandler: [requireAuth, requireRole(["ADMIN", "SUPERADMIN"])] },
+    async (request, reply) => {
+      const existing = await prisma.entity.findFirst({
+        where: { id: request.params.id },
+        include: { _count: { select: { children: true, journals: true, accounts: true } } }
+      });
+      if (!existing)
+        return { data: null, errors: [{ code: "NOT_FOUND", message: "Entity not found." }] };
+      if (
+        existing._count.children > 0 ||
+        existing._count.journals > 0 ||
+        existing._count.accounts > 0
+      ) {
+        reply.code(409);
+        return {
+          data: null,
+          errors: [
+            {
+              code: "HAS_DEPENDENTS",
+              message: "Cannot delete entity with children, journals or accounts."
+            }
+          ]
+        };
+      }
+      await prisma.entityUser.deleteMany({ where: { entityId: request.params.id } });
+      await prisma.entity.delete({ where: { id: request.params.id } });
+      reply.code(204);
+      return;
+    }
+  );
+
+  // ── License Info ────────────────────────────────────────────────────────────
+
+  app.get("/api/v1/license", { preHandler: [requireAuth] }, async (request) => {
+    const userEntityIds = (request.user as any)?.entityIds as string[] | undefined;
+
+    // Find the user's GROUP entity (root of their hierarchy)
+    const groups = await (prisma.entity as any).findMany({
+      where: {
+        type: "GROUP",
+        ...(userEntityIds && userEntityIds.length > 0 ? { id: { in: userEntityIds } } : {})
+      },
+      select: { id: true, name: true, maxProperties: true }
+    });
+
+    const result = [];
+    for (const group of groups) {
+      const propertyCount = await prisma.entity.count({
+        where: { parentId: group.id, type: "PROPERTY", isActive: true }
+      });
+      const maxProperties = (group as any).maxProperties ?? 0;
+      result.push({
+        groupId: group.id,
+        groupName: group.name,
+        maxProperties: maxProperties === 0 ? "unlimited" : maxProperties,
+        currentProperties: propertyCount,
+        remaining: maxProperties === 0 ? "unlimited" : Math.max(0, maxProperties - propertyCount)
+      });
+    }
+    return { data: result, errors: [] };
   });
 
   app.get(
@@ -86,6 +364,7 @@ export async function createApp(): Promise<FastifyInstance> {
   await registerConsolidationRouter(app);
   await registerIntegrationRouter(app);
   await registerKPIRouter(app);
+  await registerAdminRouter(app);
 
   return app;
 }

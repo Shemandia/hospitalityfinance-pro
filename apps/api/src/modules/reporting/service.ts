@@ -44,15 +44,19 @@ export class ReportingService {
     });
 
     const queue = getReportQueue();
-    await queue.add("generate-report", { reportRunId: run.id }, {
-      attempts: 3,
-      backoff: {
-        type: "exponential",
-        delay: 5000
-      },
-      removeOnComplete: 100,
-      removeOnFail: 100
-    });
+    await queue.add(
+      "generate-report",
+      { reportRunId: run.id },
+      {
+        attempts: 3,
+        backoff: {
+          type: "exponential",
+          delay: 5000
+        },
+        removeOnComplete: 100,
+        removeOnFail: 100
+      }
+    );
 
     return run;
   }

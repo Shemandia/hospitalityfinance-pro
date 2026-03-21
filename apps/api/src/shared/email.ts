@@ -30,9 +30,7 @@ type ApprovalEmailPayload = {
   rejectUrl: string;
 };
 
-export async function sendApprovalEmail(
-  payload: ApprovalEmailPayload
-): Promise<void> {
+export async function sendApprovalEmail(payload: ApprovalEmailPayload): Promise<void> {
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.RESEND_FROM_EMAIL ?? "noreply@hospitalityfinancepro.com";
 

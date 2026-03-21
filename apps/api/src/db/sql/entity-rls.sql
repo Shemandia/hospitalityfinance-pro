@@ -48,11 +48,13 @@ DECLARE
   table_name text;
 BEGIN
   FOREACH table_name IN ARRAY ARRAY[
+    -- Core tenanted tables (original 17)
     'entity_users',
     'user_roles',
     'periods',
     'accounts',
     'journals',
+    'journal_types',
     'account_period_balances',
     'approval_rules',
     'journal_approvals',
@@ -64,10 +66,21 @@ BEGIN
     'ap_payments',
     'purchase_orders',
     'goods_received_notes',
-    'payment_runs'
+    'payment_runs',
+    -- Previously missing — added for full tenant isolation
+    'customers',
+    'ar_receipts',
+    'bank_statements',
+    'interface_definitions',
+    'connector_mappings',
+    'import_logs',
+    'pms_statistics',
+    'budget_definitions',
+    'consolidation_run_entities'
   ]
   LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', table_name);
+    EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', table_name);
     EXECUTE format('DROP POLICY IF EXISTS entity_scope_policy ON %I', table_name);
     EXECUTE format(
       'CREATE POLICY entity_scope_policy ON %I
@@ -77,3 +90,6 @@ BEGIN
     );
   END LOOP;
 END $$;
+
+-- Also enforce FORCE RLS on the entities table itself
+ALTER TABLE entities FORCE ROW LEVEL SECURITY;

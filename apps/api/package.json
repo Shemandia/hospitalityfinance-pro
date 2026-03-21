@@ -16,7 +16,8 @@
     "db:setup:audit": "tsx src/db/setupAuditImmutability.ts",
     "db:setup:rls": "tsx src/db/setupEntityRls.ts",
     "db:setup:performance": "tsx src/db/setupPerformance.ts",
-    "report:worker": "tsx src/jobs/report-generation-worker.ts"
+    "report:worker": "tsx src/jobs/report-generation-worker.ts",
+    "dunning:worker": "tsx src/jobs/dunning-worker.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.907.0",

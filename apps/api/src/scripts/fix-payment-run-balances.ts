@@ -18,7 +18,7 @@ async function main() {
   try {
     // Find the AP control account (2000)
     const apControl = await prisma.account.findUnique({
-      where: { entityId_code: { entityId: ENTITY_ID, code: "2000" } },
+      where: { entityId_code: { entityId: ENTITY_ID, code: "2000" } }
     });
     if (!apControl) throw new Error("AP Control account 2000 not found");
 
@@ -27,27 +27,27 @@ async function main() {
       where: {
         entityId: ENTITY_ID,
         description: { contains: "AP payment run" },
-        status: "POSTED",
+        status: "POSTED"
       },
       include: {
         lines: {
-          include: { account: { select: { id: true, code: true, name: true } } },
-        },
-      },
+          include: { account: { select: { id: true, code: true, name: true } } }
+        }
+      }
     });
 
     console.log(`Found ${paymentJournals.length} payment run journals`);
 
     // Find entity user for journal creation
     const entityUser = await prisma.entityUser.findFirst({
-      where: { entityId: ENTITY_ID },
+      where: { entityId: ENTITY_ID }
     });
     if (!entityUser) throw new Error("No entity user found");
 
     // Find the open period
     const openPeriod = await prisma.period.findFirst({
       where: { entityId: ENTITY_ID, status: "OPEN" },
-      orderBy: [{ year: "desc" }, { month: "desc" }],
+      orderBy: [{ year: "desc" }, { month: "desc" }]
     });
     if (!openPeriod) throw new Error("No open period found");
 
@@ -75,7 +75,7 @@ async function main() {
 
       // Find the supplier by name to get their code
       const supplier = await prisma.supplier.findFirst({
-        where: { entityId: ENTITY_ID, name: supplierName },
+        where: { entityId: ENTITY_ID, name: supplierName }
       });
       if (!supplier) {
         console.log(`  SKIP ${journal.reference} — supplier "${supplierName}" not found`);
@@ -84,7 +84,7 @@ async function main() {
 
       // Find the vendor's GL account by supplier code
       const vendorAccount = await prisma.account.findUnique({
-        where: { entityId_code: { entityId: ENTITY_ID, code: supplier.code } },
+        where: { entityId_code: { entityId: ENTITY_ID, code: supplier.code } }
       });
       if (!vendorAccount) {
         console.log(`  SKIP ${journal.reference} — GL account ${supplier.code} not found`);
@@ -99,7 +99,7 @@ async function main() {
         supplierName,
         amount: apDebitLine.debit,
         vendorAccountId: vendorAccount.id,
-        vendorAccountCode: vendorAccount.code,
+        vendorAccountCode: vendorAccount.code
       });
     }
 
@@ -120,7 +120,7 @@ async function main() {
 
       // Check if correction already posted
       const existing = await prisma.journal.findFirst({
-        where: { entityId: ENTITY_ID, reference: correctionRef },
+        where: { entityId: ENTITY_ID, reference: correctionRef }
       });
       if (existing) {
         console.log(`  SKIP ${correctionRef} — already posted`);
@@ -149,7 +149,7 @@ async function main() {
                 debitFunctional: c.amount,
                 creditFunctional: new Prisma.Decimal(0),
                 description: `Reclassify payment debit to ${c.vendorAccountCode}`,
-                lineNumber: 1,
+                lineNumber: 1
               },
               {
                 accountId: apControl.id,
@@ -160,12 +160,12 @@ async function main() {
                 debitFunctional: new Prisma.Decimal(0),
                 creditFunctional: c.amount,
                 description: `Reverse incorrect debit on AP Control 2000`,
-                lineNumber: 2,
-              },
-            ],
-          },
+                lineNumber: 2
+              }
+            ]
+          }
         },
-        include: { lines: true },
+        include: { lines: true }
       });
 
       // Update account period balances
@@ -175,8 +175,8 @@ async function main() {
             entityId_accountId_periodId: {
               entityId: ENTITY_ID,
               accountId: line.accountId,
-              periodId: openPeriod.id,
-            },
+              periodId: openPeriod.id
+            }
           },
           create: {
             entityId: ENTITY_ID,
@@ -185,19 +185,21 @@ async function main() {
             openingBalance: new Prisma.Decimal(0),
             periodDebits: line.debitFunctional,
             periodCredits: line.creditFunctional,
-            closingBalance: line.debitFunctional.sub(line.creditFunctional),
+            closingBalance: line.debitFunctional.sub(line.creditFunctional)
           },
           update: {
             periodDebits: { increment: line.debitFunctional },
             periodCredits: { increment: line.creditFunctional },
             closingBalance: {
-              increment: line.debitFunctional.sub(line.creditFunctional),
-            },
-          },
+              increment: line.debitFunctional.sub(line.creditFunctional)
+            }
+          }
         });
       }
 
-      console.log(`  + POSTED ${correctionRef} — Dr ${c.vendorAccountCode} / Cr 2000 — ${c.amount}`);
+      console.log(
+        `  + POSTED ${correctionRef} — Dr ${c.vendorAccountCode} / Cr 2000 — ${c.amount}`
+      );
       corrected++;
     }
 

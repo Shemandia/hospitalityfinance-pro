@@ -1,15 +1,12 @@
 import { Prisma, PrismaClient } from "@prisma/client";
 import { sendEmail } from "../../../../shared/email.js";
-import {
-  getOperaCloudCredentials,
-  type OperaCloudCredentials,
-} from "./opera-cloud-auth.js";
+import { getOperaCloudCredentials, type OperaCloudCredentials } from "./opera-cloud-auth.js";
 import { OperaCloudClient } from "./opera-cloud-client.js";
 import { mapTransactionsToGL } from "./opera-cloud-mapper.js";
 import {
   parseSAFFile,
   extractOperaRevenueGroups,
-  type SAFParseResult,
+  type SAFParseResult
 } from "./opera-sun-parser.js";
 
 // ── Shared types ──────────────────────────────────────────────────────────────
@@ -57,8 +54,8 @@ export async function importOperaSUNFile(
       entityId: input.entityId,
       connectorType: "OPERA_SUN",
       status: "SUCCESS",
-      errorDetails: { path: ["sourceFilename"], equals: input.filename },
-    },
+      errorDetails: { path: ["sourceFilename"], equals: input.filename }
+    }
   });
 
   if (existingLog) {
@@ -66,7 +63,7 @@ export async function importOperaSUNFile(
       importLogId: existingLog.id,
       imported: existingLog.recordsImported,
       failed: 0,
-      journalId: existingLog.glJournalId,
+      journalId: existingLog.glJournalId
     };
   }
 
@@ -76,13 +73,15 @@ export async function importOperaSUNFile(
       connectorType: "OPERA_SUN",
       businessDate: parsed.dateRange
         ? new Date(
-            parsed.dateRange.earliest.substring(0, 4) + "-" +
-            parsed.dateRange.earliest.substring(4, 6) + "-" +
-            parsed.dateRange.earliest.substring(6, 8)
+            parsed.dateRange.earliest.substring(0, 4) +
+              "-" +
+              parsed.dateRange.earliest.substring(4, 6) +
+              "-" +
+              parsed.dateRange.earliest.substring(6, 8)
           )
         : new Date(),
-      status: "RUNNING",
-    },
+      status: "RUNNING"
+    }
   });
 
   try {
@@ -101,9 +100,34 @@ export async function importOperaSUNFile(
     // Find actor user for journal creation
     const entityUser = await prisma.entityUser.findFirst({
       where: { entityId: input.entityId },
-      include: { user: true },
+      include: { user: true }
     });
     if (!entityUser) throw new Error("No entity user found for journal creation");
+
+    // Determine file currency and entity functional currency for FX conversion
+    const fileCurrency = (parsed.currency ?? "USD").toUpperCase();
+    const entity = await prisma.entity.findUniqueOrThrow({
+      where: { id: input.entityId },
+      select: { functionalCurrency: true }
+    });
+    const functionalCurrency = entity.functionalCurrency.toUpperCase();
+
+    // Look up FX rate if file currency ≠ entity functional currency
+    let fxRate = new Prisma.Decimal(1);
+    if (fileCurrency !== functionalCurrency) {
+      const rateRecord = await prisma.fXRate.findFirst({
+        where: { fromCurrency: fileCurrency, toCurrency: functionalCurrency, rateType: "SPOT" },
+        orderBy: { effectiveDate: "desc" }
+      });
+      if (rateRecord) {
+        fxRate = rateRecord.rate;
+      } else {
+        throw new Error(
+          `No FX rate found for ${fileCurrency}→${functionalCurrency}. ` +
+            `Please add a SPOT rate on the FX page before importing Opera files.`
+        );
+      }
+    }
 
     // Build journal lines from all mapped SAF lines
     const journalLines: Array<{
@@ -136,12 +160,13 @@ export async function importOperaSUNFile(
         accountId,
         debit,
         credit,
-        currency: safLine.conversionCode || parsed.currency || "USD",
-        fxRate: new Prisma.Decimal(1),
-        debitFunctional: debit,
-        creditFunctional: credit,
-        description: safLine.description || `${safLine.journalType}: ${safLine.transactionReference}`,
-        lineNumber: lineNum++,
+        currency: safLine.conversionCode || fileCurrency,
+        fxRate,
+        debitFunctional: debit.mul(fxRate),
+        creditFunctional: credit.mul(fxRate),
+        description:
+          safLine.description || `${safLine.journalType}: ${safLine.transactionReference}`,
+        lineNumber: lineNum++
       });
 
       importedCount++;
@@ -151,9 +176,16 @@ export async function importOperaSUNFile(
 
     if (journalLines.length > 0) {
       const dateStr = parsed.dateRange?.earliest ?? "";
-      const businessDate = dateStr.length === 8
-        ? new Date(dateStr.substring(0, 4) + "-" + dateStr.substring(4, 6) + "-" + dateStr.substring(6, 8))
-        : new Date();
+      const businessDate =
+        dateStr.length === 8
+          ? new Date(
+              dateStr.substring(0, 4) +
+                "-" +
+                dateStr.substring(4, 6) +
+                "-" +
+                dateStr.substring(6, 8)
+            )
+          : new Date();
 
       const journalTypes = parsed.journalTypes.join("/") || "PMS";
 
@@ -165,10 +197,10 @@ export async function importOperaSUNFile(
           description: `Opera night audit import — ${journalTypes} — ${input.filename}`,
           source: "PMS",
           status: "DRAFT",
-          functionalCurrency: parsed.currency ?? "USD",
+          functionalCurrency,
           createdById: entityUser.userId,
-          lines: { create: journalLines },
-        },
+          lines: { create: journalLines }
+        }
       });
 
       journalId = journal.id;
@@ -184,9 +216,9 @@ export async function importOperaSUNFile(
         glJournalId: journalId,
         errorDetails: {
           sourceFilename: input.filename,
-          ...(unmappedCodes.length > 0 ? { unmappedCodes } : {}),
-        } as Prisma.InputJsonValue,
-      },
+          ...(unmappedCodes.length > 0 ? { unmappedCodes } : {})
+        } as Prisma.InputJsonValue
+      }
     });
 
     if (input.notifyEmail) {
@@ -201,7 +233,7 @@ export async function importOperaSUNFile(
   <li>Balanced: ${parsed.isBalanced ? "Yes" : "No"}</li>
   ${journalId ? `<li>GL Journal ID: ${journalId}</li>` : ""}
   ${unmappedCodes.length > 0 ? `<li>Unmapped codes: ${unmappedCodes.join(", ")}</li>` : ""}
-</ul>`,
+</ul>`
       });
     }
 
@@ -212,9 +244,9 @@ export async function importOperaSUNFile(
       data: {
         status: "FAILED",
         errorDetails: {
-          message: error instanceof Error ? error.message : String(error),
-        } as Prisma.InputJsonValue,
-      },
+          message: error instanceof Error ? error.message : String(error)
+        } as Prisma.InputJsonValue
+      }
     });
     throw error;
   }
@@ -240,8 +272,8 @@ export async function runOperaCloudImport(
       entityId: input.entityId,
       connectorType: "OPERA_CLOUD",
       businessDate: new Date(input.businessDate),
-      status: "SUCCESS",
-    },
+      status: "SUCCESS"
+    }
   });
 
   if (existingLog) {
@@ -249,7 +281,7 @@ export async function runOperaCloudImport(
       importLogId: existingLog.id,
       imported: existingLog.recordsImported,
       failed: 0,
-      journalId: existingLog.glJournalId,
+      journalId: existingLog.glJournalId
     };
   }
 
@@ -258,15 +290,17 @@ export async function runOperaCloudImport(
       entityId: input.entityId,
       connectorType: "OPERA_CLOUD",
       businessDate: new Date(input.businessDate),
-      status: "RUNNING",
-    },
+      status: "RUNNING"
+    }
   });
 
   try {
     const client = new OperaCloudClient(creds);
     const revenueSummary = await client.getRevenueSummary(input.hotelId, input.businessDate);
     const { mapped, unmapped } = await mapTransactionsToGL(
-      prisma, input.entityId, revenueSummary.transactions
+      prisma,
+      input.entityId,
+      revenueSummary.transactions
     );
 
     const businessDateObj = new Date(input.businessDate);
@@ -275,20 +309,20 @@ export async function runOperaCloudImport(
         entityId: input.entityId,
         status: "OPEN",
         year: businessDateObj.getFullYear(),
-        month: businessDateObj.getMonth() + 1,
-      },
+        month: businessDateObj.getMonth() + 1
+      }
     });
 
     if (!period) throw new Error(`No open period for ${input.businessDate}`);
 
     const entityUser = await prisma.entityUser.findFirst({
       where: { entityId: input.entityId },
-      include: { user: true },
+      include: { user: true }
     });
     if (!entityUser) throw new Error("No entity user found for journal creation");
 
     const cashAccount = await prisma.account.findFirst({
-      where: { entityId: input.entityId, code: "1000", allowPosting: true },
+      where: { entityId: input.entityId, code: "1000", allowPosting: true }
     });
 
     let journalId: string | null = null;
@@ -298,6 +332,30 @@ export async function runOperaCloudImport(
         (sum, tx) => sum.add(new Prisma.Decimal(tx.amount)),
         new Prisma.Decimal(0)
       );
+
+      // Determine FX rate: transaction currency → entity functional currency
+      const txCurrency = (mapped[0]?.currency ?? "USD").toUpperCase();
+      const cloudEntity = await prisma.entity.findUniqueOrThrow({
+        where: { id: input.entityId },
+        select: { functionalCurrency: true }
+      });
+      const cloudFunctionalCcy = cloudEntity.functionalCurrency.toUpperCase();
+
+      let cloudFxRate = new Prisma.Decimal(1);
+      if (txCurrency !== cloudFunctionalCcy) {
+        const rateRec = await prisma.fXRate.findFirst({
+          where: { fromCurrency: txCurrency, toCurrency: cloudFunctionalCcy, rateType: "SPOT" },
+          orderBy: { effectiveDate: "desc" }
+        });
+        if (rateRec) {
+          cloudFxRate = rateRec.rate;
+        } else {
+          throw new Error(
+            `No FX rate found for ${txCurrency}→${cloudFunctionalCcy}. ` +
+              `Add a SPOT rate before importing Opera Cloud data.`
+          );
+        }
+      }
 
       let lineNumber = 1;
       const lines: Array<{
@@ -316,25 +374,26 @@ export async function runOperaCloudImport(
         accountId: cashAccount.id,
         debit: totalRevenue,
         credit: new Prisma.Decimal(0),
-        currency: mapped[0]?.currency ?? "USD",
-        fxRate: new Prisma.Decimal(1),
-        debitFunctional: totalRevenue,
+        currency: txCurrency,
+        fxRate: cloudFxRate,
+        debitFunctional: totalRevenue.mul(cloudFxRate),
         creditFunctional: new Prisma.Decimal(0),
         description: `Opera Cloud PMS revenue — ${input.businessDate}`,
-        lineNumber: lineNumber++,
+        lineNumber: lineNumber++
       });
 
       for (const tx of mapped) {
+        const creditAmt = new Prisma.Decimal(tx.amount);
         lines.push({
           accountId: tx.glAccountId,
           debit: new Prisma.Decimal(0),
-          credit: new Prisma.Decimal(tx.amount),
+          credit: creditAmt,
           currency: tx.currency,
-          fxRate: new Prisma.Decimal(1),
+          fxRate: cloudFxRate,
           debitFunctional: new Prisma.Decimal(0),
-          creditFunctional: new Prisma.Decimal(tx.amount),
+          creditFunctional: creditAmt.mul(cloudFxRate),
           description: `${tx.transactionCode}: ${tx.transactionDescription}`,
-          lineNumber: lineNumber++,
+          lineNumber: lineNumber++
         });
       }
 
@@ -346,11 +405,11 @@ export async function runOperaCloudImport(
           description: `Opera Cloud night audit import for ${input.businessDate}`,
           source: "PMS",
           status: "POSTED",
-          functionalCurrency: mapped[0]?.currency ?? "USD",
+          functionalCurrency: cloudFunctionalCcy,
           createdById: entityUser.userId,
           postedAt: new Date(),
-          lines: { create: lines },
-        },
+          lines: { create: lines }
+        }
       });
 
       journalId = journal.id;
@@ -361,8 +420,8 @@ export async function runOperaCloudImport(
             entityId_accountId_periodId: {
               entityId: input.entityId,
               accountId: line.accountId,
-              periodId: period.id,
-            },
+              periodId: period.id
+            }
           },
           create: {
             entityId: input.entityId,
@@ -371,13 +430,13 @@ export async function runOperaCloudImport(
             openingBalance: new Prisma.Decimal(0),
             periodDebits: line.debitFunctional,
             periodCredits: line.creditFunctional,
-            closingBalance: line.debitFunctional.sub(line.creditFunctional),
+            closingBalance: line.debitFunctional.sub(line.creditFunctional)
           },
           update: {
             periodDebits: { increment: line.debitFunctional },
             periodCredits: { increment: line.creditFunctional },
-            closingBalance: { increment: line.debitFunctional.sub(line.creditFunctional) },
-          },
+            closingBalance: { increment: line.debitFunctional.sub(line.creditFunctional) }
+          }
         });
       }
     }
@@ -390,10 +449,11 @@ export async function runOperaCloudImport(
         recordsImported: mapped.length,
         recordsFailed: unmapped.length,
         glJournalId: journalId,
-        errorDetails: unmapped.length > 0
-          ? { unmappedCodes: unmapped.map(u => u.transactionCode) } as Prisma.InputJsonValue
-          : undefined,
-      },
+        errorDetails:
+          unmapped.length > 0
+            ? ({ unmappedCodes: unmapped.map((u) => u.transactionCode) } as Prisma.InputJsonValue)
+            : undefined
+      }
     });
 
     if (input.notifyEmail) {
@@ -406,20 +466,25 @@ export async function runOperaCloudImport(
   <li>Imported: ${mapped.length}</li>
   <li>Unmapped/failed: ${unmapped.length}</li>
   ${journalId ? `<li>GL Journal ID: ${journalId}</li>` : ""}
-</ul>`,
+</ul>`
       });
     }
 
-    return { importLogId: importLog.id, imported: mapped.length, failed: unmapped.length, journalId };
+    return {
+      importLogId: importLog.id,
+      imported: mapped.length,
+      failed: unmapped.length,
+      journalId
+    };
   } catch (error) {
     await prisma.importLog.update({
       where: { id: importLog.id },
       data: {
         status: "FAILED",
         errorDetails: {
-          message: error instanceof Error ? error.message : String(error),
-        } as Prisma.InputJsonValue,
-      },
+          message: error instanceof Error ? error.message : String(error)
+        } as Prisma.InputJsonValue
+      }
     });
     throw error;
   }
@@ -439,15 +504,15 @@ async function buildAccountMapping(
 
   const accounts = await prisma.account.findMany({
     where: { entityId, code: { in: safCodes } },
-    select: { id: true, code: true },
+    select: { id: true, code: true }
   });
 
   const connectorMappings = await prisma.connectorMapping.findMany({
     where: { entityId, connectorType: "OPERA_CLOUD", sourceCode: { in: safCodes } },
-    include: { glAccount: true },
+    include: { glAccount: true }
   });
 
-  const codeIndex = new Map(accounts.map(a => [a.code, a.id]));
+  const codeIndex = new Map(accounts.map((a) => [a.code, a.id]));
   for (const m of connectorMappings) {
     if (m.glAccount) codeIndex.set(m.sourceCode, m.glAccount.id);
   }
@@ -472,6 +537,6 @@ async function findPeriod(
 
   return prisma.period.findFirst({
     where: { entityId, year, month },
-    select: { id: true },
+    select: { id: true }
   });
 }

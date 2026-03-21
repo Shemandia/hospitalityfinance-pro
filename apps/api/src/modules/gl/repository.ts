@@ -9,7 +9,9 @@ import type {
   AccountCreateInput,
   AccountUpdateInput,
   JournalCreateInput,
-  JournalListQuery
+  JournalListQuery,
+  JournalTypeCreateInput,
+  JournalTypeUpdateInput
 } from "./types.js";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
@@ -50,21 +52,21 @@ export class GLRepository {
   }
 
   createAccount(entityId: string, input: AccountCreateInput) {
-    return this.db.account.create({
-      data: {
-        entityId,
-        code: input.code,
-        name: input.name,
-        type: input.type,
-        usaliCategory: input.usaliCategory,
-        usaliDepartment: input.usaliDepartment,
-        normalBalance: input.normalBalance,
-        allowPosting: input.allowPosting,
-        isControlAccount: input.isControlAccount,
-        parentId: input.parentId,
-        level: input.level
-      }
-    });
+    const data: Record<string, unknown> = {
+      entityId,
+      code: input.code,
+      name: input.name,
+      type: input.type,
+      usaliCategory: input.usaliCategory,
+      usaliDepartment: input.usaliDepartment,
+      normalBalance: input.normalBalance,
+      allowPosting: input.allowPosting,
+      allowedSources: input.allowedSources ?? [],
+      isControlAccount: input.isControlAccount,
+      parentId: input.parentId,
+      level: input.level
+    };
+    return this.db.account.create({ data: data as any });
   }
 
   updateAccount(entityId: string, id: string, input: AccountUpdateInput) {
@@ -78,6 +80,12 @@ export class GLRepository {
     return this.db.account.updateMany({
       where: { entityId, id, isActive: true },
       data: { isActive: false }
+    });
+  }
+
+  findAccountsByIds(entityId: string, ids: string[]) {
+    return this.db.account.findMany({
+      where: { entityId, id: { in: ids }, isActive: true }
     });
   }
 
@@ -149,10 +157,11 @@ export class GLRepository {
   }
 
   createJournal(entityId: string, createdById: string, input: JournalCreateInput) {
-    return this.db.journal.create({
+    return (this.db.journal as any).create({
       data: {
         entityId,
         periodId: input.periodId,
+        journalTypeId: input.journalTypeId ?? null,
         reference: input.reference,
         description: input.description,
         source: input.source,
@@ -165,12 +174,8 @@ export class GLRepository {
             credit: new Prisma.Decimal(line.credit),
             currency: line.currency.toUpperCase(),
             fxRate: new Prisma.Decimal(line.fxRate),
-            debitFunctional: new Prisma.Decimal(line.debit).mul(
-              new Prisma.Decimal(line.fxRate)
-            ),
-            creditFunctional: new Prisma.Decimal(line.credit).mul(
-              new Prisma.Decimal(line.fxRate)
-            ),
+            debitFunctional: new Prisma.Decimal(line.debit).mul(new Prisma.Decimal(line.fxRate)),
+            creditFunctional: new Prisma.Decimal(line.credit).mul(new Prisma.Decimal(line.fxRate)),
             description: line.description,
             dimension1: line.dimension1,
             dimension2: line.dimension2,
@@ -189,7 +194,7 @@ export class GLRepository {
   }
 
   getJournalWithLines(entityId: string, journalId: string) {
-    return this.db.journal.findFirst({
+    return (this.db.journal as any).findFirst({
       where: { entityId, id: journalId },
       include: {
         lines: {
@@ -197,6 +202,7 @@ export class GLRepository {
           include: { account: { select: { code: true, name: true, type: true } } }
         },
         period: true,
+        journalType: true,
         approvals: {
           orderBy: [{ createdAt: "asc" }],
           include: { approver: true }
@@ -215,11 +221,12 @@ export class GLRepository {
         }
       : {};
 
-    return this.db.journal.findMany({
+    return (this.db.journal as any).findMany({
       where: {
         entityId,
         status: query.status,
         source: query.source,
+        journalTypeId: query.journalTypeId,
         periodId: query.periodId,
         ...searchFilters
       },
@@ -253,11 +260,7 @@ export class GLRepository {
     });
   }
 
-  getApprovalRuleForAmount(
-    entityId: string,
-    module: WorkflowModule,
-    amount: Prisma.Decimal
-  ) {
+  getApprovalRuleForAmount(entityId: string, module: WorkflowModule, amount: Prisma.Decimal) {
     return this.db.approvalRule.findFirst({
       where: {
         entityId,
@@ -270,11 +273,7 @@ export class GLRepository {
     });
   }
 
-  async createJournalApprovals(
-    entityId: string,
-    journalId: string,
-    approverIds: string[]
-  ) {
+  async createJournalApprovals(entityId: string, journalId: string, approverIds: string[]) {
     if (approverIds.length === 0) {
       return;
     }
@@ -328,17 +327,85 @@ export class GLRepository {
     });
   }
 
-  async markPendingApprovalsRejected(
-    entityId: string,
-    journalId: string,
-    reason?: string
-  ) {
+  async markPendingApprovalsRejected(entityId: string, journalId: string, reason?: string) {
     await this.db.journalApproval.updateMany({
       where: { entityId, journalId, status: "PENDING" },
       data: {
         status: "REJECTED",
         reason
       }
+    });
+  }
+
+  // ── Approval Rule CRUD ─────────────────────────────────────────────────
+
+  listApprovalRules(entityId: string) {
+    return this.db.approvalRule.findMany({
+      where: { entityId },
+      orderBy: [{ module: "asc" }, { minAmount: "asc" }]
+    });
+  }
+
+  getApprovalRule(entityId: string, ruleId: string) {
+    return this.db.approvalRule.findFirst({
+      where: { id: ruleId, entityId }
+    });
+  }
+
+  createApprovalRule(
+    entityId: string,
+    data: {
+      module: "GL" | "AP" | "AR";
+      minAmount: number;
+      maxAmount?: number;
+      requiredApprovers: string[];
+      requireAll: boolean;
+      isActive: boolean;
+    }
+  ) {
+    return this.db.approvalRule.create({
+      data: {
+        entityId,
+        module: data.module,
+        minAmount: new Prisma.Decimal(data.minAmount),
+        maxAmount: data.maxAmount != null ? new Prisma.Decimal(data.maxAmount) : null,
+        requiredApprovers: data.requiredApprovers,
+        requireAll: data.requireAll,
+        isActive: data.isActive
+      }
+    });
+  }
+
+  updateApprovalRule(
+    entityId: string,
+    ruleId: string,
+    data: {
+      module?: "GL" | "AP" | "AR";
+      minAmount?: number;
+      maxAmount?: number | null;
+      requiredApprovers?: string[];
+      requireAll?: boolean;
+      isActive?: boolean;
+    }
+  ) {
+    const updateData: Record<string, unknown> = {};
+    if (data.module !== undefined) updateData.module = data.module;
+    if (data.minAmount !== undefined) updateData.minAmount = new Prisma.Decimal(data.minAmount);
+    if (data.maxAmount !== undefined)
+      updateData.maxAmount = data.maxAmount != null ? new Prisma.Decimal(data.maxAmount) : null;
+    if (data.requiredApprovers !== undefined) updateData.requiredApprovers = data.requiredApprovers;
+    if (data.requireAll !== undefined) updateData.requireAll = data.requireAll;
+    if (data.isActive !== undefined) updateData.isActive = data.isActive;
+
+    return this.db.approvalRule.update({
+      where: { id: ruleId },
+      data: updateData
+    });
+  }
+
+  deleteApprovalRule(entityId: string, ruleId: string) {
+    return this.db.approvalRule.delete({
+      where: { id: ruleId }
     });
   }
 
@@ -384,12 +451,8 @@ export class GLRepository {
       return;
     }
 
-    const periodDebits = new Prisma.Decimal(existing.periodDebits).add(
-      debitFunctional
-    );
-    const periodCredits = new Prisma.Decimal(existing.periodCredits).add(
-      creditFunctional
-    );
+    const periodDebits = new Prisma.Decimal(existing.periodDebits).add(debitFunctional);
+    const periodCredits = new Prisma.Decimal(existing.periodCredits).add(creditFunctional);
     const closing = isDebitNormal
       ? new Prisma.Decimal(existing.openingBalance).add(periodDebits).sub(periodCredits)
       : new Prisma.Decimal(existing.openingBalance).sub(periodDebits).add(periodCredits);
@@ -436,9 +499,11 @@ export class GLRepository {
           COALESCE(apb2.closing_balance, 0)::numeric(18,4) AS comparative_closing_balance
         FROM account_period_balances apb2
         WHERE apb2.entity_id = ${entityId}
-          ${comparativePeriodId
-            ? Prisma.sql`AND apb2.period_id = ${comparativePeriodId}`
-            : Prisma.sql`AND 1 = 0`}
+          ${
+            comparativePeriodId
+              ? Prisma.sql`AND apb2.period_id = ${comparativePeriodId}`
+              : Prisma.sql`AND 1 = 0`
+          }
       )
       SELECT
         pb.account_id,
@@ -454,9 +519,11 @@ export class GLRepository {
       FROM period_balances pb
       LEFT JOIN comparative_balances cb
         ON cb.account_id = pb.account_id
-      ${showZeroBalances
-        ? Prisma.sql``
-        : Prisma.sql`WHERE (pb.opening_balance <> 0 OR pb.period_debits <> 0 OR pb.period_credits <> 0 OR pb.closing_balance <> 0)`}
+      ${
+        showZeroBalances
+          ? Prisma.sql``
+          : Prisma.sql`WHERE (pb.opening_balance <> 0 OR pb.period_debits <> 0 OR pb.period_credits <> 0 OR pb.closing_balance <> 0)`
+      }
       ORDER BY pb.account_code ASC;
     `;
 
@@ -465,3 +532,95 @@ export class GLRepository {
 }
 
 type TrailBalanceQueryResult = TrialBalanceRow[];
+
+// ── Journal Type CRUD ──────────────────────────────────────────────────────
+
+export class JournalTypeRepository {
+  constructor(private readonly db: DbClient) {}
+
+  // Accessor for journalType model — cast needed until prisma generate runs
+  private get jt() {
+    return (this.db as any).journalType;
+  }
+
+  listJournalTypes(entityId: string) {
+    return this.jt.findMany({
+      where: { entityId },
+      orderBy: [{ code: "asc" }],
+      include: { _count: { select: { journals: true } } }
+    });
+  }
+
+  getJournalType(entityId: string, id: string) {
+    return this.jt.findFirst({
+      where: { entityId, id }
+    });
+  }
+
+  getJournalTypeByCode(entityId: string, code: string) {
+    return this.jt.findUnique({
+      where: { entityId_code: { entityId, code } }
+    });
+  }
+
+  createJournalType(entityId: string, input: JournalTypeCreateInput) {
+    return this.jt.create({
+      data: {
+        entityId,
+        code: input.code,
+        name: input.name,
+        description: input.description,
+        allowedSources: input.allowedSources as any,
+        allowedAccountTypes: input.allowedAccountTypes as any,
+        numberPrefix: input.numberPrefix,
+        autoReverse: input.autoReverse,
+        requireBalance: input.requireBalance,
+        isActive: input.isActive
+      }
+    });
+  }
+
+  updateJournalType(entityId: string, id: string, input: JournalTypeUpdateInput) {
+    const data: Record<string, unknown> = {};
+    if (input.code !== undefined) data.code = input.code;
+    if (input.name !== undefined) data.name = input.name;
+    if (input.description !== undefined) data.description = input.description;
+    if (input.allowedSources !== undefined) data.allowedSources = input.allowedSources;
+    if (input.allowedAccountTypes !== undefined)
+      data.allowedAccountTypes = input.allowedAccountTypes;
+    if (input.numberPrefix !== undefined) data.numberPrefix = input.numberPrefix;
+    if (input.autoReverse !== undefined) data.autoReverse = input.autoReverse;
+    if (input.requireBalance !== undefined) data.requireBalance = input.requireBalance;
+    if (input.isActive !== undefined) data.isActive = input.isActive;
+
+    return this.jt.updateMany({
+      where: { entityId, id },
+      data
+    });
+  }
+
+  async deleteJournalType(entityId: string, id: string) {
+    // Verify entity ownership before deletion to prevent cross-entity access
+    const existing = await this.jt.findFirst({ where: { id, entityId } });
+    if (!existing) throw new Error("Journal type not found for this entity.");
+    return this.jt.delete({ where: { id } });
+  }
+
+  countJournalsByType(entityId: string, journalTypeId: string) {
+    return (this.db.journal as any).count({
+      where: { entityId, journalTypeId }
+    });
+  }
+
+  /** Atomically increment and return the next reference number for this type */
+  async getNextReference(entityId: string, journalTypeId: string): Promise<string> {
+    const updated = await this.jt.update({
+      where: { id: journalTypeId },
+      data: { nextNumber: { increment: 1 } },
+      select: { numberPrefix: true, nextNumber: true }
+    });
+    const num = updated.nextNumber - 1; // we incremented, so current = next - 1
+    const year = new Date().getFullYear();
+    return `${updated.numberPrefix}-${year}-${String(num).padStart(4, "0")}`;
+  }
+}

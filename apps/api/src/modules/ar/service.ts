@@ -91,6 +91,15 @@ export class ARService {
 
   async createInvoice(entityId: string, input: ARInvoiceCreateInput) {
     await this.getCustomer(entityId, input.customerId);
+
+    // City ledger invoices from PMS should not be created manually without origin tag
+    if (!input.origin || input.origin === "MANUAL") {
+      console.info(
+        `[ARService] Manual AR invoice creation for entity=${entityId}, invoice=${input.invoiceNumber}. ` +
+          `Note: In hospitality, AR invoices typically originate from PMS city ledger.`
+      );
+    }
+
     return this.repository(this.prisma).createInvoice(entityId, input);
   }
 
@@ -103,11 +112,7 @@ export class ARService {
         throw new ARServiceError("AR_INVOICE_NOT_FOUND", "AR invoice not found.", 404);
       }
       if (invoice.status !== "DRAFT") {
-        throw new ARServiceError(
-          "AR_INVOICE_NOT_DRAFT",
-          "Only draft invoices can be posted.",
-          409
-        );
+        throw new ARServiceError("AR_INVOICE_NOT_DRAFT", "Only draft invoices can be posted.", 409);
       }
 
       const arControl =
@@ -140,6 +145,15 @@ export class ARService {
       const amount = new Prisma.Decimal(invoice.amount);
       const fxRate = new Prisma.Decimal(invoice.fxRate);
 
+      // Use invoice origin to determine the GL journal source:
+      // PMS city-ledger invoices → source "PMS", POS → "POS", manual → "AR"
+      const originToSource: Record<string, "AR" | "PMS" | "POS"> = {
+        PMS: "PMS",
+        POS: "POS",
+        MANUAL: "AR"
+      };
+      const journalSource = originToSource[(invoice as any).origin ?? "MANUAL"] ?? "AR";
+
       const journal = await repository.createPostedJournalForARInvoice(
         entityId,
         actorId,
@@ -164,7 +178,8 @@ export class ARService {
             lineNumber: 2,
             description: `Revenue recognition for invoice ${invoice.invoiceNumber}`
           }
-        ]
+        ],
+        journalSource
       );
 
       for (const line of journal.lines) {
@@ -196,7 +211,13 @@ export class ARService {
       ...(input.dueDate && { dueDate: input.dueDate }),
       ...(input.notes !== undefined && { notes: input.notes }),
       ...(input.status && {
-        status: input.status as "DRAFT" | "POSTED" | "PARTIALLY_PAID" | "PAID" | "OVERDUE" | "CANCELLED"
+        status: input.status as
+          | "DRAFT"
+          | "POSTED"
+          | "PARTIALLY_PAID"
+          | "PAID"
+          | "OVERDUE"
+          | "CANCELLED"
       })
     });
     return this.getInvoice(entityId, invoiceId);
@@ -241,7 +262,9 @@ export class ARService {
     }
 
     const allocatedAmount = new Prisma.Decimal(input.allocatedAmount);
-    const outstanding = new Prisma.Decimal(invoice.amount).sub(new Prisma.Decimal(invoice.amountPaid));
+    const outstanding = new Prisma.Decimal(invoice.amount).sub(
+      new Prisma.Decimal(invoice.amountPaid)
+    );
 
     if (allocatedAmount.greaterThan(outstanding)) {
       throw new ARServiceError(

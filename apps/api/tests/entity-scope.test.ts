@@ -8,11 +8,7 @@ describe("applyEntityScope", () => {
   });
 
   it("preserves existing filters by wrapping in AND", () => {
-    const scoped = applyEntityScope(
-      "findMany",
-      { where: { isActive: true } },
-      "entity-1"
-    );
+    const scoped = applyEntityScope("findMany", { where: { isActive: true } }, "entity-1");
 
     expect(scoped.where).toEqual({
       AND: [{ entityId: "entity-1" }, { isActive: true }]
@@ -20,11 +16,7 @@ describe("applyEntityScope", () => {
   });
 
   it("injects entityId into create payload when missing", () => {
-    const scoped = applyEntityScope(
-      "create",
-      { data: { name: "Entity User" } },
-      "entity-1"
-    );
+    const scoped = applyEntityScope("create", { data: { name: "Entity User" } }, "entity-1");
 
     expect(scoped.data).toEqual({
       name: "Entity User",

@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useApiContext } from "../../../../components/use-api-context";
+import { useUserRole } from "../../../../components/use-user-role";
 import {
   approveAPPaymentRun,
   confirmAPPaymentRun,
@@ -11,7 +12,8 @@ import {
   getAPPaymentRuns,
   getGLAccounts,
   getPaymentRunDownloadUrl,
-  getSuppliers,
+  getPaymentVoucherUrl,
+  getSuppliers
 } from "../../../../lib/gl-api";
 
 type PaymentRunSummary = {
@@ -99,6 +101,7 @@ function flattenAccounts(nodes: AccountNode[], level = 0): FlatAccount[] {
 export default function APPaymentRunsPage() {
   const apiContext = useApiContext();
   const queryClient = useQueryClient();
+  const { canWrite, canAdmin } = useUserRole();
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [startDate, setStartDate] = useState(() => {
     const d = new Date();
@@ -166,13 +169,23 @@ export default function APPaymentRunsPage() {
     queryFn: async () => {
       if (!apiContext) return [];
       const response = await getSuppliers(apiContext);
-      return (response.data as unknown as Array<{ id: string; code: string; name: string; isActive: boolean }>) ?? [];
+      return (
+        (response.data as unknown as Array<{
+          id: string;
+          code: string;
+          name: string;
+          isActive: boolean;
+        }>) ?? []
+      );
     },
-    enabled: Boolean(apiContext),
+    enabled: Boolean(apiContext)
   });
 
   const activeSuppliers = useMemo(
-    () => (suppliersQuery.data ?? []).filter((s) => s.isActive).sort((a, b) => a.name.localeCompare(b.name)),
+    () =>
+      (suppliersQuery.data ?? [])
+        .filter((s) => s.isActive)
+        .sort((a, b) => a.name.localeCompare(b.name)),
     [suppliersQuery.data]
   );
 
@@ -195,7 +208,7 @@ export default function APPaymentRunsPage() {
         bankFileFormat,
         includeApproved,
         includePosted,
-        ...(selectedSupplierIds.length > 0 ? { supplierIds: selectedSupplierIds } : {}),
+        ...(selectedSupplierIds.length > 0 ? { supplierIds: selectedSupplierIds } : {})
       });
       return response.data as PaymentRunDetail;
     },
@@ -308,9 +321,7 @@ export default function APPaymentRunsPage() {
             <select
               value={bankFileFormat}
               onChange={(event) =>
-                setBankFileFormat(
-                  event.target.value as "SWIFT_MT103" | "SEPA_PAIN001" | "CSV"
-                )
+                setBankFileFormat(event.target.value as "SWIFT_MT103" | "SEPA_PAIN001" | "CSV")
               }
               style={{ width: "100%", marginTop: "0.2rem" }}
             >
@@ -328,7 +339,9 @@ export default function APPaymentRunsPage() {
 
           {/* Selected suppliers as removable tags */}
           {selectedSupplierIds.length > 0 && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem", marginBottom: "0.4rem" }}>
+            <div
+              style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem", marginBottom: "0.4rem" }}
+            >
               {selectedSupplierIds.map((id) => {
                 const s = activeSuppliers.find((sup) => sup.id === id);
                 return (
@@ -344,7 +357,7 @@ export default function APPaymentRunsPage() {
                       borderRadius: "6px",
                       fontSize: "0.8rem",
                       fontWeight: 600,
-                      color: "#065f46",
+                      color: "#065f46"
                     }}
                   >
                     {s ? `${s.code} — ${s.name}` : id.slice(0, 8)}
@@ -359,7 +372,7 @@ export default function APPaymentRunsPage() {
                         fontWeight: 700,
                         fontSize: "0.9rem",
                         lineHeight: 1,
-                        padding: 0,
+                        padding: 0
                       }}
                     >
                       ×
@@ -376,7 +389,7 @@ export default function APPaymentRunsPage() {
                   color: "#6b7280",
                   fontSize: "0.78rem",
                   cursor: "pointer",
-                  textDecoration: "underline",
+                  textDecoration: "underline"
                 }}
               >
                 Clear all
@@ -388,7 +401,11 @@ export default function APPaymentRunsPage() {
           <div style={{ position: "relative" }}>
             <input
               type="text"
-              placeholder={selectedSupplierIds.length > 0 ? "Add another supplier..." : "Search supplier by name or code..."}
+              placeholder={
+                selectedSupplierIds.length > 0
+                  ? "Add another supplier..."
+                  : "Search supplier by name or code..."
+              }
               value={supplierSearch}
               onChange={(e) => {
                 setSupplierSearch(e.target.value);
@@ -400,64 +417,70 @@ export default function APPaymentRunsPage() {
                 padding: "0.45rem 0.65rem",
                 border: "1px solid #e2e8f0",
                 borderRadius: "8px",
-                fontSize: "0.85rem",
+                fontSize: "0.85rem"
               }}
             />
-            {supplierDropdownOpen && supplierSearch.length > 0 && (() => {
-              const q = supplierSearch.toLowerCase();
-              const matches = activeSuppliers.filter(
-                (s) =>
-                  !selectedSupplierIds.includes(s.id) &&
-                  (s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q))
-              );
-              if (matches.length === 0) return null;
-              return (
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "100%",
-                    left: 0,
-                    right: 0,
-                    zIndex: 50,
-                    background: "#fff",
-                    border: "1px solid #e2e8f0",
-                    borderRadius: "8px",
-                    boxShadow: "0 8px 20px rgba(0,0,0,.12)",
-                    maxHeight: "200px",
-                    overflowY: "auto",
-                    marginTop: "2px",
-                  }}
-                >
-                  {matches.map((s) => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedSupplierIds((prev) => [...prev, s.id]);
-                        setSupplierSearch("");
-                        setSupplierDropdownOpen(false);
-                      }}
-                      style={{
-                        display: "block",
-                        width: "100%",
-                        textAlign: "left",
-                        padding: "0.45rem 0.65rem",
-                        border: 0,
-                        background: "none",
-                        fontSize: "0.85rem",
-                        cursor: "pointer",
-                        borderBottom: "1px solid #f1f5f9",
-                      }}
-                      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "#f0fdf4"; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}
-                    >
-                      <span style={{ fontWeight: 600, color: "#0f2d5e" }}>{s.code}</span>
-                      <span style={{ color: "#475569" }}> — {s.name}</span>
-                    </button>
-                  ))}
-                </div>
-              );
-            })()}
+            {supplierDropdownOpen &&
+              supplierSearch.length > 0 &&
+              (() => {
+                const q = supplierSearch.toLowerCase();
+                const matches = activeSuppliers.filter(
+                  (s) =>
+                    !selectedSupplierIds.includes(s.id) &&
+                    (s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q))
+                );
+                if (matches.length === 0) return null;
+                return (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "100%",
+                      left: 0,
+                      right: 0,
+                      zIndex: 50,
+                      background: "#fff",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: "8px",
+                      boxShadow: "0 8px 20px rgba(0,0,0,.12)",
+                      maxHeight: "200px",
+                      overflowY: "auto",
+                      marginTop: "2px"
+                    }}
+                  >
+                    {matches.map((s) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedSupplierIds((prev) => [...prev, s.id]);
+                          setSupplierSearch("");
+                          setSupplierDropdownOpen(false);
+                        }}
+                        style={{
+                          display: "block",
+                          width: "100%",
+                          textAlign: "left",
+                          padding: "0.45rem 0.65rem",
+                          border: 0,
+                          background: "none",
+                          fontSize: "0.85rem",
+                          cursor: "pointer",
+                          borderBottom: "1px solid #f1f5f9"
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor = "#f0fdf4";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = "transparent";
+                        }}
+                      >
+                        <span style={{ fontWeight: 600, color: "#0f2d5e" }}>{s.code}</span>
+                        <span style={{ color: "#475569" }}> — {s.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
           </div>
           {selectedSupplierIds.length === 0 && (
             <p style={{ margin: "0.25rem 0 0", fontSize: "0.75rem", color: "#94a3b8" }}>
@@ -485,14 +508,15 @@ export default function APPaymentRunsPage() {
           </label>
           <button
             onClick={() => proposeMutation.mutate()}
-            disabled={proposeMutation.isPending}
+            disabled={proposeMutation.isPending || !canWrite}
+            title={!canWrite ? "CONTROLLER or ADMIN role required" : undefined}
             style={{
               border: 0,
               borderRadius: "8px",
-              backgroundColor: "#0e7c7b",
+              backgroundColor: canWrite ? "#0e7c7b" : "#94a3b8",
               color: "#fff",
               padding: "0.45rem 0.8rem",
-              cursor: "pointer"
+              cursor: canWrite ? "pointer" : "not-allowed"
             }}
           >
             {proposeMutation.isPending ? "Proposing..." : "Propose Run"}
@@ -500,7 +524,16 @@ export default function APPaymentRunsPage() {
         </div>
 
         {feedback ? (
-          <p style={{ color: feedback.includes("processed") || feedback.includes("approved") || feedback.includes("proposed") ? "#047857" : "#b91c1c" }}>
+          <p
+            style={{
+              color:
+                feedback.includes("processed") ||
+                feedback.includes("approved") ||
+                feedback.includes("proposed")
+                  ? "#047857"
+                  : "#b91c1c"
+            }}
+          >
             {feedback}
           </p>
         ) : null}
@@ -509,16 +542,40 @@ export default function APPaymentRunsPage() {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
-                <th style={{ textAlign: "left", borderBottom: "1px solid #e2e8f0", padding: "0.5rem" }}>
+                <th
+                  style={{
+                    textAlign: "left",
+                    borderBottom: "1px solid #e2e8f0",
+                    padding: "0.5rem"
+                  }}
+                >
                   Run
                 </th>
-                <th style={{ textAlign: "left", borderBottom: "1px solid #e2e8f0", padding: "0.5rem" }}>
+                <th
+                  style={{
+                    textAlign: "left",
+                    borderBottom: "1px solid #e2e8f0",
+                    padding: "0.5rem"
+                  }}
+                >
                   Date Window
                 </th>
-                <th style={{ textAlign: "left", borderBottom: "1px solid #e2e8f0", padding: "0.5rem" }}>
+                <th
+                  style={{
+                    textAlign: "left",
+                    borderBottom: "1px solid #e2e8f0",
+                    padding: "0.5rem"
+                  }}
+                >
                   Status
                 </th>
-                <th style={{ textAlign: "left", borderBottom: "1px solid #e2e8f0", padding: "0.5rem" }}>
+                <th
+                  style={{
+                    textAlign: "left",
+                    borderBottom: "1px solid #e2e8f0",
+                    padding: "0.5rem"
+                  }}
+                >
                   Items
                 </th>
               </tr>
@@ -533,14 +590,22 @@ export default function APPaymentRunsPage() {
                     backgroundColor: selectedRunId === run.id ? "#ecfeff" : "transparent"
                   }}
                 >
-                  <td style={{ borderBottom: "1px solid #f1f5f9", padding: "0.5rem", fontFamily: "monospace" }}>
+                  <td
+                    style={{
+                      borderBottom: "1px solid #f1f5f9",
+                      padding: "0.5rem",
+                      fontFamily: "monospace"
+                    }}
+                  >
                     {run.id.slice(0, 12)}
                   </td>
                   <td style={{ borderBottom: "1px solid #f1f5f9", padding: "0.5rem" }}>
                     {new Date(run.startDate).toLocaleDateString()} -{" "}
                     {new Date(run.endDate).toLocaleDateString()}
                   </td>
-                  <td style={{ borderBottom: "1px solid #f1f5f9", padding: "0.5rem" }}>{run.status}</td>
+                  <td style={{ borderBottom: "1px solid #f1f5f9", padding: "0.5rem" }}>
+                    {run.status}
+                  </td>
                   <td style={{ borderBottom: "1px solid #f1f5f9", padding: "0.5rem" }}>
                     {run.items?.length ?? 0}
                   </td>
@@ -549,7 +614,9 @@ export default function APPaymentRunsPage() {
             </tbody>
           </table>
           {runsQuery.isLoading ? <p>Loading payment runs...</p> : null}
-          {runsQuery.isError ? <p style={{ color: "#b91c1c" }}>{(runsQuery.error as Error).message}</p> : null}
+          {runsQuery.isError ? (
+            <p style={{ color: "#b91c1c" }}>{(runsQuery.error as Error).message}</p>
+          ) : null}
         </div>
       </div>
 
@@ -567,7 +634,9 @@ export default function APPaymentRunsPage() {
         >
           <h3 style={{ marginTop: 0 }}>Run Detail</h3>
           {detailQuery.isLoading ? <p>Loading detail...</p> : null}
-          {detailQuery.isError ? <p style={{ color: "#b91c1c" }}>{(detailQuery.error as Error).message}</p> : null}
+          {detailQuery.isError ? (
+            <p style={{ color: "#b91c1c" }}>{(detailQuery.error as Error).message}</p>
+          ) : null}
 
           {selectedRun ? (
             <div style={{ fontSize: "0.92rem" }}>
@@ -594,12 +663,17 @@ export default function APPaymentRunsPage() {
                       const res = await fetch(url, {
                         headers: {
                           Authorization: `Bearer ${apiContext.accessToken}`,
-                          "X-Entity-ID": apiContext.entityId,
-                        },
+                          "X-Entity-ID": apiContext.entityId
+                        }
                       });
                       if (!res.ok) return;
                       const blob = await res.blob();
-                      const ext = selectedRun.bankFileFormat === "CSV" ? "csv" : selectedRun.bankFileFormat === "SEPA_PAIN001" ? "xml" : "mt103";
+                      const ext =
+                        selectedRun.bankFileFormat === "CSV"
+                          ? "csv"
+                          : selectedRun.bankFileFormat === "SEPA_PAIN001"
+                            ? "xml"
+                            : "mt103";
                       const a = document.createElement("a");
                       a.href = URL.createObjectURL(blob);
                       a.download = `payment-run-${selectedRunId!.slice(0, 8)}.${ext}`;
@@ -611,15 +685,53 @@ export default function APPaymentRunsPage() {
                   </button>
                 </div>
               ) : (
-                <p><strong>Bank File:</strong> -</p>
+                <p>
+                  <strong>Bank File:</strong> -
+                </p>
               )}
 
               <details>
                 <summary>Suppliers</summary>
                 <ul style={{ paddingLeft: "1rem" }}>
                   {selectedRun.items.map((item) => (
-                    <li key={item.id}>
+                    <li key={item.id} style={{ marginBottom: "0.35rem" }}>
                       {item.supplier.name} ({item.currency}) - payable {item.payableAmount}
+                      {selectedRun.status === "PROCESSED" && apiContext ? (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const url = getPaymentVoucherUrl(selectedRun.id, item.supplierId);
+                            const res = await fetch(url, {
+                              headers: {
+                                Authorization: `Bearer ${apiContext.accessToken}`,
+                                "X-Entity-ID": apiContext.entityId
+                              }
+                            });
+                            if (!res.ok) {
+                              setFeedback("Failed to generate voucher PDF.");
+                              return;
+                            }
+                            const blob = await res.blob();
+                            const a = document.createElement("a");
+                            a.href = URL.createObjectURL(blob);
+                            a.download = `voucher-${selectedRun.id.slice(0, 8)}-${item.supplier.code}.pdf`;
+                            a.click();
+                            URL.revokeObjectURL(a.href);
+                          }}
+                          style={{
+                            marginLeft: "0.5rem",
+                            border: 0,
+                            borderRadius: "6px",
+                            backgroundColor: "#0f2d5e",
+                            color: "#fff",
+                            padding: "0.2rem 0.5rem",
+                            fontSize: "0.78rem",
+                            cursor: "pointer"
+                          }}
+                        >
+                          Print Voucher
+                        </button>
+                      ) : null}
                     </li>
                   ))}
                 </ul>
@@ -657,7 +769,13 @@ export default function APPaymentRunsPage() {
               ) : null}
 
               {selectedRun.status === "APPROVED" ? (
-                <div style={{ marginTop: "0.8rem", borderTop: "1px solid #e2e8f0", paddingTop: "0.75rem" }}>
+                <div
+                  style={{
+                    marginTop: "0.8rem",
+                    borderTop: "1px solid #e2e8f0",
+                    paddingTop: "0.75rem"
+                  }}
+                >
                   <h4 style={{ marginTop: 0, marginBottom: "0.45rem" }}>Confirm & Process</h4>
                   <label style={{ display: "block", marginBottom: "0.45rem" }}>
                     <span>Bank Account</span>
@@ -701,18 +819,35 @@ export default function APPaymentRunsPage() {
                   </label>
                   <button
                     onClick={() => confirmMutation.mutate(selectedRun.id)}
-                    disabled={confirmMutation.isPending || !bankAccountId}
+                    disabled={confirmMutation.isPending || !bankAccountId || !canAdmin}
+                    title={!canAdmin ? "ADMIN role required to confirm payment runs" : undefined}
                     style={{
                       border: 0,
                       borderRadius: "8px",
-                      backgroundColor: "#15803d",
+                      backgroundColor:
+                        confirmMutation.isPending || !bankAccountId || !canAdmin
+                          ? "#94a3b8"
+                          : "#15803d",
                       color: "#fff",
                       padding: "0.45rem 0.8rem",
-                      cursor: "pointer"
+                      cursor:
+                        confirmMutation.isPending || !bankAccountId || !canAdmin
+                          ? "not-allowed"
+                          : "pointer",
+                      opacity: confirmMutation.isPending || !bankAccountId || !canAdmin ? 0.7 : 1
                     }}
                   >
-                    {confirmMutation.isPending ? "Processing..." : "Confirm & Process"}
+                    {!canAdmin
+                      ? "ADMIN Required"
+                      : confirmMutation.isPending
+                        ? "Processing..."
+                        : "Confirm & Process"}
                   </button>
+                  {!bankAccountId && (
+                    <p style={{ color: "#b91c1c", fontSize: "0.82rem", marginTop: "0.3rem" }}>
+                      Please select a bank account to proceed.
+                    </p>
+                  )}
                 </div>
               ) : null}
             </div>

@@ -7,7 +7,7 @@ export function fmt(n: string | number, decimals = 0): string {
   if (isNaN(v)) return "–";
   return v.toLocaleString("en-US", {
     minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
+    maximumFractionDigits: decimals
   });
 }
 

@@ -12,7 +12,9 @@ function mapError(reply: FastifyReply, error: unknown) {
   if (error instanceof ZodError) {
     return reply.code(400).send({
       data: null,
-      errors: [{ code: "VALIDATION_ERROR", message: error.issues.map((issue) => issue.message).join("; ") }]
+      errors: [
+        { code: "VALIDATION_ERROR", message: error.issues.map((issue) => issue.message).join("; ") }
+      ]
     });
   }
 

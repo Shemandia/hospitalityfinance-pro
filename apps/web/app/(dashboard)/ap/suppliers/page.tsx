@@ -4,9 +4,14 @@ import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApiContext } from "../../../../components/use-api-context";
 import {
-  getSuppliers, getSupplier, createSupplier, updateSupplier,
+  getSuppliers,
+  getSupplier,
+  createSupplier,
+  updateSupplier,
   getAPInvoices,
-  type Supplier, type APInvoice, type APInvoiceStatus,
+  type Supplier,
+  type APInvoice,
+  type APInvoiceStatus
 } from "../../../../lib/gl-api";
 import { Button } from "../../../../components/ui/button";
 import { Badge } from "../../../../components/ui/badge";
@@ -15,10 +20,19 @@ import { Label } from "../../../../components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../../components/ui/card";
 import { Separator } from "../../../../components/ui/separator";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter
 } from "../../../../components/ui/dialog";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
 } from "../../../../components/ui/table";
 import { Plus, Pencil, X, Users, CreditCard, FileText, CheckCircle } from "lucide-react";
 
@@ -27,26 +41,36 @@ import { Plus, Pencil, X, Users, CreditCard, FileText, CheckCircle } from "lucid
 function fmt(v: string | number | null | undefined) {
   const n = Number(v ?? 0);
   if (!n && n !== 0) return "—";
-  return new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(n);
 }
 
 function fmtDate(d: string | null | undefined) {
   if (!d) return "—";
-  try { return new Date(d).toLocaleDateString(); } catch { return d; }
+  try {
+    return new Date(d).toLocaleDateString();
+  } catch {
+    return d;
+  }
 }
 
 function daysUntil(due: string) {
   return Math.round((new Date(due).getTime() - Date.now()) / 86_400_000);
 }
 
-const STATUS_VARIANT: Record<APInvoiceStatus, "default" | "secondary" | "warning" | "success" | "info" | "destructive"> = {
+const STATUS_VARIANT: Record<
+  APInvoiceStatus,
+  "default" | "secondary" | "warning" | "success" | "info" | "destructive"
+> = {
   DRAFT: "secondary",
   PENDING_APPROVAL: "warning",
   APPROVED: "info",
   POSTED: "success",
   PAID: "success",
   DISPUTED: "destructive",
-  CANCELLED: "destructive",
+  CANCELLED: "destructive"
 };
 
 // ── Supplier form ─────────────────────────────────────────────────────────────
@@ -65,9 +89,16 @@ type SupplierFormData = {
 };
 
 const EMPTY_FORM: SupplierFormData = {
-  name: "", code: "", taxId: "", currency: "USD",
-  paymentTermsDays: "30", isActive: true,
-  bankName: "", bankAccount: "", bankSwift: "", bankIban: "",
+  name: "",
+  code: "",
+  taxId: "",
+  currency: "USD",
+  paymentTermsDays: "30",
+  isActive: true,
+  bankName: "",
+  bankAccount: "",
+  bankSwift: "",
+  bankIban: ""
 };
 
 function supplierToForm(s: Supplier): SupplierFormData {
@@ -82,7 +113,7 @@ function supplierToForm(s: Supplier): SupplierFormData {
     bankName: bank.bankName ?? "",
     bankAccount: bank.accountNumber ?? "",
     bankSwift: bank.swift ?? "",
-    bankIban: bank.iban ?? "",
+    bankIban: bank.iban ?? ""
   };
 }
 
@@ -92,7 +123,7 @@ function formToPayload(f: SupplierFormData) {
     code: f.code,
     currency: f.currency,
     paymentTermsDays: Number(f.paymentTermsDays) || 30,
-    isActive: f.isActive,
+    isActive: f.isActive
   };
   if (f.taxId) payload.taxId = f.taxId;
   const bank: Record<string, string> = {};
@@ -105,7 +136,12 @@ function formToPayload(f: SupplierFormData) {
 }
 
 function SupplierFormDialog({
-  open, onClose, supplier, onSubmit, isPending, error,
+  open,
+  onClose,
+  supplier,
+  onSubmit,
+  isPending,
+  error
 }: {
   open: boolean;
   onClose: () => void;
@@ -126,11 +162,16 @@ function SupplierFormDialog({
   }
 
   function setF<K extends keyof SupplierFormData>(k: K, v: SupplierFormData[K]) {
-    setForm(p => ({ ...p, [k]: v }));
+    setForm((p) => ({ ...p, [k]: v }));
   }
 
   return (
-    <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) onClose();
+      }}
+    >
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>{supplier ? "Edit Supplier" : "New Supplier"}</DialogTitle>
@@ -140,24 +181,56 @@ function SupplierFormDialog({
           {/* Core info */}
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2 space-y-1.5">
-              <Label>Name <span className="text-destructive">*</span></Label>
-              <Input value={form.name} onChange={e => setF("name", e.target.value)} placeholder="Acme Supplies Ltd." />
+              <Label>
+                Name <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                value={form.name}
+                onChange={(e) => setF("name", e.target.value)}
+                placeholder="Acme Supplies Ltd."
+              />
             </div>
             <div className="space-y-1.5">
-              <Label>Code <span className="text-destructive">*</span></Label>
-              <Input value={form.code} onChange={e => setF("code", e.target.value.toUpperCase())} placeholder="ACME-001" className="uppercase" />
+              <Label>
+                Code <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                value={form.code}
+                onChange={(e) => setF("code", e.target.value.toUpperCase())}
+                placeholder="ACME-001"
+                className="uppercase"
+              />
             </div>
             <div className="space-y-1.5">
               <Label>Tax ID / VAT</Label>
-              <Input value={form.taxId} onChange={e => setF("taxId", e.target.value)} placeholder="AE123456789" />
+              <Input
+                value={form.taxId}
+                onChange={(e) => setF("taxId", e.target.value)}
+                placeholder="AE123456789"
+              />
             </div>
             <div className="space-y-1.5">
-              <Label>Currency <span className="text-destructive">*</span></Label>
-              <Input value={form.currency} onChange={e => setF("currency", e.target.value.toUpperCase())} maxLength={3} className="uppercase" placeholder="USD" />
+              <Label>
+                Currency <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                value={form.currency}
+                onChange={(e) => setF("currency", e.target.value.toUpperCase())}
+                maxLength={3}
+                className="uppercase"
+                placeholder="USD"
+              />
             </div>
             <div className="space-y-1.5">
               <Label>Payment Terms (days)</Label>
-              <Input type="number" min={1} max={365} value={form.paymentTermsDays} onChange={e => setF("paymentTermsDays", e.target.value)} className="font-mono" />
+              <Input
+                type="number"
+                min={1}
+                max={365}
+                value={form.paymentTermsDays}
+                onChange={(e) => setF("paymentTermsDays", e.target.value)}
+                className="font-mono"
+              />
             </div>
           </div>
 
@@ -167,46 +240,82 @@ function SupplierFormDialog({
               type="checkbox"
               id="isActive"
               checked={form.isActive}
-              onChange={e => setF("isActive", e.target.checked)}
+              onChange={(e) => setF("isActive", e.target.checked)}
               className="h-4 w-4 rounded border-border"
             />
-            <Label htmlFor="isActive" className="cursor-pointer">Active supplier</Label>
+            <Label htmlFor="isActive" className="cursor-pointer">
+              Active supplier
+            </Label>
           </div>
 
           <Separator />
 
           {/* Bank details */}
           <div>
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Bank Details</p>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+              Bank Details
+            </p>
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2 space-y-1.5">
                 <Label>Bank Name</Label>
-                <Input value={form.bankName} onChange={e => setF("bankName", e.target.value)} placeholder="First National Bank" />
+                <Input
+                  value={form.bankName}
+                  onChange={(e) => setF("bankName", e.target.value)}
+                  placeholder="First National Bank"
+                />
               </div>
               <div className="space-y-1.5">
                 <Label>Account Number</Label>
-                <Input value={form.bankAccount} onChange={e => setF("bankAccount", e.target.value)} placeholder="123456789" className="font-mono" />
+                <Input
+                  value={form.bankAccount}
+                  onChange={(e) => setF("bankAccount", e.target.value)}
+                  placeholder="123456789"
+                  className="font-mono"
+                />
               </div>
               <div className="space-y-1.5">
                 <Label>SWIFT / BIC</Label>
-                <Input value={form.bankSwift} onChange={e => setF("bankSwift", e.target.value.toUpperCase())} placeholder="FNBKUS33" className="uppercase font-mono" />
+                <Input
+                  value={form.bankSwift}
+                  onChange={(e) => setF("bankSwift", e.target.value.toUpperCase())}
+                  placeholder="FNBKUS33"
+                  className="uppercase font-mono"
+                />
               </div>
               <div className="col-span-2 space-y-1.5">
                 <Label>IBAN</Label>
-                <Input value={form.bankIban} onChange={e => setF("bankIban", e.target.value.toUpperCase())} placeholder="GB29 NWBK 6016 1331 9268 19" className="uppercase font-mono" />
+                <Input
+                  value={form.bankIban}
+                  onChange={(e) => setF("bankIban", e.target.value.toUpperCase())}
+                  placeholder="GB29 NWBK 6016 1331 9268 19"
+                  className="uppercase font-mono"
+                />
               </div>
             </div>
           </div>
 
           {error && (
-            <p className="text-sm text-destructive rounded border border-destructive/30 bg-destructive/10 px-3 py-2">{error}</p>
+            <p className="text-sm text-destructive rounded border border-destructive/30 bg-destructive/10 px-3 py-2">
+              {error}
+            </p>
           )}
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={isPending}>Cancel</Button>
-          <Button onClick={() => onSubmit(formToPayload(form))} disabled={isPending || !form.name || !form.code || !form.currency}>
-            {isPending ? (supplier ? "Saving…" : "Creating…") : (supplier ? "Save Changes" : "Create Supplier")}
+          <Button variant="outline" onClick={onClose} disabled={isPending}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => onSubmit(formToPayload(form))}
+            disabled={isPending || !form.name || !form.code || !form.currency}
+          >
+            {isPending
+              ? supplier
+                ? "Saving…"
+                : "Creating…"
+              : supplier
+                ? "Save Changes"
+                : "Create Supplier"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -219,7 +328,7 @@ function SupplierFormDialog({
 function SupplierDetailPanel({
   supplierId,
   onClose,
-  onEdit,
+  onEdit
 }: {
   supplierId: string;
   onClose: () => void;
@@ -229,16 +338,15 @@ function SupplierDetailPanel({
 
   const { data: supplierRes } = useQuery({
     queryKey: ["ap-supplier", apiContext?.entityId, supplierId],
-    queryFn: () => apiContext ? getSupplier(apiContext, supplierId) : Promise.resolve(null),
-    enabled: Boolean(apiContext && supplierId),
+    queryFn: () => (apiContext ? getSupplier(apiContext, supplierId) : Promise.resolve(null)),
+    enabled: Boolean(apiContext && supplierId)
   });
 
   const { data: invoicesRes } = useQuery({
     queryKey: ["ap-invoices-supplier", apiContext?.entityId, supplierId],
-    queryFn: () => apiContext
-      ? getAPInvoices(apiContext, { supplierId, limit: 50 })
-      : Promise.resolve(null),
-    enabled: Boolean(apiContext && supplierId),
+    queryFn: () =>
+      apiContext ? getAPInvoices(apiContext, { supplierId, limit: 50 }) : Promise.resolve(null),
+    enabled: Boolean(apiContext && supplierId)
   });
 
   const supplier = supplierRes?.data as Supplier | null | undefined;
@@ -247,10 +355,10 @@ function SupplierDetailPanel({
 
   // Payment allocation summary
   const totalOwed = invoices
-    .filter(i => !["PAID", "CANCELLED"].includes(i.status))
+    .filter((i) => !["PAID", "CANCELLED"].includes(i.status))
     .reduce((s, i) => s + Number(i.netAmount || 0), 0);
-  const overdue = invoices.filter(i =>
-    !["PAID", "CANCELLED"].includes(i.status) && daysUntil(i.dueDate) < 0
+  const overdue = invoices.filter(
+    (i) => !["PAID", "CANCELLED"].includes(i.status) && daysUntil(i.dueDate) < 0
   );
 
   return (
@@ -258,15 +366,24 @@ function SupplierDetailPanel({
       <CardHeader className="flex flex-row items-center justify-between pb-3 shrink-0">
         <div>
           <CardTitle className="text-base">{supplier?.name ?? "Loading…"}</CardTitle>
-          {supplier?.code && <p className="text-xs font-mono text-muted-foreground mt-0.5">{supplier.code}</p>}
+          {supplier?.code && (
+            <p className="text-xs font-mono text-muted-foreground mt-0.5">{supplier.code}</p>
+          )}
         </div>
         <div className="flex items-center gap-1">
           {supplier && (
-            <Button variant="ghost" size="icon" onClick={() => onEdit(supplier)} title="Edit supplier">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => onEdit(supplier)}
+              title="Edit supplier"
+            >
               <Pencil className="h-3.5 w-3.5" />
             </Button>
           )}
-          <Button variant="ghost" size="icon" onClick={onClose}><X className="h-4 w-4" /></Button>
+          <Button variant="ghost" size="icon" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </Button>
         </div>
       </CardHeader>
       <Separator className="shrink-0" />
@@ -300,12 +417,34 @@ function SupplierDetailPanel({
                 <>
                   <Separator />
                   <div>
-                    <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide mb-2">Bank Details</p>
+                    <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide mb-2">
+                      Bank Details
+                    </p>
                     <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
-                      {bank.bankName && <><div className="text-muted-foreground">Bank</div><div>{bank.bankName}</div></>}
-                      {bank.accountNumber && <><div className="text-muted-foreground">Account</div><div className="font-mono">{bank.accountNumber}</div></>}
-                      {bank.swift && <><div className="text-muted-foreground">SWIFT</div><div className="font-mono">{bank.swift}</div></>}
-                      {bank.iban && <><div className="text-muted-foreground">IBAN</div><div className="font-mono break-all">{bank.iban}</div></>}
+                      {bank.bankName && (
+                        <>
+                          <div className="text-muted-foreground">Bank</div>
+                          <div>{bank.bankName}</div>
+                        </>
+                      )}
+                      {bank.accountNumber && (
+                        <>
+                          <div className="text-muted-foreground">Account</div>
+                          <div className="font-mono">{bank.accountNumber}</div>
+                        </>
+                      )}
+                      {bank.swift && (
+                        <>
+                          <div className="text-muted-foreground">SWIFT</div>
+                          <div className="font-mono">{bank.swift}</div>
+                        </>
+                      )}
+                      {bank.iban && (
+                        <>
+                          <div className="text-muted-foreground">IBAN</div>
+                          <div className="font-mono break-all">{bank.iban}</div>
+                        </>
+                      )}
                     </div>
                   </div>
                 </>
@@ -314,28 +453,42 @@ function SupplierDetailPanel({
               {/* Payment allocation summary */}
               <Separator />
               <div>
-                <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide mb-3">Payment Allocation</p>
+                <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide mb-3">
+                  Payment Allocation
+                </p>
                 <div className="grid grid-cols-2 gap-2 mb-3">
                   <div className="rounded-md bg-muted/50 px-3 py-2 text-center">
                     <p className="text-xs text-muted-foreground">Outstanding</p>
-                    <p className="text-sm font-bold font-mono tabular-nums mt-0.5">{fmt(totalOwed)}</p>
+                    <p className="text-sm font-bold font-mono tabular-nums mt-0.5">
+                      {fmt(totalOwed)}
+                    </p>
                     <p className="text-[10px] text-muted-foreground">{supplier.currency}</p>
                   </div>
-                  <div className={`rounded-md px-3 py-2 text-center ${overdue.length > 0 ? "bg-destructive/10" : "bg-muted/50"}`}>
+                  <div
+                    className={`rounded-md px-3 py-2 text-center ${overdue.length > 0 ? "bg-destructive/10" : "bg-muted/50"}`}
+                  >
                     <p className="text-xs text-muted-foreground">Overdue</p>
-                    <p className={`text-sm font-bold mt-0.5 ${overdue.length > 0 ? "text-destructive" : ""}`}>{overdue.length}</p>
-                    <p className="text-[10px] text-muted-foreground">invoice{overdue.length !== 1 ? "s" : ""}</p>
+                    <p
+                      className={`text-sm font-bold mt-0.5 ${overdue.length > 0 ? "text-destructive" : ""}`}
+                    >
+                      {overdue.length}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      invoice{overdue.length !== 1 ? "s" : ""}
+                    </p>
                   </div>
                 </div>
 
                 {/* Open invoices with allocation status */}
-                {invoices.filter(i => !["CANCELLED"].includes(i.status)).length > 0 && (
+                {invoices.filter((i) => !["CANCELLED"].includes(i.status)).length > 0 && (
                   <div>
-                    <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide mb-1.5">Open Invoices</p>
+                    <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide mb-1.5">
+                      Open Invoices
+                    </p>
                     <div className="space-y-1">
                       {invoices
-                        .filter(i => i.status !== "CANCELLED")
-                        .map(inv => {
+                        .filter((i) => i.status !== "CANCELLED")
+                        .map((inv) => {
                           const days = daysUntil(inv.dueDate);
                           const isPaid = inv.status === "PAID";
                           const isOverdue = !isPaid && days < 0;
@@ -343,21 +496,31 @@ function SupplierDetailPanel({
                             <div
                               key={inv.id}
                               className={`flex items-center justify-between rounded px-2 py-1.5 text-xs ${
-                                isPaid ? "bg-emerald-50" : isOverdue ? "bg-destructive/5" : "bg-muted/30"
+                                isPaid
+                                  ? "bg-emerald-50"
+                                  : isOverdue
+                                    ? "bg-destructive/5"
+                                    : "bg-muted/30"
                               }`}
                             >
                               <div className="flex items-center gap-2 min-w-0">
-                                {isPaid
-                                  ? <CheckCircle className="h-3 w-3 text-emerald-600 shrink-0" />
-                                  : <CreditCard className="h-3 w-3 text-muted-foreground shrink-0" />
-                                }
+                                {isPaid ? (
+                                  <CheckCircle className="h-3 w-3 text-emerald-600 shrink-0" />
+                                ) : (
+                                  <CreditCard className="h-3 w-3 text-muted-foreground shrink-0" />
+                                )}
                                 <span className="font-mono truncate">{inv.invoiceNumber}</span>
                               </div>
                               <div className="flex items-center gap-2 shrink-0">
-                                <span className={`font-mono tabular-nums ${isOverdue ? "text-destructive" : ""}`}>
+                                <span
+                                  className={`font-mono tabular-nums ${isOverdue ? "text-destructive" : ""}`}
+                                >
                                   {fmt(inv.netAmount)}
                                 </span>
-                                <Badge variant={STATUS_VARIANT[inv.status]} className="text-[10px] px-1 py-0">
+                                <Badge
+                                  variant={STATUS_VARIANT[inv.status]}
+                                  className="text-[10px] px-1 py-0"
+                                >
                                   {inv.status === "PENDING_APPROVAL" ? "PENDING" : inv.status}
                                 </Badge>
                               </div>
@@ -369,7 +532,9 @@ function SupplierDetailPanel({
                 )}
 
                 {invoices.length === 0 && (
-                  <p className="text-xs text-muted-foreground text-center py-4">No invoices for this supplier.</p>
+                  <p className="text-xs text-muted-foreground text-center py-4">
+                    No invoices for this supplier.
+                  </p>
                 )}
               </div>
             </>
@@ -397,8 +562,8 @@ export default function SuppliersPage() {
 
   const suppliersQ = useQuery({
     queryKey: ["ap-suppliers", apiContext?.entityId],
-    queryFn: () => apiContext ? getSuppliers(apiContext) : Promise.resolve(null),
-    enabled: Boolean(apiContext),
+    queryFn: () => (apiContext ? getSuppliers(apiContext) : Promise.resolve(null)),
+    enabled: Boolean(apiContext)
   });
 
   // ── Mutations ────────────────────────────────────────────────────────────
@@ -410,7 +575,7 @@ export default function SuppliersPage() {
       setFormError(null);
       queryClient.invalidateQueries({ queryKey: ["ap-suppliers"] });
     },
-    onError: (e: Error) => setFormError(e.message),
+    onError: (e: Error) => setFormError(e.message)
   });
 
   const updateMutation = useMutation({
@@ -423,7 +588,7 @@ export default function SuppliersPage() {
       queryClient.invalidateQueries({ queryKey: ["ap-suppliers"] });
       queryClient.invalidateQueries({ queryKey: ["ap-supplier"] });
     },
-    onError: (e: Error) => setFormError(e.message),
+    onError: (e: Error) => setFormError(e.message)
   });
 
   // ── Data ─────────────────────────────────────────────────────────────────
@@ -431,11 +596,12 @@ export default function SuppliersPage() {
   const allSuppliers: Supplier[] = (suppliersQ.data?.data as unknown as Supplier[]) ?? [];
 
   const suppliers = allSuppliers
-    .filter(s => showInactive || s.isActive)
-    .filter(s =>
-      !search ||
-      s.name.toLowerCase().includes(search.toLowerCase()) ||
-      s.code.toLowerCase().includes(search.toLowerCase())
+    .filter((s) => showInactive || s.isActive)
+    .filter(
+      (s) =>
+        !search ||
+        s.name.toLowerCase().includes(search.toLowerCase()) ||
+        s.code.toLowerCase().includes(search.toLowerCase())
     );
 
   function openCreate() {
@@ -482,7 +648,7 @@ export default function SuppliersPage() {
         <div className="flex items-center gap-3">
           <Input
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by name or code…"
             className="max-w-xs"
           />
@@ -490,7 +656,7 @@ export default function SuppliersPage() {
             <input
               type="checkbox"
               checked={showInactive}
-              onChange={e => setShowInactive(e.target.checked)}
+              onChange={(e) => setShowInactive(e.target.checked)}
               className="h-4 w-4 rounded border-border"
             />
             Show inactive
@@ -509,55 +675,76 @@ export default function SuppliersPage() {
                   <TableHead className="text-xs">Payment Terms</TableHead>
                   <TableHead className="text-xs">Tax ID</TableHead>
                   <TableHead className="text-xs">Status</TableHead>
-                  <TableHead className="text-xs w-16"><span className="sr-only">Actions</span></TableHead>
+                  <TableHead className="text-xs w-16">
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {suppliersQ.isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">Loading suppliers…</TableCell>
+                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                      Loading suppliers…
+                    </TableCell>
                   </TableRow>
                 ) : suppliersQ.isError ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-8 text-destructive">{(suppliersQ.error as Error).message}</TableCell>
+                    <TableCell colSpan={7} className="text-center py-8 text-destructive">
+                      {(suppliersQ.error as Error).message}
+                    </TableCell>
                   </TableRow>
                 ) : suppliers.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={7} className="text-center py-10 text-muted-foreground">
-                      {allSuppliers.length === 0
-                        ? <>No suppliers yet. Click <strong>New Supplier</strong> to add one.</>
-                        : "No suppliers match your search."}
+                      {allSuppliers.length === 0 ? (
+                        <>
+                          No suppliers yet. Click <strong>New Supplier</strong> to add one.
+                        </>
+                      ) : (
+                        "No suppliers match your search."
+                      )}
                     </TableCell>
                   </TableRow>
-                ) : suppliers.map(s => (
-                  <TableRow
-                    key={s.id}
-                    className={`cursor-pointer ${selectedId === s.id ? "bg-(--color-primary)/5 border-l-2 border-l-(--color-primary)" : "hover:bg-muted/40"}`}
-                    onClick={() => setSelectedId(s.id)}
-                  >
-                    <TableCell className="font-mono text-xs">{s.code}</TableCell>
-                    <TableCell className="text-sm font-medium">{s.name}</TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">{s.currency}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{s.paymentTermsDays ?? 30} days</TableCell>
-                    <TableCell className="text-xs text-muted-foreground font-mono">{s.taxId ?? "—"}</TableCell>
-                    <TableCell>
-                      <Badge variant={s.isActive ? "success" : "secondary"} className="text-xs">
-                        {s.isActive ? "Active" : "Inactive"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={e => { e.stopPropagation(); openEdit(s); }}
-                        title="Edit supplier"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                ) : (
+                  suppliers.map((s) => (
+                    <TableRow
+                      key={s.id}
+                      className={`cursor-pointer ${selectedId === s.id ? "bg-(--color-primary)/5 border-l-2 border-l-(--color-primary)" : "hover:bg-muted/40"}`}
+                      onClick={() => setSelectedId(s.id)}
+                    >
+                      <TableCell className="font-mono text-xs">{s.code}</TableCell>
+                      <TableCell className="text-sm font-medium">{s.name}</TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {s.currency}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {s.paymentTermsDays ?? 30} days
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground font-mono">
+                        {s.taxId ?? "—"}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={s.isActive ? "success" : "secondary"} className="text-xs">
+                          {s.isActive ? "Active" : "Inactive"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openEdit(s);
+                          }}
+                          title="Edit supplier"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
               </TableBody>
             </Table>
           </CardContent>
@@ -576,7 +763,10 @@ export default function SuppliersPage() {
       {/* Create / Edit dialog */}
       <SupplierFormDialog
         open={showForm}
-        onClose={() => { setShowForm(false); setEditingSupplier(null); }}
+        onClose={() => {
+          setShowForm(false);
+          setEditingSupplier(null);
+        }}
         supplier={editingSupplier}
         onSubmit={handleSubmit}
         isPending={isPending}

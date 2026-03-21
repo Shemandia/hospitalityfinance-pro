@@ -4,10 +4,29 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useApiContext } from "../../../components/use-api-context";
 import { getAuditEvents } from "../../../lib/gl-api";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../components/ui/select";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle
+} from "../../../components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../../../components/ui/select";
 import { Input } from "../../../components/ui/input";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../../components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
+} from "../../../components/ui/table";
 import { Badge } from "../../../components/ui/badge";
 
 type AuditEvent = {
@@ -73,8 +92,12 @@ export default function AuditPage() {
           />
         </div>
 
-        {query.isLoading ? <p className="text-sm text-muted-foreground">Loading audit events...</p> : null}
-        {query.isError ? <p className="text-sm text-destructive">{(query.error as Error).message}</p> : null}
+        {query.isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading audit events...</p>
+        ) : null}
+        {query.isError ? (
+          <p className="text-sm text-destructive">{(query.error as Error).message}</p>
+        ) : null}
 
         <div className="overflow-x-auto">
           <Table>

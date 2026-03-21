@@ -18,10 +18,9 @@ export const customerCreateSchema = z.object({
   isActive: z.boolean().default(true)
 });
 
-export const customerUpdateSchema = customerCreateSchema.partial().refine(
-  (v) => Object.keys(v).length > 0,
-  "At least one field must be provided."
-);
+export const customerUpdateSchema = customerCreateSchema
+  .partial()
+  .refine((v) => Object.keys(v).length > 0, "At least one field must be provided.");
 
 export const arInvoiceCreateSchema = z.object({
   customerId: z.string().uuid(),
@@ -32,24 +31,24 @@ export const arInvoiceCreateSchema = z.object({
   amount: decimalStringSchema,
   functionalAmount: decimalStringSchema,
   fxRate: decimalStringSchema,
-  notes: z.string().max(2000).optional()
+  notes: z.string().max(2000).optional(),
+  /** Origin of the invoice: PMS (city ledger checkout), POS, or MANUAL */
+  origin: z.enum(["PMS", "POS", "MANUAL"]).default("MANUAL"),
+  /** PMS folio/reference for traceability when origin is PMS */
+  pmsFolioRef: z.string().max(100).optional()
 });
 
 export const arInvoiceUpdateSchema = z
   .object({
     dueDate: z.coerce.date().optional(),
     notes: z.string().max(2000).optional(),
-    status: z
-      .enum(["DRAFT", "POSTED", "PARTIALLY_PAID", "PAID", "OVERDUE", "CANCELLED"])
-      .optional()
+    status: z.enum(["DRAFT", "POSTED", "PARTIALLY_PAID", "PAID", "OVERDUE", "CANCELLED"]).optional()
   })
   .refine((v) => Object.keys(v).length > 0, "At least one field must be provided.");
 
 export const arInvoiceListQuerySchema = z.object({
   customerId: z.string().uuid().optional(),
-  status: z
-    .enum(["DRAFT", "POSTED", "PARTIALLY_PAID", "PAID", "OVERDUE", "CANCELLED"])
-    .optional(),
+  status: z.enum(["DRAFT", "POSTED", "PARTIALLY_PAID", "PAID", "OVERDUE", "CANCELLED"]).optional(),
   dueBefore: z.coerce.date().optional(),
   limit: z.coerce.number().int().positive().max(200).default(100)
 });

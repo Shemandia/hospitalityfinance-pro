@@ -10,7 +10,7 @@ import {
   XCircle,
   ChevronDown,
   ChevronRight,
-  AlertTriangle,
+  AlertTriangle
 } from "lucide-react";
 import { Card, CardContent, CardHeader } from "../../../components/ui/card";
 import { Button } from "../../../components/ui/button";
@@ -22,14 +22,14 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
+  DialogFooter
 } from "../../../components/ui/dialog";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
+  SelectValue
 } from "../../../components/ui/select";
 import {
   getPeriodList,
@@ -38,30 +38,53 @@ import {
   lockPeriod,
   reopenPeriod,
   type Period,
-  type PeriodStatus,
+  type PeriodStatus
 } from "../../../lib/gl-api";
 import { useApiContext } from "../../../components/use-api-context";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December"
 ];
 
 const SHORT_MONTH = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec"
 ];
 
-const STATUS_CONFIG: Record<PeriodStatus, {
-  label: string;
-  variant: "success" | "warning" | "destructive";
-  description: string;
-}> = {
-  OPEN:   { label: "Open",   variant: "success",     description: "Journals can be posted" },
-  CLOSED: { label: "Closed", variant: "warning",     description: "No new postings allowed" },
-  LOCKED: { label: "Locked", variant: "destructive", description: "Permanently locked" },
+const STATUS_CONFIG: Record<
+  PeriodStatus,
+  {
+    label: string;
+    variant: "success" | "warning" | "destructive";
+    description: string;
+  }
+> = {
+  OPEN: { label: "Open", variant: "success", description: "Journals can be posted" },
+  CLOSED: { label: "Closed", variant: "warning", description: "No new postings allowed" },
+  LOCKED: { label: "Locked", variant: "destructive", description: "Permanently locked" }
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -69,7 +92,9 @@ const STATUS_CONFIG: Record<PeriodStatus, {
 function fmtDate(iso: string | null) {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString(undefined, {
-    day: "2-digit", month: "short", year: "numeric",
+    day: "2-digit",
+    month: "short",
+    year: "numeric"
   });
 }
 
@@ -92,7 +117,7 @@ const ACTION_CONFIG = {
     description: (p: Period) =>
       `Close ${p.name}? No new journal entries can be posted once a period is closed.`,
     buttonLabel: "Close Period",
-    buttonVariant: "outline" as const,
+    buttonVariant: "outline" as const
   },
   lock: {
     title: "Lock Period",
@@ -101,7 +126,7 @@ const ACTION_CONFIG = {
     description: (p: Period) =>
       `Lock ${p.name}? This permanently prevents any changes. Only a SUPERADMIN can reopen a locked period.`,
     buttonLabel: "Lock Period",
-    buttonVariant: "destructive" as const,
+    buttonVariant: "destructive" as const
   },
   reopen: {
     title: "Reopen Period",
@@ -110,8 +135,8 @@ const ACTION_CONFIG = {
     description: (p: Period) =>
       `Reopen ${p.name}? This requires SUPERADMIN privileges and will set the period back to OPEN.`,
     buttonLabel: "Reopen Period",
-    buttonVariant: "outline" as const,
-  },
+    buttonVariant: "outline" as const
+  }
 };
 
 function ConfirmDialog({
@@ -119,7 +144,7 @@ function ConfirmDialog({
   onClose,
   onConfirm,
   isPending,
-  error,
+  error
 }: {
   confirm: ConfirmAction | null;
   onClose: () => void;
@@ -132,7 +157,12 @@ function ConfirmDialog({
   const Icon = cfg.icon;
 
   return (
-    <Dialog open={!!confirm} onOpenChange={(v) => { if (!v) onClose(); }}>
+    <Dialog
+      open={!!confirm}
+      onOpenChange={(v) => {
+        if (!v) onClose();
+      }}
+    >
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -155,7 +185,9 @@ function ConfirmDialog({
           )}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={isPending}>Cancel</Button>
+          <Button variant="outline" onClick={onClose} disabled={isPending}>
+            Cancel
+          </Button>
           <Button variant={cfg.buttonVariant} onClick={onConfirm} disabled={isPending}>
             {isPending ? "Processing…" : cfg.buttonLabel}
           </Button>
@@ -172,7 +204,7 @@ function NewPeriodDialog({
   onClose,
   onSubmit,
   isPending,
-  error,
+  error
 }: {
   open: boolean;
   onClose: () => void;
@@ -205,7 +237,12 @@ function NewPeriodDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) onClose();
+      }}
+    >
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle>New Accounting Period</DialogTitle>
@@ -213,7 +250,9 @@ function NewPeriodDialog({
         <div className="grid gap-4 py-2">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>Year <span className="text-destructive">*</span></Label>
+              <Label>
+                Year <span className="text-destructive">*</span>
+              </Label>
               <Input
                 type="number"
                 value={year}
@@ -224,7 +263,9 @@ function NewPeriodDialog({
               />
             </div>
             <div className="space-y-1.5">
-              <Label>Month <span className="text-destructive">*</span></Label>
+              <Label>
+                Month <span className="text-destructive">*</span>
+              </Label>
               <Select value={month} onValueChange={handleMonthChange}>
                 <SelectTrigger>
                   <SelectValue />
@@ -240,7 +281,9 @@ function NewPeriodDialog({
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label>Period Name <span className="text-destructive">*</span></Label>
+            <Label>
+              Period Name <span className="text-destructive">*</span>
+            </Label>
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -255,7 +298,9 @@ function NewPeriodDialog({
           )}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={isPending}>Cancel</Button>
+          <Button variant="outline" onClick={onClose} disabled={isPending}>
+            Cancel
+          </Button>
           <Button onClick={handleSubmit} disabled={isPending}>
             {isPending ? "Creating…" : "Create Period"}
           </Button>
@@ -269,7 +314,7 @@ function NewPeriodDialog({
 
 function PeriodRow({
   period,
-  onAction,
+  onAction
 }: {
   period: Period;
   onAction: (confirm: ConfirmAction) => void;
@@ -335,7 +380,7 @@ function PeriodRow({
 function YearGroup({
   year,
   periods,
-  onAction,
+  onAction
 }: {
   year: number;
   periods: Period[];
@@ -346,7 +391,7 @@ function YearGroup({
   const counts = {
     open: periods.filter((p) => p.status === "OPEN").length,
     closed: periods.filter((p) => p.status === "CLOSED").length,
-    locked: periods.filter((p) => p.status === "LOCKED").length,
+    locked: periods.filter((p) => p.status === "LOCKED").length
   };
 
   return (
@@ -383,9 +428,7 @@ function YearGroup({
           </div>
         </td>
       </tr>
-      {expanded && periods.map((p) => (
-        <PeriodRow key={p.id} period={p} onAction={onAction} />
-      ))}
+      {expanded && periods.map((p) => <PeriodRow key={p.id} period={p} onAction={onAction} />)}
     </>
   );
 }
@@ -398,10 +441,14 @@ export default function PeriodsPage() {
 
   // ── Data ──────────────────────────────────────────────────────────────────
 
-  const { data: periodsRes, isLoading, error: loadError } = useQuery({
+  const {
+    data: periodsRes,
+    isLoading,
+    error: loadError
+  } = useQuery({
     queryKey: ["periods", ctx?.entityId],
     queryFn: () => getPeriodList(ctx!),
-    enabled: !!ctx,
+    enabled: !!ctx
   });
 
   const periods = periodsRes?.data ?? [];
@@ -436,12 +483,15 @@ export default function PeriodsPage() {
     return Array.from(map.entries()).sort((a, b) => b[0] - a[0]);
   }, [filtered]);
 
-  const stats = useMemo(() => ({
-    open: periods.filter((p) => p.status === "OPEN").length,
-    closed: periods.filter((p) => p.status === "CLOSED").length,
-    locked: periods.filter((p) => p.status === "LOCKED").length,
-    total: periods.length,
-  }), [periods]);
+  const stats = useMemo(
+    () => ({
+      open: periods.filter((p) => p.status === "OPEN").length,
+      closed: periods.filter((p) => p.status === "CLOSED").length,
+      locked: periods.filter((p) => p.status === "LOCKED").length,
+      total: periods.length
+    }),
+    [periods]
+  );
 
   // ── Mutations ─────────────────────────────────────────────────────────────
 
@@ -453,7 +503,7 @@ export default function PeriodsPage() {
       setNewOpen(false);
       setCreateError(null);
     },
-    onError: (err: Error) => setCreateError(err.message),
+    onError: (err: Error) => setCreateError(err.message)
   });
 
   const actionMutation = useMutation({
@@ -467,7 +517,7 @@ export default function PeriodsPage() {
       setConfirmAction(null);
       setActionError(null);
     },
-    onError: (err: Error) => setActionError(err.message),
+    onError: (err: Error) => setActionError(err.message)
   });
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -488,7 +538,13 @@ export default function PeriodsPage() {
             {stats.locked > 0 && ` · ${stats.locked} locked`}
           </p>
         </div>
-        <Button onClick={() => { setCreateError(null); setNewOpen(true); }} className="gap-1.5">
+        <Button
+          onClick={() => {
+            setCreateError(null);
+            setNewOpen(true);
+          }}
+          className="gap-1.5"
+        >
           <Plus className="h-4 w-4" />
           New Period
         </Button>
@@ -511,7 +567,9 @@ export default function PeriodsPage() {
             >
               <div className="text-2xl font-bold">{count}</div>
               <div className="flex items-center gap-2 mt-1">
-                <Badge variant={cfg.variant} className="text-[10px]">{cfg.label}</Badge>
+                <Badge variant={cfg.variant} className="text-[10px]">
+                  {cfg.label}
+                </Badge>
               </div>
               <div className="text-xs text-muted-foreground mt-1">{cfg.description}</div>
             </button>
@@ -580,7 +638,10 @@ export default function PeriodsPage() {
                         key={year}
                         year={year}
                         periods={yearPeriods}
-                        onAction={(c) => { setActionError(null); setConfirmAction(c); }}
+                        onAction={(c) => {
+                          setActionError(null);
+                          setConfirmAction(c);
+                        }}
                       />
                     ))
                   )}

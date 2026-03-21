@@ -8,9 +8,7 @@ export default auth((request) => {
   const isPublic = PUBLIC_PATHS.has(pathname);
   const isAuthRoute = pathname.startsWith("/api/auth");
   const isAssetPath =
-    pathname.startsWith("/_next") ||
-    pathname === "/favicon.ico" ||
-    pathname.startsWith("/images");
+    pathname.startsWith("/_next") || pathname === "/favicon.ico" || pathname.startsWith("/images");
 
   if (isAuthRoute || isAssetPath) {
     return NextResponse.next();

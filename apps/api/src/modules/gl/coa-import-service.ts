@@ -65,31 +65,63 @@ type AccountType = "ASSET" | "LIABILITY" | "EQUITY" | "REVENUE" | "EXPENSE";
 
 /** Normalise CSV header to canonical field name */
 function normaliseHeader(raw: string): string {
-  const h = raw.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  const h = raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
   const map: Record<string, string> = {
-    code: "code", accountcode: "code", acctcode: "code", glcode: "code", accountno: "code",
-    name: "name", accountname: "name", acctname: "name", description: "name", desc: "name",
-    type: "type", accounttype: "type", accttype: "type",
-    normalbalance: "normalBalance", balance: "normalBalance", normal: "normalBalance", drcr: "normalBalance",
-    allowposting: "allowPosting", postable: "allowPosting", posting: "allowPosting",
-    iscontrolaccount: "isControlAccount", control: "isControlAccount", controlaccount: "isControlAccount",
-    parentcode: "parentCode", parent: "parentCode", parentaccount: "parentCode", parentacctcode: "parentCode",
-    level: "level", acctlevel: "level", accountlevel: "level",
-    usalicategory: "usaliCategory", category: "usaliCategory", usalicateg: "usaliCategory",
-    usalidepartment: "usaliDepartment", department: "usaliDepartment", dept: "usaliDepartment",
+    code: "code",
+    accountcode: "code",
+    acctcode: "code",
+    glcode: "code",
+    accountno: "code",
+    name: "name",
+    accountname: "name",
+    acctname: "name",
+    description: "name",
+    desc: "name",
+    type: "type",
+    accounttype: "type",
+    accttype: "type",
+    normalbalance: "normalBalance",
+    balance: "normalBalance",
+    normal: "normalBalance",
+    drcr: "normalBalance",
+    allowposting: "allowPosting",
+    postable: "allowPosting",
+    posting: "allowPosting",
+    iscontrolaccount: "isControlAccount",
+    control: "isControlAccount",
+    controlaccount: "isControlAccount",
+    parentcode: "parentCode",
+    parent: "parentCode",
+    parentaccount: "parentCode",
+    parentacctcode: "parentCode",
+    level: "level",
+    acctlevel: "level",
+    accountlevel: "level",
+    usalicategory: "usaliCategory",
+    category: "usaliCategory",
+    usalicateg: "usaliCategory",
+    usalidepartment: "usaliDepartment",
+    department: "usaliDepartment",
+    dept: "usaliDepartment"
   };
   return map[h] ?? h;
 }
 
 function parseCSV(content: string): { headers: string[]; rows: Record<string, string>[] } {
-  const lines = content.trim().split(/\r?\n/).filter(l => l.trim());
+  const lines = content
+    .trim()
+    .split(/\r?\n/)
+    .filter((l) => l.trim());
   if (lines.length === 0) return { headers: [], rows: [] };
 
   // Detect delimiter: tab, semicolon, comma
   const firstLine = lines[0];
   const delimiter = firstLine.includes("\t") ? "\t" : firstLine.includes(";") ? ";" : ",";
 
-  const rawHeaders = lines[0].split(delimiter).map(h => h.trim().replace(/^["']|["']$/g, ""));
+  const rawHeaders = lines[0].split(delimiter).map((h) => h.trim().replace(/^["']|["']$/g, ""));
   const headers = rawHeaders.map(normaliseHeader);
 
   const rows: Record<string, string>[] = [];
@@ -135,32 +167,42 @@ function splitCSVLine(line: string, delimiter: string): string[] {
 
 // ── Excel parsing ─────────────────────────────────────────────────────────────
 
-function parseExcel(base64: string, sheetName?: string): { headers: string[]; rows: Record<string, string>[] } {
+function parseExcel(
+  base64: string,
+  sheetName?: string
+): { headers: string[]; rows: Record<string, string>[] } {
   const buffer = Buffer.from(base64, "base64");
   const workbook = XLSX.read(buffer, { type: "buffer" });
 
   // Use specified sheet or first sheet
-  const sheet = sheetName
-    ? workbook.Sheets[sheetName]
-    : workbook.Sheets[workbook.SheetNames[0]];
+  const sheet = sheetName ? workbook.Sheets[sheetName] : workbook.Sheets[workbook.SheetNames[0]];
 
   if (!sheet) {
     return { headers: [], rows: [] };
   }
 
   // Convert sheet to array-of-arrays (raw: false gives formatted strings)
-  const rawData: string[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: "" });
+  const rawData: string[][] = XLSX.utils.sheet_to_json(sheet, {
+    header: 1,
+    raw: false,
+    defval: ""
+  });
 
   if (rawData.length === 0) return { headers: [], rows: [] };
 
   // Find the header row — first row with at least 2 non-empty cells that look like headers
   let headerRowIdx = 0;
   for (let i = 0; i < Math.min(rawData.length, 10); i++) {
-    const nonEmpty = rawData[i].filter(c => String(c ?? "").trim() !== "").length;
+    const nonEmpty = rawData[i].filter((c) => String(c ?? "").trim() !== "").length;
     if (nonEmpty >= 2) {
       // Check if this looks like a header (contains "code" or "name" or "account")
-      const joined = rawData[i].map(c => String(c).toLowerCase()).join(" ");
-      if (joined.includes("code") || joined.includes("name") || joined.includes("account") || joined.includes("type")) {
+      const joined = rawData[i].map((c) => String(c).toLowerCase()).join(" ");
+      if (
+        joined.includes("code") ||
+        joined.includes("name") ||
+        joined.includes("account") ||
+        joined.includes("type")
+      ) {
         headerRowIdx = i;
         break;
       }
@@ -169,14 +211,14 @@ function parseExcel(base64: string, sheetName?: string): { headers: string[]; ro
     }
   }
 
-  const rawHeaders = rawData[headerRowIdx].map(h => String(h ?? "").trim());
+  const rawHeaders = rawData[headerRowIdx].map((h) => String(h ?? "").trim());
   const headers = rawHeaders.map(normaliseHeader);
 
   const rows: Record<string, string>[] = [];
   for (let i = headerRowIdx + 1; i < rawData.length; i++) {
     const cells = rawData[i];
     // Skip completely empty rows
-    if (!cells || cells.every(c => String(c ?? "").trim() === "")) continue;
+    if (!cells || cells.every((c) => String(c ?? "").trim() === "")) continue;
 
     const row: Record<string, string> = {};
     for (let j = 0; j < headers.length; j++) {
@@ -228,23 +270,50 @@ const VALID_TYPES: AccountType[] = ["ASSET", "LIABILITY", "EQUITY", "REVENUE", "
 
 /** Map common accounting type aliases to canonical types */
 const TYPE_ALIASES: Record<string, AccountType> = {
-  ASSET: "ASSET", ASSETS: "ASSET",
-  LIABILITY: "LIABILITY", LIABILITIES: "LIABILITY",
-  EQUITY: "EQUITY", CAPITAL: "EQUITY", "OWNERS EQUITY": "EQUITY",
-  REVENUE: "REVENUE", INCOME: "REVENUE", SALES: "REVENUE",
-  EXPENSE: "EXPENSE", EXPENSES: "EXPENSE", "COST OF SALES": "EXPENSE", COGS: "EXPENSE",
-  "PROFIT AND LOSS": "EXPENSE", "P&L": "EXPENSE", PL: "EXPENSE", "P AND L": "EXPENSE",
+  ASSET: "ASSET",
+  ASSETS: "ASSET",
+  LIABILITY: "LIABILITY",
+  LIABILITIES: "LIABILITY",
+  EQUITY: "EQUITY",
+  CAPITAL: "EQUITY",
+  "OWNERS EQUITY": "EQUITY",
+  REVENUE: "REVENUE",
+  INCOME: "REVENUE",
+  SALES: "REVENUE",
+  EXPENSE: "EXPENSE",
+  EXPENSES: "EXPENSE",
+  "COST OF SALES": "EXPENSE",
+  COGS: "EXPENSE",
+  "PROFIT AND LOSS": "EXPENSE",
+  "P&L": "EXPENSE",
+  PL: "EXPENSE",
+  "P AND L": "EXPENSE",
   "BALANCE SHEET": "ASSET",
   // Common SunSystems / legacy ERP terms
-  DEBTOR: "ASSET", DEBTORS: "ASSET", "ACCOUNTS RECEIVABLE": "ASSET", AR: "ASSET",
-  CREDITOR: "LIABILITY", CREDITORS: "LIABILITY", "ACCOUNTS PAYABLE": "LIABILITY", AP: "LIABILITY",
-  BANK: "ASSET", CASH: "ASSET",
-  "FIXED ASSET": "ASSET", "FIXED ASSETS": "ASSET", FA: "ASSET",
-  TAX: "LIABILITY", VAT: "LIABILITY",
-  "RETAINED EARNINGS": "EQUITY", "ACCUMULATED PROFIT": "EQUITY",
-  "OTHER INCOME": "REVENUE", "NON OPERATING INCOME": "REVENUE",
-  "OTHER EXPENSE": "EXPENSE", OVERHEAD: "EXPENSE", OVERHEADS: "EXPENSE",
-  PAYROLL: "EXPENSE", "LABOUR COST": "EXPENSE",
+  DEBTOR: "ASSET",
+  DEBTORS: "ASSET",
+  "ACCOUNTS RECEIVABLE": "ASSET",
+  AR: "ASSET",
+  CREDITOR: "LIABILITY",
+  CREDITORS: "LIABILITY",
+  "ACCOUNTS PAYABLE": "LIABILITY",
+  AP: "LIABILITY",
+  BANK: "ASSET",
+  CASH: "ASSET",
+  "FIXED ASSET": "ASSET",
+  "FIXED ASSETS": "ASSET",
+  FA: "ASSET",
+  TAX: "LIABILITY",
+  VAT: "LIABILITY",
+  "RETAINED EARNINGS": "EQUITY",
+  "ACCUMULATED PROFIT": "EQUITY",
+  "OTHER INCOME": "REVENUE",
+  "NON OPERATING INCOME": "REVENUE",
+  "OTHER EXPENSE": "EXPENSE",
+  OVERHEAD: "EXPENSE",
+  OVERHEADS: "EXPENSE",
+  PAYROLL: "EXPENSE",
+  "LABOUR COST": "EXPENSE"
 };
 
 function resolveAccountType(raw: string): AccountType | null {
@@ -258,7 +327,7 @@ const TYPE_DEFAULT_BALANCE: Record<AccountType, "DEBIT" | "CREDIT"> = {
   LIABILITY: "CREDIT",
   EQUITY: "CREDIT",
   REVENUE: "CREDIT",
-  EXPENSE: "DEBIT",
+  EXPENSE: "DEBIT"
 };
 
 function parseBool(val: string): boolean {
@@ -266,7 +335,10 @@ function parseBool(val: string): boolean {
   return v === "true" || v === "yes" || v === "1" || v === "y";
 }
 
-function parseRow(raw: Record<string, string>, rowNum: number): { row: COAImportRow | null; errors: COAImportError[] } {
+function parseRow(
+  raw: Record<string, string>,
+  rowNum: number
+): { row: COAImportRow | null; errors: COAImportError[] } {
   const errors: COAImportError[] = [];
 
   const code = raw["code"] ?? "";
@@ -289,7 +361,11 @@ function parseRow(raw: Record<string, string>, rowNum: number): { row: COAImport
     if (resolved) {
       type = resolved;
     } else {
-      errors.push({ row: rowNum, column: "type", message: `Invalid type "${typeStr}". Use: ${VALID_TYPES.join(", ")} or aliases like Debtor, Creditor, Income, etc.` });
+      errors.push({
+        row: rowNum,
+        column: "type",
+        message: `Invalid type "${typeStr}". Use: ${VALID_TYPES.join(", ")} or aliases like Debtor, Creditor, Income, etc.`
+      });
     }
   } else {
     errors.push({ row: rowNum, column: "type", message: "Account type is required" });
@@ -304,7 +380,11 @@ function parseRow(raw: Record<string, string>, rowNum: number): { row: COAImport
   } else if (normalBalanceStr === "C" || normalBalanceStr === "CR") {
     normalBalance = "CREDIT";
   } else if (normalBalanceStr && normalBalanceStr !== "") {
-    errors.push({ row: rowNum, column: "normalBalance", message: `Invalid normal balance "${normalBalanceStr}"` });
+    errors.push({
+      row: rowNum,
+      column: "normalBalance",
+      message: `Invalid normal balance "${normalBalanceStr}"`
+    });
   }
 
   // Level
@@ -312,7 +392,11 @@ function parseRow(raw: Record<string, string>, rowNum: number): { row: COAImport
   if (levelStr) {
     level = parseInt(levelStr, 10);
     if (isNaN(level) || level < 1 || level > 10) {
-      errors.push({ row: rowNum, column: "level", message: `Invalid level "${levelStr}" (must be 1-10)` });
+      errors.push({
+        row: rowNum,
+        column: "level",
+        message: `Invalid level "${levelStr}" (must be 1-10)`
+      });
       level = 1;
     }
   } else if (parentCode) {
@@ -339,9 +423,9 @@ function parseRow(raw: Record<string, string>, rowNum: number): { row: COAImport
       parentCode,
       level,
       usaliCategory: raw["usaliCategory"] ?? "",
-      usaliDepartment: raw["usaliDepartment"] ?? "",
+      usaliDepartment: raw["usaliDepartment"] ?? ""
     },
-    errors,
+    errors
   };
 }
 
@@ -355,25 +439,44 @@ export async function previewCOAImport(
   const { headers, rows: rawRows } = parseFile(input);
 
   if (rawRows.length === 0) {
-    return { totalRows: 0, validRows: 0, errorRows: 0, newAccounts: 0, existingAccounts: 0, rows: [], errors: [{ row: 0, column: "", message: "File is empty or has no data rows" }] };
+    return {
+      totalRows: 0,
+      validRows: 0,
+      errorRows: 0,
+      newAccounts: 0,
+      existingAccounts: 0,
+      rows: [],
+      errors: [{ row: 0, column: "", message: "File is empty or has no data rows" }]
+    };
   }
 
   // Check required headers
   const requiredHeaders = ["code", "name"];
-  const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
+  const missingHeaders = requiredHeaders.filter((h) => !headers.includes(h));
   if (missingHeaders.length > 0) {
     return {
-      totalRows: 0, validRows: 0, errorRows: 0, newAccounts: 0, existingAccounts: 0, rows: [],
-      errors: [{ row: 0, column: "", message: `Missing required column(s): ${missingHeaders.join(", ")}. Found: ${headers.join(", ")}` }],
+      totalRows: 0,
+      validRows: 0,
+      errorRows: 0,
+      newAccounts: 0,
+      existingAccounts: 0,
+      rows: [],
+      errors: [
+        {
+          row: 0,
+          column: "",
+          message: `Missing required column(s): ${missingHeaders.join(", ")}. Found: ${headers.join(", ")}`
+        }
+      ]
     };
   }
 
   // Load existing accounts for this entity
   const existingAccounts = await prisma.account.findMany({
     where: { entityId },
-    select: { id: true, code: true, name: true, isActive: true },
+    select: { id: true, code: true, name: true, isActive: true }
   });
-  const existingByCode = new Map(existingAccounts.map(a => [a.code, a]));
+  const existingByCode = new Map(existingAccounts.map((a) => [a.code, a]));
 
   // Track codes in the import for duplicate detection
   const importCodes = new Map<string, number>();
@@ -392,7 +495,7 @@ export async function previewCOAImport(
       continue;
     }
 
-    const issues: string[] = errors.map(e => `${e.column}: ${e.message}`);
+    const issues: string[] = errors.map((e) => `${e.column}: ${e.message}`);
 
     // Duplicate in file
     if (importCodes.has(row.code)) {
@@ -404,14 +507,16 @@ export async function previewCOAImport(
     if (row.parentCode) {
       const parentExists = existingByCode.has(row.parentCode) || importCodes.has(row.parentCode);
       if (!parentExists) {
-        issues.push(`Parent code "${row.parentCode}" not found (must exist in DB or earlier in file)`);
+        issues.push(
+          `Parent code "${row.parentCode}" not found (must exist in DB or earlier in file)`
+        );
       }
     }
 
     const existing = existingByCode.get(row.code);
     let status: "new" | "exists" | "update" | "error" = "new";
 
-    if (errors.some(e => e.column === "code" || e.column === "type")) {
+    if (errors.some((e) => e.column === "code" || e.column === "type")) {
       status = "error";
     } else if (existing?.isActive) {
       status = "update";
@@ -427,7 +532,7 @@ export async function previewCOAImport(
       ...row,
       status,
       existingId: existing?.id,
-      issues,
+      issues
     });
 
     allErrors.push(...errors);
@@ -435,27 +540,27 @@ export async function previewCOAImport(
 
   return {
     totalRows: rawRows.length,
-    validRows: previewRows.filter(r => r.status !== "error").length,
-    errorRows: previewRows.filter(r => r.status === "error").length,
+    validRows: previewRows.filter((r) => r.status !== "error").length,
+    errorRows: previewRows.filter((r) => r.status === "error").length,
     newAccounts: newCount,
     existingAccounts: existingCount,
     rows: previewRows,
-    errors: allErrors,
+    errors: allErrors
   };
 }
 
 // ── 2. Execute import ─────────────────────────────────────────────────────────
 
 export type COAExecuteOptions = {
-  updateExisting: boolean;      // Update accounts that already exist
-  reactivateInactive: boolean;  // Reactivate soft-deleted accounts
-  skipErrors: boolean;          // Skip rows with errors instead of aborting
+  updateExisting: boolean; // Update accounts that already exist
+  reactivateInactive: boolean; // Reactivate soft-deleted accounts
+  skipErrors: boolean; // Skip rows with errors instead of aborting
 };
 
 const DEFAULT_OPTS: COAExecuteOptions = {
   updateExisting: true,
   reactivateInactive: true,
-  skipErrors: true,
+  skipErrors: true
 };
 
 export async function executeCOAImport(
@@ -472,9 +577,9 @@ export async function executeCOAImport(
   // Load existing accounts
   const existingAccounts = await prisma.account.findMany({
     where: { entityId },
-    select: { id: true, code: true, isActive: true },
+    select: { id: true, code: true, isActive: true }
   });
-  const existingByCode = new Map(existingAccounts.map(a => [a.code, a]));
+  const existingByCode = new Map(existingAccounts.map((a) => [a.code, a]));
 
   // First pass: create/update accounts WITHOUT parent links (to avoid ordering issues)
   const pendingParents: Array<{ code: string; parentCode: string }> = [];
@@ -516,8 +621,8 @@ export async function executeCOAImport(
             isControlAccount: row.isControlAccount,
             level: row.level,
             usaliCategory: row.usaliCategory || undefined,
-            usaliDepartment: row.usaliDepartment || undefined,
-          },
+            usaliDepartment: row.usaliDepartment || undefined
+          }
         });
         existingByCode.set(row.code, { id: created.id, code: created.code, isActive: true });
         result.created++;
@@ -532,8 +637,8 @@ export async function executeCOAImport(
             isControlAccount: row.isControlAccount,
             level: row.level,
             usaliCategory: row.usaliCategory || undefined,
-            usaliDepartment: row.usaliDepartment || undefined,
-          },
+            usaliDepartment: row.usaliDepartment || undefined
+          }
         });
         result.updated++;
       } else if (!existing.isActive && opts.reactivateInactive) {
@@ -548,8 +653,8 @@ export async function executeCOAImport(
             level: row.level,
             isActive: true,
             usaliCategory: row.usaliCategory || undefined,
-            usaliDepartment: row.usaliDepartment || undefined,
-          },
+            usaliDepartment: row.usaliDepartment || undefined
+          }
         });
         result.updated++;
       } else {
@@ -564,7 +669,7 @@ export async function executeCOAImport(
       result.errors.push({
         row: rowNum,
         column: "code",
-        message: `DB error: ${err instanceof Error ? err.message : String(err)}`,
+        message: `DB error: ${err instanceof Error ? err.message : String(err)}`
       });
       if (!opts.skipErrors) return result;
       result.skipped++;
@@ -580,13 +685,13 @@ export async function executeCOAImport(
       try {
         await prisma.account.update({
           where: { id: account.id },
-          data: { parentId: parent.id },
+          data: { parentId: parent.id }
         });
       } catch (err) {
         result.errors.push({
           row: 0,
           column: "parentCode",
-          message: `Failed to link ${code} → ${parentCode}: ${err instanceof Error ? err.message : String(err)}`,
+          message: `Failed to link ${code} → ${parentCode}: ${err instanceof Error ? err.message : String(err)}`
         });
       }
     }

@@ -180,70 +180,58 @@ export class KPIService {
     // Default to 100 available rooms if no PMS data loaded yet
     const availableRooms = availableRoomsRaw > 0 ? availableRoomsRaw : 100;
 
-    // Account balances for revenue/cost accounts (using standard USALI chart codes)
-    type BalanceRow = { code: string; closing_balance: Prisma.Decimal };
+    // Account balances with USALI classification from account master
+    type BalanceRow = {
+      code: string;
+      closing_balance: Prisma.Decimal;
+      account_type: string;
+      usali_department: string | null;
+    };
     const balances = await this.prisma.$queryRaw<BalanceRow[]>`
-      SELECT a.code, apb.closing_balance
+      SELECT a.code, apb.closing_balance, a.type as account_type, a.usali_department
       FROM account_period_balances apb
       JOIN accounts a ON a.id = apb.account_id
       WHERE apb.entity_id = ${req.entityId}
         AND apb.period_id = ${req.periodId}
     `;
 
-    const getBalance = (codes: string[]): Prisma.Decimal =>
-      balances
-        .filter((b) => codes.some((c) => b.code.startsWith(c)))
-        .reduce((sum, b) => sum.add(b.closing_balance), new Prisma.Decimal(0))
-        .abs();
+    // Classify by account type + usali_department, with code-prefix fallback
+    let roomRevenue = new Prisma.Decimal(0);
+    let fbRevenue = new Prisma.Decimal(0);
+    let otherRevenue = new Prisma.Decimal(0);
+    let fbCost = new Prisma.Decimal(0);
+    let operatingExpenses = new Prisma.Decimal(0);
 
-    // Revenue accounts (30xxx–36xxx in actual COA)
-    const roomRevenue = getBalance(["301", "300"]); // Rooms revenue
-    const fbRevenue = getBalance(["311", "315", "316", "321", "322", "323", "325", "326", "331"]); // Food + Beverage + Other F&B
-    const otherRevenue = getBalance([
-      "341",
-      "342",
-      "343",
-      "344",
-      "345",
-      "346",
-      "351",
-      "352",
-      "353",
-      "361",
-      "362",
-      "363",
-      "364",
-      "365",
-      "366"
-    ]); // Spa + Boutique + OOD
+    for (const b of balances) {
+      const bal = b.closing_balance.abs();
+
+      // Use usali_department if available
+      const dept = b.usali_department ? normalizeDepartmentName(b.usali_department) : null;
+
+      if (b.account_type === "REVENUE") {
+        if (dept === "Rooms" || (!dept && (b.code.startsWith("301") || b.code.startsWith("300")))) {
+          roomRevenue = roomRevenue.add(bal);
+        } else if (
+          dept === "Food & Beverage" ||
+          (!dept && (b.code.startsWith("31") || b.code.startsWith("32") || b.code.startsWith("33")))
+        ) {
+          fbRevenue = fbRevenue.add(bal);
+        } else {
+          otherRevenue = otherRevenue.add(bal);
+        }
+      } else if (b.account_type === "EXPENSE") {
+        if (
+          dept === "Food & Beverage" ||
+          (!dept && (b.code.startsWith("42") || b.code.startsWith("43")))
+        ) {
+          fbCost = fbCost.add(bal);
+        } else {
+          operatingExpenses = operatingExpenses.add(bal);
+        }
+      }
+    }
+
     const totalRevenue = roomRevenue.add(fbRevenue).add(otherRevenue);
-
-    const fbCost = getBalance(["421", "427", "431", "432", "433", "434", "435"]); // Cost of Food + Beverage sales
-    const operatingExpenses = getBalance([
-      "511",
-      "551",
-      "552",
-      "553",
-      "554",
-      "601",
-      "611",
-      "621",
-      "631",
-      "6401",
-      "6501",
-      "660",
-      "661",
-      "662",
-      "663",
-      "664",
-      "665",
-      "666",
-      "671",
-      "681",
-      "682",
-      "683"
-    ]); // Payroll + Common + Dept + Undistributed
-
     const gop = totalRevenue.sub(fbCost).sub(operatingExpenses);
 
     const occupied = new Prisma.Decimal(occupiedRooms);
@@ -412,7 +400,7 @@ export class KPIService {
     const capexChange = rows
       .filter((r) => {
         const code = parseInt(r.code);
-        return code >= 1500 && code < 2000 && r.account_type === "Asset";
+        return code >= 1500 && code < 2000 && r.account_type === "ASSET";
       })
       .reduce((s, r) => s.add(r.period_debits.sub(r.period_credits)).neg(), new Prisma.Decimal(0));
 
@@ -478,9 +466,12 @@ export class KPIService {
       period_debits: Prisma.Decimal;
       period_credits: Prisma.Decimal;
       account_type: string;
+      usali_category: string | null;
+      usali_department: string | null;
     };
     const rows = await this.prisma.$queryRaw<USALIRow[]>`
-      SELECT a.code, a.name, apb.period_debits, apb.period_credits, a.type as account_type
+      SELECT a.code, a.name, apb.period_debits, apb.period_credits,
+             a.type as account_type, a.usali_category, a.usali_department
       FROM account_period_balances apb
       JOIN accounts a ON a.id = apb.account_id
       WHERE apb.entity_id = ${req.entityId}
@@ -492,10 +483,27 @@ export class KPIService {
     const deptExpense = new Map<string, Prisma.Decimal>();
 
     for (const row of rows) {
-      const mapped = mapAccountToDepartment(row.code);
+      // Primary strategy: use usali_department from account master data
+      // Fallback: use legacy code-prefix mapping
+      let mapped: { dept: string; type: "revenue" | "expense" } | null = null;
+
+      if (row.usali_department && row.account_type) {
+        const dept = normalizeDepartmentName(row.usali_department);
+        if (dept) {
+          mapped = {
+            dept,
+            type: row.account_type === "REVENUE" ? "revenue" : "expense"
+          };
+        }
+      }
+
+      // Fallback to code-prefix mapping for accounts without usali_department
+      if (!mapped) {
+        mapped = mapAccountToDepartment(row.code);
+      }
+
       if (!mapped) continue;
 
-      // Revenue accounts are credits-heavy, expense accounts are debits-heavy
       const amount =
         mapped.type === "revenue"
           ? row.period_credits.sub(row.period_debits)
@@ -1012,6 +1020,27 @@ export class KPIService {
  * Maps an account code to its USALI department based on the actual COA structure.
  * Revenue: 30xxx–36xxx, Expenses: 42xxx–68xxx, Payroll: 51xxx/55xxx
  */
+/** Normalize various usali_department values from the account master to standard USALI department names */
+function normalizeDepartmentName(raw: string): string | null {
+  const lower = raw.toLowerCase().trim();
+  if (lower.includes("room")) return "Rooms";
+  if (lower.includes("food") || lower.includes("beverage") || lower === "f&b" || lower === "fb")
+    return "Food & Beverage";
+  if (lower.includes("spa") || lower.includes("boutique") || lower.includes("other operated"))
+    return "Other Operated Departments";
+  if (lower.includes("rental") || lower.includes("other income")) return "Rentals & Other Income";
+  if (lower.includes("admin") || lower.includes("general")) return "Administrative & General";
+  if (lower.includes("telecom") || lower.includes("information") || lower.includes("it"))
+    return "Information & Telecommunications";
+  if (lower.includes("sales") || lower.includes("marketing")) return "Sales & Marketing";
+  if (lower.includes("maintenance") || lower.includes("property op"))
+    return "Property Operations & Maintenance";
+  if (lower.includes("utilit")) return "Utilities";
+  if (lower.includes("payroll") || lower.includes("labour") || lower.includes("labor"))
+    return "Payroll & Related";
+  return null;
+}
+
 function mapAccountToDepartment(
   code: string
 ): { dept: string; type: "revenue" | "expense" } | null {

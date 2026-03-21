@@ -3,7 +3,9 @@ import type { PrismaClient } from "@prisma/client";
 import { ZodError } from "zod";
 import { prisma } from "../../db/prisma.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
+import { requireWriteAccess } from "../../middleware/requireWriteAccess.js";
 import { BudgetService, BudgetServiceError } from "./service.js";
+import { previewBudgetExcel, executeBudgetExcelImport } from "./excel-import.js";
 import {
   budgetDefinitionCreateSchema,
   budgetLinesBulkSchema,
@@ -39,6 +41,7 @@ export async function registerBudgetRouter(app: FastifyInstance): Promise<void> 
   app.register(
     async (router) => {
       router.addHook("preHandler", requireAuth);
+      router.addHook("preHandler", requireWriteAccess);
 
       router.get("/definitions", async (request, reply) => {
         try {
@@ -102,6 +105,63 @@ export async function registerBudgetRouter(app: FastifyInstance): Promise<void> 
           return mapError(reply, error);
         }
       });
+
+      // ── Excel Import ─────────────────────────────────────────────────────────
+
+      router.post<{ Params: { id: string } }>(
+        "/definitions/:id/import-excel/preview",
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const body = request.body as { file?: string; filename?: string };
+            if (!body?.file) {
+              return reply.code(400).send({
+                data: null,
+                errors: [{ code: "MISSING_FILE", message: "Base64-encoded file is required." }]
+              });
+            }
+            const buffer = Buffer.from(body.file, "base64");
+            const filename = body.filename ?? "budget.xlsx";
+            const data = await previewBudgetExcel(
+              prisma as unknown as PrismaClient,
+              entityId,
+              buffer,
+              filename
+            );
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      router.post<{ Params: { id: string } }>(
+        "/definitions/:id/import-excel/execute",
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const body = request.body as { file?: string; filename?: string };
+            if (!body?.file) {
+              return reply.code(400).send({
+                data: null,
+                errors: [{ code: "MISSING_FILE", message: "Base64-encoded file is required." }]
+              });
+            }
+            const buffer = Buffer.from(body.file, "base64");
+            const filename = body.filename ?? "budget.xlsx";
+            const data = await executeBudgetExcelImport(
+              prisma as unknown as PrismaClient,
+              entityId,
+              request.params.id,
+              buffer,
+              filename
+            );
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
     },
     { prefix: "/api/v1/budget" }
   );

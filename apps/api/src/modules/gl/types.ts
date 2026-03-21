@@ -7,13 +7,7 @@ const decimalStringSchema = z
   .regex(decimalRegex, "Expected a positive decimal string.")
   .transform((value) => value.trim());
 
-export const accountTypeSchema = z.enum([
-  "ASSET",
-  "LIABILITY",
-  "EQUITY",
-  "REVENUE",
-  "EXPENSE"
-]);
+export const accountTypeSchema = z.enum(["ASSET", "LIABILITY", "EQUITY", "REVENUE", "EXPENSE"]);
 
 export const normalBalanceSchema = z.enum(["DEBIT", "CREDIT"]);
 
@@ -25,15 +19,17 @@ export const accountCreateSchema = z.object({
   usaliDepartment: z.string().max(100).optional(),
   normalBalance: normalBalanceSchema,
   allowPosting: z.boolean().default(true),
+  allowedSources: z
+    .array(z.enum(["MANUAL", "PMS", "POS", "PAYROLL", "FX_REVAL", "AP", "AR"]))
+    .default([]),
   isControlAccount: z.boolean().default(false),
   parentId: z.string().uuid().optional(),
   level: z.number().int().positive().max(10).default(1)
 });
 
-export const accountUpdateSchema = accountCreateSchema.partial().refine(
-  (value) => Object.keys(value).length > 0,
-  "At least one field must be provided."
-);
+export const accountUpdateSchema = accountCreateSchema
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, "At least one field must be provided.");
 
 export const journalLineCreateSchema = z
   .object({
@@ -62,20 +58,43 @@ export const journalLineCreateSchema = z
 
 export const journalCreateSchema = z.object({
   periodId: z.string().uuid(),
+  journalTypeId: z.string().uuid().optional(),
   reference: z.string().max(50).optional(),
   description: z.string().max(1000).optional(),
-  source: z
-    .enum(["MANUAL", "PMS", "POS", "PAYROLL", "FX_REVAL", "AP", "AR"])
-    .default("MANUAL"),
+  source: z.enum(["MANUAL", "PMS", "POS", "PAYROLL", "FX_REVAL", "AP", "AR"]).default("MANUAL"),
   functionalCurrency: z.string().length(3),
-  lines: z.array(journalLineCreateSchema).min(2)
+  lines: z.array(journalLineCreateSchema).min(1),
+  /** When a manual journal touches source-restricted accounts (e.g. REVENUE),
+   *  the user must supply a reason. Requires CONTROLLER or ADMIN role. */
+  sourceOverrideReason: z.string().max(500).optional()
 });
+
+// ── Journal Type CRUD ───────────────────────────────────────────────────────
+
+const journalSourceEnum = z.enum(["MANUAL", "PMS", "POS", "PAYROLL", "FX_REVAL", "AP", "AR"]);
+
+export const journalTypeCreateSchema = z.object({
+  code: z.string().min(1).max(10),
+  name: z.string().min(1).max(100),
+  description: z.string().max(500).optional(),
+  allowedSources: z.array(journalSourceEnum).default([]),
+  allowedAccountTypes: z.array(accountTypeSchema).default([]),
+  numberPrefix: z.string().min(1).max(10),
+  autoReverse: z.boolean().default(false),
+  requireBalance: z.boolean().default(true),
+  isActive: z.boolean().default(true)
+});
+
+export const journalTypeUpdateSchema = journalTypeCreateSchema
+  .partial()
+  .refine((v) => Object.keys(v).length > 0, "At least one field must be provided.");
 
 export const journalListQuerySchema = z.object({
   cursor: z.string().uuid().optional(),
   limit: z.coerce.number().int().positive().max(100).default(50),
   status: z.enum(["DRAFT", "PENDING_APPROVAL", "POSTED", "REVERSED"]).optional(),
   source: z.enum(["MANUAL", "PMS", "POS", "PAYROLL", "FX_REVAL", "AP", "AR"]).optional(),
+  journalTypeId: z.string().uuid().optional(),
   periodId: z.string().uuid().optional(),
   search: z.string().trim().min(1).max(100).optional()
 });
@@ -93,8 +112,28 @@ export const journalDecisionSchema = z.object({
   reason: z.string().max(500).optional()
 });
 
+// ── Approval Rules ──────────────────────────────────────────────────────────
+
+export const approvalRuleCreateSchema = z.object({
+  module: z.enum(["GL", "AP", "AR"]),
+  minAmount: z.coerce.number().nonnegative(),
+  maxAmount: z.coerce.number().positive().optional(),
+  requiredApprovers: z.array(z.string().uuid()).min(1, "At least one approver is required"),
+  requireAll: z.boolean().default(true),
+  isActive: z.boolean().default(true)
+});
+
+export const approvalRuleUpdateSchema = approvalRuleCreateSchema
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, "At least one field must be provided.");
+
+export type ApprovalRuleCreateInput = z.infer<typeof approvalRuleCreateSchema>;
+export type ApprovalRuleUpdateInput = z.infer<typeof approvalRuleUpdateSchema>;
+
 export type AccountCreateInput = z.infer<typeof accountCreateSchema>;
 export type AccountUpdateInput = z.infer<typeof accountUpdateSchema>;
 export type JournalCreateInput = z.infer<typeof journalCreateSchema>;
 export type JournalListQuery = z.infer<typeof journalListQuerySchema>;
 export type TrialBalanceQuery = z.infer<typeof trialBalanceQuerySchema>;
+export type JournalTypeCreateInput = z.infer<typeof journalTypeCreateSchema>;
+export type JournalTypeUpdateInput = z.infer<typeof journalTypeUpdateSchema>;

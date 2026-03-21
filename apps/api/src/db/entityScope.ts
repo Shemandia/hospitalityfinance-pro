@@ -6,6 +6,7 @@ const MODELS_WITH_ENTITY_ID = new Set([
   "Period",
   "Account",
   "Journal",
+  "JournalType",
   "AccountPeriodBalance",
   "ApprovalRule",
   "JournalApproval",
@@ -17,7 +18,17 @@ const MODELS_WITH_ENTITY_ID = new Set([
   "APPayment",
   "PurchaseOrder",
   "GoodsReceivedNote",
-  "PaymentRun"
+  "PaymentRun",
+  // Previously missing — cross-tenant leak risk:
+  "Customer",
+  "ARReceipt",
+  "BankStatement",
+  "InterfaceDefinition",
+  "ConnectorMapping",
+  "ImportLog",
+  "PMSStatistic",
+  "BudgetDefinition",
+  "ConsolidationRunEntity"
 ]);
 
 type Args = Record<string, unknown> | undefined;
@@ -56,10 +67,7 @@ export function applyEntityScope(
       "upsert"
     ].includes(operation)
   ) {
-    scoped.where = mergeEntityWhere(
-      scoped.where as Record<string, unknown> | undefined,
-      entityId
-    );
+    scoped.where = mergeEntityWhere(scoped.where as Record<string, unknown> | undefined, entityId);
   }
 
   if (operation === "create") {
@@ -75,9 +83,7 @@ export function applyEntityScope(
     if (Array.isArray(createManyData)) {
       scoped.data = createManyData.map((row) => {
         const record =
-          typeof row === "object" && row !== null
-            ? ({ ...row } as Record<string, unknown>)
-            : {};
+          typeof row === "object" && row !== null ? ({ ...row } as Record<string, unknown>) : {};
         if (!("entityId" in record)) {
           record.entityId = entityId;
         }

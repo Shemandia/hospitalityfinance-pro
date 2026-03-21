@@ -37,8 +37,8 @@ async function main() {
         data: {
           debitFunctional: line.debit,
           creditFunctional: line.credit,
-          fxRate: new Prisma.Decimal(1),
-        },
+          fxRate: new Prisma.Decimal(1)
+        }
       });
     }
     console.log(`  Fixed ${brokenLines.length} lines`);
@@ -46,7 +46,7 @@ async function main() {
     // Step 2: Delete all existing balances for this entity
     console.log("\nStep 2: Clearing existing account period balances...");
     const deleted = await prisma.accountPeriodBalance.deleteMany({
-      where: { entityId: ENTITY_ID },
+      where: { entityId: ENTITY_ID }
     });
     console.log(`  Deleted ${deleted.count} balance records`);
 
@@ -85,8 +85,8 @@ async function main() {
           openingBalance: new Prisma.Decimal(0),
           periodDebits,
           periodCredits,
-          closingBalance,
-        },
+          closingBalance
+        }
       });
       created++;
     }
@@ -115,7 +115,9 @@ async function main() {
       const dr = Number(r.period_debits).toLocaleString();
       const cr = Number(r.period_credits).toLocaleString();
       const bal = Number(r.closing_balance).toLocaleString();
-      console.log(`  ${String(r.code).trim().padEnd(12)} ${String(r.name).padEnd(42)} Dr:${dr.padStart(14)} Cr:${cr.padStart(14)} Bal:${bal.padStart(14)}`);
+      console.log(
+        `  ${String(r.code).trim().padEnd(12)} ${String(r.name).padEnd(42)} Dr:${dr.padStart(14)} Cr:${cr.padStart(14)} Bal:${bal.padStart(14)}`
+      );
     }
 
     console.log("\nDone!");

@@ -158,6 +158,9 @@ enum FXRateSource {
 model Entity {
   id                 String      @id @default(uuid())
   name               String
+  /// Short business-unit code (e.g. "JUM", "DIFC", "PALM"). Unique within parent group.
+  /// Equivalent to SunSystems "Business Unit" code. Used in reports and consolidation.
+  code               String?     @db.VarChar(20)
   type               EntityType
   functionalCurrency String      @default("USD") @map("functional_currency")
   reportingCurrency  String      @default("USD") @map("reporting_currency")
@@ -167,6 +170,8 @@ model Entity {
   city               String?
   postalCode         String?     @map("postal_code")
   isActive           Boolean     @default(true) @map("is_active")
+  /// Maximum number of PROPERTY children allowed (licensing). Only on GROUP entities. 0 = unlimited.
+  maxProperties      Int         @default(0) @map("max_properties")
   parentId           String?     @map("parent_id")
   parent             Entity?     @relation("EntityHierarchy", fields: [parentId], references: [id])
   children           Entity[]    @relation("EntityHierarchy")
@@ -201,6 +206,7 @@ model Entity {
   bankStatements     BankStatement[]
   consolidationParentRuns ConsolidationRun[] @relation("ConsolidationParent")
   consolidationEntityRuns ConsolidationRunEntity[] @relation("ConsolidationEntity")
+  journalTypes           JournalType[]
 
   @@index([parentId])
   @@map("entities")
@@ -322,6 +328,7 @@ model Account {
   usaliDepartment  String?             @map("usali_department")
   normalBalance    NormalBalance       @map("normal_balance")
   allowPosting     Boolean             @default(true) @map("allow_posting")
+  allowedSources   JournalSource[]     @default([]) @map("allowed_sources")
   isControlAccount Boolean             @default(false) @map("is_control_account")
   isActive         Boolean             @default(true) @map("is_active")
   parentId         String?             @map("parent_id")
@@ -343,10 +350,42 @@ model Account {
   @@map("accounts")
 }
 
+// ── Journal Type (configurable per-entity) ─────────────────────────────────
+
+model JournalType {
+  id                  String          @id @default(uuid())
+  entityId            String          @map("entity_id")
+  code                String          @db.VarChar(10)
+  name                String          @db.VarChar(100)
+  description         String?         @db.VarChar(500)
+  /// Which JournalSource values are allowed for this type (empty = unrestricted)
+  allowedSources      JournalSource[] @default([]) @map("allowed_sources")
+  /// Which account types can appear on lines (empty = unrestricted)
+  allowedAccountTypes AccountType[]   @default([]) @map("allowed_account_types")
+  /// Prefix for auto-numbering (e.g. "RV" → RV-2026-0001)
+  numberPrefix        String          @map("number_prefix") @db.VarChar(10)
+  /// Auto-reverse in the next open period on posting
+  autoReverse         Boolean         @default(false) @map("auto_reverse")
+  /// Whether journals of this type require debit/credit balance (false for statistical)
+  requireBalance      Boolean         @default(true) @map("require_balance")
+  isActive            Boolean         @default(true) @map("is_active")
+  /// Auto-increment counter for this type's numbering (per entity)
+  nextNumber          Int             @default(1) @map("next_number")
+  createdAt           DateTime        @default(now()) @map("created_at")
+  updatedAt           DateTime        @updatedAt @map("updated_at")
+
+  entity              Entity          @relation(fields: [entityId], references: [id])
+  journals            Journal[]
+
+  @@unique([entityId, code])
+  @@map("journal_types")
+}
+
 model Journal {
   id                 String         @id @default(uuid())
   entityId           String         @map("entity_id")
   periodId           String         @map("period_id")
+  journalTypeId      String?        @map("journal_type_id")
   reference          String?
   description        String?
   source             JournalSource
@@ -359,6 +398,7 @@ model Journal {
   updatedAt          DateTime       @updatedAt @map("updated_at")
   entity             Entity         @relation(fields: [entityId], references: [id])
   period             Period         @relation(fields: [periodId], references: [id])
+  journalType        JournalType?   @relation(fields: [journalTypeId], references: [id])
   createdBy          User           @relation("JournalCreatedBy", fields: [createdById], references: [id])
   approvedBy         User?          @relation("JournalApprovedBy", fields: [approvedById], references: [id])
   lines              JournalLine[]
@@ -366,6 +406,7 @@ model Journal {
 
   @@index([entityId, periodId, status])
   @@index([entityId, createdAt])
+  @@index([entityId, journalTypeId])
   @@map("journals")
 }
 
@@ -496,7 +537,7 @@ model APInvoice {
   fxRate           Decimal         @map("fx_rate") @db.Decimal(14, 8)
   status           APInvoiceStatus @default(DRAFT)
   glJournalId      String?         @map("gl_journal_id")
-  poId             String?         @map("po_id")
+  externalPoRef    String?         @map("external_po_ref") @db.VarChar(100)
   paymentTerms     String?         @map("payment_terms")
   createdById      String?         @map("created_by")
   approvedById     String?         @map("approved_by")
@@ -505,7 +546,6 @@ model APInvoice {
   entity           Entity          @relation(fields: [entityId], references: [id])
   supplier         Supplier        @relation(fields: [supplierId], references: [id])
   period           Period          @relation(fields: [periodId], references: [id])
-  purchaseOrder    PurchaseOrder?  @relation(fields: [poId], references: [id])
   lines            APInvoiceLine[]
   paymentRuns      PaymentRunInvoice[]
   paymentAllocations APPaymentAllocation[]
@@ -548,7 +588,6 @@ model PurchaseOrder {
   supplier           Supplier            @relation(fields: [supplierId], references: [id])
   lines              PurchaseOrderLine[]
   goodsReceivedNotes GoodsReceivedNote[]
-  apInvoices         APInvoice[]
 
   @@unique([entityId, poNumber])
   @@index([entityId, supplierId, status])
@@ -945,11 +984,13 @@ model InterfaceDefinition {
   id            String   @id @default(uuid())
   entityId      String   @map("entity_id")
   name          String
-  connectorType String   @map("connector_type")   // OPERA_CLOUD | SKY_JANA | BANK | CUSTOM
-  sourceFormat  String   @map("source_format")    // CSV | JSON | XML | MT940 | FIXED_WIDTH
+  connectorType String   @map("connector_type")   // OPERA_CLOUD | OPERA_SUN | SIMPHONY_POS | SKY_JANA | BANK | PAYROLL | PROCUREMENT | CUSTOM
+  sourceFormat  String   @map("source_format")    // CSV | JSON | XML | EXCEL | MT940 | FIXED_WIDTH | SAF
+  targetType    String   @default("GL_JOURNAL") @map("target_type") // GL_JOURNAL | AP_INVOICE | SUPPLIER_SYNC
   description   String?
   isActive      Boolean  @default(true) @map("is_active")
   fieldMappings Json     @map("field_mappings")   // FieldMappingRule[]
+  parseOptions  Json?    @map("parse_options")    // ParseOptions (delimiter, skipRows, fixedWidthColumns, filterRules, groupBy, etc.)
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
   entity        Entity   @relation(fields: [entityId], references: [id])
@@ -980,7 +1021,7 @@ model ImportLog {
   entityId        String   @map("entity_id")
   connectorType   String   @map("connector_type")
   businessDate    DateTime @map("business_date") @db.Date
-  status          String
+  status          String   // RUNNING | SUCCESS | FAILED | PARTIAL
   recordsTotal    Int      @default(0) @map("records_total")
   recordsImported Int      @default(0) @map("records_imported")
   recordsFailed   Int      @default(0) @map("records_failed")

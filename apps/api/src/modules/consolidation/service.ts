@@ -58,7 +58,11 @@ export class ConsolidationService {
       include: { entityResults: { include: { entity: true } } }
     });
     if (!run) {
-      throw new ConsolidationServiceError("CONSOL_RUN_NOT_FOUND", "Consolidation run not found.", 404);
+      throw new ConsolidationServiceError(
+        "CONSOL_RUN_NOT_FOUND",
+        "Consolidation run not found.",
+        404
+      );
     }
     return run;
   }
@@ -73,14 +77,22 @@ export class ConsolidationService {
       where: { id: request.parentEntityId }
     });
     if (!parentEntity) {
-      throw new ConsolidationServiceError("CONSOL_PARENT_NOT_FOUND", "Parent entity not found.", 404);
+      throw new ConsolidationServiceError(
+        "CONSOL_PARENT_NOT_FOUND",
+        "Parent entity not found.",
+        404
+      );
     }
 
     const period = await this.prisma.period.findFirst({
-      where: { id: request.periodId }
+      where: { id: request.periodId, entityId: request.parentEntityId }
     });
     if (!period) {
-      throw new ConsolidationServiceError("CONSOL_PERIOD_NOT_FOUND", "Period not found.", 404);
+      throw new ConsolidationServiceError(
+        "CONSOL_PERIOD_NOT_FOUND",
+        "Period not found for the parent entity.",
+        404
+      );
     }
 
     const consolidatedMap = new Map<string, ConsolidatedLine>();
@@ -115,7 +127,9 @@ export class ConsolidationService {
             fromCurrency: localCurrency,
             toCurrency: request.reportingCurrency,
             rateType: "CLOSING",
-            effectiveDate: { lte: new Date(`${period.year}-${String(period.month).padStart(2, "0")}-28`) }
+            effectiveDate: {
+              lte: new Date(`${period.year}-${String(period.month).padStart(2, "0")}-28`)
+            }
           },
           orderBy: [{ effectiveDate: "desc" }]
         });
@@ -125,7 +139,9 @@ export class ConsolidationService {
             fromCurrency: localCurrency,
             toCurrency: request.reportingCurrency,
             rateType: "AVERAGE",
-            effectiveDate: { lte: new Date(`${period.year}-${String(period.month).padStart(2, "0")}-28`) }
+            effectiveDate: {
+              lte: new Date(`${period.year}-${String(period.month).padStart(2, "0")}-28`)
+            }
           },
           orderBy: [{ effectiveDate: "desc" }]
         });
@@ -232,7 +248,9 @@ export class ConsolidationService {
     for (const line of intercompanyLines) {
       const key = `${line.accountId}`;
       const current = icGrouped.get(key) ?? new Prisma.Decimal(0);
-      const netLine = new Prisma.Decimal(line.debitFunctional).sub(new Prisma.Decimal(line.creditFunctional));
+      const netLine = new Prisma.Decimal(line.debitFunctional).sub(
+        new Prisma.Decimal(line.creditFunctional)
+      );
       icGrouped.set(key, current.add(netLine));
     }
 

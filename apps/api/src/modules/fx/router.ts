@@ -3,6 +3,8 @@ import type { PrismaClient } from "@prisma/client";
 import { ZodError } from "zod";
 import { prisma } from "../../db/prisma.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
+import { requireRole } from "../../middleware/requireRole.js";
+import { requireWriteAccess } from "../../middleware/requireWriteAccess.js";
 import { FXService, FXServiceError } from "./service.js";
 import {
   convertQuerySchema,
@@ -35,6 +37,7 @@ export async function registerFXRouter(app: FastifyInstance): Promise<void> {
   app.register(
     async (router) => {
       router.addHook("preHandler", requireAuth);
+      router.addHook("preHandler", requireWriteAccess);
 
       // ── Currencies ─────────────────────────────────────────────────────────────
       router.get("/currencies", async (_request, reply) => {
@@ -77,14 +80,20 @@ export async function registerFXRouter(app: FastifyInstance): Promise<void> {
         }
       });
 
-      router.delete<{ Params: { id: string } }>("/rates/:id", async (request, reply) => {
-        try {
-          await fxService.deleteRate(request.params.id);
-          return reply.send({ data: { deleted: true }, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.delete<{ Params: { id: string } }>(
+        "/rates/:id",
+        {
+          preHandler: [requireRole(["ADMIN", "SUPERADMIN"])]
+        },
+        async (request, reply) => {
+          try {
+            await fxService.deleteRate(request.params.id);
+            return reply.send({ data: { deleted: true }, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       // ── Convert ────────────────────────────────────────────────────────────────
       router.get("/convert", async (request, reply) => {
@@ -111,6 +120,27 @@ export async function registerFXRouter(app: FastifyInstance): Promise<void> {
       router.post("/revaluation", async (request, reply) => {
         try {
           const payload = revaluationRequestSchema.parse(request.body);
+
+          // Enforce entity scope — revaluation entityId must match request context
+          const requestEntityId = request.entityId;
+          if (!requestEntityId) {
+            return reply.code(400).send({
+              data: null,
+              errors: [{ code: "FX_ENTITY_REQUIRED", message: "X-Entity-ID header is required." }]
+            });
+          }
+          if (payload.entityId !== requestEntityId) {
+            return reply.code(403).send({
+              data: null,
+              errors: [
+                {
+                  code: "FX_ENTITY_MISMATCH",
+                  message: "Revaluation entityId must match your current entity context."
+                }
+              ]
+            });
+          }
+
           const data = await fxService.runRevaluation(payload);
           return reply.send({ data, errors: [] });
         } catch (error) {

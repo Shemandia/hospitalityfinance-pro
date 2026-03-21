@@ -4,7 +4,7 @@ import {
   extractJanaVouchers,
   isVendorAccount,
   isGLAccount,
-  type SAFParseResult,
+  type SAFParseResult
 } from "./sky-jana-parser.js";
 import { getSkyJanaSftpConfig, SkyJanaSftpClientWrapper } from "./sky-jana-sftp-client.js";
 
@@ -31,7 +31,7 @@ export async function runSkyJanaSync(
     suppliersCreated: 0,
     accountsMapped: 0,
     accountsUnmapped: [],
-    errors: [],
+    errors: []
   };
 
   await client.connect();
@@ -107,7 +107,7 @@ async function processSAFFile(
     journalsCreated: 0,
     suppliersCreated: 0,
     accountsMapped: 0,
-    accountsUnmapped: [],
+    accountsUnmapped: []
   };
 
   // Extract vouchers grouped by reference
@@ -121,15 +121,16 @@ async function processSAFFile(
   // Build vendor code → supplier ID mapping (auto-create suppliers)
   const vendorCodes = parsed.uniqueAccounts.filter(isVendorAccount);
   const supplierMap = await ensureSuppliers(
-    prisma, entityId, vendorCodes, parsed.currency ?? "USD"
+    prisma,
+    entityId,
+    vendorCodes,
+    parsed.currency ?? "USD"
   );
   result.suppliersCreated = supplierMap.created;
 
   // Find the open period for the file's accounting period
   const periodKey = parsed.lines[0]?.accountingPeriod;
-  const period = periodKey
-    ? await findOrCreatePeriod(prisma, entityId, periodKey)
-    : null;
+  const period = periodKey ? await findOrCreatePeriod(prisma, entityId, periodKey) : null;
 
   if (!period) {
     throw new Error(`No matching period for accounting period ${periodKey}`);
@@ -141,7 +142,7 @@ async function processSAFFile(
 
     // Build journal lines: each SAF line becomes a GL journal line
     const voucherLines = [
-      ...parsed.lines.filter(l => l.transactionReference === voucher.reference),
+      ...parsed.lines.filter((l) => l.transactionReference === voucher.reference)
     ];
 
     const journalLines: Array<{
@@ -156,8 +157,8 @@ async function processSAFFile(
     let allMapped = true;
 
     for (const safLine of voucherLines) {
-      const accountId = accountMap.mapped.get(safLine.accountCode)
-        ?? supplierMap.accounts.get(safLine.accountCode);
+      const accountId =
+        accountMap.mapped.get(safLine.accountCode) ?? supplierMap.accounts.get(safLine.accountCode);
 
       if (!accountId) {
         allMapped = false;
@@ -169,7 +170,7 @@ async function processSAFFile(
         debit: new Prisma.Decimal(safLine.dcMarker === "D" ? safLine.amount : 0),
         credit: new Prisma.Decimal(safLine.dcMarker === "C" ? safLine.amount : 0),
         description: safLine.description,
-        lineNumber: lineNum++,
+        lineNumber: lineNum++
       });
     }
 
@@ -178,15 +179,17 @@ async function processSAFFile(
     // Create the GL journal
     const txDate = voucher.transactionDate
       ? new Date(
-          voucher.transactionDate.substring(0, 4) + "-" +
-          voucher.transactionDate.substring(4, 6) + "-" +
-          voucher.transactionDate.substring(6, 8)
+          voucher.transactionDate.substring(0, 4) +
+            "-" +
+            voucher.transactionDate.substring(4, 6) +
+            "-" +
+            voucher.transactionDate.substring(6, 8)
         )
       : new Date();
 
     // Find an entity user for the createdById field
     const entityUser = await prisma.entityUser.findFirst({
-      where: { entityId },
+      where: { entityId }
     });
     if (!entityUser) throw new Error("No entity user found for journal creation");
 
@@ -206,10 +209,10 @@ async function processSAFFile(
             currency: voucher.currency,
             fxRate: new Prisma.Decimal(1),
             debitFunctional: jl.debit,
-            creditFunctional: jl.credit,
-          })),
-        },
-      },
+            creditFunctional: jl.credit
+          }))
+        }
+      }
     });
 
     result.journalsCreated++;
@@ -235,10 +238,10 @@ async function buildAccountMapping(
   // Look up by account code
   const accounts = await prisma.account.findMany({
     where: { entityId, code: { in: glCodes } },
-    select: { id: true, code: true },
+    select: { id: true, code: true }
   });
 
-  const codeIndex = new Map(accounts.map(a => [a.code, a.id]));
+  const codeIndex = new Map(accounts.map((a) => [a.code, a.id]));
 
   for (const code of glCodes) {
     const id = codeIndex.get(code);
@@ -266,7 +269,7 @@ async function ensureSuppliers(
   for (const code of vendorCodes) {
     // Check if supplier exists with this code
     let supplier = await prisma.supplier.findUnique({
-      where: { entityId_code: { entityId, code } },
+      where: { entityId_code: { entityId, code } }
     });
 
     if (!supplier) {
@@ -278,15 +281,15 @@ async function ensureSuppliers(
           code,
           currency: defaultCurrency,
           paymentTermsDays: 30,
-          isActive: true,
-        },
+          isActive: true
+        }
       });
       created++;
     }
 
     // Find or create the creditor GL account for this vendor
     let creditorAccount = await prisma.account.findFirst({
-      where: { entityId, code },
+      where: { entityId, code }
     });
 
     if (!creditorAccount) {
@@ -299,8 +302,8 @@ async function ensureSuppliers(
           normalBalance: "CREDIT",
           allowPosting: true,
           isControlAccount: true,
-          level: 3,
-        },
+          level: 3
+        }
       });
     }
 
@@ -324,7 +327,7 @@ async function findOrCreatePeriod(
 
   const period = await prisma.period.findFirst({
     where: { entityId, year, month },
-    select: { id: true },
+    select: { id: true }
   });
 
   return period;

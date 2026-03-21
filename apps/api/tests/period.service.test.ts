@@ -14,9 +14,9 @@ describe("PeriodService.reopenPeriod", () => {
     } as unknown as ConstructorParameters<typeof PeriodService>[0];
 
     const service = new PeriodService(prismaStub as never);
-    await expect(
-      service.reopenPeriod("entity-1", "period-1", ["CONTROLLER"])
-    ).rejects.toThrowError(PeriodServiceError);
+    await expect(service.reopenPeriod("entity-1", "period-1", ["CONTROLLER"])).rejects.toThrowError(
+      PeriodServiceError
+    );
   });
 
   it("reopens when role is SUPERADMIN and no other open period exists", async () => {
@@ -36,9 +36,7 @@ describe("PeriodService.reopenPeriod", () => {
     } as unknown as ConstructorParameters<typeof PeriodService>[0];
 
     const service = new PeriodService(prismaStub as never);
-    const reopened = await service.reopenPeriod("entity-1", "period-1", [
-      "SUPERADMIN"
-    ]);
+    const reopened = await service.reopenPeriod("entity-1", "period-1", ["SUPERADMIN"]);
 
     expect(reopened.status).toBe("OPEN");
   });

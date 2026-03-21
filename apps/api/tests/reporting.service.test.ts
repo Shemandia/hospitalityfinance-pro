@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  ReportingService,
-  ReportingServiceError
-} from "../src/modules/reporting/service.js";
+import { ReportingService, ReportingServiceError } from "../src/modules/reporting/service.js";
 
 describe("ReportingService.createRun", () => {
   it("throws when definition is missing", async () => {

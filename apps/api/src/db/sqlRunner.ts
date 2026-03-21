@@ -112,10 +112,7 @@ function splitSqlStatements(sql: string): string[] {
   return statements;
 }
 
-export async function executeSqlFile(
-  prisma: SqlExecutor,
-  sqlFilePath: string
-): Promise<number> {
+export async function executeSqlFile(prisma: SqlExecutor, sqlFilePath: string): Promise<number> {
   const sql = await readFile(sqlFilePath, "utf-8");
   const statements = splitSqlStatements(sql);
 
