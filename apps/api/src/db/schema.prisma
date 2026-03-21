@@ -213,21 +213,46 @@ model Entity {
 }
 
 model User {
-  id         String      @id @default(uuid())
-  email      String      @unique
-  keycloakId String      @unique @map("keycloak_id")
-  name       String
-  createdAt  DateTime    @default(now()) @map("created_at")
-  updatedAt  DateTime    @updatedAt @map("updated_at")
+  id          String    @id @default(uuid())
+  email       String    @unique
+  keycloakId  String    @unique @map("keycloak_id")
+  name        String
+  phone       String?
+  jobTitle    String?   @map("job_title")
+  department  String?
+  avatarUrl   String?   @map("avatar_url")
+  isActive    Boolean   @default(true) @map("is_active")
+  lastLoginAt DateTime? @map("last_login_at")
+  loginCount  Int       @default(0) @map("login_count")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
 
   entities         EntityUser[]
   roles            UserRole[]
-  createdJournals  Journal[] @relation("JournalCreatedBy")
-  approvedJournals Journal[] @relation("JournalApprovedBy")
+  createdJournals  Journal[]          @relation("JournalCreatedBy")
+  approvedJournals Journal[]          @relation("JournalApprovedBy")
   journalApprovals JournalApproval[]
   auditEvents      AuditEvent[]
+  loginAudits      LoginAudit[]
 
   @@map("users")
+}
+
+model LoginAudit {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  email     String
+  action    String   // LOGIN_SUCCESS, LOGIN_FAILED, LOGOUT, TOKEN_REFRESH, PASSWORD_RESET_REQUEST
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  entityId  String?  @map("entity_id")
+  metadata  Json?    // extra info (e.g., failure reason)
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([email, createdAt])
+  @@map("login_audits")
 }
 
 model EntityUser {

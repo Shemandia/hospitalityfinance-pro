@@ -94,8 +94,9 @@ const navGroups: NavGroup[] = [
   {
     label: "Admin",
     items: [
+      { href: "/settings/profile", label: "My Profile", icon: Users },
       { href: "/settings/properties", label: "Properties", icon: Building2 },
-      { href: "/settings/users", label: "Users", icon: Users },
+      { href: "/settings/users", label: "User Management", icon: Users },
       { href: "/settings/roles", label: "Roles & Permissions", icon: ShieldCheck },
       { href: "/periods", label: "Periods", icon: CalendarDays },
       { href: "/audit", label: "Audit Log", icon: ClipboardList },

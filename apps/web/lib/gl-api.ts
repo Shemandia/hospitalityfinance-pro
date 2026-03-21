@@ -1886,6 +1886,75 @@ export async function removeEntityUser(context: ApiContext, userId: string) {
   return request<null>(context, `/api/v1/admin/users/${userId}`, { method: "DELETE" });
 }
 
+// ── User Profile & Login Audit ────────────────────────────────────────────────
+
+export type UserProfile = {
+  id: string;
+  email: string;
+  name: string;
+  phone: string | null;
+  jobTitle: string | null;
+  department: string | null;
+  avatarUrl: string | null;
+  isActive: boolean;
+  lastLoginAt: string | null;
+  loginCount: number;
+  createdAt: string;
+  entities: Array<{
+    role: string;
+    entity: { id: string; name: string; type: string };
+  }>;
+};
+
+export type LoginAuditEntry = {
+  id: string;
+  action: string;
+  ipAddress: string | null;
+  createdAt: string;
+};
+
+export async function getUserProfile(context: ApiContext) {
+  return request<UserProfile>(context, "/api/v1/admin/profile");
+}
+
+export async function updateUserProfile(
+  context: ApiContext,
+  payload: {
+    name?: string;
+    phone?: string;
+    jobTitle?: string;
+    department?: string;
+  }
+) {
+  return request<UserProfile>(context, "/api/v1/admin/profile", {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function getLoginAudit(
+  context: ApiContext,
+  params?: { userId?: string; limit?: number }
+) {
+  const search = new URLSearchParams();
+  if (params?.userId) search.set("userId", params.userId);
+  if (params?.limit) search.set("limit", String(params.limit));
+  const qs = search.toString();
+  return request<LoginAuditEntry[]>(context, `/api/v1/admin/login-audit${qs ? `?${qs}` : ""}`);
+}
+
+export async function setUserActiveStatus(context: ApiContext, userId: string, isActive: boolean) {
+  return request<{ id: string; isActive: boolean }>(
+    context,
+    `/api/v1/admin/users/${userId}/status`,
+    { method: "PUT", body: JSON.stringify({ isActive }) }
+  );
+}
+
+export async function getUserDetail(context: ApiContext, userId: string) {
+  return request<Record<string, unknown>>(context, `/api/v1/admin/users/${userId}/detail`);
+}
+
 // ── Mews PMS ─────────────────────────────────────────────────────────────────
 
 export async function runMewsImport(

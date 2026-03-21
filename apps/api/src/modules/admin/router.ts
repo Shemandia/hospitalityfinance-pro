@@ -324,6 +324,206 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
           }
         }
       );
+      // ── User Profile (own profile, any role) ──────────────────────────────
+
+      router.get("/profile", async (request, reply) => {
+        try {
+          const userId = typeof request.user?.sub === "string" ? request.user.sub : null;
+          if (!userId)
+            return reply
+              .code(401)
+              .send({ data: null, errors: [{ code: "NO_USER", message: "Not authenticated." }] });
+
+          const user = await db.user.findUnique({
+            where: { id: userId },
+            select: {
+              id: true,
+              email: true,
+              name: true,
+              phone: true,
+              jobTitle: true,
+              department: true,
+              avatarUrl: true,
+              isActive: true,
+              lastLoginAt: true,
+              loginCount: true,
+              createdAt: true,
+              entities: {
+                include: { entity: { select: { id: true, name: true, type: true } } }
+              }
+            }
+          });
+          if (!user)
+            return reply.code(404).send({
+              data: null,
+              errors: [{ code: "USER_NOT_FOUND", message: "User not found." }]
+            });
+          return reply.send({ data: user, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      router.put("/profile", async (request, reply) => {
+        try {
+          const userId = typeof request.user?.sub === "string" ? request.user.sub : null;
+          if (!userId)
+            return reply
+              .code(401)
+              .send({ data: null, errors: [{ code: "NO_USER", message: "Not authenticated." }] });
+
+          const body = request.body as {
+            name?: string;
+            phone?: string;
+            jobTitle?: string;
+            department?: string;
+          };
+
+          const data = await db.user.update({
+            where: { id: userId },
+            data: {
+              ...(body.name !== undefined && { name: body.name }),
+              ...(body.phone !== undefined && { phone: body.phone }),
+              ...(body.jobTitle !== undefined && { jobTitle: body.jobTitle }),
+              ...(body.department !== undefined && { department: body.department })
+            },
+            select: {
+              id: true,
+              email: true,
+              name: true,
+              phone: true,
+              jobTitle: true,
+              department: true
+            }
+          });
+          return reply.send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      // ── Login Audit ─────────────────────────────────────────────────────────
+
+      router.post("/login-audit", async (request, reply) => {
+        try {
+          const body = request.body as {
+            userId: string;
+            email: string;
+            action: string;
+            ipAddress?: string;
+            userAgent?: string;
+            entityId?: string;
+            metadata?: Record<string, unknown>;
+          };
+
+          const data = await db.loginAudit.create({
+            data: {
+              userId: body.userId,
+              email: body.email,
+              action: body.action,
+              ipAddress: body.ipAddress,
+              userAgent: body.userAgent,
+              entityId: body.entityId,
+              metadata: body.metadata as any
+            }
+          });
+
+          // Update user's lastLoginAt and loginCount on successful login
+          if (body.action === "LOGIN_SUCCESS") {
+            await db.user
+              .update({
+                where: { id: body.userId },
+                data: { lastLoginAt: new Date(), loginCount: { increment: 1 } }
+              })
+              .catch(() => {}); // non-critical
+          }
+
+          return reply.code(201).send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      router.get("/login-audit", async (request, reply) => {
+        try {
+          const { userId, email, limit } = request.query as {
+            userId?: string;
+            email?: string;
+            limit?: string;
+          };
+
+          const data = await db.loginAudit.findMany({
+            where: {
+              ...(userId ? { userId } : {}),
+              ...(email ? { email } : {})
+            },
+            orderBy: { createdAt: "desc" },
+            take: Math.min(parseInt(limit ?? "50", 10), 200)
+          });
+          return reply.send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      // ── User Deactivation ───────────────────────────────────────────────────
+
+      router.put<{ Params: { userId: string } }>(
+        "/users/:userId/status",
+        async (request, reply) => {
+          try {
+            const body = request.body as { isActive: boolean };
+            const data = await db.user.update({
+              where: { id: request.params.userId },
+              data: { isActive: body.isActive },
+              select: { id: true, email: true, name: true, isActive: true }
+            });
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      // ── User Detail (admin view) ────────────────────────────────────────────
+
+      router.get<{ Params: { userId: string } }>(
+        "/users/:userId/detail",
+        async (request, reply) => {
+          try {
+            const data = await db.user.findUnique({
+              where: { id: request.params.userId },
+              select: {
+                id: true,
+                email: true,
+                name: true,
+                phone: true,
+                jobTitle: true,
+                department: true,
+                isActive: true,
+                lastLoginAt: true,
+                loginCount: true,
+                createdAt: true,
+                entities: {
+                  include: { entity: { select: { id: true, name: true, type: true } } }
+                },
+                loginAudits: {
+                  orderBy: { createdAt: "desc" },
+                  take: 10,
+                  select: { id: true, action: true, ipAddress: true, createdAt: true }
+                }
+              }
+            });
+            if (!data)
+              return reply
+                .code(404)
+                .send({ data: null, errors: [{ code: "NOT_FOUND", message: "User not found." }] });
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
     },
     { prefix: "/api/v1/admin" }
   );
