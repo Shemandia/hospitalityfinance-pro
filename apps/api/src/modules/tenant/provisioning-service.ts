@@ -157,10 +157,18 @@ export class ProvisioningService {
             try {
               await tenantClient.$executeRawUnsafe(stmt);
             } catch (sqlErr: any) {
-              // Skip statements referencing tables that don't exist yet (42P01)
-              // or indexes/views that already exist (42P07)
+              // Skip statements referencing tables/relations that don't exist yet
+              // or indexes/views that already exist. Prisma wraps PG errors in
+              // different structures, so check message string as fallback.
+              const msg = sqlErr?.message ?? "";
               const code = sqlErr?.code ?? sqlErr?.meta?.code ?? "";
-              if (code === "42P01" || code === "42P07") continue;
+              if (
+                code === "42P01" ||
+                code === "42P07" ||
+                msg.includes("does not exist") ||
+                msg.includes("already exists")
+              )
+                continue;
               throw sqlErr;
             }
           }
