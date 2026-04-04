@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { WizardLayout, WizardStepContent } from "../../../../../components/wizard-layout";
 import { COUNTRIES } from "../../../../../lib/countries";
 
@@ -48,7 +48,74 @@ type ProvisioningStep = {
   error?: string;
 };
 
+// ── Platform Key Gate ────────────────────────────────────────────────────────
+
 export default function OnboardPage() {
+  const [platformKey, setPlatformKey] = useState<string | null>(null);
+  const [keyInput, setKeyInput] = useState("");
+  const [keyError, setKeyError] = useState("");
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    const stored = sessionStorage.getItem("hfp-platform-key");
+    if (stored) setPlatformKey(stored);
+    setChecking(false);
+  }, []);
+
+  const handleKeySubmit = async () => {
+    setKeyError("");
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/platform/tenants`, {
+        headers: { "X-Platform-Key": keyInput }
+      });
+      if (res.ok) {
+        sessionStorage.setItem("hfp-platform-key", keyInput);
+        setPlatformKey(keyInput);
+      } else {
+        setKeyError("Invalid platform key. Check with your administrator.");
+      }
+    } catch {
+      setKeyError("Cannot reach API server.");
+    }
+  };
+
+  if (checking) return null;
+
+  if (!platformKey) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center">
+        <div className="w-full max-w-sm space-y-4">
+          <h2 className="text-xl font-semibold text-slate-900">Platform Authentication</h2>
+          <p className="text-sm text-slate-500">
+            Enter your platform API key to access tenant management.
+          </p>
+          <input
+            type="password"
+            value={keyInput}
+            onChange={(e) => setKeyInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleKeySubmit()}
+            className="w-full rounded-md border px-3 py-2 text-sm"
+            placeholder="Platform API key"
+          />
+          {keyError && <p className="text-sm text-red-500">{keyError}</p>}
+          <button
+            onClick={handleKeySubmit}
+            disabled={!keyInput}
+            className="w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            Authenticate
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return <OnboardWizard platformKey={platformKey} />;
+}
+
+// ── Onboard Wizard ───────────────────────────────────────────────────────────
+
+function OnboardWizard({ platformKey }: { platformKey: string }) {
   const [currentStep, setCurrentStep] = useState(1);
   const [completedSteps, setCompletedSteps] = useState<number[]>([]);
   const [provisioning, setProvisioning] = useState(false);
@@ -114,8 +181,6 @@ export default function OnboardPage() {
       { step: "seeding_data", order: 5, status: "PENDING" },
       { step: "sending_email", order: 6, status: "PENDING" }
     ]);
-
-    const platformKey = sessionStorage.getItem("hfp-platform-key") ?? "";
 
     try {
       const response = await fetch(`${API_BASE}/api/v1/platform/tenants/provision`, {
