@@ -131,7 +131,7 @@ export class ProvisioningService {
     });
 
     await this.executeStep(tenantRecord.id, "running_migrations", sse, async () => {
-      const apiRoot = resolve(import.meta.dirname ?? __dirname, "../..");
+      const apiRoot = resolve(import.meta.dirname ?? __dirname, "../../..");
       execSync("npx prisma migrate deploy --schema src/db/schema.prisma", {
         cwd: apiRoot,
         env: { ...process.env, DATABASE_URL: tenantDbUrl },
@@ -144,7 +144,7 @@ export class ProvisioningService {
       const tenantClient = new PrismaClient({ datasourceUrl: tenantDbUrl });
       try {
         const { readFileSync } = await import("node:fs");
-        const apiRoot = resolve(import.meta.dirname ?? __dirname, "../..");
+        const apiRoot = resolve(import.meta.dirname ?? __dirname, "../../..");
         const sqlDir = resolve(apiRoot, "src/db/sql");
         const performanceSql = readFileSync(resolve(sqlDir, "performance.sql"), "utf-8");
         const rlsSql = readFileSync(resolve(sqlDir, "entity-rls.sql"), "utf-8");
