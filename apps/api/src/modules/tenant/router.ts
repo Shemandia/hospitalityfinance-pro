@@ -8,9 +8,12 @@
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { ZodError } from "zod";
 import { registryPrisma } from "../../db/prisma.js";
 import { invalidateTenantCache, listTenants } from "../../db/tenantRegistry.js";
 import { evictTenant } from "../../db/tenantPool.js";
+import { provisionTenantSchema } from "./types.js";
+import { ProvisioningService } from "./provisioning-service.js";
 
 // ── Platform API key auth ─────────────────────────────────────────────────────
 
@@ -221,6 +224,87 @@ export async function registerTenantRouter(app: FastifyInstance): Promise<void> 
           errors: []
         });
       });
+
+      // ── Provisioning endpoints ──────────────────────────────────────────
+
+      const provisioningService = new ProvisioningService();
+
+      // Start provisioning (SSE stream)
+      router.post("/tenants/provision", async (request, reply) => {
+        let input;
+        try {
+          input = provisionTenantSchema.parse(request.body);
+        } catch (err) {
+          if (err instanceof ZodError) {
+            return reply.code(400).send({
+              data: null,
+              errors: err.errors.map((e) => ({
+                code: "VALIDATION_ERROR",
+                message: e.message,
+                path: e.path
+              }))
+            });
+          }
+          throw err;
+        }
+
+        reply.raw.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive"
+        });
+
+        const sse = (event: string, data: Record<string, unknown>) => {
+          reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        };
+
+        try {
+          await provisioningService.provision(input, sse);
+        } catch {
+          // Error already emitted via SSE in the service
+        } finally {
+          reply.raw.end();
+        }
+      });
+
+      // Get provisioning status
+      router.get<{ Params: { slug: string } }>(
+        "/tenants/:slug/provision-status",
+        async (request, reply) => {
+          const status = await provisioningService.getStatus(request.params.slug);
+          if (!status) {
+            return reply.code(404).send({
+              data: null,
+              errors: [{ code: "TENANT_NOT_FOUND", message: "Tenant not found." }]
+            });
+          }
+          return reply.send({ data: status, errors: [] });
+        }
+      );
+
+      // Retry provisioning from failed step (SSE stream)
+      router.post<{ Params: { slug: string } }>(
+        "/tenants/:slug/provision-retry",
+        async (request, reply) => {
+          reply.raw.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive"
+          });
+
+          const sse = (event: string, data: Record<string, unknown>) => {
+            reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+          };
+
+          try {
+            await provisioningService.retry(request.params.slug, sse);
+          } catch {
+            // Error already emitted via SSE
+          } finally {
+            reply.raw.end();
+          }
+        }
+      );
     },
     { prefix: "/api/v1/platform" }
   );
