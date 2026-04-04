@@ -1,3 +1,18 @@
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function sanitizeUrl(url: string): string {
+  // Only allow http/https URLs
+  if (/^https?:\/\//i.test(url)) return escapeHtml(url);
+  return "#";
+}
+
 type GenericEmailPayload = {
   to: string;
   subject: string;
@@ -43,11 +58,11 @@ export async function sendApprovalEmail(payload: ApprovalEmailPayload): Promise<
     to: [payload.to],
     subject: `Journal ${payload.journalId} requires your approval`,
     html: `
-      <p>Hello ${payload.approverName},</p>
-      <p>A journal is pending approval for entity <strong>${payload.entityId}</strong>.</p>
+      <p>Hello ${escapeHtml(payload.approverName)},</p>
+      <p>A journal is pending approval for entity <strong>${escapeHtml(payload.entityId)}</strong>.</p>
       <p>
-        <a href="${payload.approveUrl}">Approve</a> |
-        <a href="${payload.rejectUrl}">Reject</a>
+        <a href="${sanitizeUrl(payload.approveUrl)}">Approve</a> |
+        <a href="${sanitizeUrl(payload.rejectUrl)}">Reject</a>
       </p>
     `
   };
