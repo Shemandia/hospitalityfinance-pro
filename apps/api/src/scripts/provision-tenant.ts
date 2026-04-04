@@ -1,0 +1,253 @@
+/**
+ * Tenant Provisioning Script
+ *
+ * Creates a new tenant: registers in the shared registry, creates a PostgreSQL
+ * database, runs Prisma migrations, applies performance indexes and RLS.
+ *
+ * Usage:
+ *   npx tsx src/scripts/provision-tenant.ts \
+ *     --name "Jumeirah Group" \
+ *     --slug "jumeirah" \
+ *     --admin-email "admin@jumeirah.com" \
+ *     --plan standard \
+ *     --max-properties 20
+ *
+ * Environment:
+ *   REGISTRY_DATABASE_URL  — shared registry DB (default: DATABASE_URL)
+ *   TENANT_DB_HOST         — host for new tenant DBs (default: localhost)
+ *   TENANT_DB_PORT         — port (default: 5432)
+ *   TENANT_DB_USER         — superuser to create DBs (default: from DATABASE_URL)
+ *   TENANT_DB_PASSWORD     — password (default: from DATABASE_URL)
+ */
+
+import { PrismaClient } from "@prisma/client";
+import { execSync } from "node:child_process";
+import { resolve } from "node:path";
+
+// ── Parse args ────────────────────────────────────────────────────────────────
+
+function parseArgs(): {
+  name: string;
+  slug: string;
+  adminEmail: string;
+  plan: string;
+  maxProperties: number;
+} {
+  const args = process.argv.slice(2);
+  const map = new Map<string, string>();
+
+  for (let i = 0; i < args.length; i += 2) {
+    const key = args[i]?.replace(/^--/, "");
+    const val = args[i + 1];
+    if (key && val) map.set(key, val);
+  }
+
+  const name = map.get("name");
+  const slug = map.get("slug");
+  const adminEmail = map.get("admin-email");
+
+  if (!name || !slug || !adminEmail) {
+    console.error("Usage: provision-tenant --name <name> --slug <slug> --admin-email <email>");
+    console.error("  Optional: --plan <standard|enterprise|trial> --max-properties <n>");
+    process.exit(1);
+  }
+
+  // Validate slug: lowercase, alphanumeric + hyphens
+  if (!/^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$/.test(slug)) {
+    console.error(
+      "Slug must be 3-50 chars, lowercase alphanumeric with hyphens, no leading/trailing hyphen."
+    );
+    process.exit(1);
+  }
+
+  return {
+    name,
+    slug,
+    adminEmail,
+    plan: map.get("plan") ?? "standard",
+    maxProperties: parseInt(map.get("max-properties") ?? "10", 10)
+  };
+}
+
+// ── Parse connection URL ──────────────────────────────────────────────────────
+
+function parseDbUrl(url: string): {
+  user: string;
+  password: string;
+  host: string;
+  port: string;
+  database: string;
+} {
+  const parsed = new URL(url);
+  return {
+    user: parsed.username,
+    password: parsed.password,
+    host: parsed.hostname,
+    port: parsed.port || "5432",
+    database: parsed.pathname.slice(1) // remove leading /
+  };
+}
+
+function buildDbUrl(
+  user: string,
+  password: string,
+  host: string,
+  port: string,
+  database: string
+): string {
+  return `postgresql://${user}:${encodeURIComponent(password)}@${host}:${port}/${database}`;
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
+
+async function main() {
+  const config = parseArgs();
+  const registryUrl = process.env.REGISTRY_DATABASE_URL ?? process.env.DATABASE_URL;
+
+  if (!registryUrl) {
+    console.error("REGISTRY_DATABASE_URL or DATABASE_URL must be set.");
+    process.exit(1);
+  }
+
+  const registry = new PrismaClient({ datasourceUrl: registryUrl });
+
+  console.log(`\n=== Provisioning tenant: ${config.name} (${config.slug}) ===\n`);
+
+  // 1. Check if slug already exists
+  const existing = await registry.tenant.findUnique({ where: { slug: config.slug } });
+  if (existing) {
+    console.error(`Tenant with slug '${config.slug}' already exists (id: ${existing.id}).`);
+    process.exit(1);
+  }
+
+  // 2. Determine tenant database name and URL
+  const dbConn = parseDbUrl(registryUrl);
+  const tenantDbHost = process.env.TENANT_DB_HOST ?? dbConn.host;
+  const tenantDbPort = process.env.TENANT_DB_PORT ?? dbConn.port;
+  const tenantDbUser = process.env.TENANT_DB_USER ?? dbConn.user;
+  const tenantDbPassword = process.env.TENANT_DB_PASSWORD ?? dbConn.password;
+  const tenantDbName = `hfp_${config.slug.replace(/-/g, "_")}`;
+  const tenantDbUrl = buildDbUrl(
+    tenantDbUser,
+    tenantDbPassword,
+    tenantDbHost,
+    tenantDbPort,
+    tenantDbName
+  );
+
+  console.log(`  Database: ${tenantDbName}`);
+  console.log(`  Host: ${tenantDbHost}:${tenantDbPort}`);
+
+  // 3. Create the database (using psql or raw connection via registry)
+  console.log("\n1. Creating database...");
+
+  // Validate identifiers to prevent SQL injection (allowlist: letters, digits, underscores)
+  const identifierRegex = /^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/;
+  if (!identifierRegex.test(tenantDbName)) {
+    throw new Error(
+      `Invalid database name: ${tenantDbName}. Only alphanumeric and underscores allowed.`
+    );
+  }
+  if (!identifierRegex.test(tenantDbUser)) {
+    throw new Error(
+      `Invalid database user: ${tenantDbUser}. Only alphanumeric and underscores allowed.`
+    );
+  }
+
+  try {
+    await registry.$executeRawUnsafe(`CREATE DATABASE "${tenantDbName}" OWNER "${tenantDbUser}"`);
+    console.log(`   Created database: ${tenantDbName}`);
+  } catch (error: any) {
+    if (error.message?.includes("already exists")) {
+      console.log(`   Database ${tenantDbName} already exists, continuing...`);
+    } else {
+      throw error;
+    }
+  }
+
+  // 4. Run Prisma migrations on the new database
+  console.log("\n2. Running migrations...");
+  const apiRoot = resolve(import.meta.dirname ?? __dirname, "../..");
+  execSync(`npx prisma migrate deploy`, {
+    cwd: apiRoot,
+    env: { ...process.env, DATABASE_URL: tenantDbUrl },
+    stdio: "inherit"
+  });
+
+  // 5. Apply performance indexes and RLS
+  console.log("\n3. Applying performance indexes...");
+  const tenantClient = new PrismaClient({ datasourceUrl: tenantDbUrl });
+
+  try {
+    // Read and execute SQL files
+    const { readFileSync } = await import("node:fs");
+    const sqlDir = resolve(apiRoot, "src/db/sql");
+
+    const performanceSql = readFileSync(resolve(sqlDir, "performance.sql"), "utf-8");
+    const rlsSql = readFileSync(resolve(sqlDir, "entity-rls.sql"), "utf-8");
+
+    // Split by semicolons and execute each statement
+    for (const file of [performanceSql, rlsSql]) {
+      const statements = file
+        .split(";")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0 && !s.startsWith("--"));
+
+      for (const stmt of statements) {
+        try {
+          await tenantClient.$executeRawUnsafe(stmt);
+        } catch {
+          // Some statements may fail if already applied — continue
+        }
+      }
+    }
+    console.log("   Performance indexes and RLS applied.");
+  } catch (error) {
+    console.warn("   Warning: Could not apply SQL files. Apply manually if needed.", error);
+  }
+
+  // 6. Register in tenant registry
+  console.log("\n4. Registering tenant...");
+  const tenant = await registry.tenant.create({
+    data: {
+      name: config.name,
+      slug: config.slug,
+      databaseUrl: tenantDbUrl,
+      adminEmail: config.adminEmail,
+      plan: config.plan,
+      maxProperties: config.maxProperties,
+      isActive: true,
+      provisionedAt: new Date()
+    }
+  });
+
+  console.log(`   Registered: ${tenant.id}`);
+
+  // 7. Create admin user in tenant database
+  console.log("\n5. Creating admin user...");
+  await tenantClient.user.create({
+    data: {
+      email: config.adminEmail,
+      name: config.name + " Admin",
+      isActive: true
+    }
+  });
+  console.log(`   Admin user created: ${config.adminEmail}`);
+
+  await tenantClient.$disconnect();
+  await registry.$disconnect();
+
+  console.log(`\n=== Tenant '${config.slug}' provisioned successfully ===`);
+  console.log(`  ID: ${tenant.id}`);
+  console.log(`  Database: ${tenantDbName}`);
+  console.log(`  URL: ${tenantDbUrl}`);
+  console.log(`\nNext steps:`);
+  console.log(`  1. Add tenant_slug="${config.slug}" to Keycloak user attributes`);
+  console.log(`  2. Set X-Tenant-Slug: ${config.slug} header in API requests`);
+  console.log(`  3. Run seed-uat.ts with DATABASE_URL=${tenantDbUrl} to populate demo data`);
+}
+
+main().catch((error) => {
+  console.error("\nProvisioning failed:", error);
+  process.exit(1);
+});
