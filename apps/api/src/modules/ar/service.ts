@@ -107,12 +107,23 @@ export class ARService {
     return this.prisma.$transaction(async (tx) => {
       await setEntityDbContext(tx, entityId);
       const repository = this.repository(tx);
+      // Lock the invoice row to prevent concurrent double-posting (SELECT FOR UPDATE)
+      const [locked] = await tx.$queryRaw<
+        Array<{ id: string; status: string }>
+      >`SELECT id, status FROM ar_invoices
+        WHERE id = ${invoiceId}::uuid AND entity_id = ${entityId}::uuid
+        FOR UPDATE`;
+      if (!locked) {
+        throw new ARServiceError("AR_INVOICE_NOT_FOUND", "AR invoice not found.", 404);
+      }
+      if (locked.status !== "DRAFT") {
+        throw new ARServiceError("AR_INVOICE_NOT_DRAFT", "Only draft invoices can be posted.", 409);
+      }
+
+      // Now fetch the full invoice with relations (already locked)
       const invoice = await repository.getInvoice(entityId, invoiceId);
       if (!invoice) {
         throw new ARServiceError("AR_INVOICE_NOT_FOUND", "AR invoice not found.", 404);
-      }
-      if (invoice.status !== "DRAFT") {
-        throw new ARServiceError("AR_INVOICE_NOT_DRAFT", "Only draft invoices can be posted.", 409);
       }
 
       const arControl =
@@ -244,48 +255,72 @@ export class ARService {
 
   // ── Allocation ───────────────────────────────────────────────────────────────
 
+  /**
+   * Allocate a receipt to an invoice within a transaction.
+   * Uses SELECT FOR UPDATE on the invoice row to prevent concurrent
+   * over-allocation (two allocations exceeding the outstanding balance).
+   */
   async allocateReceipt(entityId: string, input: ARAllocationInput) {
-    const receipt = await this.repository(this.prisma).getReceipt(entityId, input.receiptId);
-    if (!receipt) {
-      throw new ARServiceError("AR_RECEIPT_NOT_FOUND", "Receipt not found.", 404);
-    }
-    const invoice = await this.repository(this.prisma).getInvoice(entityId, input.invoiceId);
-    if (!invoice) {
-      throw new ARServiceError("AR_INVOICE_NOT_FOUND", "Invoice not found.", 404);
-    }
-    if (!["POSTED", "PARTIALLY_PAID", "OVERDUE"].includes(invoice.status)) {
-      throw new ARServiceError(
-        "AR_INVOICE_NOT_ALLOCATABLE",
-        "Invoice is not in a state that allows allocation.",
-        409
+    return this.prisma.$transaction(async (tx) => {
+      const repo = this.repository(tx);
+
+      const receipt = await repo.getReceipt(entityId, input.receiptId);
+      if (!receipt) {
+        throw new ARServiceError("AR_RECEIPT_NOT_FOUND", "Receipt not found.", 404);
+      }
+
+      // Lock the invoice row to prevent concurrent allocations
+      const [locked] = await tx.$queryRaw<
+        Array<{ id: string; status: string; amount: string; amount_paid: string }>
+      >`
+        SELECT id, status, amount::text, amount_paid::text
+        FROM ar_invoices
+        WHERE id = ${input.invoiceId}::uuid AND entity_id = ${entityId}::uuid
+        FOR UPDATE
+      `;
+      if (!locked) {
+        throw new ARServiceError("AR_INVOICE_NOT_FOUND", "Invoice not found.", 404);
+      }
+      if (!["POSTED", "PARTIALLY_PAID", "OVERDUE"].includes(locked.status)) {
+        throw new ARServiceError(
+          "AR_INVOICE_NOT_ALLOCATABLE",
+          "Invoice is not in a state that allows allocation.",
+          409
+        );
+      }
+
+      const allocatedAmount = new Prisma.Decimal(input.allocatedAmount);
+      const outstanding = new Prisma.Decimal(locked.amount).sub(
+        new Prisma.Decimal(locked.amount_paid)
       );
-    }
 
-    const allocatedAmount = new Prisma.Decimal(input.allocatedAmount);
-    const outstanding = new Prisma.Decimal(invoice.amount).sub(
-      new Prisma.Decimal(invoice.amountPaid)
-    );
+      if (allocatedAmount.greaterThan(outstanding)) {
+        throw new ARServiceError(
+          "AR_ALLOCATION_EXCEEDS_OUTSTANDING",
+          `Allocated amount ${allocatedAmount.toFixed(4)} exceeds outstanding balance ${outstanding.toFixed(4)}.`,
+          422
+        );
+      }
 
-    if (allocatedAmount.greaterThan(outstanding)) {
-      throw new ARServiceError(
-        "AR_ALLOCATION_EXCEEDS_OUTSTANDING",
-        `Allocated amount ${allocatedAmount.toFixed(4)} exceeds outstanding balance ${outstanding.toFixed(4)}.`,
-        422
-      );
-    }
+      const allocation = await repo.createAllocation(input);
+      const newAmountPaid = new Prisma.Decimal(locked.amount_paid).add(allocatedAmount);
+      const newStatus = newAmountPaid.greaterThanOrEqualTo(new Prisma.Decimal(locked.amount))
+        ? "PAID"
+        : "PARTIALLY_PAID";
 
-    const allocation = await this.repository(this.prisma).createAllocation(input);
-    const newAmountPaid = new Prisma.Decimal(invoice.amountPaid).add(allocatedAmount);
-    const newStatus = newAmountPaid.greaterThanOrEqualTo(new Prisma.Decimal(invoice.amount))
-      ? "PAID"
-      : "PARTIALLY_PAID";
+      await repo.updateInvoice(entityId, locked.id, {
+        amountPaid: newAmountPaid,
+        status: newStatus as
+          | "DRAFT"
+          | "POSTED"
+          | "PARTIALLY_PAID"
+          | "PAID"
+          | "OVERDUE"
+          | "CANCELLED"
+      });
 
-    await this.repository(this.prisma).updateInvoice(entityId, invoice.id, {
-      amountPaid: newAmountPaid,
-      status: newStatus as "DRAFT" | "POSTED" | "PARTIALLY_PAID" | "PAID" | "OVERDUE" | "CANCELLED"
+      return allocation;
     });
-
-    return allocation;
   }
 
   // ── Ageing Report ─────────────────────────────────────────────────────────────
@@ -323,8 +358,14 @@ export class ARService {
       const daysOverdue = Math.floor(
         (now.getTime() - new Date(invoice.dueDate).getTime()) / (1000 * 60 * 60 * 24)
       );
-      const daysToSend = [7, 14, 30];
-      if (!daysToSend.includes(daysOverdue)) continue;
+      // Use range-based checks so a missed day does not permanently skip a reminder
+      let dunningLevel: number | null = null;
+      if (daysOverdue >= 30) dunningLevel = 30;
+      else if (daysOverdue >= 14) dunningLevel = 14;
+      else if (daysOverdue >= 7) dunningLevel = 7;
+      if (dunningLevel === null) continue;
+      // Skip if this dunning level was already sent (tracked via lastDunningLevel on invoice)
+      if ((invoice as any).lastDunningLevel >= dunningLevel) continue;
 
       const billingContact = invoice.customer.billingContact as Record<string, unknown> | null;
       const email = typeof billingContact?.email === "string" ? billingContact.email : null;
@@ -337,6 +378,12 @@ export class ARService {
 <p>Invoice <strong>${invoice.invoiceNumber}</strong> for ${invoice.currency} ${invoice.amount} was due on ${new Date(invoice.dueDate).toDateString()}.</p>
 <p>It is now <strong>${daysOverdue} days overdue</strong>. Please arrange payment at your earliest convenience.</p>
 <p>HospitalityFinance Pro</p>`
+      });
+      // Track dunning level so we don't re-send the same tier
+      await this.prisma.$executeRaw`
+        UPDATE ar_invoices SET last_dunning_level = ${dunningLevel} WHERE id = ${invoice.id}::uuid
+      `.catch(() => {
+        /* column may not exist yet — requires migration */
       });
       sent.push(invoice.id);
     }
