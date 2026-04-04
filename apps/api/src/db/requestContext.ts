@@ -56,6 +56,9 @@ export function updateRequestContext(patch: Partial<RequestContext>): void {
   const store = storage.getStore();
   if (store) {
     Object.assign(store, patch);
+  } else {
+    // No active store — create one (backward compat with enterWith callers)
+    storage.enterWith({ ...defaultContext(), ...patch });
   }
 }
 
