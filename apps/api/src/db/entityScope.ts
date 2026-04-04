@@ -107,6 +107,21 @@ export function createEntityScopeExtension(getEntityId: () => string | null) {
 
             const entityId = getEntityId();
             if (!entityId) {
+              // For mutations on entity-scoped models, require entity context
+              const mutationOps = new Set([
+                "create",
+                "createMany",
+                "update",
+                "updateMany",
+                "delete",
+                "deleteMany",
+                "upsert"
+              ]);
+              if (mutationOps.has(operation)) {
+                throw new Error(
+                  `Entity context required for ${operation} on ${model}. Ensure X-Entity-ID header is set.`
+                );
+              }
               return query(args);
             }
 
