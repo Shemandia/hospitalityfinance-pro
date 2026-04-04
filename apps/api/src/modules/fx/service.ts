@@ -252,7 +252,7 @@ export class FXService {
                 rateType: "SPOT",
                 rate: new Prisma.Decimal(rate).toDecimalPlaces(8).toFixed(8),
                 effectiveDate,
-                source: "ECB" // labelled ECB for consistency in the auto-import flow
+                source: "OPEN_ER_API"
               });
               // X → USD (inverse)
               const inv = new Prisma.Decimal(1).div(new Prisma.Decimal(rate));
@@ -262,7 +262,7 @@ export class FXService {
                 rateType: "SPOT",
                 rate: inv.toDecimalPlaces(8).toFixed(8),
                 effectiveDate,
-                source: "ECB"
+                source: "OPEN_ER_API"
               });
               imported++;
             } catch {
