@@ -14,7 +14,7 @@
 
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { PrismaClient } from "@prisma/client";
-import { ZodError } from "zod";
+import { z, ZodError } from "zod";
 import { prisma } from "../../db/prisma.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
 import { requireRole } from "../../middleware/requireRole.js";
@@ -28,6 +28,19 @@ import {
   entityUserCreateSchema,
   userCreateSchema
 } from "./types.js";
+
+const assignScopeSchema = z.object({
+  userId: z.string().uuid(),
+  entityId: z.string().uuid(),
+  role: z.enum(["VIEWER", "CONTROLLER", "ADMIN", "SUPERADMIN"]),
+  cascade: z.boolean().default(false)
+});
+
+const revokeScopeSchema = z.object({
+  userId: z.string().uuid(),
+  entityId: z.string().uuid(),
+  cascade: z.boolean().default(false)
+});
 
 function mapError(reply: FastifyReply, error: unknown) {
   if (error instanceof ZodError) {
@@ -392,12 +405,7 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
         },
         async (request, reply) => {
           try {
-            const body = request.body as {
-              userId: string;
-              entityId: string;
-              role: string;
-              cascade: boolean; // if true, also assign to all child entities
-            };
+            const body = assignScopeSchema.parse(request.body);
 
             const user = await db.user.findUnique({ where: { id: body.userId } });
             if (!user)
@@ -462,11 +470,7 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
         },
         async (request, reply) => {
           try {
-            const body = request.body as {
-              userId: string;
-              entityId: string;
-              cascade: boolean;
-            };
+            const body = revokeScopeSchema.parse(request.body);
 
             const entityIds: string[] = [body.entityId];
             if (body.cascade) {
