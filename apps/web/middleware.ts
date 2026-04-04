@@ -6,11 +6,12 @@ const PUBLIC_PATHS = new Set(["/login"]);
 export default auth((request) => {
   const { pathname, origin } = request.nextUrl;
   const isPublic = PUBLIC_PATHS.has(pathname);
-  const isAuthRoute = pathname.startsWith("/api/auth");
+  const isAuthRoute = pathname.startsWith("/api/auth") || pathname === "/api/tenants";
+  const isPlatformRoute = pathname.startsWith("/platform");
   const isAssetPath =
     pathname.startsWith("/_next") || pathname === "/favicon.ico" || pathname.startsWith("/images");
 
-  if (isAuthRoute || isAssetPath) {
+  if (isAuthRoute || isAssetPath || isPlatformRoute) {
     return NextResponse.next();
   }
 
