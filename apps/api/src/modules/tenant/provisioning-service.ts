@@ -152,9 +152,17 @@ export class ProvisioningService {
           const statements = file
             .split(";")
             .map((s) => s.trim())
-            .filter(Boolean);
+            .filter((s) => s.length > 0 && !s.startsWith("--"));
           for (const stmt of statements) {
-            await tenantClient.$executeRawUnsafe(stmt);
+            try {
+              await tenantClient.$executeRawUnsafe(stmt);
+            } catch (sqlErr: any) {
+              // Skip statements referencing tables that don't exist yet (42P01)
+              // or indexes/views that already exist (42P07)
+              const code = sqlErr?.code ?? sqlErr?.meta?.code ?? "";
+              if (code === "42P01" || code === "42P07") continue;
+              throw sqlErr;
+            }
           }
         }
       } finally {
