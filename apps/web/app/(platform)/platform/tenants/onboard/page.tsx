@@ -118,6 +118,7 @@ export default function OnboardPage() {
 function OnboardWizard({ platformKey }: { platformKey: string }) {
   const [currentStep, setCurrentStep] = useState(1);
   const [completedSteps, setCompletedSteps] = useState<number[]>([]);
+  const [slugEdited, setSlugEdited] = useState(false);
   const [provisioning, setProvisioning] = useState(false);
   const [provisioningSteps, setProvisioningSteps] = useState<ProvisioningStep[]>([]);
   const [provisionResult, setProvisionResult] = useState<{
@@ -294,7 +295,7 @@ function OnboardWizard({ platformKey }: { platformKey: string }) {
                   setTenant((t) => ({
                     ...t,
                     name,
-                    slug: t.slug === generateSlug(t.name) ? generateSlug(name) : t.slug
+                    slug: slugEdited ? t.slug : generateSlug(name)
                   }));
                 }}
                 className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
@@ -307,9 +308,15 @@ function OnboardWizard({ platformKey }: { platformKey: string }) {
                 <input
                   type="text"
                   value={tenant.slug}
-                  onChange={(e) => setTenant((t) => ({ ...t, slug: e.target.value }))}
+                  onChange={(e) => {
+                    setSlugEdited(true);
+                    setTenant((t) => ({ ...t, slug: e.target.value }));
+                  }}
                   className="mt-1 w-full rounded-md border px-3 py-2 text-sm font-mono"
                 />
+                <p className="mt-1 text-xs text-slate-400">
+                  Lowercase letters, numbers, and hyphens only (3–50 chars)
+                </p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700">Domain</label>
