@@ -211,6 +211,16 @@ function OnboardWizard({ platformKey }: { platformKey: string }) {
         })
       });
 
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => null);
+        const msg =
+          errorBody?.errors?.map((e: any) => e.message).join("; ") ??
+          `Server error: ${response.status}`;
+        setProvisionError(msg);
+        setProvisioning(false);
+        return;
+      }
+
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       if (!reader) return;
