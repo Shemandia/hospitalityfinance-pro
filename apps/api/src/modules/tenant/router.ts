@@ -253,9 +253,11 @@ export async function registerTenantRouter(app: FastifyInstance): Promise<void> 
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",
           Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
           "Access-Control-Allow-Origin": origin,
           "Access-Control-Allow-Credentials": "true"
         });
+        reply.raw.flushHeaders();
 
         const sse = (event: string, data: Record<string, unknown>) => {
           reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -263,8 +265,10 @@ export async function registerTenantRouter(app: FastifyInstance): Promise<void> 
 
         try {
           await provisioningService.provision(input, sse);
-        } catch {
-          // Error already emitted via SSE in the service
+        } catch (err) {
+          // Emit error via SSE if not already emitted
+          const msg = err instanceof Error ? err.message : "Unknown error";
+          sse("error", { step: "unknown", order: 0, status: "FAILED", error: msg });
         } finally {
           reply.raw.end();
         }
@@ -294,9 +298,11 @@ export async function registerTenantRouter(app: FastifyInstance): Promise<void> 
             "Content-Type": "text/event-stream",
             "Cache-Control": "no-cache",
             Connection: "keep-alive",
+            "X-Accel-Buffering": "no",
             "Access-Control-Allow-Origin": retryOrigin,
             "Access-Control-Allow-Credentials": "true"
           });
+          reply.raw.flushHeaders();
 
           const sse = (event: string, data: Record<string, unknown>) => {
             reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -304,8 +310,9 @@ export async function registerTenantRouter(app: FastifyInstance): Promise<void> 
 
           try {
             await provisioningService.retry(request.params.slug, sse);
-          } catch {
-            // Error already emitted via SSE
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : "Unknown error";
+            sse("error", { step: "unknown", order: 0, status: "FAILED", error: msg });
           } finally {
             reply.raw.end();
           }
