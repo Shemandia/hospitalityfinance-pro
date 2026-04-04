@@ -1,7 +1,9 @@
 import fp from "fastify-plugin";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
-import { prisma } from "../db/prisma.js";
+import { prisma, setActiveTenant } from "../db/prisma.js";
+import { resolveTenant } from "../db/tenantRegistry.js";
+import { updateRequestContext } from "../db/requestContext.js";
 
 type ErrorWithStatus = Error & { statusCode: number };
 
@@ -10,9 +12,11 @@ declare module "fastify" {
     user?: JWTPayload & {
       roles: string[];
       entityIds: string[];
+      tenantSlug?: string;
     };
     entityId?: string;
     chainId?: string;
+    tenantSlug?: string;
   }
 
   interface FastifyInstance {
@@ -37,17 +41,13 @@ function toStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
   }
-
   return value.filter((item): item is string => typeof item === "string");
 }
 
 async function readEntity(id: string): Promise<{ id: string; parentId: string | null } | null> {
   return prisma.entity.findUnique({
     where: { id },
-    select: {
-      id: true,
-      parentId: true
-    }
+    select: { id: true, parentId: true }
   });
 }
 
@@ -57,16 +57,10 @@ async function resolveEntityLineage(entityId: string): Promise<string[]> {
   let currentId: string | null = entityId;
 
   while (currentId) {
-    if (visited.has(currentId)) {
-      break;
-    }
+    if (visited.has(currentId)) break;
     visited.add(currentId);
-
     const entity = await readEntity(currentId);
-    if (!entity) {
-      break;
-    }
-
+    if (!entity) break;
     lineage.push(entity.id);
     currentId = entity.parentId;
   }
@@ -83,14 +77,35 @@ async function isEntityAllowedByClaims(
   requestedEntityId: string,
   claimedEntityIds: string[]
 ): Promise<boolean> {
-  if (claimedEntityIds.length === 0) {
-    return true;
-  }
-
+  if (claimedEntityIds.length === 0) return true;
   const granted = new Set(claimedEntityIds);
   const lineage = await resolveEntityLineage(requestedEntityId);
   return lineage.some((entityId) => granted.has(entityId));
 }
+
+// ── Tenant resolution ─────────────────────────────────────────────────────────
+
+async function resolveTenantContext(request: FastifyRequest, tenantSlug: string): Promise<void> {
+  const tenant = await resolveTenant(tenantSlug);
+  if (!tenant) {
+    throw buildError(403, `Tenant '${tenantSlug}' not found or inactive.`);
+  }
+  if (!tenant.isActive) {
+    throw buildError(403, `Tenant '${tenantSlug}' is deactivated.`);
+  }
+
+  request.tenantSlug = tenant.slug;
+
+  // Set tenant in request context so the prisma proxy routes to the right DB
+  updateRequestContext({
+    tenantSlug: tenant.slug,
+    tenantDbUrl: tenant.databaseUrl
+  });
+  // Also set the global fallback (AsyncLocalStorage can lose context across Fastify hooks)
+  setActiveTenant(tenant.slug, tenant.databaseUrl);
+}
+
+// ── Plugin ────────────────────────────────────────────────────────────────────
 
 export default fp(async (fastify: FastifyInstance) => {
   const issuerUrl = process.env.KEYCLOAK_ISSUER_URL ?? "http://localhost:8080/realms/hfp";
@@ -102,43 +117,63 @@ export default fp(async (fastify: FastifyInstance) => {
     try {
       const token = extractBearerToken(request.headers.authorization);
 
-      // Dev-mode bypass: accept "dev-token" without Keycloak verification
-      if (process.env.NODE_ENV !== "production" && token === "dev-token") {
-        const headerEntityId = request.headers["x-entity-id"];
-        if (typeof headerEntityId !== "string" || headerEntityId.length === 0) {
-          throw buildError(400, "X-Entity-ID header is required.");
+      // ── Dev-mode bypass ─────────────────────────────────────────────────
+      const devAuthEnabled =
+        process.env.NODE_ENV !== "production" && process.env.ENABLE_DEV_AUTH === "true";
+      if (devAuthEnabled && token.startsWith("dev-")) {
+        // Resolve tenant from header (required in multi-tenant mode, optional in single-tenant dev)
+        const tenantHeader = request.headers["x-tenant-slug"];
+        if (typeof tenantHeader === "string" && tenantHeader.length > 0) {
+          await resolveTenantContext(request, tenantHeader);
         }
-        // Use actual admin user ID so FK constraints (e.g. approvedById) work
+
+        const headerEntityId = request.headers["x-entity-id"];
+
         request.user = {
           sub: "a15c0667-e920-4e66-8b15-e1a561b965c4",
           roles: ["admin", "superadmin"],
-          entityIds: []
+          entityIds: [],
+          tenantSlug: request.tenantSlug
         };
-        request.entityId = headerEntityId;
-        // Best-effort chain resolution — skip on DB error in dev
-        try {
-          request.chainId = await resolveChainEntityId(headerEntityId);
-        } catch {
-          request.chainId = headerEntityId;
+
+        if (typeof headerEntityId === "string" && headerEntityId.length > 0) {
+          request.entityId = headerEntityId;
+          try {
+            request.chainId = await resolveChainEntityId(headerEntityId);
+          } catch {
+            request.chainId = headerEntityId;
+          }
         }
+        // entityId may be undefined — individual routes that need it call requireEntityId()
         return;
       }
+
+      // ── Production: Keycloak JWT ────────────────────────────────────────
       const { payload } = await jwtVerify(token, jwks, {
         issuer: issuerUrl,
         audience
       });
 
-      const realmAccess = (payload.realm_access ?? {}) as {
-        roles?: unknown;
-      };
-
+      const realmAccess = (payload.realm_access ?? {}) as { roles?: unknown };
       const roles = toStringArray(realmAccess.roles);
       const entityIds = toStringArray(payload.entity_ids);
+
+      // Resolve tenant from JWT claim or request header
+      const tenantSlug =
+        (typeof payload.tenant_slug === "string" ? payload.tenant_slug : null) ??
+        (typeof request.headers["x-tenant-slug"] === "string"
+          ? request.headers["x-tenant-slug"]
+          : null);
+
+      if (tenantSlug) {
+        await resolveTenantContext(request, tenantSlug);
+      }
 
       request.user = {
         ...payload,
         roles,
-        entityIds
+        entityIds,
+        tenantSlug: request.tenantSlug
       };
 
       const headerEntityId = request.headers["x-entity-id"];
