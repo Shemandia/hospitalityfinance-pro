@@ -29,6 +29,7 @@ export const provisionTenantSchema = z.object({
       .regex(/^\d{4}-\d{2}-\d{2}$/, "ISO date required")
       .optional()
       .nullable()
+      .or(z.literal(""))
   }),
   adminUser: z.object({
     firstName: z.string().min(1).max(100),
