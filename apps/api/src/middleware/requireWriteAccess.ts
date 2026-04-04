@@ -37,7 +37,7 @@ export async function requireWriteAccess(
   if (writeRoles.some((r) => userRoles.includes(r))) return;
 
   // Block: user has no write-capable role (VIEWER or no role)
-  reply.code(403).send({
+  return reply.code(403).send({
     data: null,
     errors: [
       {

@@ -9,7 +9,7 @@ export function requireRole(requiredRoles: string[]) {
       return;
     }
 
-    reply.code(403).send({
+    return reply.code(403).send({
       data: null,
       errors: [
         {
