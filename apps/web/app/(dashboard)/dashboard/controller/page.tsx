@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { useApiContext } from "../../../../components/use-api-context";
 import { useUserRole } from "../../../../components/use-user-role";
 import {
@@ -23,6 +24,7 @@ import type {
 import { Card, CardContent, CardHeader, CardTitle } from "../../../../components/ui/card";
 import { Badge } from "../../../../components/ui/badge";
 import { Button } from "../../../../components/ui/button";
+import { fmt, fmtPct } from "../../../../lib/format";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -47,17 +49,6 @@ type RevPARData = {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function fmt(n: string | number, d = 0) {
-  return parseFloat(String(n)).toLocaleString(undefined, {
-    minimumFractionDigits: d,
-    maximumFractionDigits: d
-  });
-}
-
-function fmtPct(n: string | number) {
-  return `${parseFloat(String(n)).toFixed(1)}%`;
-}
-
 function statusBadge(status: string) {
   const map: Record<string, string> = {
     OPEN: "bg-emerald-100 text-emerald-800",
@@ -71,6 +62,19 @@ function varianceColor(variance: number): string {
   if (variance > 0) return "text-emerald-700";
   if (variance < 0) return "text-red-600";
   return "text-muted-foreground";
+}
+
+function fmtVariance(v: number | string): string {
+  const n = typeof v === "string" ? parseFloat(v) : v;
+  if (isNaN(n)) return "--";
+  const sign = n > 0 ? "+" : "";
+  return `${sign}${n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
+
+function fmtVariancePct(v: number): string {
+  if (isNaN(v)) return "--";
+  const sign = v > 0 ? "+" : "";
+  return `${sign}${v.toFixed(1)}%`;
 }
 
 // ── KPI Card ─────────────────────────────────────────────────────────────────
@@ -113,6 +117,7 @@ function SectionHeader({ title }: { title: string }) {
 // ── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ControllerDashboard() {
+  const router = useRouter();
   const apiContext = useApiContext();
   const { role } = useUserRole();
 
@@ -337,14 +342,14 @@ export default function ControllerDashboard() {
                                 variance
                               )}`}
                             >
-                              {budget > 0 ? fmt(variance) : "--"}
+                              {budget > 0 ? fmtVariance(variance) : "--"}
                             </td>
                             <td
                               className={`py-2 pr-4 text-right tabular-nums ${varianceColor(
                                 variancePctVal
                               )}`}
                             >
-                              {budget > 0 ? `${variancePctVal.toFixed(1)}%` : "--"}
+                              {budget > 0 ? fmtVariancePct(variancePctVal) : "--"}
                             </td>
                             <td className="py-2 w-28">
                               {budget > 0 ? (
@@ -383,7 +388,9 @@ export default function ControllerDashboard() {
                             parseFloat(usali.revenueVariance || "0")
                           )}`}
                         >
-                          {usali.budgetTotalRevenue !== "0" ? fmt(usali.revenueVariance) : "--"}
+                          {usali.budgetTotalRevenue !== "0"
+                            ? fmtVariance(usali.revenueVariance)
+                            : "--"}
                         </td>
                         <td className="py-2 pr-4 text-right" />
                         <td />
@@ -577,7 +584,7 @@ export default function ControllerDashboard() {
                       arTotal - apTotal >= 0 ? "text-emerald-700" : "text-red-600"
                     }`}
                   >
-                    {fmt(arTotal - apTotal)}
+                    {fmtVariance(arTotal - apTotal)}
                   </span>
                 </div>
               </div>
@@ -653,7 +660,7 @@ export default function ControllerDashboard() {
                     size="sm"
                     className="w-full mt-2 text-xs"
                     onClick={() => {
-                      window.location.href = "/gl/journals?status=PENDING_APPROVAL";
+                      router.push("/gl/journals?status=PENDING_APPROVAL");
                     }}
                   >
                     View All Pending Journals
