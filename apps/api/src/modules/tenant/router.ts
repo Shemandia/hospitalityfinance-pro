@@ -248,10 +248,13 @@ export async function registerTenantRouter(app: FastifyInstance): Promise<void> 
           throw err;
         }
 
+        const origin = request.headers.origin ?? "*";
         reply.raw.writeHead(200, {
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",
-          Connection: "keep-alive"
+          Connection: "keep-alive",
+          "Access-Control-Allow-Origin": origin,
+          "Access-Control-Allow-Credentials": "true"
         });
 
         const sse = (event: string, data: Record<string, unknown>) => {
@@ -286,10 +289,13 @@ export async function registerTenantRouter(app: FastifyInstance): Promise<void> 
       router.post<{ Params: { slug: string } }>(
         "/tenants/:slug/provision-retry",
         async (request, reply) => {
+          const retryOrigin = request.headers.origin ?? "*";
           reply.raw.writeHead(200, {
             "Content-Type": "text/event-stream",
             "Cache-Control": "no-cache",
-            Connection: "keep-alive"
+            Connection: "keep-alive",
+            "Access-Control-Allow-Origin": retryOrigin,
+            "Access-Control-Allow-Credentials": "true"
           });
 
           const sse = (event: string, data: Record<string, unknown>) => {
