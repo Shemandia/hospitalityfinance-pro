@@ -132,7 +132,7 @@ export class ProvisioningService {
 
     await this.executeStep(tenantRecord.id, "running_migrations", sse, async () => {
       const apiRoot = resolve(import.meta.dirname ?? __dirname, "../../..");
-      execSync("npx prisma migrate deploy --schema src/db/schema.prisma", {
+      execSync("npx prisma db push --schema src/db/schema.prisma --skip-generate", {
         cwd: apiRoot,
         env: { ...process.env, DATABASE_URL: tenantDbUrl },
         stdio: "pipe",
