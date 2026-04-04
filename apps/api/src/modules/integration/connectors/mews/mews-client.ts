@@ -1,3 +1,5 @@
+import { Prisma } from "@prisma/client";
+
 /**
  * Mews PMS — REST API Client
  *
@@ -28,7 +30,7 @@ export type MewsAccountingItem = {
   id: string;
   name: string;
   type: string;
-  amount: number;
+  amount: string;
   currency: string;
   consumedUtc: string;
   accountingCategoryId: string;
@@ -38,9 +40,9 @@ export type MewsOutletItem = {
   id: string;
   outletId: string;
   name: string;
-  unitAmount: number;
+  unitAmount: string;
   quantity: number;
-  amount: number;
+  amount: string;
   currency: string;
   consumedUtc: string;
   accountingCategoryId: string;
@@ -74,13 +76,13 @@ export type MewsDailySummary = {
   currency: string;
   items: MewsAccountingItem[];
   outletItems: MewsOutletItem[];
-  totalRevenue: number;
-  totalTax: number;
-  totalPayments: number;
+  totalRevenue: string;
+  totalTax: string;
+  totalPayments: string;
   byCategory: Array<{
     accountingCategoryId: string;
     categoryName: string;
-    amount: number;
+    amount: string;
     type: string;
   }>;
 };
@@ -152,7 +154,7 @@ export class MewsClient {
       id: item.Id ?? "",
       name: item.Name ?? "",
       type: item.Type ?? "",
-      amount: item.Amount?.Value ?? 0,
+      amount: new Prisma.Decimal(item.Amount?.Value ?? 0).toDecimalPlaces(4).toString(),
       currency: (item.Amount?.Currency ?? "USD").toUpperCase(),
       consumedUtc: item.ConsumedUtc ?? "",
       accountingCategoryId: item.AccountingCategoryId ?? ""
@@ -187,9 +189,9 @@ export class MewsClient {
       id: item.Id ?? "",
       outletId: item.OutletId ?? "",
       name: item.Name ?? "",
-      unitAmount: item.UnitAmount?.Value ?? 0,
+      unitAmount: new Prisma.Decimal(item.UnitAmount?.Value ?? 0).toDecimalPlaces(4).toString(),
       quantity: item.UnitCount ?? 0,
-      amount: item.Amount?.Value ?? 0,
+      amount: new Prisma.Decimal(item.Amount?.Value ?? 0).toDecimalPlaces(4).toString(),
       currency: (item.Amount?.Currency ?? "USD").toUpperCase(),
       consumedUtc: item.ConsumedUtc ?? "",
       accountingCategoryId: item.AccountingCategoryId ?? ""
@@ -290,56 +292,58 @@ export class MewsClient {
       categoryMap.set(cat.id, cat);
     }
 
-    // Aggregate by accounting category
+    // Aggregate by accounting category using Decimal for precision
     const byCategoryAgg = new Map<
       string,
-      { accountingCategoryId: string; categoryName: string; amount: number; type: string }
+      { accountingCategoryId: string; categoryName: string; amount: Prisma.Decimal; type: string }
     >();
 
-    let totalRevenue = 0;
-    let totalTax = 0;
-    let totalPayments = 0;
+    let totalRevenue = new Prisma.Decimal(0);
+    let totalTax = new Prisma.Decimal(0);
+    let totalPayments = new Prisma.Decimal(0);
     const currency = items[0]?.currency ?? outletItems[0]?.currency ?? "USD";
 
     for (const item of items) {
       const cat = categoryMap.get(item.accountingCategoryId);
       const classification = cat?.classification ?? "Unknown";
+      const itemAmount = new Prisma.Decimal(item.amount);
 
       const existing = byCategoryAgg.get(item.accountingCategoryId);
       if (existing) {
-        existing.amount += item.amount;
+        existing.amount = existing.amount.add(itemAmount);
       } else {
         byCategoryAgg.set(item.accountingCategoryId, {
           accountingCategoryId: item.accountingCategoryId,
           categoryName: cat?.name ?? "Unknown",
-          amount: item.amount,
+          amount: itemAmount,
           type: classification
         });
       }
 
-      if (classification === "Revenue") totalRevenue += item.amount;
-      else if (classification === "Tax") totalTax += item.amount;
-      else if (classification === "Payment") totalPayments += item.amount;
+      if (classification === "Revenue") totalRevenue = totalRevenue.add(itemAmount);
+      else if (classification === "Tax") totalTax = totalTax.add(itemAmount);
+      else if (classification === "Payment") totalPayments = totalPayments.add(itemAmount);
     }
 
     // Include outlet items in revenue
     for (const item of outletItems) {
       const cat = categoryMap.get(item.accountingCategoryId);
       const classification = cat?.classification ?? "Unknown";
+      const itemAmount = new Prisma.Decimal(item.amount);
 
       const existing = byCategoryAgg.get(item.accountingCategoryId);
       if (existing) {
-        existing.amount += item.amount;
+        existing.amount = existing.amount.add(itemAmount);
       } else {
         byCategoryAgg.set(item.accountingCategoryId, {
           accountingCategoryId: item.accountingCategoryId,
           categoryName: cat?.name ?? "Unknown",
-          amount: item.amount,
+          amount: itemAmount,
           type: classification
         });
       }
 
-      if (classification === "Revenue") totalRevenue += item.amount;
+      if (classification === "Revenue") totalRevenue = totalRevenue.add(itemAmount);
     }
 
     return {
@@ -347,10 +351,13 @@ export class MewsClient {
       currency: currency.toUpperCase(),
       items,
       outletItems,
-      totalRevenue,
-      totalTax,
-      totalPayments,
-      byCategory: Array.from(byCategoryAgg.values())
+      totalRevenue: totalRevenue.toString(),
+      totalTax: totalTax.toString(),
+      totalPayments: totalPayments.toString(),
+      byCategory: Array.from(byCategoryAgg.values()).map((c) => ({
+        ...c,
+        amount: c.amount.toString()
+      }))
     };
   }
 }
