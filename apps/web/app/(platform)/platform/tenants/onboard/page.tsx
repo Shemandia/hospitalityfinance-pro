@@ -304,7 +304,12 @@ function OnboardWizard({ platformKey }: { platformKey: string }) {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700">Slug *</label>
+                <label className="block text-sm font-medium text-slate-700">
+                  Slug *{" "}
+                  {tenant.slug && (
+                    <span className="text-xs font-normal text-emerald-600">(auto-generated)</span>
+                  )}
+                </label>
                 <input
                   type="text"
                   value={tenant.slug}
