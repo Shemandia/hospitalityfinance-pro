@@ -21,6 +21,7 @@ import { registerKPIRouter } from "./modules/kpi/router.js";
 import { registerAdminRouter } from "./modules/admin/router.js";
 import { registerTenantRouter } from "./modules/tenant/router.js";
 import { registerAccountTypeRouter } from "./modules/account-type/router.js";
+import { registerSetupRouter } from "./modules/setup/router.js";
 import authPlugin from "./plugins/auth.js";
 
 export async function createApp(): Promise<FastifyInstance> {
@@ -463,6 +464,7 @@ export async function createApp(): Promise<FastifyInstance> {
   await registerAdminRouter(app);
   await registerTenantRouter(app);
   registerAccountTypeRouter(app);
+  await registerSetupRouter(app);
 
   return app;
 }
