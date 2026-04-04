@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { WizardLayout, WizardStepContent } from "../../../../../components/wizard-layout";
+import { COUNTRIES } from "../../../../../lib/countries";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
@@ -259,19 +260,18 @@ export default function OnboardPage() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700">Country *</label>
-                <input
-                  type="text"
+                <select
                   value={tenant.countryCode}
-                  onChange={(e) =>
-                    setTenant((t) => ({
-                      ...t,
-                      countryCode: e.target.value.toUpperCase().slice(0, 2)
-                    }))
-                  }
+                  onChange={(e) => setTenant((t) => ({ ...t, countryCode: e.target.value }))}
                   className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
-                  placeholder="AE"
-                  maxLength={2}
-                />
+                >
+                  <option value="">Select a country…</option>
+                  {COUNTRIES.map((c) => (
+                    <option key={c.code} value={c.code}>
+                      {c.name} ({c.code})
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
           </div>
@@ -510,7 +510,10 @@ export default function OnboardPage() {
                 </div>
                 <div>
                   <dt className="text-slate-500">Country</dt>
-                  <dd>{tenant.countryCode}</dd>
+                  <dd>
+                    {COUNTRIES.find((c) => c.code === tenant.countryCode)?.name ??
+                      tenant.countryCode}
+                  </dd>
                 </div>
               </dl>
             </section>
