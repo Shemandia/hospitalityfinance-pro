@@ -149,10 +149,27 @@ export class ProvisioningService {
         const performanceSql = readFileSync(resolve(sqlDir, "performance.sql"), "utf-8");
         const rlsSql = readFileSync(resolve(sqlDir, "entity-rls.sql"), "utf-8");
         for (const file of [performanceSql, rlsSql]) {
-          const statements = file
-            .split(";")
-            .map((s) => s.trim())
-            .filter((s) => s.length > 0 && !s.startsWith("--"));
+          // Split on semicolons but respect $$ dollar-quoted blocks (PL/pgSQL)
+          const statements: string[] = [];
+          let current = "";
+          let inDollarBlock = false;
+          for (const line of file.split("\n")) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith("--") && !inDollarBlock) continue;
+            if (trimmed.includes("$$")) {
+              inDollarBlock = !inDollarBlock;
+            }
+            current += line + "\n";
+            if (!inDollarBlock && trimmed.endsWith(";")) {
+              const stmt = current.trim().replace(/;$/, "").trim();
+              if (stmt.length > 0) statements.push(stmt);
+              current = "";
+            }
+          }
+          if (current.trim().length > 0) {
+            const stmt = current.trim().replace(/;$/, "").trim();
+            if (stmt.length > 0) statements.push(stmt);
+          }
           for (const stmt of statements) {
             try {
               await tenantClient.$executeRawUnsafe(stmt);
