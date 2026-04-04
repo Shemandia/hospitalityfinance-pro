@@ -1,4 +1,4 @@
-import { prisma } from "../../db/prisma.js";
+import { prisma, registryPrisma } from "../../db/prisma.js";
 import { stepSchemas } from "./types.js";
 
 export class SetupService {
@@ -17,7 +17,20 @@ export class SetupService {
         }
       });
     }
-    return progress;
+
+    // Fetch tenant info from registry for pre-filling step 1
+    const tenant = await registryPrisma.tenant.findFirst({
+      where: { slug: tenantId },
+      select: { name: true, adminEmail: true }
+    });
+
+    // Look up country from entitlements or tenant record
+    // The countryCode was stored during provisioning — check if we can find it
+    // For now, return tenant name and email for pre-fill
+    return {
+      ...progress,
+      tenantInfo: tenant ? { name: tenant.name, adminEmail: tenant.adminEmail } : null
+    };
   }
 
   async saveStep(tenantId: string, step: number, data: unknown, saveOnly: boolean) {

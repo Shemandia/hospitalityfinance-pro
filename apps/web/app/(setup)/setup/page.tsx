@@ -202,6 +202,9 @@ export default function SetupPage() {
         if (completed) setCompletedSteps(completed);
         if (step) setCurrentStep(step);
 
+        // Pre-fill from tenant info (provisioning data) if step 1 not yet saved
+        const tenantInfo = json.data.tenantInfo;
+
         // Restore form state from stepData
         if (stepData) {
           const sd = stepData as StepData;
@@ -210,6 +213,9 @@ export default function SetupPage() {
             setCorporateCountry(sd.step1.corporateCountry ?? "");
             setFunctionalCurrency(sd.step1.functionalCurrency ?? "USD");
             if (sd.step1.properties?.length) setProperties(sd.step1.properties);
+          } else if (tenantInfo) {
+            // Pre-fill from provisioning data
+            setCorporateName(tenantInfo.name ?? "");
           }
           if (sd.step2?.departments?.length) setDepartments(sd.step2.departments);
           if (sd.step3) setImportMethod(sd.step3.importMethod ?? "USALI_TEMPLATE");
@@ -444,7 +450,7 @@ export default function SetupPage() {
                   value={corporateName}
                   onChange={(e) => setCorporateName(e.target.value)}
                   className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
-                  placeholder="Jumeirah Group Holdings"
+                  placeholder="Corporate entity name"
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -516,7 +522,7 @@ export default function SetupPage() {
                         value={prop.name}
                         onChange={(e) => updateProperty(idx, "name", e.target.value)}
                         className="mt-1 w-full rounded-md border px-3 py-1.5 text-sm"
-                        placeholder="Jumeirah Beach Hotel"
+                        placeholder="Property name"
                       />
                     </div>
                     <div>

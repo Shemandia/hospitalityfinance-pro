@@ -128,18 +128,19 @@ function TenantList({ platformKey }: { platformKey: string }) {
               <th className="px-4 py-3 text-left font-medium text-slate-600">Admin</th>
               <th className="px-4 py-3 text-left font-medium text-slate-600">Status</th>
               <th className="px-4 py-3 text-left font-medium text-slate-600">Provisioned</th>
+              <th className="px-4 py-3 text-left font-medium text-slate-600">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y">
             {loading ? (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
                   Loading…
                 </td>
               </tr>
             ) : tenants.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
                   No tenants yet
                 </td>
               </tr>
@@ -152,6 +153,16 @@ function TenantList({ platformKey }: { platformKey: string }) {
                   <td className="px-4 py-3">{statusBadge(t.provisioningStatus)}</td>
                   <td className="px-4 py-3 text-slate-500">
                     {t.provisionedAt ? new Date(t.provisionedAt).toLocaleDateString("en-US") : "—"}
+                  </td>
+                  <td className="px-4 py-3">
+                    {t.provisioningStatus === "ACTIVE" && (
+                      <a
+                        href={`/login?tenant=${t.slug}`}
+                        className="rounded bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                      >
+                        Setup Wizard →
+                      </a>
+                    )}
                   </td>
                 </tr>
               ))
