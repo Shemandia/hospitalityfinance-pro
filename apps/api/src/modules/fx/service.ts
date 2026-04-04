@@ -22,7 +22,7 @@ export class FXServiceError extends Error {
 type EcbRateEntry = { currency: string; rate: string };
 
 /** Only these currencies are active in the system. USD is the base/reporting currency. */
-const ALLOWED_CURRENCIES = new Set(["USD", "EUR", "GBP", "TZS"]);
+const ALLOWED_CURRENCIES = new Set(["USD", "EUR", "GBP", "TZS", "AED", "QAR"]);
 
 export class FXService {
   constructor(private readonly prisma: PrismaClient) {}
@@ -140,7 +140,9 @@ export class FXService {
       USD: { name: "US Dollar", symbol: "$" },
       EUR: { name: "Euro", symbol: "€" },
       GBP: { name: "British Pound", symbol: "£" },
-      TZS: { name: "Tanzanian Shilling", symbol: "TSh" }
+      TZS: { name: "Tanzanian Shilling", symbol: "TSh" },
+      AED: { name: "UAE Dirham", symbol: "د.إ" },
+      QAR: { name: "Qatari Riyal", symbol: "ر.ق" }
     };
     for (const [code, meta] of Object.entries(currencyMeta)) {
       try {
@@ -148,7 +150,7 @@ export class FXService {
           code,
           name: meta.name,
           symbol: meta.symbol,
-          decimalPlaces: code === "TZS" ? 0 : 2,
+          decimalPlaces: ["TZS"].includes(code) ? 0 : 2,
           isActive: true
         });
       } catch {
@@ -224,6 +226,55 @@ export class FXService {
       }
     }
 
+    // ── Fallback: fetch rates for currencies ECB doesn't cover (e.g. TZS, QAR) ──
+    const coveredByEcb = new Set(entries.map((e) => e.currency));
+    const missing = [...ALLOWED_CURRENCIES].filter((c) => c !== "EUR" && !coveredByEcb.has(c));
+
+    if (missing.length > 0 && eurUsd) {
+      try {
+        // Use open.er-api.com (free, no key required) as fallback
+        const fallbackUrl = `https://open.er-api.com/v6/latest/USD`;
+        const fbRes = await fetch(fallbackUrl, {
+          signal: AbortSignal.timeout(10_000)
+        });
+        if (fbRes.ok) {
+          const fbData = (await fbRes.json()) as { rates?: Record<string, number> };
+          const fbRates = fbData.rates ?? {};
+
+          for (const ccy of missing) {
+            const rate = fbRates[ccy];
+            if (!rate) continue;
+            try {
+              // USD → X
+              await repo.upsertRate({
+                fromCurrency: "USD",
+                toCurrency: ccy,
+                rateType: "SPOT",
+                rate: new Prisma.Decimal(rate).toDecimalPlaces(8).toFixed(8),
+                effectiveDate,
+                source: "ECB" // labelled ECB for consistency in the auto-import flow
+              });
+              // X → USD (inverse)
+              const inv = new Prisma.Decimal(1).div(new Prisma.Decimal(rate));
+              await repo.upsertRate({
+                fromCurrency: ccy,
+                toCurrency: "USD",
+                rateType: "SPOT",
+                rate: inv.toDecimalPlaces(8).toFixed(8),
+                effectiveDate,
+                source: "ECB"
+              });
+              imported++;
+            } catch {
+              // Skip individual failures
+            }
+          }
+        }
+      } catch {
+        // Fallback API unavailable — skip silently
+      }
+    }
+
     return { imported, date: rateDate };
   }
 
@@ -247,7 +298,7 @@ export class FXService {
       throw new FXServiceError("FX_PERIOD_NOT_OPEN", "Period must be OPEN for revaluation.", 422);
     }
 
-    // Idempotency: if revaluation already ran for this period+date, return early
+    // Quick idempotency check (non-authoritative, saves work if already done)
     const existing = await repository.findExistingRevaluationJournal(
       request.entityId,
       request.periodId,
@@ -282,142 +333,163 @@ export class FXService {
       );
     }
 
-    const journalLines: Array<{
-      accountId: string;
-      debit: Prisma.Decimal;
-      credit: Prisma.Decimal;
-      lineNumber: number;
-      description: string;
-    }> = [];
-    let lineNumber = 1;
-    let totalGainLoss = new Prisma.Decimal(0);
-    let apItemsRevalued = 0;
-    let arItemsRevalued = 0;
-
-    // ── Revalue AP invoices ────────────────────────────────────────────────────
-    const apInvoices = await repository.getOpenAPInvoices(request.entityId);
-    for (const invoice of apInvoices) {
-      if (invoice.currency === functionalCurrency) continue;
-
-      const rateRecord = await repository.getLatestRate(
-        invoice.currency,
-        functionalCurrency,
-        "CLOSING",
-        request.closingRateDate
-      );
-      if (!rateRecord) continue;
-
-      const closingRate = new Prisma.Decimal(rateRecord.rate);
-      const bookedFunctional = new Prisma.Decimal(invoice.functionalAmount);
-      const newFunctional = new Prisma.Decimal(invoice.netAmount).mul(closingRate);
-      const gainLoss = bookedFunctional.sub(newFunctional); // positive = gain for payable
-
-      if (gainLoss.abs().lessThan(new Prisma.Decimal("0.0001"))) continue;
-
-      if (gainLoss.greaterThan(0)) {
-        // Gain on payable (payable decreased in functional terms) — credit FX Gain/Loss
-        journalLines.push({
-          accountId: fxGainLossAccount.id,
-          debit: new Prisma.Decimal(0),
-          credit: gainLoss.abs(),
-          lineNumber: lineNumber++,
-          description: `FX revaluation gain on AP ${invoice.id.slice(0, 8)}`
-        });
-      } else {
-        // Loss on payable
-        journalLines.push({
-          accountId: fxGainLossAccount.id,
-          debit: gainLoss.abs(),
-          credit: new Prisma.Decimal(0),
-          lineNumber: lineNumber++,
-          description: `FX revaluation loss on AP ${invoice.id.slice(0, 8)}`
-        });
-      }
-      totalGainLoss = totalGainLoss.add(gainLoss);
-      apItemsRevalued++;
-    }
-
-    // ── Revalue AR invoices ────────────────────────────────────────────────────
-    const arInvoices = await repository.getOpenARInvoices(request.entityId);
-    for (const invoice of arInvoices) {
-      if (invoice.currency === functionalCurrency) continue;
-
-      const rateRecord = await repository.getLatestRate(
-        invoice.currency,
-        functionalCurrency,
-        "CLOSING",
-        request.closingRateDate
-      );
-      if (!rateRecord) continue;
-
-      const closingRate = new Prisma.Decimal(rateRecord.rate);
-      const outstanding = new Prisma.Decimal(invoice.amount).sub(
-        new Prisma.Decimal(invoice.amountPaid)
-      );
-      const bookedFunctional = new Prisma.Decimal(invoice.functionalAmount);
-      const newFunctional = outstanding.mul(closingRate);
-      const gainLoss = newFunctional.sub(bookedFunctional); // positive = gain for receivable
-
-      if (gainLoss.abs().lessThan(new Prisma.Decimal("0.0001"))) continue;
-
-      if (gainLoss.greaterThan(0)) {
-        journalLines.push({
-          accountId: fxGainLossAccount.id,
-          debit: new Prisma.Decimal(0),
-          credit: gainLoss.abs(),
-          lineNumber: lineNumber++,
-          description: `FX revaluation gain on AR ${invoice.id.slice(0, 8)}`
-        });
-      } else {
-        journalLines.push({
-          accountId: fxGainLossAccount.id,
-          debit: gainLoss.abs(),
-          credit: new Prisma.Decimal(0),
-          lineNumber: lineNumber++,
-          description: `FX revaluation loss on AR ${invoice.id.slice(0, 8)}`
-        });
-      }
-      totalGainLoss = totalGainLoss.add(gainLoss);
-      arItemsRevalued++;
-    }
-
-    if (journalLines.length === 0) {
-      return {
-        journalId: null,
-        apItemsRevalued,
-        arItemsRevalued,
-        totalGainLoss: "0.0000",
-        idempotent: false
-      };
-    }
-
-    // Balance the journal: net gain/loss entry to offset all individual lines
-    const totalDebit = journalLines.reduce((s, l) => s.add(l.debit), new Prisma.Decimal(0));
-    const totalCredit = journalLines.reduce((s, l) => s.add(l.credit), new Prisma.Decimal(0));
-    const diff = totalDebit.sub(totalCredit);
-    if (!diff.equals(0)) {
-      if (diff.greaterThan(0)) {
-        journalLines.push({
-          accountId: fxGainLossAccount.id,
-          debit: new Prisma.Decimal(0),
-          credit: diff,
-          lineNumber: lineNumber++,
-          description: "FX revaluation balancing entry"
-        });
-      } else {
-        journalLines.push({
-          accountId: fxGainLossAccount.id,
-          debit: diff.abs(),
-          credit: new Prisma.Decimal(0),
-          lineNumber: lineNumber++,
-          description: "FX revaluation balancing entry"
-        });
-      }
-    }
-
+    // ── All reads and writes in a single transaction (IAS 21 compliance) ──────
     return this.prisma.$transaction(async (tx) => {
       await setEntityDbContext(tx, request.entityId);
       const txRepo = this.repository(tx);
+
+      // Authoritative idempotency check inside transaction (prevents race)
+      const existingInTx = await txRepo.findExistingRevaluationJournal(
+        request.entityId,
+        request.periodId,
+        referenceDate
+      );
+      if (existingInTx) {
+        return {
+          journalId: existingInTx.id,
+          apItemsRevalued: 0,
+          arItemsRevalued: 0,
+          totalGainLoss: "0.0000",
+          idempotent: true
+        };
+      }
+
+      const journalLines: Array<{
+        accountId: string;
+        debit: Prisma.Decimal;
+        credit: Prisma.Decimal;
+        lineNumber: number;
+        description: string;
+      }> = [];
+      let lineNumber = 1;
+      let totalGainLoss = new Prisma.Decimal(0);
+      let apItemsRevalued = 0;
+      let arItemsRevalued = 0;
+      const apRevaluations: Array<{ invoiceId: string; newFunctional: Prisma.Decimal }> = [];
+      const arRevaluations: Array<{ invoiceId: string; newFunctional: Prisma.Decimal }> = [];
+
+      // ── Revalue AP invoices ──────────────────────────────────────────────────
+      const apInvoices = await txRepo.getOpenAPInvoices(request.entityId);
+      for (const invoice of apInvoices) {
+        if (invoice.currency === functionalCurrency) continue;
+
+        const rateRecord = await txRepo.getLatestRate(
+          invoice.currency,
+          functionalCurrency,
+          "CLOSING",
+          request.closingRateDate
+        );
+        if (!rateRecord) continue;
+
+        const closingRate = new Prisma.Decimal(rateRecord.rate);
+        const bookedFunctional = new Prisma.Decimal(invoice.functionalAmount);
+        const newFunctional = new Prisma.Decimal(invoice.netAmount).mul(closingRate);
+        const gainLoss = bookedFunctional.sub(newFunctional); // positive = gain for payable
+
+        if (gainLoss.abs().lessThan(new Prisma.Decimal("0.0001"))) continue;
+
+        if (gainLoss.greaterThan(0)) {
+          // Gain on payable (payable decreased in functional terms) — credit FX Gain/Loss
+          journalLines.push({
+            accountId: fxGainLossAccount.id,
+            debit: new Prisma.Decimal(0),
+            credit: gainLoss.abs(),
+            lineNumber: lineNumber++,
+            description: `FX revaluation gain on AP ${invoice.id.slice(0, 8)}`
+          });
+        } else {
+          // Loss on payable
+          journalLines.push({
+            accountId: fxGainLossAccount.id,
+            debit: gainLoss.abs(),
+            credit: new Prisma.Decimal(0),
+            lineNumber: lineNumber++,
+            description: `FX revaluation loss on AP ${invoice.id.slice(0, 8)}`
+          });
+        }
+        totalGainLoss = totalGainLoss.add(gainLoss);
+        apItemsRevalued++;
+        apRevaluations.push({ invoiceId: invoice.id, newFunctional });
+      }
+
+      // ── Revalue AR invoices ──────────────────────────────────────────────────
+      const arInvoices = await txRepo.getOpenARInvoices(request.entityId);
+      for (const invoice of arInvoices) {
+        if (invoice.currency === functionalCurrency) continue;
+
+        const rateRecord = await txRepo.getLatestRate(
+          invoice.currency,
+          functionalCurrency,
+          "CLOSING",
+          request.closingRateDate
+        );
+        if (!rateRecord) continue;
+
+        const closingRate = new Prisma.Decimal(rateRecord.rate);
+        const outstanding = new Prisma.Decimal(invoice.amount).sub(
+          new Prisma.Decimal(invoice.amountPaid)
+        );
+        const bookedFunctional = new Prisma.Decimal(invoice.functionalAmount);
+        const newFunctional = outstanding.mul(closingRate);
+        const gainLoss = newFunctional.sub(bookedFunctional); // positive = gain for receivable
+
+        if (gainLoss.abs().lessThan(new Prisma.Decimal("0.0001"))) continue;
+
+        if (gainLoss.greaterThan(0)) {
+          journalLines.push({
+            accountId: fxGainLossAccount.id,
+            debit: new Prisma.Decimal(0),
+            credit: gainLoss.abs(),
+            lineNumber: lineNumber++,
+            description: `FX revaluation gain on AR ${invoice.id.slice(0, 8)}`
+          });
+        } else {
+          journalLines.push({
+            accountId: fxGainLossAccount.id,
+            debit: gainLoss.abs(),
+            credit: new Prisma.Decimal(0),
+            lineNumber: lineNumber++,
+            description: `FX revaluation loss on AR ${invoice.id.slice(0, 8)}`
+          });
+        }
+        totalGainLoss = totalGainLoss.add(gainLoss);
+        arItemsRevalued++;
+        arRevaluations.push({ invoiceId: invoice.id, newFunctional });
+      }
+
+      if (journalLines.length === 0) {
+        return {
+          journalId: null,
+          apItemsRevalued,
+          arItemsRevalued,
+          totalGainLoss: "0.0000",
+          idempotent: false
+        };
+      }
+
+      // Balance the journal: net gain/loss entry to offset all individual lines
+      const totalDebit = journalLines.reduce((s, l) => s.add(l.debit), new Prisma.Decimal(0));
+      const totalCredit = journalLines.reduce((s, l) => s.add(l.credit), new Prisma.Decimal(0));
+      const diff = totalDebit.sub(totalCredit);
+      if (!diff.equals(0)) {
+        if (diff.greaterThan(0)) {
+          journalLines.push({
+            accountId: fxGainLossAccount.id,
+            debit: new Prisma.Decimal(0),
+            credit: diff,
+            lineNumber: lineNumber++,
+            description: "FX revaluation balancing entry"
+          });
+        } else {
+          journalLines.push({
+            accountId: fxGainLossAccount.id,
+            debit: diff.abs(),
+            credit: new Prisma.Decimal(0),
+            lineNumber: lineNumber++,
+            description: "FX revaluation balancing entry"
+          });
+        }
+      }
 
       const journal = await txRepo.createRevaluationJournal(
         request.entityId,
@@ -436,6 +508,14 @@ export class FXService {
           line.debitFunctional,
           line.creditFunctional
         );
+      }
+
+      // Update invoice functional amounts to the revalued amounts (IAS 21 compliance)
+      for (const reval of apRevaluations) {
+        await txRepo.markAPInvoiceRevalued(request.entityId, reval.invoiceId, reval.newFunctional);
+      }
+      for (const reval of arRevaluations) {
+        await txRepo.markARInvoiceRevalued(request.entityId, reval.invoiceId, reval.newFunctional);
       }
 
       return {
