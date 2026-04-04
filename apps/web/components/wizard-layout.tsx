@@ -27,7 +27,7 @@ export function WizardLayout({
   children
 }: WizardLayoutProps) {
   return (
-    <div className="flex min-h-screen">
+    <div className="flex h-full min-h-screen">
       {/* Sidebar stepper */}
       <aside className="w-64 flex-shrink-0 border-r bg-slate-900 text-slate-200">
         <div className="p-6">
