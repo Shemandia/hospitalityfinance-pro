@@ -14,6 +14,8 @@
  *   Jana-Internal-Movements-Guide.md, Jana-Inventory-Differences-Guide.md
  */
 
+import { Prisma } from "@prisma/client";
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type SAFFormat = "fixed_width" | "pipe_delimited";
@@ -43,9 +45,9 @@ export interface SAFTransactionLine {
   transactionDate: string; // YYYYMMDD
   journalNumber: string;
   lineNumber: string;
-  amount: number; // Always positive
+  amount: string; // Always positive
   dcMarker: "D" | "C"; // Debit or Credit
-  signedAmount: number; // Positive for debit, negative for credit
+  signedAmount: string; // Positive for debit, negative for credit
   allocationIndicator: string;
   journalType: string; // e.g. MFMCP, FIDEL, FIDMS, FIDST
   journalSource: string;
@@ -62,9 +64,9 @@ export interface SAFTransactionLine {
   assetSubCode: string;
   conversionCode: string; // Currency code (TZS, USD, EUR)
   // Extended fields
-  otherAmount: number;
+  otherAmount: string;
   otherAmountCurrency: string;
-  baseAmount: number;
+  baseAmount: string;
   // Analysis codes T0–T9
   // Fixed-width: positional fields at 242+
   // Pipe-delimited: fields [31]=property, [32]=dept, [33]=dept2, [34]=outlet
@@ -90,8 +92,8 @@ export interface SAFParseResult {
   version: string | null;
   controlRecord: SAFControlRecord | null;
   lines: SAFTransactionLine[];
-  totalDebits: number;
-  totalCredits: number;
+  totalDebits: string;
+  totalCredits: string;
   isBalanced: boolean;
   lineCount: number;
   dateRange: { earliest: string; latest: string } | null;
@@ -161,29 +163,34 @@ function field(line: string, start: number, length: number): string {
  * Parse Jana/fixed-width amount — MFMCP purchasing files.
  * - If the string contains '.', parse as float directly
  * - Otherwise parse as integer (whole number, no implied decimals)
+ * Returns string to avoid float drift.
  */
-function parseAmountJanaWholeInteger(raw: string): number {
+function parseAmountJanaWholeInteger(raw: string): string {
   const s = raw.trim();
-  if (!s || s === "0") return 0;
+  if (!s || s === "0") return "0";
   if (s.includes(".")) {
     const n = parseFloat(s);
-    return isNaN(n) ? 0 : n;
+    return isNaN(n) ? "0" : n.toString();
   }
   const n = parseInt(s, 10);
-  return isNaN(n) ? 0 : n;
+  return isNaN(n) ? "0" : n.toString();
 }
 
 /**
  * Parse Jana/fixed-width amount — MCTRF files (Internal Movements, Inventory Differences).
  * 18-digit integer with 3 implied decimal places → divide by 1000.
  * e.g. 000000000571467040 → 571,467.040
+ * Uses string manipulation to avoid float drift.
  */
-function parseAmountJanaDivide1000(raw: string): number {
+function parseAmountJanaDivide1000(raw: string): string {
   const s = raw.trim();
-  if (!s || s === "0") return 0;
-  const n = parseInt(s, 10);
-  if (isNaN(n)) return 0;
-  return Math.round(n) / 1000;
+  if (!s || s === "0") return "0";
+  // Use string manipulation to avoid float: extract digits, divide by 1000
+  const digits = s.replace(/\D/g, "") || "0";
+  const padded = digits.padStart(4, "0");
+  const whole = padded.slice(0, padded.length - 3) || "0";
+  const frac = padded.slice(padded.length - 3);
+  return `${whole}.${frac}`;
 }
 
 /**
@@ -198,7 +205,7 @@ function getJanaAmountRule(journalType: string, journalSource: string): JanaAmou
 }
 
 /** Parse a Jana fixed-width amount using the appropriate rule */
-function parseAmountJana(raw: string, rule: JanaAmountRule): number {
+function parseAmountJana(raw: string, rule: JanaAmountRule): string {
   return rule === "divide_by_1000"
     ? parseAmountJanaDivide1000(raw)
     : parseAmountJanaWholeInteger(raw);
@@ -208,15 +215,16 @@ function parseAmountJana(raw: string, rule: JanaAmountRule): number {
  * Parse Opera/pipe-delimited amount.
  * 18-digit integer with 3 implied decimal places → divide by 1000.
  * e.g. 000000000007204970 → 7204.970
+ * Uses string manipulation to avoid float drift.
  */
-function parseAmountOpera(raw: string): number {
+function parseAmountOpera(raw: string): string {
   const s = raw.trim();
-  if (!s || s === "0") return 0;
-  // Remove leading zeros, parse as integer, divide by 1000
-  const n = parseInt(s, 10);
-  if (isNaN(n)) return 0;
-  // Use Math.round to avoid floating-point drift
-  return Math.round(n) / 1000;
+  if (!s || s === "0") return "0";
+  const digits = s.replace(/\D/g, "") || "0";
+  const padded = digits.padStart(4, "0");
+  const whole = padded.slice(0, padded.length - 3) || "0";
+  const frac = padded.slice(padded.length - 3);
+  return `${whole}.${frac}`;
 }
 
 // ── Format detection ─────────────────────────────────────────────────────────
@@ -284,7 +292,7 @@ function parsePipeLine(
   }
 
   const amount = parseAmountOpera(amountRaw);
-  if (amount < 0) {
+  if (new Prisma.Decimal(amount).isNegative()) {
     errors.push({ line: lineNum, message: `Negative amount: ${amountRaw}`, raw });
     return null;
   }
@@ -300,7 +308,7 @@ function parsePipeLine(
   // Currency at field 22, base amount at field 24
   const conversionCode = f(22);
   const baseAmountRaw = f(24);
-  const baseAmount = baseAmountRaw ? parseAmountOpera(baseAmountRaw) : amount;
+  const baseAmount: string = baseAmountRaw ? parseAmountOpera(baseAmountRaw) : amount;
 
   // Analysis codes: fields 31-34 for Opera (property, dept, dept2, outlet)
   const t0 = f(31); // Property code (e.g. EZZ)
@@ -325,7 +333,7 @@ function parsePipeLine(
     lineNumber,
     amount,
     dcMarker: dcMarker as "D" | "C",
-    signedAmount: dcMarker === "D" ? amount : -amount,
+    signedAmount: dcMarker === "D" ? amount : new Prisma.Decimal(amount).neg().toString(),
     allocationIndicator,
     journalType,
     journalSource,
@@ -341,7 +349,7 @@ function parsePipeLine(
     assetCode: f(20),
     assetSubCode: f(21),
     conversionCode,
-    otherAmount: 0,
+    otherAmount: "0",
     otherAmountCurrency: f(23),
     baseAmount,
     t0,
@@ -402,7 +410,7 @@ function parseFixedWidthLine(
   const amountRule = getJanaAmountRule(journalType, journalSource);
 
   const amount = parseAmountJana(amountRaw, amountRule);
-  if (amount < 0) {
+  if (new Prisma.Decimal(amount).isNegative()) {
     errors.push({ line: lineNum, message: `Negative amount: ${amountRaw}`, raw });
     return null;
   }
@@ -425,7 +433,7 @@ function parseFixedWidthLine(
     lineNumber: field(line, 41, 7),
     amount,
     dcMarker: dcMarker as "D" | "C",
-    signedAmount: dcMarker === "D" ? amount : -amount,
+    signedAmount: dcMarker === "D" ? amount : new Prisma.Decimal(amount).neg().toString(),
     allocationIndicator: field(line, 67, 1),
     journalType,
     journalSource,
@@ -534,12 +542,18 @@ export function parseSAFFile(content: string, filename?: string): SAFParseResult
   }
 
   // ── Summaries ──
-  const totalDebits = txLines.filter((l) => l.dcMarker === "D").reduce((s, l) => s + l.amount, 0);
-  const totalCredits = txLines.filter((l) => l.dcMarker === "C").reduce((s, l) => s + l.amount, 0);
+  const totalDebits = txLines
+    .filter((l) => l.dcMarker === "D")
+    .reduce((s, l) => s.add(new Prisma.Decimal(l.amount)), new Prisma.Decimal(0));
+  const totalCredits = txLines
+    .filter((l) => l.dcMarker === "C")
+    .reduce((s, l) => s.add(new Prisma.Decimal(l.amount)), new Prisma.Decimal(0));
 
-  // Balance check — round to 3 decimal places (Opera uses 3 implied decimals)
-  const isBalanced =
-    Math.abs(Math.round(totalDebits * 1000) - Math.round(totalCredits * 1000)) === 0;
+  // Balance check — tolerance of 0.001 (Opera uses 3 implied decimals)
+  const isBalanced = totalDebits
+    .sub(totalCredits)
+    .abs()
+    .lessThanOrEqualTo(new Prisma.Decimal("0.001"));
 
   // Date range
   const dates = txLines
@@ -598,8 +612,8 @@ export function parseSAFFile(content: string, filename?: string): SAFParseResult
     version,
     controlRecord,
     lines: txLines,
-    totalDebits: Math.round(totalDebits * 1000) / 1000,
-    totalCredits: Math.round(totalCredits * 1000) / 1000,
+    totalDebits: totalDebits.toFixed(4),
+    totalCredits: totalCredits.toFixed(4),
     isBalanced,
     lineCount: txLines.length,
     dateRange,
@@ -665,15 +679,15 @@ export function buildPreviewSummary(result: SAFParseResult) {
       if (!acc.has(l.accountCode))
         acc.set(l.accountCode, {
           code: l.accountCode,
-          total: 0,
+          total: new Prisma.Decimal(0),
           lines: 0,
           sampleDesc: l.description
         });
       const entry = acc.get(l.accountCode)!;
-      entry.total += l.amount;
+      entry.total = entry.total.add(new Prisma.Decimal(l.amount));
       entry.lines++;
       return acc;
-    }, new Map<string, { code: string; total: number; lines: number; sampleDesc: string }>());
+    }, new Map<string, { code: string; total: Prisma.Decimal; lines: number; sampleDesc: string }>());
 
   const creditAccounts = result.lines
     .filter((l) => l.dcMarker === "C")
@@ -681,15 +695,15 @@ export function buildPreviewSummary(result: SAFParseResult) {
       if (!acc.has(l.accountCode))
         acc.set(l.accountCode, {
           code: l.accountCode,
-          total: 0,
+          total: new Prisma.Decimal(0),
           lines: 0,
           sampleDesc: l.description
         });
       const entry = acc.get(l.accountCode)!;
-      entry.total += l.amount;
+      entry.total = entry.total.add(new Prisma.Decimal(l.amount));
       entry.lines++;
       return acc;
-    }, new Map<string, { code: string; total: number; lines: number; sampleDesc: string }>());
+    }, new Map<string, { code: string; total: Prisma.Decimal; lines: number; sampleDesc: string }>());
 
   return {
     format: result.format,
@@ -700,12 +714,18 @@ export function buildPreviewSummary(result: SAFParseResult) {
     totalDebits: result.totalDebits,
     totalCredits: result.totalCredits,
     isBalanced: result.isBalanced,
-    difference: Math.round((result.totalDebits - result.totalCredits) * 1000) / 1000,
+    difference: new Prisma.Decimal(result.totalDebits)
+      .sub(new Prisma.Decimal(result.totalCredits))
+      .toFixed(3),
     dateRange: result.dateRange,
     currency: result.currency,
     journalTypes: result.journalTypes,
-    debitAccounts: [...debitAccounts.values()].sort((a, b) => b.total - a.total),
-    creditAccounts: [...creditAccounts.values()].sort((a, b) => b.total - a.total),
+    debitAccounts: [...debitAccounts.values()]
+      .map((a) => ({ ...a, total: a.total.toNumber() }))
+      .sort((a, b) => b.total - a.total),
+    creditAccounts: [...creditAccounts.values()]
+      .map((a) => ({ ...a, total: a.total.toNumber() }))
+      .sort((a, b) => b.total - a.total),
     uniqueAccountCount: result.uniqueAccounts.length,
     errors: result.errors
   };

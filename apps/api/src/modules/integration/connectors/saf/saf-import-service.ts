@@ -327,8 +327,8 @@ export async function executeSAFImport(
 
       journalLines.push({
         accountId,
-        debit: new Prisma.Decimal(safLine.dcMarker === "D" ? safLine.amount : 0),
-        credit: new Prisma.Decimal(safLine.dcMarker === "C" ? safLine.amount : 0),
+        debit: new Prisma.Decimal(safLine.dcMarker === "D" ? safLine.amount : "0"),
+        credit: new Prisma.Decimal(safLine.dcMarker === "C" ? safLine.amount : "0"),
         description: safLine.description,
         lineNumber: lineNum++
       });
@@ -442,14 +442,17 @@ export async function executeSAFImport(
 
     if (vendorCredits.length > 0 && opts.autoPost) {
       // Group vendor credits by supplier code (usually one per group)
-      const vendorMap = new Map<string, { totalCredit: number; lines: typeof safLines }>();
+      const vendorMap = new Map<string, { totalCredit: Prisma.Decimal; lines: typeof safLines }>();
       for (const vc of vendorCredits) {
         const existing = vendorMap.get(vc.accountCode);
         if (existing) {
-          existing.totalCredit += vc.amount;
+          existing.totalCredit = existing.totalCredit.add(new Prisma.Decimal(vc.amount));
           existing.lines.push(vc);
         } else {
-          vendorMap.set(vc.accountCode, { totalCredit: vc.amount, lines: [vc] });
+          vendorMap.set(vc.accountCode, {
+            totalCredit: new Prisma.Decimal(vc.amount),
+            lines: [vc]
+          });
         }
       }
 
@@ -500,7 +503,7 @@ export async function executeSAFImport(
           });
         }
 
-        const netAmount = new Prisma.Decimal(vendorData.totalCredit);
+        const netAmount = vendorData.totalCredit;
         const functionalAmount = netAmount.mul(fxRate);
         const dueDate = new Date(journalDate);
         dueDate.setDate(dueDate.getDate() + (supplier.paymentTermsDays ?? 30));
