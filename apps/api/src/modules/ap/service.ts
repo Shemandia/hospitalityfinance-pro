@@ -266,6 +266,28 @@ ${transactions
         );
       }
     }
+
+    // Cross-field: grossAmount must equal netAmount + taxAmount
+    if (
+      "grossAmount" in input &&
+      input.grossAmount &&
+      "netAmount" in input &&
+      input.netAmount &&
+      "taxAmount" in input &&
+      input.taxAmount
+    ) {
+      const gross = new Prisma.Decimal(input.grossAmount);
+      const net = new Prisma.Decimal(input.netAmount);
+      const tax = new Prisma.Decimal(input.taxAmount);
+      const expectedGross = net.add(tax);
+      if (!expectedGross.toDecimalPlaces(4).equals(gross.toDecimalPlaces(4))) {
+        throw new APServiceError(
+          "AP_INVOICE_GROSS_MISMATCH",
+          `grossAmount (${gross.toFixed(4)}) must equal netAmount (${net.toFixed(4)}) + taxAmount (${tax.toFixed(4)}) = ${expectedGross.toFixed(4)}.`,
+          422
+        );
+      }
+    }
   }
 
   async createInvoice(entityId: string, actorUserId: string | null, input: APInvoiceCreateInput) {
@@ -334,6 +356,10 @@ ${transactions
     );
   }
 
+  /**
+   * Approve an AP invoice using a conditional update to prevent concurrent
+   * double-approval or approve-during-post races.
+   */
   async approveInvoice(entityId: string, invoiceId: string, approverSubject: string) {
     const invoice = await this.getInvoice(entityId, invoiceId);
     if (!["DRAFT", "PENDING_APPROVAL", "DISPUTED"].includes(invoice.status)) {
@@ -345,12 +371,25 @@ ${transactions
     }
 
     const approverId = await this.resolveJournalActorId(entityId, approverSubject);
-    await this.repository(this.prisma).setInvoiceStatus(
-      entityId,
-      invoiceId,
-      "APPROVED",
-      approverId
-    );
+
+    // Conditional update: only succeeds if status is still one of the approvable states.
+    // If another thread already changed the status, count will be 0.
+    const result = await this.prisma.aPInvoice.updateMany({
+      where: {
+        id: invoiceId,
+        entityId,
+        status: { in: ["DRAFT", "PENDING_APPROVAL", "DISPUTED"] }
+      },
+      data: { status: "APPROVED", approvedById: approverId }
+    });
+
+    if (result.count === 0) {
+      throw new APServiceError(
+        "AP_INVOICE_STATUS_CHANGED",
+        "Invoice status was changed by another user. Please refresh and try again.",
+        409
+      );
+    }
 
     return this.getInvoice(entityId, invoiceId);
   }
@@ -361,18 +400,27 @@ ${transactions
     return this.prisma.$transaction(async (transaction) => {
       await setEntityDbContext(transaction, entityId);
       const repository = this.repository(transaction);
-      const invoice = await repository.getInvoice(entityId, invoiceId);
-      if (!invoice) {
+
+      // Lock the invoice row to prevent concurrent post/approve/cancel
+      const [locked] = await transaction.$queryRaw<Array<{ id: string; status: string }>>`
+        SELECT id, status FROM ap_invoices
+        WHERE id = ${invoiceId}::uuid AND entity_id = ${entityId}::uuid
+        FOR UPDATE
+      `;
+      if (!locked) {
         throw new APServiceError("AP_INVOICE_NOT_FOUND", "Invoice not found.", 404);
       }
 
-      if (invoice.status !== "APPROVED") {
+      if (locked.status !== "APPROVED") {
         throw new APServiceError(
           "AP_INVOICE_NOT_APPROVED",
           "Only approved invoices can be posted.",
           409
         );
       }
+
+      // Now safe to read full invoice with relations (row is locked)
+      const invoice = await repository.getInvoice(entityId, invoiceId);
 
       if (invoice.period.status !== "OPEN") {
         throw new APServiceError(
@@ -602,6 +650,22 @@ ${transactions
     return paymentRun;
   }
 
+  async deletePaymentRun(entityId: string, paymentRunId: string) {
+    const paymentRun = await this.getPaymentRun(entityId, paymentRunId);
+    if (paymentRun.status !== "PROPOSED") {
+      throw new APServiceError(
+        "AP_PAYMENT_RUN_DELETE_INVALID_STATUS",
+        `Only PROPOSED payment runs can be deleted. Current status: ${paymentRun.status}.`,
+        409
+      );
+    }
+    // Delete related items and invoices first, then the run
+    await this.prisma.paymentRunInvoice.deleteMany({ where: { paymentRunId } });
+    await this.prisma.paymentRunItem.deleteMany({ where: { paymentRunId } });
+    await this.prisma.paymentRun.delete({ where: { id: paymentRunId } });
+    return { deleted: true };
+  }
+
   async approvePaymentRun(entityId: string, paymentRunId: string, approverSubject: string) {
     const approverId = await this.resolveJournalActorId(entityId, approverSubject);
     const paymentRun = await this.getPaymentRun(entityId, paymentRunId);
@@ -681,17 +745,26 @@ ${transactions
     return this.prisma.$transaction(async (transaction) => {
       await setEntityDbContext(transaction, entityId);
       const txRepository = this.repository(transaction);
-      const paymentRun = await txRepository.getPaymentRun(entityId, paymentRunId);
-      if (!paymentRun) {
+
+      // Lock the payment run row to prevent double-confirmation
+      const [lockedRun] = await transaction.$queryRaw<Array<{ id: string; status: string }>>`
+        SELECT id, status FROM payment_runs
+        WHERE id = ${paymentRunId}::uuid AND entity_id = ${entityId}::uuid
+        FOR UPDATE
+      `;
+      if (!lockedRun) {
         throw new APServiceError("AP_PAYMENT_RUN_NOT_FOUND", "Payment run not found.", 404);
       }
-      if (paymentRun.status !== "APPROVED") {
+      if (lockedRun.status !== "APPROVED") {
         throw new APServiceError(
           "AP_PAYMENT_RUN_CONFIRM_INVALID_STATUS",
-          `Payment run status ${paymentRun.status} cannot be confirmed.`,
+          `Payment run status ${lockedRun.status} cannot be confirmed.`,
           409
         );
       }
+
+      // Safe to read full payment run with relations now (row is locked)
+      const paymentRun = await txRepository.getPaymentRun(entityId, paymentRunId);
 
       const confirmed = await txRepository.updatePaymentRunStatus(
         entityId,
@@ -737,6 +810,13 @@ ${transactions
         );
       }
 
+      // Fetch entity's functional currency for FX rate lookups
+      const entity = await transaction.entity.findFirst({
+        where: { id: entityId },
+        select: { functionalCurrency: true }
+      });
+      const functionalCurrency = entity?.functionalCurrency ?? "USD";
+
       const paidInvoiceIds = new Set<string>();
       let sequence = 1;
 
@@ -759,6 +839,22 @@ ${transactions
         const reference = `${referencePrefix}-${paymentRun.id.slice(0, 8)}-${String(sequence).padStart(3, "0")}`;
         sequence += 1;
 
+        // Look up spot FX rate if payment currency differs from functional currency
+        let paymentFxRate = new Prisma.Decimal(1);
+        if (item.currency !== functionalCurrency) {
+          const spotRate = await transaction.fXRate.findFirst({
+            where: {
+              fromCurrency: item.currency,
+              toCurrency: functionalCurrency,
+              rateType: "SPOT"
+            },
+            orderBy: { effectiveDate: "desc" }
+          });
+          if (spotRate) {
+            paymentFxRate = spotRate.rate;
+          }
+        }
+
         // Use the supplier's own GL account (e.g. CBORA001) if it exists,
         // otherwise fall back to the generic AP control account (2000).
         // SAF imports credit vendor accounts directly, so payment must debit the same account.
@@ -777,7 +873,7 @@ ${transactions
               accountId: debitAccountId,
               debit: payableAmount,
               credit: new Prisma.Decimal(0),
-              fxRate: new Prisma.Decimal(1),
+              fxRate: paymentFxRate,
               lineNumber: 1,
               description: `Clear AP for ${item.supplier.name}`
             },
@@ -785,7 +881,7 @@ ${transactions
               accountId: bankAccount.id,
               debit: new Prisma.Decimal(0),
               credit: payableAmount,
-              fxRate: new Prisma.Decimal(1),
+              fxRate: paymentFxRate,
               lineNumber: 2,
               description: `Disburse cash for ${item.supplier.name}`
             }
