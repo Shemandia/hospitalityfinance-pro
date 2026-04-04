@@ -55,6 +55,7 @@ export async function registerTenantRouter(app: FastifyInstance): Promise<void> 
             plan: true,
             maxProperties: true,
             isActive: true,
+            provisioningStatus: true,
             provisionedAt: true,
             createdAt: true
           }

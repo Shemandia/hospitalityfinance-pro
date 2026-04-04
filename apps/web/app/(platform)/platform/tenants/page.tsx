@@ -17,20 +17,80 @@ type Tenant = {
 };
 
 export default function TenantListPage() {
+  const [platformKey, setPlatformKey] = useState<string | null>(null);
+  const [keyInput, setKeyInput] = useState("");
+  const [keyError, setKeyError] = useState("");
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    const stored = sessionStorage.getItem("hfp-platform-key");
+    if (stored) setPlatformKey(stored);
+    setChecking(false);
+  }, []);
+
+  const handleKeySubmit = async () => {
+    setKeyError("");
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/platform/tenants`, {
+        headers: { "X-Platform-Key": keyInput }
+      });
+      if (res.ok) {
+        sessionStorage.setItem("hfp-platform-key", keyInput);
+        setPlatformKey(keyInput);
+      } else {
+        setKeyError("Invalid platform key.");
+      }
+    } catch {
+      setKeyError("Cannot reach API server.");
+    }
+  };
+
+  if (checking) return null;
+
+  if (!platformKey) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center">
+        <div className="w-full max-w-sm space-y-4">
+          <h2 className="text-xl font-semibold text-slate-900">Platform Authentication</h2>
+          <p className="text-sm text-slate-500">
+            Enter your platform API key to access tenant management.
+          </p>
+          <input
+            type="password"
+            value={keyInput}
+            onChange={(e) => setKeyInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleKeySubmit()}
+            className="w-full rounded-md border px-3 py-2 text-sm"
+            placeholder="Platform API key"
+          />
+          {keyError && <p className="text-sm text-red-500">{keyError}</p>}
+          <button
+            onClick={handleKeySubmit}
+            disabled={!keyInput}
+            className="w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            Authenticate
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return <TenantList platformKey={platformKey} />;
+}
+
+function TenantList({ platformKey }: { platformKey: string }) {
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const platformKey = sessionStorage.getItem("hfp-platform-key");
-    if (!platformKey) return;
-
     fetch(`${API_BASE}/api/v1/platform/tenants`, {
       headers: { "X-Platform-Key": platformKey }
     })
       .then((r) => r.json())
       .then((json) => setTenants(json.data ?? []))
       .finally(() => setLoading(false));
-  }, []);
+  }, [platformKey]);
 
   const statusBadge = (status: string) => {
     const colors: Record<string, string> = {
@@ -43,7 +103,7 @@ export default function TenantListPage() {
       <span
         className={`rounded-full px-2 py-0.5 text-xs font-medium ${colors[status] ?? colors.PENDING}`}
       >
-        {status}
+        {status ?? "PENDING"}
       </span>
     );
   };
