@@ -1,6 +1,6 @@
 "use client";
 
-import { Check } from "lucide-react";
+import { Check, Home } from "lucide-react";
 import { cn } from "../lib/utils";
 
 export type WizardStepDef = {
@@ -16,6 +16,8 @@ type WizardLayoutProps = {
   completedSteps: number[];
   onStepClick?: (step: number) => void;
   children: React.ReactNode;
+  /** Optional footer card at the bottom of the sidebar (e.g. tenant info) */
+  sidebarFooter?: React.ReactNode;
 };
 
 export function WizardLayout({
@@ -24,16 +26,32 @@ export function WizardLayout({
   currentStep,
   completedSteps,
   onStepClick,
-  children
+  children,
+  sidebarFooter
 }: WizardLayoutProps) {
   return (
-    <div className="flex h-full min-h-screen">
-      {/* Sidebar stepper */}
-      <aside className="w-64 flex-shrink-0 border-r bg-slate-900 text-slate-200">
-        <div className="p-6">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">{title}</h2>
+    <div className="flex min-h-screen bg-[#f8fafc]">
+      {/* ── Sidebar ──────────────────────────────────────────────────────── */}
+      <aside className="w-[280px] flex-shrink-0 bg-white border-r border-slate-200 flex flex-col shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
+        {/* Brand */}
+        <div className="px-6 py-8 border-b border-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="w-[34px] h-[34px] bg-emerald-500 rounded-[10px] flex items-center justify-center text-white shadow-[0_4px_10px_rgba(16,185,129,0.2)]">
+              <Home className="h-[18px] w-[18px]" />
+            </div>
+            <div>
+              <h2 className="text-[16px] font-extrabold text-slate-900 leading-none">
+                Hospitality
+              </h2>
+              <span className="text-[10px] font-extrabold text-emerald-500 uppercase tracking-[0.1em]">
+                Finance Pro
+              </span>
+            </div>
+          </div>
         </div>
-        <nav className="space-y-1 px-3">
+
+        {/* Step navigation */}
+        <nav className="flex-1 px-3 py-6 space-y-1">
           {steps.map((step) => {
             const isCompleted = completedSteps.includes(step.id);
             const isCurrent = step.id === currentStep;
@@ -46,34 +64,49 @@ export function WizardLayout({
                 onClick={() => isClickable && onStepClick?.(step.id)}
                 disabled={!isClickable}
                 className={cn(
-                  "flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors",
-                  isCurrent && "bg-slate-800 text-white",
-                  !isCurrent && !isCompleted && "text-slate-500",
-                  isCompleted && !isCurrent && "text-slate-300",
-                  isClickable && "cursor-pointer hover:bg-slate-800",
+                  "flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left transition-all duration-200",
+                  isCurrent && "bg-emerald-50",
+                  !isCurrent && !isCompleted && "opacity-50",
+                  isClickable && "cursor-pointer hover:bg-slate-50",
                   !isClickable && "cursor-default"
                 )}
               >
+                {/* Step indicator circle */}
                 <span
                   className={cn(
-                    "flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-xs font-semibold",
-                    isCurrent && "bg-blue-600 text-white",
-                    isCompleted && !isCurrent && "bg-emerald-600 text-white",
-                    !isCurrent && !isCompleted && "border border-slate-600 text-slate-500"
+                    "flex h-[22px] w-[22px] flex-shrink-0 items-center justify-center rounded-full text-[11px] font-extrabold transition-all",
+                    isCompleted && "bg-emerald-100 text-emerald-500",
+                    isCurrent &&
+                      !isCompleted &&
+                      "bg-emerald-500 text-white shadow-[0_2px_8px_rgba(16,185,129,0.3)]",
+                    !isCurrent && !isCompleted && "border-2 border-slate-200 text-slate-400"
                   )}
                 >
-                  {isCompleted && !isCurrent ? <Check className="h-3.5 w-3.5" /> : step.id}
+                  {isCompleted ? <Check className="h-3 w-3" strokeWidth={3} /> : step.id}
                 </span>
-                <span className="truncate">{step.name}</span>
+                {/* Step label */}
+                <span
+                  className={cn(
+                    "text-[13px] truncate",
+                    isCurrent && "font-bold text-emerald-900",
+                    isCompleted && !isCurrent && "font-semibold text-slate-500",
+                    !isCurrent && !isCompleted && "font-medium text-slate-400"
+                  )}
+                >
+                  {step.name}
+                </span>
               </button>
             );
           })}
         </nav>
+
+        {/* Sidebar footer */}
+        {sidebarFooter && <div className="mx-4 mb-4">{sidebarFooter}</div>}
       </aside>
 
-      {/* Main content */}
-      <main className="flex-1 overflow-y-auto bg-white">
-        <div className="mx-auto max-w-2xl px-8 py-8">{children}</div>
+      {/* ── Main content ─────────────────────────────────────────────────── */}
+      <main className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-[800px] px-16 py-16">{children}</div>
       </main>
     </div>
   );
@@ -110,29 +143,38 @@ export function WizardStepContent({
 }: WizardStepContentProps) {
   return (
     <div>
-      <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
-        Step {stepNumber} of {totalSteps}
-      </p>
-      <h3 className="mt-1 text-xl font-semibold text-slate-900">{title}</h3>
-      <p className="mt-1 text-sm text-slate-500">{description}</p>
-      <div className="mt-6">{children}</div>
-      <div className="mt-8 flex items-center justify-between border-t pt-6">
+      {/* Header */}
+      <div className="mb-12">
+        <p className="text-xs font-extrabold uppercase tracking-wider text-slate-400 mb-2">
+          Step {stepNumber} of {totalSteps}
+        </p>
+        <h1 className="text-[32px] font-extrabold text-slate-900 tracking-[-0.02em] leading-tight">
+          {title}
+        </h1>
+        <p className="mt-2 text-base text-slate-500">{description}</p>
+      </div>
+
+      {/* Content */}
+      <div>{children}</div>
+
+      {/* Footer actions */}
+      <div className="mt-12 flex items-center justify-between border-t border-slate-100 pt-8">
         <div>
           {onBack && (
             <button
               onClick={onBack}
-              className="rounded-md px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+              className="rounded-xl px-5 py-2.5 text-sm font-bold text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-all"
             >
-              ← Back
+              Back
             </button>
           )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-3">
           {showSave && onSave && (
             <button
               onClick={onSave}
               disabled={isLoading}
-              className="rounded-md border px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+              className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50 transition-all disabled:opacity-50"
             >
               Save & Continue Later
             </button>
@@ -141,9 +183,9 @@ export function WizardStepContent({
             <button
               onClick={onNext}
               disabled={isNextDisabled || isLoading}
-              className="rounded-md bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              className="rounded-xl bg-slate-900 px-6 py-2.5 text-sm font-bold text-white shadow-[0_4px_12px_rgba(15,23,42,0.2)] hover:bg-slate-800 transition-all disabled:opacity-50"
             >
-              {isLoading ? "Processing…" : nextLabel}
+              {isLoading ? "Processing..." : nextLabel}
             </button>
           )}
         </div>

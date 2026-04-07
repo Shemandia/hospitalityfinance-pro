@@ -1,30 +1,56 @@
 @import "tailwindcss";
 
 @theme {
-  --color-brand-navy: #0f2d5e;
-  --color-brand-teal: #0e7c7b;
-  --color-brand-teal-dark: #0a5e5d;
-  --color-surface: #f4f7fb;
-  --color-border: #dbe3ef;
-  --font-sans: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  /* ── Brand palette ─────────────────────────────────────────────────────── */
+  --color-brand-navy: #0c1929;
+  --color-brand-navy-light: #132238;
+  --color-brand-teal: #22b8a0;
+  --color-brand-teal-dark: #1a9a85;
+  --color-brand-teal-light: #2dd4bf;
+  --color-brand-gold: #d4a853;
+  --color-brand-gold-light: #e8c678;
+  --color-surface: #f8fafc;
+  --color-surface-raised: #ffffff;
+  --color-border: #e2e8f0;
+  --color-border-subtle: #f1f5f9;
+  --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
 
-  /* shadcn-compatible CSS variables */
+  /* ── Sidebar palette (white theme) ──────────────────────────────────── */
+  --color-sidebar: #ffffff;
+  --color-sidebar-hover: #f1f5f9;
+  --color-sidebar-active: #059669;
+  --color-sidebar-border: #e2e8f0;
+  --color-sidebar-text: #334155;
+  --color-sidebar-text-muted: #94a3b8;
+  --color-sidebar-accent: #059669;
+
+  /* ── shadcn-compatible variables ───────────────────────────────────────── */
   --color-background: #ffffff;
   --color-foreground: #0f172a;
   --color-card: #ffffff;
   --color-card-foreground: #0f172a;
-  --color-primary: #0f2d5e;
+  --color-primary: #0f1b2d;
   --color-primary-foreground: #ffffff;
   --color-secondary: #f1f5f9;
-  --color-secondary-foreground: #0f172a;
+  --color-secondary-foreground: #1e293b;
   --color-muted: #f1f5f9;
   --color-muted-foreground: #64748b;
-  --color-accent: #0e7c7b;
+  --color-accent: #059669;
   --color-accent-foreground: #ffffff;
   --color-destructive: #ef4444;
   --color-destructive-foreground: #ffffff;
-  --color-ring: #0e7c7b;
-  --radius: 0.5rem;
+  --color-ring: #059669;
+  --radius: 0.625rem;
+
+  /* ── Enterprise shadow system ──────────────────────────────────────────── */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.06), 0 2px 4px -2px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.06), 0 4px 6px -4px rgba(0, 0, 0, 0.04);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+  --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.06), 0 2px 4px rgba(0, 0, 0, 0.03);
+  --shadow-sidebar: 4px 0 24px rgba(0, 0, 0, 0.12);
 }
 
 * {
@@ -39,9 +65,267 @@ body {
   font-family: var(--font-sans);
   background-color: var(--color-surface);
   color: var(--color-foreground);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
 
 a {
   color: inherit;
   text-decoration: none;
+}
+
+/* ── Smooth transitions everywhere ─────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+/* ── Scrollbar styling for sidebar ───────────────────────────────────────── */
+
+.sidebar-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 4px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.14);
+}
+
+/* ── Main content scrollbar ──────────────────────────────────────────────── */
+
+.content-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.content-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.content-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 3px;
+}
+
+.content-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.14);
+}
+
+/* ── Sidebar component styles ────────────────────────────────────────────── */
+
+.sidebar-bg {
+  background: #ffffff;
+}
+
+.sidebar-brand-icon {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  box-shadow: 0 4px 12px rgba(5, 150, 105, 0.25);
+}
+
+.sidebar-accent-text {
+  color: #059669;
+}
+
+.sidebar-divider {
+  background: linear-gradient(90deg, transparent, #e2e8f0, transparent);
+}
+
+.sidebar-divider-top {
+  border-top: 1px solid #e2e8f0;
+}
+
+/* ── Enterprise card hover ───────────────────────────────────────────────── */
+
+.enterprise-card {
+  transition:
+    box-shadow 0.2s ease,
+    transform 0.2s ease,
+    border-color 0.2s ease;
+}
+
+.enterprise-card:hover {
+  box-shadow: var(--shadow-card-hover);
+  border-color: rgba(5, 150, 105, 0.15);
+}
+
+/* ── KPI card gradient accents ───────────────────────────────────────────── */
+
+.kpi-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.kpi-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #059669, #047857);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.kpi-card:hover::before {
+  opacity: 1;
+}
+
+/* ── Section header line ─────────────────────────────────────────────────── */
+
+.section-line {
+  background: linear-gradient(90deg, var(--color-border), transparent);
+}
+
+/* ── Glassmorphism for login ─────────────────────────────────────────────── */
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.95);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+/* ── Loading shimmer ─────────────────────────────────────────────────────── */
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.shimmer {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.04), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
+/* ── Fade in animation ───────────────────────────────────────────────────── */
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* ── Subtle pulse for notification dot ───────────────────────────────────── */
+
+@keyframes gentle-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.animate-gentle-pulse {
+  animation: gentle-pulse 3s ease-in-out infinite;
+}
+
+/* ── Top bar backdrop blur ───────────────────────────────────────────────── */
+
+.topbar-blur {
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  backdrop-filter: blur(12px) saturate(180%);
+  background: rgba(255, 255, 255, 0.85);
+}
+
+/* ── Table enterprise styling ────────────────────────────────────────────── */
+
+.enterprise-table thead th {
+  background: #f8fafc;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-muted-foreground);
+}
+
+.enterprise-table tbody tr {
+  transition: background-color 0.15s ease;
+}
+
+.enterprise-table tbody tr:hover {
+  background-color: rgba(5, 150, 105, 0.03);
+}
+
+/* ── Login page floating orbs ────────────────────────────────────────────── */
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  33% {
+    transform: translate(30px, -50px) scale(1.05);
+  }
+  66% {
+    transform: translate(-20px, 20px) scale(0.95);
+  }
+}
+
+.login-orb {
+  animation: float 20s ease-in-out infinite;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.15;
+  position: absolute;
+  pointer-events: none;
+}
+
+/* ── Focus ring utility ──────────────────────────────────────────────────── */
+
+.focus-ring {
+  outline: none;
+}
+
+.focus-ring:focus-visible {
+  box-shadow:
+    0 0 0 2px var(--color-background),
+    0 0 0 4px var(--color-ring);
+}
+
+/* ── Login page backgrounds ──────────────────────────────────────────────── */
+
+.login-bg {
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(34, 184, 160, 0.08), transparent),
+    radial-gradient(ellipse at 50% 100%, rgba(15, 27, 45, 1), rgba(10, 18, 33, 1));
+}
+
+.login-orb-1 {
+  animation-delay: 0s;
+}
+
+.login-orb-2 {
+  animation-delay: -7s;
+}
+
+.login-orb-3 {
+  animation-delay: -14s;
+  opacity: 0.06;
 }

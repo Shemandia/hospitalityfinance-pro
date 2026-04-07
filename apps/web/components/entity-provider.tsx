@@ -10,8 +10,9 @@ import {
   type ReactNode
 } from "react";
 import { useSession } from "next-auth/react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getEntities, type EntitySummaryItem } from "../lib/gl-api";
+import { useTenantSlug } from "../hooks/use-tenant-slug";
 
 type EntityContextValue = {
   /** All entities the user has access to */
@@ -40,15 +41,19 @@ export function EntityProvider({ children }: { children: ReactNode }) {
   const { data: session } = useSession();
   const accessToken = session?.accessToken;
   const sessionEntityIds = session?.user?.entityIds ?? [];
+  const urlTenantSlug = useTenantSlug();
+  const tenantSlug = urlTenantSlug ?? session?.user?.tenantSlug;
 
   // Fetch all entities the user can access
   const { data: entities = [], isLoading } = useQuery({
-    queryKey: ["entities", accessToken],
+    queryKey: ["entities", accessToken, tenantSlug],
     queryFn: () => {
       if (!accessToken) throw new Error("No session");
-      // Use first granted entity or a placeholder for superadmin (empty entityIds)
-      const contextEntityId = sessionEntityIds[0] ?? "00000000-0000-0000-0000-000000000001";
-      return getEntities({ accessToken, entityId: contextEntityId }).then((res) => res.data);
+      // Superadmin (empty entityIds) omits X-Entity-ID — backend returns all entities
+      const contextEntityId = sessionEntityIds[0] ?? "";
+      return getEntities({ accessToken, entityId: contextEntityId, tenantSlug }).then(
+        (res) => res.data
+      );
     },
     enabled: !!accessToken,
     staleTime: 5 * 60 * 1000
@@ -92,11 +97,17 @@ export function EntityProvider({ children }: { children: ReactNode }) {
     }
   }, [entityId]);
 
-  const switchEntity = useCallback((id: string) => {
-    setSelectedId(id);
-    // Force refetch all queries when switching entity
-    window.location.reload();
-  }, []);
+  const queryClient = useQueryClient();
+
+  const switchEntity = useCallback(
+    (id: string) => {
+      setSelectedId(id);
+      localStorage.setItem(STORAGE_KEY, id);
+      // Invalidate all queries so they refetch with the new entity context
+      queryClient.invalidateQueries();
+    },
+    [queryClient]
+  );
 
   const value = useMemo<EntityContextValue>(
     () => ({

@@ -3,18 +3,18 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../../lib/utils";
 
 const badgeVariants = cva(
-  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  "inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
   {
     variants: {
       variant: {
-        default: "border-transparent bg-primary text-white hover:bg-primary/80",
-        secondary: "border-transparent bg-secondary text-foreground hover:bg-secondary/80",
-        destructive: "border-transparent bg-destructive text-white hover:bg-destructive/80",
-        outline: "text-foreground",
-        success: "border-transparent bg-emerald-100 text-emerald-800",
-        warning: "border-transparent bg-amber-100 text-amber-800",
-        info: "border-transparent bg-sky-100 text-sky-800",
-        teal: "border-transparent bg-accent text-white"
+        default: "border-transparent bg-primary text-white",
+        secondary: "border-transparent bg-secondary text-secondary-foreground",
+        destructive: "border-transparent bg-red-50 text-red-700 border-red-200/60",
+        outline: "text-foreground border-border/80",
+        success: "border-transparent bg-emerald-50 text-emerald-700 border-emerald-200/60",
+        warning: "border-transparent bg-amber-50 text-amber-700 border-amber-200/60",
+        info: "border-transparent bg-sky-50 text-sky-700 border-sky-200/60",
+        teal: "border-transparent bg-accent/10 text-accent font-semibold"
       }
     },
     defaultVariants: {

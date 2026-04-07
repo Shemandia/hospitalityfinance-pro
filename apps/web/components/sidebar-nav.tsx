@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import { useTenantSlugSafe } from "../hooks/use-tenant-router";
 import {
   Building2,
   LayoutDashboard,
@@ -60,7 +61,8 @@ const navGroups: NavGroup[] = [
       { href: "/gl/journals", label: "General Journal", icon: BookOpen },
       { href: "/gl/journals/new", label: "New Journal", icon: FileText },
       { href: "/gl/trial-balance", label: "Trial Balance", icon: Scale },
-      { href: "/settings/journal-types", label: "Journal Types", icon: Tags }
+      { href: "/settings/journal-types", label: "Journal Types", icon: Tags },
+      { href: "/settings/account-types", label: "Account Types", icon: SlidersHorizontal }
     ]
   },
   {
@@ -111,11 +113,21 @@ const navGroups: NavGroup[] = [
 
 export function SidebarNav() {
   const pathname = usePathname();
+  const tenantSlug = useTenantSlugSafe();
+  const prefix = tenantSlug ? `/${tenantSlug}` : "";
 
-  // Determine which groups should start expanded (those containing the active route)
+  // Prefix all nav hrefs with tenant slug
+  const prefixedNavGroups = navGroups.map((group) => ({
+    ...group,
+    items: group.items.map((item) => ({
+      ...item,
+      href: `${prefix}${item.href}`
+    }))
+  }));
+
   const initialOpen = () => {
     const set = new Set<string>();
-    for (const group of navGroups) {
+    for (const group of prefixedNavGroups) {
       for (const item of group.items) {
         if (pathname === item.href || pathname.startsWith(item.href + "/")) {
           set.add(group.label);
@@ -123,8 +135,7 @@ export function SidebarNav() {
         }
       }
     }
-    // Always keep Overview open
-    set.add("Overview");
+    set.add("Dashboards");
     return set;
   };
 
@@ -133,11 +144,8 @@ export function SidebarNav() {
   const toggle = (label: string) => {
     setOpenGroups((prev) => {
       const next = new Set(prev);
-      if (next.has(label)) {
-        next.delete(label);
-      } else {
-        next.add(label);
-      }
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
       return next;
     });
   };
@@ -145,34 +153,38 @@ export function SidebarNav() {
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + "/");
 
   return (
-    <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
-      {navGroups.map((group) => {
+    <nav className="flex-1 overflow-y-auto sidebar-scroll px-3 py-4 space-y-0.5">
+      {prefixedNavGroups.map((group) => {
         const isOpen = openGroups.has(group.label);
         const hasActiveItem = group.items.some((item) => isActive(item.href));
 
         return (
-          <div key={group.label}>
+          <div key={group.label} className="mb-1">
+            {/* Group header */}
             <button
               type="button"
               onClick={() => toggle(group.label)}
-              className="w-full flex items-center justify-between px-2 py-1.5 rounded-md text-[10px] font-semibold uppercase tracking-widest text-white/40 hover:text-white/60 hover:bg-white/5 transition-colors"
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-[11px] font-bold uppercase tracking-[0.15em] transition-all duration-200 ${
+                hasActiveItem && !isOpen
+                  ? "text-emerald-600"
+                  : "text-slate-400 hover:text-slate-600 hover:bg-slate-50"
+              }`}
             >
-              <span className="flex items-center gap-1.5">
+              <span className="flex items-center gap-2">
                 {group.label}
                 {!isOpen && hasActiveItem && (
-                  <span className="h-1.5 w-1.5 rounded-full bg-(--color-accent)" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                 )}
               </span>
               <ChevronDown
-                className={`h-3 w-3 transition-transform duration-200 ${
-                  isOpen ? "" : "-rotate-90"
-                }`}
+                className={`h-3 w-3 transition-transform duration-200 ${isOpen ? "" : "-rotate-90"}`}
               />
             </button>
 
+            {/* Group items */}
             <div
-              className={`overflow-hidden transition-all duration-200 ${
-                isOpen ? "max-h-96 opacity-100" : "max-h-0 opacity-0"
+              className={`overflow-hidden transition-all duration-250 ease-in-out ${
+                isOpen ? "max-h-150 opacity-100" : "max-h-0 opacity-0"
               }`}
             >
               <ul className="space-y-0.5 mt-0.5">
@@ -182,18 +194,18 @@ export function SidebarNav() {
                     <li key={href}>
                       <Link
                         href={href}
-                        className={`flex items-center gap-2.5 px-2 py-2 rounded-md text-sm transition-colors group ${
+                        className={`flex items-center gap-3 px-4 py-2.5 rounded-2xl text-sm transition-all duration-200 group ${
                           active
-                            ? "bg-white/15 text-white font-medium"
-                            : "text-white/80 hover:text-white hover:bg-white/10"
+                            ? "bg-emerald-600 text-white font-medium shadow-md shadow-emerald-100"
+                            : "text-slate-500 hover:bg-emerald-50 hover:text-emerald-700"
                         }`}
                       >
                         <Icon
-                          className={`h-4 w-4 ${
-                            active ? "opacity-100" : "opacity-70 group-hover:opacity-100"
+                          className={`h-4.5 w-4.5 shrink-0 transition-all duration-200 ${
+                            active ? "text-white" : "text-slate-400 group-hover:text-emerald-600"
                           }`}
                         />
-                        {label}
+                        <span className="truncate">{label}</span>
                       </Link>
                     </li>
                   );

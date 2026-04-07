@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4500";
 
 type Envelope<T> = {
   data: T;
@@ -9,6 +9,7 @@ type Envelope<T> = {
 export type ApiContext = {
   accessToken: string;
   entityId: string;
+  tenantSlug?: string;
 };
 
 // ── Core domain types ────────────────────────────────────────────────────────
@@ -92,7 +93,8 @@ async function request<T>(
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${context.accessToken}`,
-      "X-Entity-ID": context.entityId,
+      ...(context.entityId ? { "X-Entity-ID": context.entityId } : {}),
+      ...(context.tenantSlug ? { "X-Tenant-Slug": context.tenantSlug } : {}),
       ...(init?.headers ?? {})
     }
   });
@@ -168,6 +170,21 @@ export async function postGLJournal(context: ApiContext, journalId: string) {
 
 export async function getGLAccounts(context: ApiContext) {
   return request<GLAccount[]>(context, "/api/v1/gl/accounts");
+}
+
+export type GLAccountBalance = {
+  accountId: string;
+  code: string;
+  name: string;
+  type: string;
+  /** Decimal string, signed for the account's normal balance side */
+  balance: string;
+  debits: string;
+  credits: string;
+};
+
+export async function getGLAccountBalance(context: ApiContext, accountId: string) {
+  return request<GLAccountBalance>(context, `/api/v1/gl/accounts/${accountId}/balance`);
 }
 
 export type EntitySummaryItem = {
@@ -435,6 +452,12 @@ export async function getAPPaymentRuns(context: ApiContext, params: { limit?: nu
 
 export async function getAPPaymentRun(context: ApiContext, runId: string) {
   return request<Record<string, unknown>>(context, `/api/v1/ap/payment-runs/${runId}`);
+}
+
+export async function deleteAPPaymentRun(context: ApiContext, runId: string) {
+  return request<{ deleted: boolean }>(context, `/api/v1/ap/payment-runs/${runId}`, {
+    method: "DELETE"
+  });
 }
 
 export async function createAPPaymentRunProposal(
@@ -1039,14 +1062,27 @@ export function updateSupplier(context: ApiContext, id: string, payload: Record<
 
 // ── Account types ────────────────────────────────────────────────────────────
 
-export type AccountType = "ASSET" | "LIABILITY" | "EQUITY" | "REVENUE" | "EXPENSE";
+export type AccountType = string;
 export type NormalBalance = "DEBIT" | "CREDIT";
+export type AccountTypeCategory = "BALANCE_SHEET" | "INCOME" | "STATISTICAL";
+
+export type AccountTypeDefinition = {
+  id: string;
+  code: string;
+  name: string;
+  category: AccountTypeCategory;
+  normalBalance: NormalBalance;
+  isSystem: boolean;
+  sortOrder: number;
+  isActive: boolean;
+  entityId: string | null;
+};
 
 export type AccountNode = {
   id: string;
   code: string;
   name: string;
-  type: AccountType;
+  type: string;
   normalBalance: NormalBalance;
   usaliCategory: string | null;
   usaliDepartment: string | null;
@@ -1059,7 +1095,7 @@ export type AccountNode = {
 export type AccountFormPayload = {
   code: string;
   name: string;
-  type: AccountType;
+  type: string;
   normalBalance: NormalBalance;
   allowPosting: boolean;
   isControlAccount: boolean;
@@ -1068,6 +1104,51 @@ export type AccountFormPayload = {
   usaliCategory?: string;
   usaliDepartment?: string;
 };
+
+// ── Account Type Definition API ──────────────────────────────────────────────
+
+export async function getAccountTypeDefinitions(context: ApiContext) {
+  return request<AccountTypeDefinition[]>(context, "/api/v1/account-types");
+}
+
+export async function createAccountTypeDefinition(
+  context: ApiContext,
+  payload: {
+    code: string;
+    name: string;
+    category: AccountTypeCategory;
+    normalBalance: NormalBalance;
+    sortOrder?: number;
+  }
+) {
+  return request<AccountTypeDefinition>(context, "/api/v1/account-types", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateAccountTypeDefinition(
+  context: ApiContext,
+  id: string,
+  payload: Partial<{
+    name: string;
+    category: AccountTypeCategory;
+    normalBalance: NormalBalance;
+    sortOrder: number;
+    isActive: boolean;
+  }>
+) {
+  return request<AccountTypeDefinition>(context, `/api/v1/account-types/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function deleteAccountTypeDefinition(context: ApiContext, id: string) {
+  return request<{ deleted: boolean }>(context, `/api/v1/account-types/${id}`, {
+    method: "DELETE"
+  });
+}
 
 // ── Account Ledger ─────────────────────────────────────────────────────────
 
@@ -1832,6 +1913,17 @@ export async function getAdminRole(context: ApiContext, id: string) {
 export async function createAdminRole(context: ApiContext, payload: Record<string, unknown>) {
   return request<Record<string, unknown>>(context, "/api/v1/admin/roles", {
     method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateAdminRole(
+  context: ApiContext,
+  id: string,
+  payload: Record<string, unknown>
+) {
+  return request<Record<string, unknown>>(context, `/api/v1/admin/roles/${id}`, {
+    method: "PUT",
     body: JSON.stringify(payload)
   });
 }
