@@ -94,6 +94,10 @@ const navGroups: NavGroup[] = [
     items: [{ href: "/consolidation", label: "Consolidation", icon: Layers }]
   },
   {
+    label: "Transfer Desk",
+    items: [{ href: "/transfer-desk", label: "Transfer Desk", icon: Plug }]
+  },
+  {
     label: "Admin",
     items: [
       { href: "/settings/profile", label: "My Profile", icon: Users },
