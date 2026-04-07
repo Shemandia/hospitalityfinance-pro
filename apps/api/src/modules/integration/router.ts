@@ -1090,6 +1090,448 @@ export async function registerIntegrationRouter(app: FastifyInstance): Promise<v
         return reply.send({ data: components, errors: [] });
       });
 
+      // ── Transfer Desk: Profile CRUD (TD-API-009..016) ────────────────────────
+      //
+      // Reads (list + detail) are available to any authenticated user via the
+      // normal auth gate. Writes require ADMIN/SUPERADMIN (maps to
+      // transfer:designer per QW4).
+
+      const profileCreateSchema = z.object({
+        name: z.string().min(1).max(100),
+        description: z.string().max(500).optional(),
+        profileType: z.enum([
+          "IMPORT",
+          "EXPORT",
+          "PROCESS",
+          "INTERNAL_TRANSFER",
+          "EXTERNAL_TRANSFER"
+        ]),
+        sourceComponent: z.string().optional(),
+        targetComponent: z.string().optional(),
+        sourceFormatId: z.string().uuid().optional(),
+        targetFormatId: z.string().uuid().optional(),
+        transformationId: z.string().uuid().optional(),
+        filterId: z.string().uuid().optional(),
+        sourceParams: z.record(z.unknown()).optional(),
+        targetParams: z.record(z.unknown()).optional(),
+        savePayload: z.enum(["NONE", "INPUT", "OUTPUT", "BOTH"]).optional()
+      });
+      type ProfileCreateInput = z.infer<typeof profileCreateSchema>;
+
+      /**
+       * Profile-type-specific validation. Returns a list of error messages;
+       * empty array means valid.
+       *
+       * Per spec:
+       *   TD-BL-002 Import: target_component mandatory; source_format_id required if non-SSML
+       *   TD-BL-003 Export: source_component mandatory; target_format_id required if non-SSML
+       *   TD-BL-004 Process: target_component mandatory; no file params required
+       *   TD-BL-005 transformation_id always mandatory (a same-format default exists but
+       *             the reference must still be set)
+       */
+      function validateProfileShape(p: ProfileCreateInput): string[] {
+        const errors: string[] = [];
+        if (!p.transformationId) {
+          errors.push("transformationId is required (TD-BL-005)");
+        }
+        switch (p.profileType) {
+          case "IMPORT":
+            if (!p.targetComponent)
+              errors.push("Import profiles require targetComponent (TD-BL-002)");
+            break;
+          case "EXPORT":
+            if (!p.sourceComponent)
+              errors.push("Export profiles require sourceComponent (TD-BL-003)");
+            break;
+          case "PROCESS":
+            if (!p.targetComponent)
+              errors.push("Process profiles require targetComponent (TD-BL-004)");
+            break;
+          case "INTERNAL_TRANSFER":
+          case "EXTERNAL_TRANSFER":
+            if (!p.sourceComponent || !p.targetComponent) {
+              errors.push("Transfer profiles require both sourceComponent and targetComponent");
+            }
+            break;
+        }
+        return errors;
+      }
+
+      // TD-API-009 — GET /transfer-desk/profiles (list)
+      router.get("/transfer-desk/profiles", async (request, reply) => {
+        try {
+          const { profileType, isActive } = request.query as {
+            profileType?: string;
+            isActive?: string;
+          };
+          const data = await (prisma as unknown as PrismaClient).transferProfile.findMany({
+            where: {
+              ...(profileType ? { profileType: profileType as any } : {}),
+              ...(isActive !== undefined ? { isActive: isActive === "true" } : {})
+            },
+            orderBy: [{ profileType: "asc" }, { name: "asc" }],
+            include: {
+              sourceFormat: { select: { id: true, name: true, classification: true } },
+              targetFormat: { select: { id: true, name: true, classification: true } },
+              transformation: { select: { id: true, name: true } },
+              _count: { select: { executions: true, versions: true } }
+            }
+          });
+          return reply.send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      // TD-API-010 — GET /transfer-desk/profiles/:id (detail)
+      router.get<{ Params: { id: string } }>(
+        "/transfer-desk/profiles/:id",
+        async (request, reply) => {
+          try {
+            const data = await (prisma as unknown as PrismaClient).transferProfile.findUnique({
+              where: { id: request.params.id },
+              include: {
+                sourceFormat: true,
+                targetFormat: true,
+                transformation: { select: { id: true, name: true, scriptType: true } },
+                filter: { select: { id: true, name: true } },
+                versions: {
+                  select: {
+                    id: true,
+                    version: true,
+                    changedBy: true,
+                    changedAt: true,
+                    changeNote: true
+                  },
+                  orderBy: { version: "desc" },
+                  take: 10
+                }
+              }
+            });
+            if (!data) {
+              return reply.code(404).send({
+                data: null,
+                errors: [{ code: "NOT_FOUND", message: "Profile not found" }]
+              });
+            }
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      // TD-API-011 — POST /transfer-desk/profiles (create)
+      router.post(
+        "/transfer-desk/profiles",
+        { preHandler: [requireRole(["ADMIN", "SUPERADMIN"])] },
+        async (request, reply) => {
+          try {
+            const payload = profileCreateSchema.parse(request.body);
+            const validationErrors = validateProfileShape(payload);
+            const db = prisma as unknown as PrismaClient;
+            const created = await db.transferProfile.create({
+              data: {
+                name: payload.name,
+                description: payload.description,
+                profileType: payload.profileType as any,
+                sourceComponent: payload.sourceComponent,
+                targetComponent: payload.targetComponent,
+                sourceFormatId: payload.sourceFormatId,
+                targetFormatId: payload.targetFormatId,
+                transformationId: payload.transformationId,
+                filterId: payload.filterId,
+                sourceParams: payload.sourceParams as any,
+                targetParams: payload.targetParams as any,
+                savePayload: (payload.savePayload ?? "NONE") as any,
+                isValid: validationErrors.length === 0,
+                createdById: (request.user as { sub?: string } | undefined)?.sub
+              }
+            });
+            // Snapshot v1
+            await db.transferProfileVersion.create({
+              data: {
+                profileId: created.id,
+                version: 1,
+                snapshot: created as any,
+                changedBy: (request.user as { sub?: string } | undefined)?.sub,
+                changeNote: "Initial version"
+              }
+            });
+            return reply.code(201).send({ data: { ...created, validationErrors }, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      // TD-API-012 — PUT /transfer-desk/profiles/:id (update, creates a new version row)
+      router.put<{ Params: { id: string } }>(
+        "/transfer-desk/profiles/:id",
+        { preHandler: [requireRole(["ADMIN", "SUPERADMIN"])] },
+        async (request, reply) => {
+          try {
+            const payload = profileCreateSchema.partial().parse(request.body);
+            const db = prisma as unknown as PrismaClient;
+            const existing = await db.transferProfile.findUnique({
+              where: { id: request.params.id }
+            });
+            if (!existing) {
+              return reply.code(404).send({
+                data: null,
+                errors: [{ code: "NOT_FOUND", message: "Profile not found" }]
+              });
+            }
+            const merged = {
+              ...existing,
+              ...payload,
+              sourceParams: (payload.sourceParams ?? existing.sourceParams) as any,
+              targetParams: (payload.targetParams ?? existing.targetParams) as any
+            };
+            const validationErrors = validateProfileShape(merged as ProfileCreateInput);
+            const updated = await db.transferProfile.update({
+              where: { id: request.params.id },
+              data: {
+                name: payload.name,
+                description: payload.description,
+                profileType: payload.profileType as any,
+                sourceComponent: payload.sourceComponent,
+                targetComponent: payload.targetComponent,
+                sourceFormatId: payload.sourceFormatId,
+                targetFormatId: payload.targetFormatId,
+                transformationId: payload.transformationId,
+                filterId: payload.filterId,
+                sourceParams: payload.sourceParams as any,
+                targetParams: payload.targetParams as any,
+                savePayload: payload.savePayload as any,
+                isValid: validationErrors.length === 0,
+                version: { increment: 1 }
+              }
+            });
+            await db.transferProfileVersion.create({
+              data: {
+                profileId: updated.id,
+                version: updated.version,
+                snapshot: updated as any,
+                changedBy: (request.user as { sub?: string } | undefined)?.sub,
+                changeNote: "Updated"
+              }
+            });
+            return reply.send({ data: { ...updated, validationErrors }, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      // TD-API-013 — DELETE /transfer-desk/profiles/:id (soft delete via isActive=false)
+      router.delete<{ Params: { id: string } }>(
+        "/transfer-desk/profiles/:id",
+        { preHandler: [requireRole(["ADMIN", "SUPERADMIN"])] },
+        async (request, reply) => {
+          try {
+            const updated = await (prisma as unknown as PrismaClient).transferProfile.update({
+              where: { id: request.params.id },
+              data: { isActive: false }
+            });
+            return reply.send({ data: { id: updated.id, isActive: false }, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      // TD-API-014 — POST /transfer-desk/profiles/:id/clone
+      router.post<{ Params: { id: string }; Body: { newName: string } }>(
+        "/transfer-desk/profiles/:id/clone",
+        { preHandler: [requireRole(["ADMIN", "SUPERADMIN"])] },
+        async (request, reply) => {
+          try {
+            const { newName } = request.body ?? ({ newName: "" } as { newName: string });
+            if (!newName || newName.length < 1 || newName.length > 100) {
+              return reply.code(400).send({
+                data: null,
+                errors: [{ code: "VALIDATION_ERROR", message: "newName is required (1-100 chars)" }]
+              });
+            }
+            const db = prisma as unknown as PrismaClient;
+            const src = await db.transferProfile.findUnique({ where: { id: request.params.id } });
+            if (!src) {
+              return reply.code(404).send({
+                data: null,
+                errors: [{ code: "NOT_FOUND", message: "Profile not found" }]
+              });
+            }
+            const clone = await db.transferProfile.create({
+              data: {
+                name: newName,
+                description: src.description,
+                profileType: src.profileType,
+                sourceComponent: src.sourceComponent,
+                targetComponent: src.targetComponent,
+                sourceFormatId: src.sourceFormatId,
+                targetFormatId: src.targetFormatId,
+                transformationId: src.transformationId,
+                filterId: src.filterId,
+                sourceParams: src.sourceParams as any,
+                targetParams: src.targetParams as any,
+                savePayload: src.savePayload,
+                isValid: src.isValid,
+                version: 1,
+                isActive: true,
+                createdById: (request.user as { sub?: string } | undefined)?.sub
+              }
+            });
+            return reply.code(201).send({ data: clone, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      // TD-API-015 — GET /transfer-desk/profiles/:id/versions
+      router.get<{ Params: { id: string } }>(
+        "/transfer-desk/profiles/:id/versions",
+        async (request, reply) => {
+          try {
+            const data = await (prisma as unknown as PrismaClient).transferProfileVersion.findMany({
+              where: { profileId: request.params.id },
+              orderBy: { version: "desc" }
+            });
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      // TD-API-016 — POST /transfer-desk/profiles/:id/validate
+      router.post<{ Params: { id: string } }>(
+        "/transfer-desk/profiles/:id/validate",
+        async (request, reply) => {
+          try {
+            const profile = await (prisma as unknown as PrismaClient).transferProfile.findUnique({
+              where: { id: request.params.id }
+            });
+            if (!profile) {
+              return reply.code(404).send({
+                data: null,
+                errors: [{ code: "NOT_FOUND", message: "Profile not found" }]
+              });
+            }
+            const errors = validateProfileShape(profile as unknown as ProfileCreateInput);
+            // Persist the result on the profile
+            if (profile.isValid !== (errors.length === 0)) {
+              await (prisma as unknown as PrismaClient).transferProfile.update({
+                where: { id: profile.id },
+                data: { isValid: errors.length === 0 }
+              });
+            }
+            return reply.send({
+              data: { valid: errors.length === 0, errors, warnings: [] },
+              errors: []
+            });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      // ── Transfer Desk: Filter CRUD (TD-API-017..020) ─────────────────────────
+
+      const filterSchema = z.object({
+        name: z.string().min(1).max(100),
+        description: z.string().max(500).optional(),
+        sourceComponent: z.string().min(1),
+        filterClauses: z.record(z.unknown())
+      });
+
+      router.get("/transfer-desk/filters", async (_request, reply) => {
+        try {
+          const data = await (prisma as unknown as PrismaClient).transferFilter.findMany({
+            orderBy: [{ sourceComponent: "asc" }, { name: "asc" }],
+            include: { _count: { select: { profiles: true } } }
+          });
+          return reply.send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      router.post(
+        "/transfer-desk/filters",
+        { preHandler: [requireRole(["ADMIN", "SUPERADMIN"])] },
+        async (request, reply) => {
+          try {
+            const payload = filterSchema.parse(request.body);
+            const data = await (prisma as unknown as PrismaClient).transferFilter.create({
+              data: {
+                name: payload.name,
+                description: payload.description,
+                sourceComponent: payload.sourceComponent,
+                filterClauses: payload.filterClauses as any,
+                createdById: (request.user as { sub?: string } | undefined)?.sub
+              }
+            });
+            return reply.code(201).send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      router.put<{ Params: { id: string } }>(
+        "/transfer-desk/filters/:id",
+        { preHandler: [requireRole(["ADMIN", "SUPERADMIN"])] },
+        async (request, reply) => {
+          try {
+            const payload = filterSchema.partial().parse(request.body);
+            const data = await (prisma as unknown as PrismaClient).transferFilter.update({
+              where: { id: request.params.id },
+              data: {
+                name: payload.name,
+                description: payload.description,
+                sourceComponent: payload.sourceComponent,
+                filterClauses: payload.filterClauses as any
+              }
+            });
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      router.delete<{ Params: { id: string } }>(
+        "/transfer-desk/filters/:id",
+        { preHandler: [requireRole(["ADMIN", "SUPERADMIN"])] },
+        async (request, reply) => {
+          try {
+            // Reject if any active profile references this filter
+            const refs = await (prisma as unknown as PrismaClient).transferProfile.count({
+              where: { filterId: request.params.id }
+            });
+            if (refs > 0) {
+              return reply.code(409).send({
+                data: null,
+                errors: [
+                  {
+                    code: "FILTER_IN_USE",
+                    message: `Cannot delete: ${refs} profile(s) reference this filter`
+                  }
+                ]
+              });
+            }
+            await (prisma as unknown as PrismaClient).transferFilter.delete({
+              where: { id: request.params.id }
+            });
+            return reply.send({ data: { deleted: true }, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
       // ── Interface Definitions (Transfer Desk) ────────────────────────────────
 
       router.get("/interfaces", async (request, reply) => {
