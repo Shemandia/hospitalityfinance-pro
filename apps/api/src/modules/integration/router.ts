@@ -6,6 +6,12 @@ import { prisma } from "../../db/prisma.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
 import { requireRole } from "../../middleware/requireRole.js";
 import { requireWriteAccess } from "../../middleware/requireWriteAccess.js";
+import { resolveTenant } from "../../db/tenantRegistry.js";
+import {
+  enqueueTransferDeskExecution,
+  cancelTransferDeskExecution
+} from "../../jobs/transfer-desk-queue.js";
+import { ensureTransferDeskWorker } from "../../jobs/transfer-desk-worker.js";
 import {
   runOperaCloudImport,
   importOperaSUNFile
@@ -1431,6 +1437,272 @@ export async function registerIntegrationRouter(app: FastifyInstance): Promise<v
               data: { valid: errors.length === 0, errors, warnings: [] },
               errors: []
             });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      // ── Transfer Desk: Execution (TD-API-001..006) ───────────────────────────
+      //
+      // The execute endpoint does four things atomically:
+      //   1. Validates the profile exists, is active, and is valid
+      //   2. Creates a transfer_executions row with status=QUEUED
+      //   3. Ensures the per-tenant BullMQ worker is running (lazy-start)
+      //   4. Enqueues the job — the worker will flip the row to RUNNING then
+      //      COMPLETED/FAILED per Sprint 2's worker skeleton
+
+      const executeProfileSchema = z.object({
+        /** Runtime parameter overrides merged onto profile.sourceParams */
+        sourceParamOverrides: z.record(z.unknown()).optional(),
+        targetParamOverrides: z.record(z.unknown()).optional(),
+        /** Inline file content for Import profiles that accept uploaded payload */
+        inputContent: z.string().optional()
+      });
+
+      // TD-API-001 — POST /transfer-desk/profiles/:id/execute
+      router.post<{ Params: { id: string } }>(
+        "/transfer-desk/profiles/:id/execute",
+        {
+          preHandler: [requireRole(["CONTROLLER", "ADMIN", "SUPERADMIN"])],
+          config: { rateLimit: { max: 30, timeWindow: "1 minute" } }
+        },
+        async (request, reply) => {
+          try {
+            const payload = executeProfileSchema.parse(request.body ?? {});
+            const db = prisma as unknown as PrismaClient;
+
+            // 1. Load + validate profile
+            const profile = await db.transferProfile.findUnique({
+              where: { id: request.params.id }
+            });
+            if (!profile) {
+              return reply.code(404).send({
+                data: null,
+                errors: [{ code: "NOT_FOUND", message: "Profile not found" }]
+              });
+            }
+            if (!profile.isActive) {
+              return reply.code(409).send({
+                data: null,
+                errors: [{ code: "PROFILE_INACTIVE", message: "Profile is deactivated" }]
+              });
+            }
+            if (!profile.isValid) {
+              return reply.code(409).send({
+                data: null,
+                errors: [
+                  {
+                    code: "PROFILE_INVALID",
+                    message:
+                      "Profile failed validation (TD-BL-006). Run POST /profiles/:id/validate to see errors."
+                  }
+                ]
+              });
+            }
+
+            // 2. Create execution row (status=QUEUED)
+            const runtimeParams = {
+              sourceParamOverrides: payload.sourceParamOverrides ?? {},
+              targetParamOverrides: payload.targetParamOverrides ?? {},
+              hasInlineInput: Boolean(payload.inputContent)
+            };
+            const execution = await db.transferExecution.create({
+              data: {
+                profileId: profile.id,
+                status: "QUEUED",
+                triggeredBy: (request.user as { sub?: string } | undefined)?.sub,
+                runtimeParams: runtimeParams as any
+              }
+            });
+
+            // 3. Look up tenant DB URL for the worker
+            const tenantSlug = request.tenantSlug;
+            if (!tenantSlug) {
+              return reply.code(400).send({
+                data: null,
+                errors: [{ code: "TENANT_REQUIRED", message: "Tenant context missing" }]
+              });
+            }
+            const tenantRecord = await resolveTenant(tenantSlug);
+            if (!tenantRecord) {
+              return reply.code(500).send({
+                data: null,
+                errors: [
+                  { code: "TENANT_NOT_FOUND", message: "Tenant not resolvable from registry" }
+                ]
+              });
+            }
+
+            // 4. Ensure the worker is up and enqueue the job
+            ensureTransferDeskWorker(tenantSlug, tenantRecord.databaseUrl);
+            const jobId = await enqueueTransferDeskExecution({
+              tenantSlug,
+              executionId: execution.id,
+              profileId: profile.id
+            });
+
+            // Persist the job ID on the execution row for cancel lookup
+            await db.transferExecution.update({
+              where: { id: execution.id },
+              data: { jobId }
+            });
+
+            return reply.code(202).send({
+              data: {
+                executionId: execution.id,
+                jobId,
+                status: "QUEUED"
+              },
+              errors: []
+            });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      // TD-API-002 — GET /transfer-desk/executions (list)
+      router.get("/transfer-desk/executions", async (request, reply) => {
+        try {
+          const { profileId, status, limit, offset } = request.query as {
+            profileId?: string;
+            status?: string;
+            limit?: string;
+            offset?: string;
+          };
+          const take = Math.min(Number(limit) || 50, 200);
+          const skip = Math.min(Number(offset) || 0, 100000);
+          const data = await (prisma as unknown as PrismaClient).transferExecution.findMany({
+            where: {
+              ...(profileId ? { profileId } : {}),
+              ...(status ? { status: status as any } : {})
+            },
+            orderBy: { createdAt: "desc" },
+            take,
+            skip,
+            include: {
+              profile: { select: { id: true, name: true, profileType: true } },
+              automation: { select: { id: true, name: true } }
+            }
+          });
+          return reply.send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      // TD-API-003 — GET /transfer-desk/executions/:id (detail)
+      router.get<{ Params: { id: string } }>(
+        "/transfer-desk/executions/:id",
+        async (request, reply) => {
+          try {
+            const data = await (prisma as unknown as PrismaClient).transferExecution.findUnique({
+              where: { id: request.params.id },
+              include: {
+                profile: true,
+                automation: { select: { id: true, name: true } }
+              }
+            });
+            if (!data) {
+              return reply.code(404).send({
+                data: null,
+                errors: [{ code: "NOT_FOUND", message: "Execution not found" }]
+              });
+            }
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      // TD-API-004 — GET /transfer-desk/executions/:id/logs (record-level logs)
+      router.get<{ Params: { id: string } }>(
+        "/transfer-desk/executions/:id/logs",
+        async (request, reply) => {
+          try {
+            const { limit, offset, statusFilter } = request.query as {
+              limit?: string;
+              offset?: string;
+              statusFilter?: string;
+            };
+            const take = Math.min(Number(limit) || 100, 1000);
+            const skip = Math.min(Number(offset) || 0, 1000000);
+            const db = prisma as unknown as PrismaClient;
+            const [rows, total] = await Promise.all([
+              db.transferExecutionLog.findMany({
+                where: {
+                  executionId: request.params.id,
+                  ...(statusFilter ? { status: statusFilter as any } : {})
+                },
+                orderBy: { recordIndex: "asc" },
+                take,
+                skip
+              }),
+              db.transferExecutionLog.count({
+                where: {
+                  executionId: request.params.id,
+                  ...(statusFilter ? { status: statusFilter as any } : {})
+                }
+              })
+            ]);
+            // BigInt can't be serialized by default — coerce the autoinc id to string
+            const serialized = rows.map((r) => ({ ...r, id: r.id.toString() }));
+            return reply.send({ data: { rows: serialized, total, take, skip }, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      // TD-API-006 — POST /transfer-desk/executions/:id/cancel
+      router.post<{ Params: { id: string } }>(
+        "/transfer-desk/executions/:id/cancel",
+        { preHandler: [requireRole(["CONTROLLER", "ADMIN", "SUPERADMIN"])] },
+        async (request, reply) => {
+          try {
+            const db = prisma as unknown as PrismaClient;
+            const execution = await db.transferExecution.findUnique({
+              where: { id: request.params.id }
+            });
+            if (!execution) {
+              return reply.code(404).send({
+                data: null,
+                errors: [{ code: "NOT_FOUND", message: "Execution not found" }]
+              });
+            }
+            if (execution.status !== "QUEUED" && execution.status !== "RUNNING") {
+              return reply.code(409).send({
+                data: null,
+                errors: [
+                  {
+                    code: "NOT_CANCELLABLE",
+                    message: `Execution is ${execution.status}, cannot be cancelled`
+                  }
+                ]
+              });
+            }
+
+            // Best-effort: try to yank the BullMQ job
+            const tenantSlug = request.tenantSlug;
+            if (tenantSlug) {
+              try {
+                await cancelTransferDeskExecution(tenantSlug, execution.id);
+              } catch {
+                // Worker may have already progressed; we still flip the DB row below
+              }
+            }
+
+            const updated = await db.transferExecution.update({
+              where: { id: execution.id },
+              data: {
+                status: "CANCELLED",
+                finishedAt: new Date(),
+                errorMessage: "Cancelled by user"
+              }
+            });
+            return reply.send({ data: updated, errors: [] });
           } catch (error) {
             return mapError(reply, error);
           }
