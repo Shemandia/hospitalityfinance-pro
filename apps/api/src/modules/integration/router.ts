@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import rateLimit from "@fastify/rate-limit";
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "../../db/client.js";
 import { z, ZodError } from "zod";
 import { prisma } from "../../db/prisma.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
@@ -351,7 +351,7 @@ export async function registerIntegrationRouter(app: FastifyInstance): Promise<v
             where: { entityId, connectorType: "OPERA_CLOUD" },
             orderBy: { createdAt: "desc" },
             take: Math.min(parseInt(limit ?? "50", 10), 200),
-            skip: parseInt(offset ?? "0", 10)
+            skip: Math.min(parseInt(offset ?? "0", 10), 100000)
           });
           return reply.send({ data, errors: [] });
         } catch (error) {
@@ -618,6 +618,478 @@ export async function registerIntegrationRouter(app: FastifyInstance): Promise<v
         });
       });
 
+      // ── Transfer Desk: Component schemas (UI-API-003) ────────────────────────
+      //
+      // Lists the HFP components a Transfer Desk profile can read from or
+      // write to, with each component's field schema. Used by the profile
+      // creation wizard's source/target component dropdowns.
+      //
+      // Per spec exclusions, this list does NOT include Item Master, Purchase
+      // Order, Supplier master, or any inventory/sales order entities — those
+      // are owned by Sky Jana MMS. HFP only receives journals from those
+      // systems and writes them into its GL.
+      router.get("/transfer-desk/components", async (_request, reply) => {
+        const components = [
+          {
+            name: "GL_JOURNAL",
+            label: "General Ledger Journal",
+            description:
+              "GL journal headers and lines. The most common target for journal imports.",
+            fields: [
+              {
+                name: "reference",
+                dataType: "string",
+                required: true,
+                description: "Journal reference / number (auto-assigned if blank)"
+              },
+              {
+                name: "description",
+                dataType: "string",
+                required: true,
+                description: "Journal narrative / description"
+              },
+              {
+                name: "periodId",
+                dataType: "string",
+                required: true,
+                description: "Posting period UUID"
+              },
+              {
+                name: "journalType",
+                dataType: "string",
+                required: false,
+                description: "Journal type code (e.g., AP, AR, GJ)"
+              },
+              {
+                name: "source",
+                dataType: "string",
+                required: false,
+                description: "Journal source enum (IMPORT, MANUAL, etc.)"
+              },
+              {
+                name: "functionalCurrency",
+                dataType: "string",
+                required: true,
+                description: "ISO 4217 currency code"
+              },
+              {
+                name: "lineAccountCode",
+                dataType: "string",
+                required: true,
+                description: "GL account code (line)"
+              },
+              {
+                name: "lineDebit",
+                dataType: "decimal",
+                required: true,
+                description: "Line debit amount in line currency"
+              },
+              {
+                name: "lineCredit",
+                dataType: "decimal",
+                required: true,
+                description: "Line credit amount in line currency"
+              },
+              {
+                name: "lineCurrency",
+                dataType: "string",
+                required: true,
+                description: "Line currency (ISO 4217)"
+              },
+              {
+                name: "lineFxRate",
+                dataType: "decimal",
+                required: false,
+                description: "FX rate to functional currency"
+              },
+              {
+                name: "lineDescription",
+                dataType: "string",
+                required: false,
+                description: "Per-line narrative"
+              },
+              {
+                name: "lineDimension1",
+                dataType: "string",
+                required: false,
+                description: "Analysis dimension T1"
+              },
+              {
+                name: "lineDimension2",
+                dataType: "string",
+                required: false,
+                description: "Analysis dimension T2"
+              },
+              {
+                name: "lineDimension3",
+                dataType: "string",
+                required: false,
+                description: "Analysis dimension T3"
+              },
+              {
+                name: "lineDimension4",
+                dataType: "string",
+                required: false,
+                description: "Analysis dimension T4"
+              },
+              {
+                name: "lineDimension5",
+                dataType: "string",
+                required: false,
+                description: "Analysis dimension T5"
+              },
+              {
+                name: "lineDimension6",
+                dataType: "string",
+                required: false,
+                description: "Analysis dimension T6"
+              }
+            ]
+          },
+          {
+            name: "AP_INVOICE",
+            label: "Accounts Payable Invoice",
+            description:
+              "AP invoice headers received from Sky Jana MMS as journal imports. HFP owns the AP control account, payment, and aging.",
+            fields: [
+              {
+                name: "supplierCode",
+                dataType: "string",
+                required: true,
+                description: "Supplier code as known to HFP (must already exist in tenant)"
+              },
+              {
+                name: "invoiceNumber",
+                dataType: "string",
+                required: true,
+                description: "Supplier invoice number"
+              },
+              {
+                name: "invoiceDate",
+                dataType: "date",
+                required: true,
+                description: "Invoice issue date"
+              },
+              {
+                name: "dueDate",
+                dataType: "date",
+                required: true,
+                description: "Invoice due date"
+              },
+              {
+                name: "currency",
+                dataType: "string",
+                required: true,
+                description: "Invoice currency (ISO 4217)"
+              },
+              {
+                name: "grossAmount",
+                dataType: "decimal",
+                required: true,
+                description: "Gross amount including tax"
+              },
+              { name: "taxAmount", dataType: "decimal", required: true, description: "Tax amount" },
+              {
+                name: "netAmount",
+                dataType: "decimal",
+                required: true,
+                description: "Net amount excluding tax"
+              },
+              {
+                name: "fxRate",
+                dataType: "decimal",
+                required: false,
+                description: "FX rate to functional currency"
+              },
+              {
+                name: "periodId",
+                dataType: "string",
+                required: true,
+                description: "Posting period UUID"
+              },
+              {
+                name: "externalPoRef",
+                dataType: "string",
+                required: false,
+                description: "External PO reference (from Jana)"
+              }
+            ]
+          },
+          {
+            name: "AR_INVOICE",
+            label: "Accounts Receivable Invoice",
+            description:
+              "Customer invoices issued by HFP. Source for receipt allocation and aging.",
+            fields: [
+              {
+                name: "customerCode",
+                dataType: "string",
+                required: true,
+                description: "Customer code (must exist in tenant)"
+              },
+              {
+                name: "invoiceNumber",
+                dataType: "string",
+                required: true,
+                description: "AR invoice number"
+              },
+              {
+                name: "invoiceDate",
+                dataType: "date",
+                required: true,
+                description: "Invoice issue date"
+              },
+              {
+                name: "dueDate",
+                dataType: "date",
+                required: true,
+                description: "Invoice due date"
+              },
+              {
+                name: "currency",
+                dataType: "string",
+                required: true,
+                description: "Invoice currency (ISO 4217)"
+              },
+              { name: "amount", dataType: "decimal", required: true, description: "Total amount" },
+              {
+                name: "taxAmount",
+                dataType: "decimal",
+                required: false,
+                description: "Tax amount"
+              },
+              {
+                name: "fxRate",
+                dataType: "decimal",
+                required: false,
+                description: "FX rate to functional currency"
+              },
+              {
+                name: "periodId",
+                dataType: "string",
+                required: true,
+                description: "Posting period UUID"
+              }
+            ]
+          },
+          {
+            name: "AR_RECEIPT",
+            label: "Accounts Receivable Receipt",
+            description: "Customer payments received. Allocates against AR invoices.",
+            fields: [
+              {
+                name: "customerCode",
+                dataType: "string",
+                required: true,
+                description: "Customer code"
+              },
+              {
+                name: "receiptNumber",
+                dataType: "string",
+                required: true,
+                description: "Receipt reference"
+              },
+              {
+                name: "receiptDate",
+                dataType: "date",
+                required: true,
+                description: "Date of receipt"
+              },
+              {
+                name: "currency",
+                dataType: "string",
+                required: true,
+                description: "Receipt currency"
+              },
+              {
+                name: "amount",
+                dataType: "decimal",
+                required: true,
+                description: "Receipt amount"
+              },
+              {
+                name: "bankAccountCode",
+                dataType: "string",
+                required: true,
+                description: "Bank account that received the payment"
+              },
+              {
+                name: "paymentMethod",
+                dataType: "string",
+                required: false,
+                description: "Payment method (BANK_TRANSFER, CASH, CHEQUE, CARD)"
+              }
+            ]
+          },
+          {
+            name: "COA_ACCOUNT",
+            label: "Chart of Accounts (Account)",
+            description:
+              "GL account master records. Used by COA import profiles to create or update accounts in bulk.",
+            fields: [
+              {
+                name: "code",
+                dataType: "string",
+                required: true,
+                description: "Account code (unique per entity)"
+              },
+              { name: "name", dataType: "string", required: true, description: "Account name" },
+              {
+                name: "type",
+                dataType: "string",
+                required: true,
+                description:
+                  "Account type (ASSET, LIABILITY, EQUITY, REVENUE, EXPENSE, STATISTICAL)"
+              },
+              {
+                name: "normalBalance",
+                dataType: "string",
+                required: true,
+                description: "Normal balance side (DEBIT or CREDIT)"
+              },
+              {
+                name: "parentCode",
+                dataType: "string",
+                required: false,
+                description: "Parent account code (for hierarchy)"
+              },
+              {
+                name: "level",
+                dataType: "number",
+                required: false,
+                description: "Hierarchy level (1=root)"
+              },
+              {
+                name: "allowPosting",
+                dataType: "boolean",
+                required: false,
+                description: "Whether postings are allowed at this level"
+              },
+              {
+                name: "isControlAccount",
+                dataType: "boolean",
+                required: false,
+                description: "Whether this is a control account (e.g., AP control 2000)"
+              },
+              {
+                name: "usaliCategory",
+                dataType: "string",
+                required: false,
+                description: "USALI category (Rooms, F&B, A&G, etc.)"
+              },
+              {
+                name: "usaliDepartment",
+                dataType: "string",
+                required: false,
+                description: "USALI department"
+              }
+            ]
+          },
+          {
+            name: "BUDGET",
+            label: "Budget Lines",
+            description: "Budget amounts per account per period. Used by budget import profiles.",
+            fields: [
+              {
+                name: "budgetDefinitionCode",
+                dataType: "string",
+                required: true,
+                description: "Budget definition reference (e.g., 'FY2026-OP')"
+              },
+              {
+                name: "accountCode",
+                dataType: "string",
+                required: true,
+                description: "GL account code"
+              },
+              { name: "periodId", dataType: "string", required: true, description: "Period UUID" },
+              {
+                name: "amount",
+                dataType: "decimal",
+                required: true,
+                description: "Budget amount in functional currency"
+              },
+              {
+                name: "dimension1",
+                dataType: "string",
+                required: false,
+                description: "Analysis dimension T1 (optional)"
+              },
+              {
+                name: "dimension2",
+                dataType: "string",
+                required: false,
+                description: "Analysis dimension T2 (optional)"
+              }
+            ]
+          },
+          {
+            name: "BANK_STATEMENT",
+            label: "Bank Statement",
+            description:
+              "Bank statement transactions for reconciliation. Used by bank statement import profiles.",
+            fields: [
+              {
+                name: "bankAccountCode",
+                dataType: "string",
+                required: true,
+                description: "Bank account code as known to HFP"
+              },
+              {
+                name: "statementDate",
+                dataType: "date",
+                required: true,
+                description: "Statement closing date"
+              },
+              {
+                name: "openingBalance",
+                dataType: "decimal",
+                required: true,
+                description: "Statement opening balance"
+              },
+              {
+                name: "closingBalance",
+                dataType: "decimal",
+                required: true,
+                description: "Statement closing balance"
+              },
+              {
+                name: "currency",
+                dataType: "string",
+                required: true,
+                description: "Statement currency"
+              },
+              { name: "txDate", dataType: "date", required: true, description: "Transaction date" },
+              {
+                name: "txAmount",
+                dataType: "decimal",
+                required: true,
+                description: "Transaction amount (signed: positive=credit, negative=debit)"
+              },
+              {
+                name: "txReference",
+                dataType: "string",
+                required: false,
+                description: "Transaction reference"
+              },
+              {
+                name: "txDescription",
+                dataType: "string",
+                required: false,
+                description: "Transaction description / narrative"
+              },
+              {
+                name: "txCounterparty",
+                dataType: "string",
+                required: false,
+                description: "Counterparty name"
+              }
+            ]
+          }
+        ];
+        return reply.send({ data: components, errors: [] });
+      });
+
       // ── Interface Definitions (Transfer Desk) ────────────────────────────────
 
       router.get("/interfaces", async (request, reply) => {
@@ -648,9 +1120,9 @@ export async function registerIntegrationRouter(app: FastifyInstance): Promise<v
               description: payload.description,
               isActive: payload.isActive,
               fieldMappings:
-                payload.fieldMappings as unknown as import("@prisma/client").Prisma.InputJsonValue,
+                payload.fieldMappings as unknown as import("../../db/client.js").Prisma.InputJsonValue,
               parseOptions:
-                (payload.parseOptions as unknown as import("@prisma/client").Prisma.InputJsonValue) ??
+                (payload.parseOptions as unknown as import("../../db/client.js").Prisma.InputJsonValue) ??
                 undefined
             }
           });
@@ -698,10 +1170,10 @@ export async function registerIntegrationRouter(app: FastifyInstance): Promise<v
           if (payload.isActive !== undefined) updateData.isActive = payload.isActive;
           if (payload.fieldMappings)
             updateData.fieldMappings =
-              payload.fieldMappings as unknown as import("@prisma/client").Prisma.InputJsonValue;
+              payload.fieldMappings as unknown as import("../../db/client.js").Prisma.InputJsonValue;
           if (payload.parseOptions !== undefined)
             updateData.parseOptions =
-              payload.parseOptions as unknown as import("@prisma/client").Prisma.InputJsonValue;
+              payload.parseOptions as unknown as import("../../db/client.js").Prisma.InputJsonValue;
 
           const data = await (prisma as unknown as PrismaClient).interfaceDefinition.update({
             where: { id: request.params.id },
@@ -950,12 +1422,12 @@ export async function registerIntegrationRouter(app: FastifyInstance): Promise<v
           // Build journal lines
           const journalLines: Array<{
             accountId: string;
-            debit: import("@prisma/client").Prisma.Decimal;
-            credit: import("@prisma/client").Prisma.Decimal;
+            debit: import("../../db/client.js").Prisma.Decimal;
+            credit: import("../../db/client.js").Prisma.Decimal;
             currency: string;
-            fxRate: import("@prisma/client").Prisma.Decimal;
-            debitFunctional: import("@prisma/client").Prisma.Decimal;
-            creditFunctional: import("@prisma/client").Prisma.Decimal;
+            fxRate: import("../../db/client.js").Prisma.Decimal;
+            debitFunctional: import("../../db/client.js").Prisma.Decimal;
+            creditFunctional: import("../../db/client.js").Prisma.Decimal;
             description: string;
             lineNumber: number;
             dimension1?: string;
@@ -966,7 +1438,7 @@ export async function registerIntegrationRouter(app: FastifyInstance): Promise<v
             dimension6?: string;
           }> = [];
 
-          const { Prisma: PrismaTypes } = await import("@prisma/client");
+          const { Prisma: PrismaTypes } = await import("../../db/client.js");
           const unmappedCodes: string[] = [];
           let lineNum = 1;
 
