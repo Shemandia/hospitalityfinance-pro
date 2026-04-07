@@ -1227,3 +1227,498 @@ model BankTransaction {
   @@index([isReconciled])
   @@map("bank_transactions")
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Transfer Desk (Sprint 2 — see HFP_TransferDesk_TechnicalSpecification_v1_0.md)
+//
+// Tenant-wide tables: profiles, formats, transformations, lookups, automations,
+// folders, files, executions are SHARED across all entities in a tenant. They
+// are isolated by the tenant DB boundary; no row-level entity_id needed.
+//
+// Per-entity table: transfer_journal_ranges has business_unit (entity_id) per
+// spec TD-DB-006 — journal range control state is per BU × ledger.
+//
+// RLS: enabled on all TD tables for consistency with the rest of the schema.
+// Most policies are open (USING (true)) because the tenant DB itself is the
+// isolation boundary. The policy on transfer_journal_ranges enforces the
+// standard entity_id = app_current_entity_id() pattern.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum ProfileType {
+  IMPORT
+  EXPORT
+  PROCESS
+  INTERNAL_TRANSFER
+  EXTERNAL_TRANSFER
+}
+
+enum ExecutionStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum ExecutionLogStatus {
+  SUCCESS
+  FAILED
+  SKIPPED
+}
+
+enum FormatClassification {
+  DELIMITED
+  SINGLE_FIXED
+  MULTIPLE_FIXED
+  OTHER_FLAT
+  USER_XML
+  SIMPLE_XML
+}
+
+enum ScriptType {
+  TML
+  XSL
+}
+
+enum LookupValueType {
+  CONSTANT
+  COPY
+  MAP_TO
+  OMIT
+  REVERSE_SIGN
+}
+
+enum SavePayloadOption {
+  NONE
+  INPUT
+  OUTPUT
+  BOTH
+}
+
+// ── TD-DB-003: transfer_profiles ─────────────────────────────────────────────
+
+model TransferProfile {
+  id                  String      @id @default(uuid())
+  name                String      @unique
+  description         String?
+  profileType         ProfileType @map("profile_type")
+  /// External component (e.g. "OPERA_CLOUD"); free-text to allow custom systems
+  sourceComponent     String?     @map("source_component")
+  /// HFP target component (GL_JOURNAL, AP_INVOICE, AR_INVOICE, etc.)
+  targetComponent     String?     @map("target_component")
+  sourceFormatId      String?     @map("source_format_id")
+  targetFormatId      String?     @map("target_format_id")
+  transformationId    String?     @map("transformation_id")
+  filterId            String?     @map("filter_id")
+  /// Runtime parameters (JSONB) — e.g. ledger, posting_options, file_handling
+  sourceParams        Json?       @map("source_params")
+  targetParams        Json?       @map("target_params")
+  /// Whether this profile passes its own validation rules; false blocks execute
+  isValid             Boolean     @default(false) @map("is_valid")
+  /// Increments on every save; profile_versions captures the snapshot
+  version             Int         @default(1)
+  /// Soft delete flag
+  isActive            Boolean     @default(true) @map("is_active")
+  /// Save behavior: NONE / INPUT / OUTPUT / BOTH
+  savePayload         SavePayloadOption @default(NONE) @map("save_payload")
+  createdById         String?     @map("created_by")
+  createdAt           DateTime    @default(now()) @map("created_at")
+  updatedAt           DateTime    @updatedAt @map("updated_at")
+
+  sourceFormat        TransferFormat?         @relation("TransferProfileSourceFormat", fields: [sourceFormatId], references: [id])
+  targetFormat        TransferFormat?         @relation("TransferProfileTargetFormat", fields: [targetFormatId], references: [id])
+  transformation      TransferTransformation? @relation(fields: [transformationId], references: [id])
+  filter              TransferFilter?         @relation(fields: [filterId], references: [id])
+  versions            TransferProfileVersion[]
+  journalRanges       TransferJournalRange[]
+  executions          TransferExecution[]
+  automationSteps     TransferAutomationStep[]
+
+  @@index([profileType, isActive])
+  @@map("transfer_profiles")
+}
+
+// ── TD-DB-004: transfer_profile_versions ─────────────────────────────────────
+
+model TransferProfileVersion {
+  id          String   @id @default(uuid())
+  profileId   String   @map("profile_id")
+  version     Int
+  /// Full snapshot of the profile at this version (JSONB)
+  snapshot    Json
+  changedBy   String?  @map("changed_by")
+  changedAt   DateTime @default(now()) @map("changed_at")
+  changeNote  String?  @map("change_note")
+
+  profile     TransferProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, version])
+  @@index([profileId, changedAt])
+  @@map("transfer_profile_versions")
+}
+
+// ── TD-DB-005: transfer_filters ──────────────────────────────────────────────
+
+model TransferFilter {
+  id              String   @id @default(uuid())
+  name            String   @unique
+  description     String?
+  /// Component this filter applies to (e.g. "GL_JOURNAL")
+  sourceComponent String   @map("source_component")
+  /// AND/OR clause tree as JSONB. Shape: { op: 'AND'|'OR', clauses: [...] }
+  filterClauses   Json     @map("filter_clauses")
+  createdById     String?  @map("created_by")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  profiles        TransferProfile[]
+
+  @@map("transfer_filters")
+}
+
+// ── TD-DB-006: transfer_journal_ranges ───────────────────────────────────────
+//
+// Per-profile, per-business-unit, per-ledger journal number range state.
+// Used by export profiles to remember "I last exported up to journal #1234,
+// resume from #1235 next time". This is the ONLY TD table that's entity-scoped
+// (business_unit = entity_id) per spec TD-DB-006.
+
+model TransferJournalRange {
+  id                String   @id @default(uuid())
+  profileId         String   @map("profile_id")
+  /// Business unit / entity this range applies to
+  entityId          String   @map("entity_id")
+  /// Single-character ledger code (A-K per SunSystems convention)
+  ledger            String   @db.Char(1)
+  /// Inclusive start of range (BIGINT to support high journal numbers)
+  journalNumberFrom BigInt   @map("journal_number_from")
+  /// Inclusive end of range — last successfully exported journal
+  journalNumberTo   BigInt   @map("journal_number_to")
+  /// FK to the execution that last advanced this range
+  lastExecutionId   String?  @map("last_execution_id")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  profile           TransferProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, entityId, ledger])
+  @@index([entityId])
+  @@map("transfer_journal_ranges")
+}
+
+// ── TD-DB-007: transfer_automations ──────────────────────────────────────────
+
+model TransferAutomation {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  isEnabled   Boolean  @default(true) @map("is_enabled")
+  createdById String?  @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  steps       TransferAutomationStep[]
+  schedules   TransferAutomationSchedule[]
+  executions  TransferExecution[]
+
+  @@map("transfer_automations")
+}
+
+// ── TD-DB-008: transfer_automation_steps ─────────────────────────────────────
+
+model TransferAutomationStep {
+  id                    String   @id @default(uuid())
+  automationId          String   @map("automation_id")
+  profileId             String   @map("profile_id")
+  stepOrder             Int      @map("step_order")
+  failOnError           Boolean  @default(true) @map("fail_on_error")
+  /// Per-step parameter overrides; merged onto profile.sourceParams at run time
+  sourceParamOverrides  Json?    @map("source_param_overrides")
+  targetParamOverrides  Json?    @map("target_param_overrides")
+
+  automation            TransferAutomation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  profile               TransferProfile    @relation(fields: [profileId], references: [id])
+
+  @@unique([automationId, stepOrder])
+  @@index([profileId])
+  @@map("transfer_automation_steps")
+}
+
+// ── TD-DB-009: transfer_automation_schedules ─────────────────────────────────
+
+model TransferAutomationSchedule {
+  id              String   @id @default(uuid())
+  automationId    String   @map("automation_id")
+  /// Standard 5-field cron expression
+  cronExpression  String   @map("cron_expression")
+  /// IANA timezone (e.g. "Africa/Dar_es_Salaam"); next_run_at is stored in UTC
+  timezone        String
+  isActive        Boolean  @default(true) @map("is_active")
+  /// User the automation runs as (Keycloak sub); needed for tenant context
+  runAsUser       String?  @map("run_as_user")
+  nextRunAt       DateTime? @map("next_run_at")
+  /// BullMQ repeat job key — used to deregister the schedule
+  bullmqRepeatKey String?  @map("bullmq_repeat_key")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  automation      TransferAutomation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+
+  @@index([nextRunAt])
+  @@map("transfer_automation_schedules")
+}
+
+// ── TD-DB-010: transfer_formats (FSD) ────────────────────────────────────────
+
+model TransferFormat {
+  id              String               @id @default(uuid())
+  name            String               @unique
+  description     String?
+  classification  FormatClassification
+  /// Raw FSD XML — the source-of-truth definition
+  fsdXml          String               @map("fsd_xml") @db.Text
+  /// Optional GUI editor state (visual designer position, palette, etc.)
+  guiState        Json?                @map("gui_state")
+  /// True for pre-built system formats that cannot be deleted
+  isSystem        Boolean              @default(false) @map("is_system")
+  isValid         Boolean              @default(false) @map("is_valid")
+  validationErrors Json?               @map("validation_errors")
+  createdById     String?              @map("created_by")
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+
+  sourceProfiles  TransferProfile[]    @relation("TransferProfileSourceFormat")
+  targetProfiles  TransferProfile[]    @relation("TransferProfileTargetFormat")
+  sourceTransforms TransferTransformation[] @relation("TransferTransformationSourceFormat")
+  targetTransforms TransferTransformation[] @relation("TransferTransformationTargetFormat")
+
+  @@index([classification])
+  @@map("transfer_formats")
+}
+
+// ── TD-DB-011: transfer_transformations (TML) ────────────────────────────────
+
+model TransferTransformation {
+  id                String     @id @default(uuid())
+  name              String     @unique
+  description       String?
+  scriptType        ScriptType @default(TML) @map("script_type")
+  sourceFormatId    String?    @map("source_format_id")
+  targetFormatId    String?    @map("target_format_id")
+  sourceComponent   String?    @map("source_component")
+  targetComponent   String?    @map("target_component")
+  /// Raw TML XML — the source-of-truth definition
+  tmlXml            String?    @map("tml_xml") @db.Text
+  /// Parsed TML rules as JSONB (for the visual mapper)
+  rulesJson         Json?      @map("rules_json")
+  /// User-defined JS function library (CDATA-wrapped JS)
+  functionsJson     Json?      @map("functions_json")
+  isSystem          Boolean    @default(false) @map("is_system")
+  isValid           Boolean    @default(false) @map("is_valid")
+  validationErrors  Json?      @map("validation_errors")
+  createdById       String?    @map("created_by")
+  createdAt         DateTime   @default(now()) @map("created_at")
+  updatedAt         DateTime   @updatedAt @map("updated_at")
+
+  sourceFormat      TransferFormat?  @relation("TransferTransformationSourceFormat", fields: [sourceFormatId], references: [id])
+  targetFormat      TransferFormat?  @relation("TransferTransformationTargetFormat", fields: [targetFormatId], references: [id])
+  profiles          TransferProfile[]
+
+  @@map("transfer_transformations")
+}
+
+// ── TD-DB-012: transfer_lookup_tables ────────────────────────────────────────
+
+model TransferLookupTable {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  createdById String?  @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  columns     TransferLookupColumn[]
+  rows        TransferLookupRow[]
+
+  @@map("transfer_lookup_tables")
+}
+
+// ── TD-DB-013: transfer_lookup_columns ───────────────────────────────────────
+
+model TransferLookupColumn {
+  id          String   @id @default(uuid())
+  tableId     String   @map("table_id")
+  name        String
+  columnOrder Int      @map("column_order")
+
+  table       TransferLookupTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  values      TransferLookupValue[]
+
+  @@unique([tableId, name])
+  @@unique([tableId, columnOrder])
+  @@map("transfer_lookup_columns")
+}
+
+// ── TD-DB-014: transfer_lookup_rows ──────────────────────────────────────────
+//
+// Range-based row matching uses ALPHABETICAL collation, NOT numeric.
+// Always zero-pad numeric values when defining ranges (per spec TD-BL-021).
+
+model TransferLookupRow {
+  id              String   @id @default(uuid())
+  tableId         String   @map("table_id")
+  /// Business unit scope: NULL = global data (matches any BU)
+  businessUnit    String?  @map("business_unit")
+  /// Inclusive lower bound (alpha-collated)
+  rangeFrom       String   @map("range_from")
+  /// Inclusive upper bound (alpha-collated)
+  rangeTo         String   @map("range_to")
+  rowOrder        Int      @map("row_order")
+
+  table           TransferLookupTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  values          TransferLookupValue[]
+
+  @@index([tableId, businessUnit, rangeFrom, rangeTo])
+  @@index([tableId, rowOrder])
+  @@map("transfer_lookup_rows")
+}
+
+// ── TD-DB-015: transfer_lookup_values ────────────────────────────────────────
+
+model TransferLookupValue {
+  id          String          @id @default(uuid())
+  rowId       String          @map("row_id")
+  columnId    String          @map("column_id")
+  valueType   LookupValueType @map("value_type")
+  /// Parameter for the value type (the constant string, the source field path, etc.)
+  valueParam  String?         @map("value_param")
+  isDefault   Boolean         @default(false) @map("is_default")
+
+  row         TransferLookupRow    @relation(fields: [rowId], references: [id], onDelete: Cascade)
+  column      TransferLookupColumn @relation(fields: [columnId], references: [id], onDelete: Cascade)
+
+  @@unique([rowId, columnId])
+  @@map("transfer_lookup_values")
+}
+
+// ── TD-DB-016: transfer_folders ──────────────────────────────────────────────
+
+model TransferFolder {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  parentId    String?  @map("parent_id")
+  /// S3 key prefix where files in this folder are stored (must be unique)
+  s3Prefix    String   @unique @map("s3_prefix")
+  createdById String?  @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  parent      TransferFolder?  @relation("TransferFolderHierarchy", fields: [parentId], references: [id])
+  children    TransferFolder[] @relation("TransferFolderHierarchy")
+  access      TransferFolderAccess[]
+  files       TransferFile[]
+
+  @@unique([parentId, name])
+  @@map("transfer_folders")
+}
+
+// ── TD-DB-017: transfer_folder_access ────────────────────────────────────────
+
+model TransferFolderAccess {
+  id        String   @id @default(uuid())
+  folderId  String   @map("folder_id")
+  /// Role identifier (e.g. "transfer:user", "transfer:designer")
+  roleName  String   @map("role_name")
+  /// What this role can do in this folder
+  canRead   Boolean  @default(true) @map("can_read")
+  canWrite  Boolean  @default(false) @map("can_write")
+  canDelete Boolean  @default(false) @map("can_delete")
+
+  folder    TransferFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
+
+  @@unique([folderId, roleName])
+  @@map("transfer_folder_access")
+}
+
+// ── TD-DB-018: transfer_files ────────────────────────────────────────────────
+
+model TransferFile {
+  id           String   @id @default(uuid())
+  folderId     String   @map("folder_id")
+  filename     String
+  /// Full S3 key (folder.s3Prefix + filename + uuid for collision-free)
+  s3Key        String   @unique @map("s3_key")
+  fileSize     BigInt   @map("file_size")
+  contentType  String   @map("content_type")
+  encoding     String   @default("UTF-8")
+  /// JSONB blob for arbitrary metadata (origin profile, etc.)
+  metadata     Json?
+  uploadedById String?  @map("uploaded_by")
+  uploadedAt   DateTime @default(now()) @map("uploaded_at")
+
+  folder       TransferFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
+
+  @@index([folderId, uploadedAt])
+  @@map("transfer_files")
+}
+
+// ── TD-DB-001: transfer_executions ───────────────────────────────────────────
+//
+// One row per profile execution. Tracked through QUEUED → RUNNING →
+// COMPLETED/FAILED/CANCELLED. Per-record details live in transfer_execution_logs.
+
+model TransferExecution {
+  id              String          @id @default(uuid())
+  profileId       String          @map("profile_id")
+  /// Set when this execution is part of an automation pipeline
+  automationId    String?         @map("automation_id")
+  automationStepOrder Int?        @map("automation_step_order")
+  status          ExecutionStatus @default(QUEUED)
+  /// BullMQ job ID for cancellation and progress streaming
+  jobId           String?         @map("job_id")
+  /// Triggering user (Keycloak sub)
+  triggeredBy     String?         @map("triggered_by")
+  recordsTotal    Int             @default(0) @map("records_total")
+  recordsSucceeded Int            @default(0) @map("records_succeeded")
+  recordsFailed   Int             @default(0) @map("records_failed")
+  /// S3 key of the saved input payload (when save_payload includes INPUT)
+  inputPayloadKey  String?        @map("input_payload_key")
+  outputPayloadKey String?        @map("output_payload_key")
+  errorMessage    String?         @map("error_message") @db.Text
+  /// Snapshot of the runtime parameters used for this execution
+  runtimeParams   Json?           @map("runtime_params")
+  startedAt       DateTime?       @map("started_at")
+  finishedAt      DateTime?       @map("finished_at")
+  createdAt       DateTime        @default(now()) @map("created_at")
+
+  profile         TransferProfile     @relation(fields: [profileId], references: [id])
+  automation      TransferAutomation? @relation(fields: [automationId], references: [id])
+  logs            TransferExecutionLog[]
+
+  @@index([profileId, createdAt])
+  @@index([status])
+  @@index([automationId, automationStepOrder])
+  @@map("transfer_executions")
+}
+
+// ── TD-DB-002: transfer_execution_logs ───────────────────────────────────────
+//
+// One row per source record processed. BIGSERIAL primary key for sortable order.
+
+model TransferExecutionLog {
+  id              BigInt              @id @default(autoincrement())
+  executionId     String              @map("execution_id")
+  recordIndex     Int                 @map("record_index")
+  status          ExecutionLogStatus
+  /// Source record as JSONB (parsed from FSD)
+  sourceData      Json?               @map("source_data")
+  /// Transformed output as JSONB (after TML)
+  transformedData Json?               @map("transformed_data")
+  errorCode       String?             @map("error_code")
+  errorMessage    String?             @map("error_message") @db.Text
+
+  execution       TransferExecution   @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@index([executionId, recordIndex])
+  @@index([executionId, status])
+  @@map("transfer_execution_logs")
+}
