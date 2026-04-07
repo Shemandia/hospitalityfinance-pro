@@ -1,7 +1,8 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "../../db/client.js";
 import { z, ZodError } from "zod";
 import { prisma } from "../../db/prisma.js";
+import { setEntityDbContext } from "../../db/tenantContext.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
 import { requireRole } from "../../middleware/requireRole.js";
 import { requireWriteAccess } from "../../middleware/requireWriteAccess.js";
@@ -78,6 +79,17 @@ function mapError(reply: FastifyReply, error: unknown) {
   }
 
   const message = error instanceof Error ? error.message : "Unknown error";
+  const stack = error instanceof Error ? error.stack : "";
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fs = require("node:fs") as typeof import("node:fs");
+    fs.appendFileSync(
+      "C:\\tmp\\gl-errors.log",
+      `${new Date().toISOString()} ${message}\n${stack}\n---\n`
+    );
+  } catch {
+    /* ignore */
+  }
   return reply.code(500).send({
     data: null,
     errors: [{ code: "INTERNAL_SERVER_ERROR", message }]
@@ -118,6 +130,16 @@ export async function registerGLRouter(app: FastifyInstance): Promise<void> {
         try {
           const entityId = requireEntityId(request.entityId);
           const data = await glService.getAccount(entityId, request.params.id);
+          return reply.send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      router.get<{ Params: { id: string } }>("/accounts/:id/balance", async (request, reply) => {
+        try {
+          const entityId = requireEntityId(request.entityId);
+          const data = await glService.getAccountCurrentBalance(entityId, request.params.id);
           return reply.send({ data, errors: [] });
         } catch (error) {
           return mapError(reply, error);
@@ -218,6 +240,7 @@ export async function registerGLRouter(app: FastifyInstance): Promise<void> {
               errors: [{ code: "MISSING_FILE", message: "fileContent or fileBase64 is required" }]
             });
           }
+          // RLS context is set inside executeCOAImport via withEntityRLS
           const data = await executeCOAImport(
             prisma as unknown as PrismaClient,
             entityId,
