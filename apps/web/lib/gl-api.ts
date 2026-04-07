@@ -2452,3 +2452,225 @@ export type LicenseEntitlements = {
 export function getLicenseEntitlements(context: ApiContext) {
   return request<LicenseEntitlements>(context, "/api/v1/license/entitlements");
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Transfer Desk — Profile CRUD client (TD-API-009..016)
+// Matches the backend routes added in Sprint 3 commit 1.
+// ────────────────────────────────────────────────────────────────────────────
+
+export type TransferProfileType =
+  | "IMPORT"
+  | "EXPORT"
+  | "PROCESS"
+  | "INTERNAL_TRANSFER"
+  | "EXTERNAL_TRANSFER";
+
+export type TransferProfileSummary = {
+  id: string;
+  name: string;
+  description: string | null;
+  profileType: TransferProfileType;
+  sourceComponent: string | null;
+  targetComponent: string | null;
+  sourceFormatId: string | null;
+  targetFormatId: string | null;
+  transformationId: string | null;
+  filterId: string | null;
+  isValid: boolean;
+  isActive: boolean;
+  version: number;
+  savePayload: "NONE" | "INPUT" | "OUTPUT" | "BOTH";
+  createdById: string | null;
+  createdAt: string;
+  updatedAt: string;
+  sourceFormat?: { id: string; name: string; classification: string } | null;
+  targetFormat?: { id: string; name: string; classification: string } | null;
+  transformation?: { id: string; name: string } | null;
+  _count?: { executions: number; versions: number };
+};
+
+export type TransferProfileDetail = TransferProfileSummary & {
+  sourceParams: Record<string, unknown> | null;
+  targetParams: Record<string, unknown> | null;
+  versions?: Array<{
+    id: string;
+    version: number;
+    changedBy: string | null;
+    changedAt: string;
+    changeNote: string | null;
+  }>;
+};
+
+export type TransferProfileInput = {
+  name: string;
+  description?: string;
+  profileType: TransferProfileType;
+  sourceComponent?: string;
+  targetComponent?: string;
+  sourceFormatId?: string;
+  targetFormatId?: string;
+  transformationId?: string;
+  filterId?: string;
+  sourceParams?: Record<string, unknown>;
+  targetParams?: Record<string, unknown>;
+  savePayload?: "NONE" | "INPUT" | "OUTPUT" | "BOTH";
+};
+
+export function listTransferProfiles(
+  context: ApiContext,
+  filters: { profileType?: TransferProfileType; isActive?: boolean } = {}
+) {
+  const q = new URLSearchParams();
+  if (filters.profileType) q.set("profileType", filters.profileType);
+  if (filters.isActive !== undefined) q.set("isActive", String(filters.isActive));
+  const qs = q.toString();
+  return request<TransferProfileSummary[]>(
+    context,
+    `/api/v1/integration/transfer-desk/profiles${qs ? `?${qs}` : ""}`
+  );
+}
+
+export function getTransferProfile(context: ApiContext, profileId: string) {
+  return request<TransferProfileDetail>(
+    context,
+    `/api/v1/integration/transfer-desk/profiles/${profileId}`
+  );
+}
+
+export function createTransferProfile(context: ApiContext, payload: TransferProfileInput) {
+  return request<TransferProfileDetail>(context, `/api/v1/integration/transfer-desk/profiles`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateTransferProfile(
+  context: ApiContext,
+  profileId: string,
+  payload: Partial<TransferProfileInput>
+) {
+  return request<TransferProfileDetail>(
+    context,
+    `/api/v1/integration/transfer-desk/profiles/${profileId}`,
+    { method: "PUT", body: JSON.stringify(payload) }
+  );
+}
+
+export function deleteTransferProfile(context: ApiContext, profileId: string) {
+  return request<{ id: string; isActive: false }>(
+    context,
+    `/api/v1/integration/transfer-desk/profiles/${profileId}`,
+    { method: "DELETE" }
+  );
+}
+
+export function cloneTransferProfile(context: ApiContext, profileId: string, newName: string) {
+  return request<TransferProfileDetail>(
+    context,
+    `/api/v1/integration/transfer-desk/profiles/${profileId}/clone`,
+    { method: "POST", body: JSON.stringify({ newName }) }
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Transfer Desk — Execution client (TD-API-001..006)
+// ────────────────────────────────────────────────────────────────────────────
+
+export type TransferExecutionStatus = "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED";
+
+export type TransferExecutionSummary = {
+  id: string;
+  profileId: string;
+  automationId: string | null;
+  status: TransferExecutionStatus;
+  jobId: string | null;
+  triggeredBy: string | null;
+  recordsTotal: number;
+  recordsSucceeded: number;
+  recordsFailed: number;
+  errorMessage: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  createdAt: string;
+  profile?: { id: string; name: string; profileType: TransferProfileType };
+  automation?: { id: string; name: string } | null;
+};
+
+export type TransferExecutionLog = {
+  id: string;
+  executionId: string;
+  recordIndex: number;
+  status: "SUCCESS" | "FAILED" | "SKIPPED";
+  sourceData: unknown;
+  transformedData: unknown;
+  errorCode: string | null;
+  errorMessage: string | null;
+};
+
+export function executeTransferProfile(
+  context: ApiContext,
+  profileId: string,
+  payload: {
+    sourceParamOverrides?: Record<string, unknown>;
+    targetParamOverrides?: Record<string, unknown>;
+    inputContent?: string;
+  } = {}
+) {
+  return request<{ executionId: string; jobId: string; status: TransferExecutionStatus }>(
+    context,
+    `/api/v1/integration/transfer-desk/profiles/${profileId}/execute`,
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+}
+
+export function listTransferExecutions(
+  context: ApiContext,
+  filters: {
+    profileId?: string;
+    status?: TransferExecutionStatus;
+    limit?: number;
+    offset?: number;
+  } = {}
+) {
+  const q = new URLSearchParams();
+  if (filters.profileId) q.set("profileId", filters.profileId);
+  if (filters.status) q.set("status", filters.status);
+  if (filters.limit) q.set("limit", String(filters.limit));
+  if (filters.offset) q.set("offset", String(filters.offset));
+  const qs = q.toString();
+  return request<TransferExecutionSummary[]>(
+    context,
+    `/api/v1/integration/transfer-desk/executions${qs ? `?${qs}` : ""}`
+  );
+}
+
+export function getTransferExecution(context: ApiContext, executionId: string) {
+  return request<TransferExecutionSummary>(
+    context,
+    `/api/v1/integration/transfer-desk/executions/${executionId}`
+  );
+}
+
+export function getTransferExecutionLogs(
+  context: ApiContext,
+  executionId: string,
+  params: { limit?: number; offset?: number; statusFilter?: "SUCCESS" | "FAILED" | "SKIPPED" } = {}
+) {
+  const q = new URLSearchParams();
+  if (params.limit) q.set("limit", String(params.limit));
+  if (params.offset) q.set("offset", String(params.offset));
+  if (params.statusFilter) q.set("statusFilter", params.statusFilter);
+  const qs = q.toString();
+  return request<{ rows: TransferExecutionLog[]; total: number; take: number; skip: number }>(
+    context,
+    `/api/v1/integration/transfer-desk/executions/${executionId}/logs${qs ? `?${qs}` : ""}`
+  );
+}
+
+export function cancelTransferExecution(context: ApiContext, executionId: string) {
+  return request<TransferExecutionSummary>(
+    context,
+    `/api/v1/integration/transfer-desk/executions/${executionId}/cancel`,
+    { method: "POST", body: "{}" }
+  );
+}
