@@ -2272,3 +2272,183 @@ export function autoMatchStatement(context: ApiContext, statementId: string, min
     { method: "POST", body: JSON.stringify({ minScore: minScore ?? 70 }) }
   );
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Transfer Desk — Self-Service Designer API client stubs
+//
+// Per HFP_TransferDesk_SelfService_Designer_v1_0.md §13. The backend routes
+// for these are scaffolded incrementally; UI code can already import and call
+// them now (they will return 404 until the matching backend endpoint exists).
+// Keep the function signatures stable so the UI doesn't need to change when
+// the backend is wired up.
+// ────────────────────────────────────────────────────────────────────────────
+
+/** UI-API-001 — POST /transfer/formats/detect — auto-detect format from sample */
+export type FormatDetectionResult = {
+  classification:
+    | "delimited"
+    | "single_fixed"
+    | "multiple_fixed"
+    | "other_flat"
+    | "user_xml"
+    | "simple_xml";
+  delimiter: string | null;
+  recordSeparator: string | null;
+  encoding: string;
+  hasHeaders: boolean;
+  fields: Array<{
+    name: string;
+    startPos?: number;
+    length?: number;
+    sampleValues: string[];
+  }>;
+  previewRows: Array<Record<string, string>>;
+  suggestedFsdXml: string;
+  /** 0..100 */
+  confidence: number;
+};
+
+export function detectFormat(context: ApiContext, sampleContent: string, filename?: string) {
+  return request<FormatDetectionResult>(
+    context,
+    "/api/v1/integration/transfer-desk/formats/detect",
+    {
+      method: "POST",
+      body: JSON.stringify({ sampleContent, filename })
+    }
+  );
+}
+
+/** UI-API-003/004 — GET /transfer/components — list HFP component schemas */
+export type ComponentField = {
+  name: string;
+  dataType: "string" | "number" | "decimal" | "date" | "datetime" | "boolean" | "json";
+  required: boolean;
+  description: string;
+};
+export type ComponentSchema = {
+  name: string;
+  label: string;
+  description: string;
+  fields: ComponentField[];
+};
+
+export function getComponentSchemas(context: ApiContext) {
+  return request<ComponentSchema[]>(context, "/api/v1/integration/transfer-desk/components");
+}
+
+/** UI-API-005 — POST /transfer/transformations/{id}/auto-map — generate 1:1 mappings */
+export type AutoMapResult = {
+  mappings: Array<{
+    sourceField: string;
+    targetField: string;
+    confidence: number;
+  }>;
+  unmappedSourceFields: string[];
+  unmappedTargetFields: string[];
+};
+
+export function autoMap(context: ApiContext, transformationId: string) {
+  return request<AutoMapResult>(
+    context,
+    `/api/v1/integration/transfer-desk/transformations/${transformationId}/auto-map`,
+    { method: "POST", body: "{}" }
+  );
+}
+
+/** UI-API-006 — GET /transfer/functions/library — list pre-built JS transformation functions */
+export type TransformFunctionDef = {
+  name: string;
+  category: "Date" | "String" | "Number" | "Currency" | "Conditional" | "AccountMapping";
+  description: string;
+  parameters: Array<{ name: string; type: string; description: string }>;
+  returnType: string;
+  example: string;
+};
+
+export function getFunctionLibrary(context: ApiContext) {
+  return request<TransformFunctionDef[]>(
+    context,
+    "/api/v1/integration/transfer-desk/functions/library"
+  );
+}
+
+/** UI-API-007 — POST /transfer/functions/test — execute a JS function in the sandbox */
+export type FunctionTestResult = {
+  result: unknown;
+  error?: string;
+  executionTimeMs: number;
+};
+
+export function testFunction(
+  context: ApiContext,
+  payload: { functionName: string; functionBody?: string; parameters: Record<string, unknown> }
+) {
+  return request<FunctionTestResult>(context, "/api/v1/integration/transfer-desk/functions/test", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+/** UI-API-008 — GET /transfer/profiles/{id}/validate-full — deep profile validation */
+export type ProfileValidationResult = {
+  valid: boolean;
+  errors: Array<{ field: string; code: string; message: string }>;
+  warnings: Array<{ field: string; code: string; message: string }>;
+};
+
+export function validateProfile(context: ApiContext, profileId: string) {
+  return request<ProfileValidationResult>(
+    context,
+    `/api/v1/integration/transfer-desk/profiles/${profileId}/validate-full`
+  );
+}
+
+/** UI-API-009 — POST /transfer/profiles/{id}/dry-run — execute against sample without committing */
+export type DryRunResult = {
+  dryRunId: string;
+  status: "completed" | "failed";
+  preview: Array<Record<string, unknown>>;
+  errors: Array<{ row: number; field?: string; code: string; message: string }>;
+  recordsProcessed: number;
+  recordsFailed: number;
+};
+
+export function dryRun(
+  context: ApiContext,
+  profileId: string,
+  payload: { sampleContent?: string; parameters?: Record<string, unknown> }
+) {
+  return request<DryRunResult>(
+    context,
+    `/api/v1/integration/transfer-desk/profiles/${profileId}/dry-run`,
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+}
+
+/** UI-API-010 — GET /transfer/executions/stats — dashboard stats */
+export type ExecutionStats = {
+  executionsByDay: Array<{ date: string; succeeded: number; failed: number }>;
+  successRate: number; // 0..1
+  avgDurationMs: number;
+  topProfiles: Array<{ profileId: string; profileName: string; runCount: number }>;
+};
+
+export function getExecutionStats(context: ApiContext) {
+  return request<ExecutionStats>(context, "/api/v1/integration/transfer-desk/executions/stats");
+}
+
+/** UI-API-011 — GET /license/entitlements — tenant license entitlements */
+export type LicenseEntitlements = {
+  transferDeskEnabled: boolean;
+  visualMapperEnabled: boolean;
+  customFunctionsEnabled: boolean;
+  automationEnabled: boolean;
+  maxProfilesPerTenant: number | null;
+  maxConcurrentExecutions: number;
+  tier: "starter" | "pro" | "enterprise";
+};
+
+export function getLicenseEntitlements(context: ApiContext) {
+  return request<LicenseEntitlements>(context, "/api/v1/license/entitlements");
+}
