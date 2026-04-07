@@ -67,7 +67,7 @@ const NAV_SECTIONS: NavSection[] = [
     description: "Import, export, process and transfer definitions",
     icon: ListChecks,
     minRole: "user",
-    status: "stub"
+    status: "ready"
   },
   {
     href: "/transfer-desk/automations",
@@ -115,7 +115,7 @@ const NAV_SECTIONS: NavSection[] = [
     description: "Per-record logs of every profile run",
     icon: History,
     minRole: "user",
-    status: "stub"
+    status: "ready"
   },
   {
     href: "/transfer-desk/settings",
