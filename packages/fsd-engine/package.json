@@ -1,0 +1,24 @@
+{
+  "name": "@hfp/fsd-engine",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HFP Transfer Desk — Flat-file Schema Definition engine. Parses FSD definitions and performs bidirectional conversion between flat files and JSON record arrays.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5"
+  }
+}
