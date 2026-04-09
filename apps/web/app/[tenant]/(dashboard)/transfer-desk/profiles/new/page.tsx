@@ -15,8 +15,8 @@
 
 import { useState, useCallback } from "react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
-import { useTenantHref } from "../../../../../../hooks/use-tenant-router";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { useTenantHref, useTenantRouter } from "../../../../../../hooks/use-tenant-router";
 import { useUserRole } from "../../../../../../components/use-user-role";
 import { useApiContext } from "../../../../../../components/use-api-context";
 import { Card, CardContent } from "../../../../../../components/ui/card";
@@ -46,6 +46,7 @@ import {
   TRANSFER_PROFILE_TYPES,
   listTransferFormats,
   getTransferFormat,
+  createTransferProfile,
   type TransferProfileType,
   type TransferFormatSummary
 } from "../../../../../../lib/gl-api";
@@ -506,10 +507,90 @@ function Step4FsdViewer({
   );
 }
 
-function StepPlaceholder({ step }: { step: number }) {
+function Step5ReviewSubmit({
+  form,
+  isSubmitting,
+  submitError
+}: {
+  form: WizardFormState;
+  isSubmitting: boolean;
+  submitError: string | null;
+}) {
+  const typeLabel =
+    TRANSFER_PROFILE_TYPES.find((t) => t.value === form.profileType)?.label ?? form.profileType;
+  const sourceLabel =
+    TRANSFER_COMPONENTS.find((c) => c.value === form.sourceComponent)?.label ??
+    form.sourceComponent;
+  const targetLabel =
+    TRANSFER_COMPONENTS.find((c) => c.value === form.targetComponent)?.label ??
+    form.targetComponent;
+
   return (
-    <div className="flex items-center justify-center py-16 text-slate-400 text-sm">
-      Step {step} content — coming next
+    <div className="space-y-5">
+      <p className="text-sm text-slate-500">
+        Review your profile configuration before creating it.
+      </p>
+
+      <div className="rounded-lg border border-slate-200 divide-y divide-slate-100">
+        {/* Basics */}
+        <div className="p-4 space-y-2">
+          <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+            Type & Basics
+          </h3>
+          <dl className="grid grid-cols-[120px_1fr] gap-y-1 text-sm">
+            <dt className="text-slate-400">Type</dt>
+            <dd className="font-medium text-slate-700">{typeLabel}</dd>
+            <dt className="text-slate-400">Name</dt>
+            <dd className="font-medium text-slate-700">{form.name}</dd>
+            {form.description && (
+              <>
+                <dt className="text-slate-400">Description</dt>
+                <dd className="text-slate-600">{form.description}</dd>
+              </>
+            )}
+          </dl>
+        </div>
+
+        {/* Components */}
+        <div className="p-4 space-y-2">
+          <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+            Source & Target
+          </h3>
+          <dl className="grid grid-cols-[120px_1fr] gap-y-1 text-sm">
+            <dt className="text-slate-400">Source</dt>
+            <dd className="font-medium text-slate-700">{sourceLabel || "—"}</dd>
+            <dt className="text-slate-400">Target</dt>
+            <dd className="font-medium text-slate-700">{targetLabel || "—"}</dd>
+          </dl>
+        </div>
+
+        {/* Formats */}
+        <div className="p-4 space-y-2">
+          <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Formats</h3>
+          <dl className="grid grid-cols-[120px_1fr] gap-y-1 text-sm">
+            <dt className="text-slate-400">Source FSD</dt>
+            <dd className="font-mono text-xs text-slate-600">
+              {form.sourceFormatId || "— none —"}
+            </dd>
+            <dt className="text-slate-400">Target FSD</dt>
+            <dd className="font-mono text-xs text-slate-600">
+              {form.targetFormatId || "— none —"}
+            </dd>
+            <dt className="text-slate-400">Transformation</dt>
+            <dd className="font-mono text-xs text-slate-600">
+              {form.transformationId || "— none —"}
+            </dd>
+          </dl>
+        </div>
+      </div>
+
+      {submitError && (
+        <div className="rounded-md bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+          {submitError}
+        </div>
+      )}
+
+      {isSubmitting && <p className="text-xs text-slate-400">Creating profile…</p>}
     </div>
   );
 }
@@ -521,13 +602,42 @@ export default function NewTransferProfilePage() {
   const role = useUserRole();
   const apiContext = useApiContext();
 
+  const router = useTenantRouter();
   const [currentStep, setCurrentStep] = useState(1);
   const [form, setForm] = useState<WizardFormState>(INITIAL_STATE);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const updateForm = useCallback(
     (patch: Partial<WizardFormState>) => setForm((prev) => ({ ...prev, ...patch })),
     []
   );
+
+  const createMutation = useMutation({
+    mutationFn: () => {
+      if (!apiContext || !form.profileType) throw new Error("Missing context");
+      return createTransferProfile(apiContext, {
+        name: form.name.trim(),
+        description: form.description.trim() || undefined,
+        profileType: form.profileType,
+        sourceComponent: form.sourceComponent || undefined,
+        targetComponent: form.targetComponent || undefined,
+        sourceFormatId: form.sourceFormatId || undefined,
+        targetFormatId: form.targetFormatId || undefined,
+        transformationId: form.transformationId || undefined
+      });
+    },
+    onSuccess: (result) => {
+      const id = (result as any)?.data?.id;
+      if (id) {
+        router.push(`/transfer-desk/profiles/${id}`);
+      } else {
+        router.push("/transfer-desk/profiles");
+      }
+    },
+    onError: (err: Error) => {
+      setSubmitError(err.message || "Failed to create profile");
+    }
+  });
 
   if (!role.canTransferDeskDesigner) {
     return (
@@ -626,7 +736,13 @@ export default function NewTransferProfilePage() {
             <Step3Formats form={form} updateForm={updateForm} apiContext={apiContext} />
           )}
           {currentStep === 4 && <Step4FsdViewer form={form} apiContext={apiContext} />}
-          {currentStep === 5 && <StepPlaceholder step={currentStep} />}
+          {currentStep === 5 && (
+            <Step5ReviewSubmit
+              form={form}
+              isSubmitting={createMutation.isPending}
+              submitError={submitError}
+            />
+          )}
         </CardContent>
       </Card>
 
@@ -653,7 +769,16 @@ export default function NewTransferProfilePage() {
             Next <ArrowRight className="h-3.5 w-3.5" />
           </Button>
         ) : (
-          <Button variant="teal" size="sm" disabled className="gap-1.5">
+          <Button
+            variant="teal"
+            size="sm"
+            disabled={createMutation.isPending || !form.profileType || !form.name.trim()}
+            onClick={() => {
+              setSubmitError(null);
+              createMutation.mutate();
+            }}
+            className="gap-1.5"
+          >
             <Check className="h-3.5 w-3.5" /> Create Profile
           </Button>
         )}
