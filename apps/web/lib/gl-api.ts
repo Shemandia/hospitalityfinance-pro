@@ -2621,6 +2621,117 @@ export function updateTransferFormat(
   );
 }
 
+// ── Transformation types + CRUD (TD-API-040..043) ─────────────────────────
+
+export type TransferTransformationSummary = {
+  id: string;
+  name: string;
+  description: string | null;
+  scriptType: "TML" | "XSL";
+  sourceFormatId: string | null;
+  targetFormatId: string | null;
+  sourceComponent: string | null;
+  targetComponent: string | null;
+  isSystem: boolean;
+  isValid: boolean;
+  createdAt: string;
+  updatedAt: string;
+  sourceFormat: { id: string; name: string; classification: FormatClassification } | null;
+  targetFormat: { id: string; name: string; classification: FormatClassification } | null;
+  _count?: { profiles: number };
+};
+
+export type TransferTransformationDetail = TransferTransformationSummary & {
+  rulesJson: unknown;
+  functionsJson: unknown;
+  validationErrors: unknown | null;
+  createdById: string | null;
+  sourceFormat: {
+    id: string;
+    name: string;
+    classification: FormatClassification;
+    fsdXml: string;
+  } | null;
+  targetFormat: {
+    id: string;
+    name: string;
+    classification: FormatClassification;
+    fsdXml: string;
+  } | null;
+};
+
+export type TransformationCreateInput = {
+  name: string;
+  description?: string;
+  sourceFormatId?: string;
+  targetFormatId?: string;
+  sourceComponent?: string;
+  targetComponent?: string;
+  rulesJson?: unknown;
+  functionsJson?: unknown;
+};
+
+export type TransformationUpdateInput = {
+  name?: string;
+  description?: string;
+  sourceFormatId?: string;
+  targetFormatId?: string;
+  sourceComponent?: string;
+  targetComponent?: string;
+  rulesJson?: unknown;
+  functionsJson?: unknown;
+};
+
+export function listTransferTransformations(
+  context: ApiContext,
+  filters: { sourceComponent?: string; targetComponent?: string } = {}
+) {
+  const q = new URLSearchParams();
+  if (filters.sourceComponent) q.set("sourceComponent", filters.sourceComponent);
+  if (filters.targetComponent) q.set("targetComponent", filters.targetComponent);
+  const qs = q.toString();
+  return request<TransferTransformationSummary[]>(
+    context,
+    `/api/v1/integration/transfer-desk/transformations${qs ? `?${qs}` : ""}`
+  );
+}
+
+export function getTransferTransformation(context: ApiContext, id: string) {
+  return request<TransferTransformationDetail>(
+    context,
+    `/api/v1/integration/transfer-desk/transformations/${id}`
+  );
+}
+
+export function createTransferTransformation(
+  context: ApiContext,
+  input: TransformationCreateInput
+) {
+  return request<TransferTransformationDetail>(
+    context,
+    "/api/v1/integration/transfer-desk/transformations",
+    {
+      method: "POST",
+      body: JSON.stringify(input)
+    }
+  );
+}
+
+export function updateTransferTransformation(
+  context: ApiContext,
+  id: string,
+  input: TransformationUpdateInput
+) {
+  return request<TransferTransformationDetail>(
+    context,
+    `/api/v1/integration/transfer-desk/transformations/${id}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(input)
+    }
+  );
+}
+
 export type TransferProfileSummary = {
   id: string;
   name: string;
