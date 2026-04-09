@@ -518,12 +518,174 @@ async function seedJanaProfiles(prisma: PrismaClient): Promise<void> {
   console.log("Seeded 3 Sky Jana MMS system profiles (Purchasing, Movements, Inventory).");
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// FSD Schema — Simphony POS (semicolon-delimited Report Builder export)
+// ══════════════════════════════════════════════════════════════════════════════
+
+const SIMPHONY_POS_FSD = {
+  version: "1.0",
+  classification: "DELIMITED",
+  fieldSep: ";",
+  recordSep: "\r\n",
+  initialLinesToIgnore: 1,
+  encoding: "UTF-8",
+  record: {
+    name: "SimphonyRevenue",
+    fields: [
+      { name: "businessDate", type: "date", required: true, maxLength: 10 },
+      { name: "revenueCenter", type: "string", required: true, maxLength: 30 },
+      { name: "revenueCenterName", type: "string", required: false, maxLength: 60 },
+      { name: "accountCode", type: "string", required: true, maxLength: 20 },
+      { name: "debit", type: "number", required: true, maxLength: 15 },
+      { name: "credit", type: "number", required: true, maxLength: 15 },
+      { name: "currencyCode", type: "string", required: true, maxLength: 3 },
+      { name: "description", type: "string", required: false, maxLength: 100 },
+      { name: "reference", type: "string", required: false, maxLength: 50 }
+    ]
+  }
+};
+
+const SIMPHONY_POS_TML = {
+  rules: [
+    { type: "map", target: "accountCode", sources: [{ path: "accountCode" }] },
+    { type: "map", target: "debit", sources: [{ path: "debit" }] },
+    { type: "map", target: "credit", sources: [{ path: "credit" }] },
+    { type: "map", target: "currency", sources: [{ path: "currencyCode" }] },
+    { type: "map", target: "description", sources: [{ path: "description" }] },
+    { type: "map", target: "reference", sources: [{ path: "reference" }] },
+    { type: "map", target: "dimension1", sources: [{ path: "revenueCenter" }] },
+    { type: "map", target: "dimension2", sources: [{ path: "revenueCenterName" }] }
+  ]
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// FSD Schema — Bank Statement (SWIFT MT940)
+// ══════════════════════════════════════════════════════════════════════════════
+
+const BANK_MT940_FSD = {
+  version: "1.0",
+  classification: "DELIMITED",
+  fieldSep: ",",
+  recordSep: "\r\n",
+  initialLinesToIgnore: 1,
+  encoding: "UTF-8",
+  record: {
+    name: "MT940_Transaction",
+    fields: [
+      { name: "valueDate", type: "date", required: true, maxLength: 10 },
+      { name: "entryDate", type: "date", required: false, maxLength: 10 },
+      { name: "debitCredit", type: "string", required: true, maxLength: 1 },
+      { name: "amount", type: "number", required: true, maxLength: 18 },
+      { name: "currencyCode", type: "string", required: true, maxLength: 3 },
+      { name: "transactionType", type: "string", required: false, maxLength: 10 },
+      { name: "reference", type: "string", required: false, maxLength: 50 },
+      { name: "bankReference", type: "string", required: false, maxLength: 50 },
+      { name: "description", type: "string", required: false, maxLength: 200 }
+    ]
+  }
+};
+
+const BANK_MT940_TML = {
+  rules: [
+    { type: "map", target: "reference", sources: [{ path: "reference" }] },
+    { type: "map", target: "currency", sources: [{ path: "currencyCode" }] },
+    { type: "map", target: "description", sources: [{ path: "description" }] },
+    { type: "map", target: "dimension1", sources: [{ path: "transactionType" }] },
+    { type: "map", target: "dimension2", sources: [{ path: "bankReference" }] },
+    {
+      type: "conditional",
+      condition: { field: "debitCredit", operator: "eq", value: "D" },
+      then: [
+        { type: "map", target: "debit", sources: [{ path: "amount" }] },
+        { type: "set", target: "credit", value: 0 }
+      ],
+      else: [
+        { type: "set", target: "debit", value: 0 },
+        { type: "map", target: "credit", sources: [{ path: "amount" }] }
+      ]
+    }
+  ]
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Seed: Simphony POS
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function seedSimphonyProfiles(prisma: PrismaClient): Promise<void> {
+  const fmt = await upsertFormat(prisma, {
+    name: "Simphony POS Revenue Export",
+    description:
+      "Oracle Simphony POS Report Builder export (semicolon-delimited, 9-field, real decimals)",
+    formatType: "FLAT_FILE",
+    fsdXml: SIMPHONY_POS_FSD
+  });
+
+  const tml = await upsertTransformation(prisma, {
+    name: "Simphony POS → GL Journal",
+    description: "Maps Simphony revenue center fields to GL journal lines (no amount conversion)",
+    rulesJson: SIMPHONY_POS_TML
+  });
+
+  await upsertProfile(prisma, {
+    name: "Simphony POS Revenue",
+    description: "Daily POS revenue posting from Oracle Simphony Report Builder export",
+    profileType: "IMPORT",
+    sourceComponent: "SIMPHONY_POS",
+    targetComponent: "GL_JOURNAL",
+    sourceFormatId: fmt.id,
+    transformationId: tml.id,
+    targetParams: {
+      fieldMap: { accountCode: "accountId" },
+      groupBy: "businessDate",
+      defaultDescription: "Simphony POS revenue import"
+    }
+  });
+
+  console.log("Seeded 1 Simphony POS system profile.");
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Seed: Bank Statement (MT940)
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function seedBankStatementProfiles(prisma: PrismaClient): Promise<void> {
+  const fmt = await upsertFormat(prisma, {
+    name: "Bank Statement MT940",
+    description: "SWIFT MT940 bank statement (CSV pre-parsed, comma-delimited)",
+    formatType: "FLAT_FILE",
+    fsdXml: BANK_MT940_FSD
+  });
+
+  const tml = await upsertTransformation(prisma, {
+    name: "MT940 → GL Journal",
+    description:
+      "Maps MT940 bank statement transactions to GL journal lines (D/C conditional split)",
+    rulesJson: BANK_MT940_TML
+  });
+
+  await upsertProfile(prisma, {
+    name: "Bank Statement (MT940)",
+    description: "Bank statement import for reconciliation against GL bank accounts",
+    profileType: "IMPORT",
+    sourceComponent: "SWIFT_MT940",
+    targetComponent: "GL_JOURNAL",
+    sourceFormatId: fmt.id,
+    transformationId: tml.id,
+    targetParams: {
+      fieldMap: {},
+      groupBy: "valueDate",
+      defaultDescription: "MT940 bank statement import"
+    }
+  });
+
+  console.log("Seeded 1 Bank Statement (MT940) system profile.");
+}
+
 // ── Main seed function ───────────────────────────────────────────────────────
 
 export async function seedTransferDeskSystemData(prisma: PrismaClient): Promise<void> {
   await seedOperaProfiles(prisma);
   await seedJanaProfiles(prisma);
-
-  // Commit 4 will add: await seedSimphonyProfiles(prisma);
-  // Commit 4 will add: await seedBankStatementProfiles(prisma);
+  await seedSimphonyProfiles(prisma);
+  await seedBankStatementProfiles(prisma);
 }
