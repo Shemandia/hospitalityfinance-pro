@@ -1220,6 +1220,185 @@ export async function registerIntegrationRouter(app: FastifyInstance): Promise<v
         }
       );
 
+      // TD-API-032 — POST /transfer-desk/formats/detect (auto-detect from sample file)
+      router.post("/transfer-desk/formats/detect", async (request, reply) => {
+        try {
+          const { detectFormat } = await import("../../jobs/format-auto-detect.js");
+          const body = request.body as { fileContent?: string };
+          if (!body.fileContent || body.fileContent.trim().length === 0) {
+            return reply.code(400).send({
+              data: null,
+              errors: [{ code: "MISSING_FILE_CONTENT", message: "fileContent is required" }]
+            });
+          }
+          const result = detectFormat(body.fileContent);
+          return reply.send({ data: result, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      // TD-API-033 — POST /transfer-desk/formats (create)
+      router.post("/transfer-desk/formats", async (request, reply) => {
+        try {
+          const body = request.body as {
+            name?: string;
+            description?: string;
+            classification?: string;
+            fsdXml?: string;
+            guiState?: unknown;
+          };
+
+          if (!body.name || body.name.trim().length === 0) {
+            return reply.code(400).send({
+              data: null,
+              errors: [{ code: "MISSING_NAME", message: "Format name is required" }]
+            });
+          }
+          if (!body.fsdXml) {
+            return reply.code(400).send({
+              data: null,
+              errors: [{ code: "MISSING_FSD", message: "fsdXml is required" }]
+            });
+          }
+
+          // Validate the FSD JSON is parseable
+          let parsedFsd: unknown;
+          try {
+            parsedFsd = JSON.parse(body.fsdXml);
+          } catch {
+            return reply.code(400).send({
+              data: null,
+              errors: [{ code: "INVALID_FSD_JSON", message: "fsdXml is not valid JSON" }]
+            });
+          }
+
+          // Dry-run parse to validate schema structure
+          let isValid = true;
+          let validationErrors: unknown = null;
+          try {
+            const { parse } = await import("@hfp/fsd-engine");
+            const result = parse(parsedFsd as any, "");
+            // Empty input with valid schema should return 0 records, 0 errors
+            // If there are structural errors (missing record def), that's invalid
+            if (result.errors.some((e: any) => e.code.startsWith("SCHEMA_"))) {
+              isValid = false;
+              validationErrors = result.errors.filter((e: any) => e.code.startsWith("SCHEMA_"));
+            }
+          } catch {
+            // Parse threw — schema might still be saveable but mark as invalid
+            isValid = false;
+          }
+
+          const classification =
+            body.classification ?? (parsedFsd as any).classification ?? "DELIMITED";
+          const db = prisma as unknown as PrismaClient;
+          const data = await db.transferFormat.create({
+            data: {
+              name: body.name.trim(),
+              description: body.description?.trim() || null,
+              classification: classification as any,
+              fsdXml: body.fsdXml,
+              guiState: body.guiState ?? undefined,
+              isValid,
+              validationErrors: validationErrors ?? undefined
+            }
+          });
+          return reply.code(201).send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      // TD-API-034 — PUT /transfer-desk/formats/:id (update)
+      router.put<{ Params: { id: string } }>(
+        "/transfer-desk/formats/:id",
+        async (request, reply) => {
+          try {
+            const db = prisma as unknown as PrismaClient;
+            const existing = await db.transferFormat.findUnique({
+              where: { id: request.params.id }
+            });
+            if (!existing) {
+              return reply.code(404).send({
+                data: null,
+                errors: [{ code: "NOT_FOUND", message: "Format not found" }]
+              });
+            }
+            if (existing.isSystem) {
+              return reply.code(403).send({
+                data: null,
+                errors: [
+                  {
+                    code: "SYSTEM_FORMAT",
+                    message: "System formats cannot be modified. Clone to create a custom version."
+                  }
+                ]
+              });
+            }
+
+            const body = request.body as {
+              name?: string;
+              description?: string;
+              classification?: string;
+              fsdXml?: string;
+              guiState?: unknown;
+            };
+
+            // Re-validate FSD if updated
+            let isValid = existing.isValid;
+            let validationErrors = existing.validationErrors;
+
+            if (body.fsdXml) {
+              let parsedFsd: unknown;
+              try {
+                parsedFsd = JSON.parse(body.fsdXml);
+              } catch {
+                return reply.code(400).send({
+                  data: null,
+                  errors: [{ code: "INVALID_FSD_JSON", message: "fsdXml is not valid JSON" }]
+                });
+              }
+
+              isValid = true;
+              validationErrors = null;
+              try {
+                const { parse } = await import("@hfp/fsd-engine");
+                const result = parse(parsedFsd as any, "");
+                if (result.errors.some((e: any) => e.code.startsWith("SCHEMA_"))) {
+                  isValid = false;
+                  validationErrors = result.errors.filter((e: any) => e.code.startsWith("SCHEMA_"));
+                }
+              } catch {
+                isValid = false;
+              }
+            }
+
+            const data = await db.transferFormat.update({
+              where: { id: request.params.id },
+              data: {
+                ...(body.name ? { name: body.name.trim() } : {}),
+                ...(body.description !== undefined
+                  ? { description: body.description?.trim() || null }
+                  : {}),
+                ...(body.classification ? { classification: body.classification as any } : {}),
+                ...(body.fsdXml
+                  ? {
+                      fsdXml: body.fsdXml,
+                      isValid,
+                      validationErrors: validationErrors ?? undefined
+                    }
+                  : {}),
+                ...(body.guiState !== undefined ? { guiState: body.guiState } : {})
+              }
+            });
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
       // TD-API-009 — GET /transfer-desk/profiles (list)
       router.get("/transfer-desk/profiles", async (request, reply) => {
         try {
