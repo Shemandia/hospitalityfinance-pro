@@ -350,12 +350,180 @@ async function seedOperaProfiles(prisma: PrismaClient): Promise<void> {
   console.log("Seeded 4 Opera PMS system profiles (EZZRV, EZZCL, EZZMS, EZZDS).");
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// FSD Schemas — Sky Jana MMS (semicolon-delimited SAF files)
+// ══════════════════════════════════════════════════════════════════════════════
+
+/** Jana SAF: semicolon-delimited, 9 fields, no header line */
+const JANA_SAF_FSD = {
+  version: "1.0",
+  classification: "DELIMITED",
+  fieldSep: ";",
+  recordSep: "\n",
+  encoding: "UTF-8",
+  record: {
+    name: "voucher",
+    fields: [
+      { name: "voucherNo", type: "string", required: true, maxLength: 20 },
+      { name: "journalType", type: "string", required: true, maxLength: 10 },
+      { name: "accountCode", type: "string", required: true, maxLength: 20 },
+      { name: "debit", type: "integer", required: true, maxLength: 15 },
+      { name: "credit", type: "integer", required: true, maxLength: 15 },
+      { name: "description", type: "string", maxLength: 200 },
+      { name: "entryDate", type: "date", required: true, maxLength: 10 },
+      { name: "supplierCode", type: "string", maxLength: 20 },
+      { name: "reference", type: "string", maxLength: 50 }
+    ]
+  }
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TML Transformations — Sky Jana MMS
+// ══════════════════════════════════════════════════════════════════════════════
+
+/** Jana Purchasing: whole-integer TZS — identity map (no division) */
+const JANA_PURCHASING_TML = {
+  rules: [
+    { type: "map", target: "accountCode", sources: [{ path: "accountCode" }] },
+    { type: "map", target: "debit", sources: [{ path: "debit" }] },
+    { type: "map", target: "credit", sources: [{ path: "credit" }] },
+    { type: "map", target: "description", sources: [{ path: "description" }] },
+    { type: "map", target: "reference", sources: [{ path: "reference" }] },
+    { type: "map", target: "dimension1", sources: [{ path: "supplierCode" }] },
+    { type: "map", target: "dimension2", sources: [{ path: "voucherNo" }] }
+  ]
+};
+
+/** Jana Internal Movements & Inventory: ÷1000 implied decimals */
+const JANA_DIVIDE1000_TML = {
+  rules: [
+    { type: "map", target: "accountCode", sources: [{ path: "accountCode" }] },
+    {
+      type: "transform",
+      target: "debit",
+      function: {
+        name: "divideBy1000",
+        params: [{ value: "debit", fromSource: true, type: "number" }]
+      }
+    },
+    {
+      type: "transform",
+      target: "credit",
+      function: {
+        name: "divideBy1000",
+        params: [{ value: "credit", fromSource: true, type: "number" }]
+      }
+    },
+    { type: "map", target: "description", sources: [{ path: "description" }] },
+    { type: "map", target: "reference", sources: [{ path: "reference" }] },
+    { type: "map", target: "dimension1", sources: [{ path: "voucherNo" }] }
+  ]
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Seed: Sky Jana MMS
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function seedJanaProfiles(prisma: PrismaClient): Promise<void> {
+  // All three Jana profiles share the same SAF FSD schema
+  const fmtPurchasing = await upsertFormat(prisma, {
+    name: "Jana SAF (Purchasing Vouchers)",
+    description:
+      "Sky Jana MMS purchasing voucher SAF export (semicolon-delimited, whole-integer TZS)",
+    formatType: "FLAT_FILE",
+    fsdXml: JANA_SAF_FSD
+  });
+  const fmtMovements = await upsertFormat(prisma, {
+    name: "Jana SAF (Internal Movements)",
+    description:
+      "Sky Jana MMS inter-store transfer SAF export (semicolon-delimited, ÷1000 implied decimals)",
+    formatType: "FLAT_FILE",
+    fsdXml: JANA_SAF_FSD
+  });
+  const fmtInventory = await upsertFormat(prisma, {
+    name: "Jana SAF (Inventory Differences)",
+    description:
+      "Sky Jana MMS inventory difference SAF export (semicolon-delimited, ÷1000 implied decimals)",
+    formatType: "FLAT_FILE",
+    fsdXml: JANA_SAF_FSD
+  });
+
+  // ── Transformations ──
+  const tmlPurchasing = await upsertTransformation(prisma, {
+    name: "Jana Purchasing → GL Journal",
+    description:
+      "Maps Jana purchasing voucher fields to GL journal lines (whole-integer, no ÷1000)",
+    rulesJson: JANA_PURCHASING_TML
+  });
+  const tmlMovements = await upsertTransformation(prisma, {
+    name: "Jana Internal Movements → GL Journal",
+    description: "Maps Jana inter-store transfer fields to GL journal lines with ÷1000 conversion",
+    rulesJson: JANA_DIVIDE1000_TML
+  });
+  const tmlInventory = await upsertTransformation(prisma, {
+    name: "Jana Inventory Differences → GL Journal",
+    description: "Maps Jana inventory difference fields to GL journal lines with ÷1000 conversion",
+    rulesJson: JANA_DIVIDE1000_TML
+  });
+
+  // ── Profiles ──
+  const janaTargetParams = {
+    fieldMap: { accountCode: "accountId", voucherNo: "reference" },
+    groupBy: "entryDate",
+    functionalCurrency: "TZS"
+  };
+
+  await upsertProfile(prisma, {
+    name: "Sky Jana Purchasing Vouchers",
+    description: "AP invoice headers from Sky Jana procurement (whole-integer TZS)",
+    profileType: "IMPORT",
+    sourceComponent: "SKY_JANA_MMS",
+    targetComponent: "GL_JOURNAL",
+    sourceFormatId: fmtPurchasing.id,
+    transformationId: tmlPurchasing.id,
+    targetParams: {
+      ...janaTargetParams,
+      defaultDescription: "Jana purchasing voucher import"
+    }
+  });
+
+  await upsertProfile(prisma, {
+    name: "Sky Jana Internal Movements",
+    description: "Inter-store transfer journals from Sky Jana (÷1000 implied decimals)",
+    profileType: "IMPORT",
+    sourceComponent: "SKY_JANA_MMS",
+    targetComponent: "GL_JOURNAL",
+    sourceFormatId: fmtMovements.id,
+    transformationId: tmlMovements.id,
+    targetParams: {
+      ...janaTargetParams,
+      defaultDescription: "Jana internal movement import"
+    }
+  });
+
+  await upsertProfile(prisma, {
+    name: "Sky Jana Inventory Differences",
+    description: "Inventory difference adjustments from Sky Jana (÷1000 implied decimals)",
+    profileType: "IMPORT",
+    sourceComponent: "SKY_JANA_MMS",
+    targetComponent: "GL_JOURNAL",
+    sourceFormatId: fmtInventory.id,
+    transformationId: tmlInventory.id,
+    targetParams: {
+      ...janaTargetParams,
+      defaultDescription: "Jana inventory difference import"
+    }
+  });
+
+  console.log("Seeded 3 Sky Jana MMS system profiles (Purchasing, Movements, Inventory).");
+}
+
 // ── Main seed function ───────────────────────────────────────────────────────
 
 export async function seedTransferDeskSystemData(prisma: PrismaClient): Promise<void> {
   await seedOperaProfiles(prisma);
+  await seedJanaProfiles(prisma);
 
-  // Commit 3 will add: await seedJanaProfiles(prisma);
   // Commit 4 will add: await seedSimphonyProfiles(prisma);
   // Commit 4 will add: await seedBankStatementProfiles(prisma);
 }
