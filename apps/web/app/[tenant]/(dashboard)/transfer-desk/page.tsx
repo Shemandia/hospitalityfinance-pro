@@ -75,7 +75,7 @@ const NAV_SECTIONS: NavSection[] = [
     description: "Scheduled multi-profile pipelines",
     icon: CalendarClock,
     minRole: "user",
-    status: "stub"
+    status: "ready"
   },
   {
     href: "/transfer-desk/formats",
@@ -99,7 +99,7 @@ const NAV_SECTIONS: NavSection[] = [
     description: "Range-based value substitution tables",
     icon: Database,
     minRole: "designer",
-    status: "stub"
+    status: "ready"
   },
   {
     href: "/transfer-desk/files",
