@@ -7,14 +7,9 @@
  *
  * Responsibilities:
  *   1. Pull TransferDeskJobData from the per-tenant queue.
- *   2. Resolve the tenant DB and update the `transfer_executions` row through
- *      the QUEUED → RUNNING → COMPLETED / FAILED state machine.
- *   3. Set the per-job `app.current_entity_id` if the job operates on
- *      entity-scoped data (none of the TD tables today, but the runtime params
- *      may include an entityId for the actual import target).
- *   4. (Future) Hand off to the FSD parser → TML transformer → target writer
- *      pipeline. Currently a stub that immediately marks the execution as
- *      COMPLETED with zero records processed.
+ *   2. Resolve the tenant DB and load the profile + execution row.
+ *   3. Update transfer_executions through QUEUED → RUNNING → COMPLETED / FAILED.
+ *   4. Dispatch to the appropriate pipeline (import / export / process).
  *
  * Concurrency: defaults to 1 per tenant. Per-tenant license-tier limits
  * (Starter=1, Pro=3, Enterprise=10) will be enforced by reading the tenant
@@ -35,6 +30,15 @@ import {
   getTransferDeskRedisConnection,
   type TransferDeskJobData
 } from "./transfer-desk-queue.js";
+import {
+  executeImport,
+  executeExport,
+  executeProcess,
+  type PipelineContext,
+  type PipelineResult,
+  type ProfileWithRelations
+} from "./transfer-desk-pipeline.js";
+import { getStorageBackend } from "./transfer-desk-storage.js";
 
 // ── Per-tenant worker cache ────────────────────────────────────────────────
 
@@ -56,7 +60,6 @@ export function ensureTransferDeskWorker(tenantSlug: string, tenantDbUrl: string
     {
       connection: getTransferDeskRedisConnection(),
       concurrency: 1, // TODO: read from license entitlements (Starter=1, Pro=3, Enterprise=10)
-      // Workers don't auto-restart failed jobs — TD failures require human inspection
       autorun: true
     }
   );
@@ -81,12 +84,8 @@ export function ensureTransferDeskWorker(tenantSlug: string, tenantDbUrl: string
 }
 
 /**
- * Job handler. Stub implementation — updates the `transfer_executions` row
- * through QUEUED → RUNNING → COMPLETED but doesn't actually run any FSD/TML
- * pipeline yet (those engines don't exist; they're scheduled for sprints 4-9).
- *
- * The lifecycle update is real so the UI can already poll for status changes
- * once the execute-profile endpoint lands.
+ * Job handler. Loads the profile + execution, dispatches to the appropriate
+ * pipeline (import / export / process), and updates the execution row.
  */
 async function processJob(
   job: Job<TransferDeskJobData>,
@@ -94,14 +93,7 @@ async function processJob(
   tenantDbUrl: string
 ): Promise<{ executionId: string; status: "COMPLETED" | "FAILED"; recordsTotal: number }> {
   const { executionId, profileId } = job.data;
-  const tenant = getTenantClient(tenantSlug, tenantDbUrl) as unknown as {
-    transferExecution: {
-      update: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<unknown>;
-      findUnique: (args: {
-        where: { id: string };
-      }) => Promise<{ id: string; status: string } | null>;
-    };
-  };
+  const prisma = getTenantClient(tenantSlug, tenantDbUrl) as any;
 
   console.log(
     `[TransferDeskWorker:${tenantSlug}] Picked up execution ${executionId} (profile ${profileId})`
@@ -109,7 +101,7 @@ async function processJob(
 
   // ── Mark RUNNING ────────────────────────────────────────────────────────
   try {
-    await tenant.transferExecution.update({
+    await prisma.transferExecution.update({
       where: { id: executionId },
       data: {
         status: "RUNNING",
@@ -122,57 +114,128 @@ async function processJob(
       `[TransferDeskWorker:${tenantSlug}] Failed to mark execution ${executionId} as RUNNING:`,
       err
     );
-    throw err; // Let BullMQ record the failure
+    throw err;
   }
 
-  // ── (Stub) Run the actual profile here ──────────────────────────────────
-  //
-  // Real implementation will:
-  //   1. Load the profile + its source/target format + transformation
-  //   2. Pull the input file (from request payload, file repo, or external API)
-  //   3. Run the FSD parser → produce JSON records
-  //   4. Run the TML transformer → produce target records
-  //   5. Write target records into the target component (GL_JOURNAL, AP_INVOICE, etc.)
-  //   6. Stream per-record progress via SSE (UI-RT-001)
-  //   7. Insert per-record rows into transfer_execution_logs
-  //
-  // For Sprint 2 we just simulate success after a brief delay so the lifecycle
-  // is observable via the existing transfer_executions table.
-
-  await new Promise((resolve) => setTimeout(resolve, 100));
-
-  // ── Mark COMPLETED ──────────────────────────────────────────────────────
+  // ── Load profile ────────────────────────────────────────────────────────
+  let profile: ProfileWithRelations | null;
   try {
-    await tenant.transferExecution.update({
+    profile = await prisma.transferProfile.findUnique({
+      where: { id: profileId },
+      include: {
+        sourceFormat: true,
+        targetFormat: true
+      }
+    });
+  } catch (err) {
+    await markFailed(prisma, executionId, `Failed to load profile: ${(err as Error).message}`);
+    throw err;
+  }
+
+  if (!profile) {
+    const msg = `Profile ${profileId} not found`;
+    await markFailed(prisma, executionId, msg);
+    throw new Error(msg);
+  }
+
+  // ── Load execution for runtimeParams ────────────────────────────────────
+  let runtimeParams: Record<string, unknown> = {};
+  try {
+    const execution = await prisma.transferExecution.findUnique({
+      where: { id: executionId },
+      select: { runtimeParams: true }
+    });
+    if (execution?.runtimeParams) {
+      runtimeParams =
+        typeof execution.runtimeParams === "string"
+          ? JSON.parse(execution.runtimeParams)
+          : (execution.runtimeParams as Record<string, unknown>);
+    }
+  } catch {
+    // Non-fatal — proceed with empty params
+  }
+
+  // ── Build pipeline context ──────────────────────────────────────────────
+  const ctx: PipelineContext = {
+    db: prisma,
+    storage: getStorageBackend(),
+    tenantSlug,
+    tenantDbUrl
+  };
+
+  // ── Dispatch to pipeline ────────────────────────────────────────────────
+  let result: PipelineResult;
+
+  try {
+    switch (profile.profileType) {
+      case "IMPORT":
+        result = await executeImport(ctx, executionId, profile, runtimeParams);
+        break;
+      case "EXPORT":
+        result = await executeExport(ctx, executionId, profile, runtimeParams);
+        break;
+      case "PROCESS":
+      case "INTERNAL_TRANSFER":
+      case "EXTERNAL_TRANSFER":
+        result = await executeProcess(ctx, executionId, profile);
+        break;
+      default:
+        result = {
+          recordsTotal: 0,
+          recordsSucceeded: 0,
+          recordsFailed: 0,
+          errorMessage: `Unknown profile type: ${profile.profileType}`
+        };
+    }
+  } catch (err) {
+    await markFailed(prisma, executionId, (err as Error).message);
+    throw err;
+  }
+
+  // ── Mark COMPLETED or FAILED ────────────────────────────────────────────
+  const finalStatus = result.errorMessage ? "FAILED" : "COMPLETED";
+
+  try {
+    await prisma.transferExecution.update({
       where: { id: executionId },
       data: {
-        status: "COMPLETED",
+        status: finalStatus,
         finishedAt: new Date(),
-        recordsTotal: 0,
-        recordsSucceeded: 0,
-        recordsFailed: 0
+        recordsTotal: result.recordsTotal,
+        recordsSucceeded: result.recordsSucceeded,
+        recordsFailed: result.recordsFailed,
+        errorMessage: result.errorMessage ?? null
       }
     });
   } catch (err) {
     console.error(
-      `[TransferDeskWorker:${tenantSlug}] Failed to mark execution ${executionId} as COMPLETED:`,
+      `[TransferDeskWorker:${tenantSlug}] Failed to mark execution ${executionId} as ${finalStatus}:`,
       err
     );
-    // Try to flip to FAILED so the UI doesn't see a stuck RUNNING row
-    await tenant.transferExecution
-      .update({
-        where: { id: executionId },
-        data: {
-          status: "FAILED",
-          finishedAt: new Date(),
-          errorMessage: (err as Error).message
-        }
-      })
-      .catch(() => {});
+    await markFailed(prisma, executionId, (err as Error).message);
     throw err;
   }
 
-  return { executionId, status: "COMPLETED", recordsTotal: 0 };
+  return {
+    executionId,
+    status: finalStatus,
+    recordsTotal: result.recordsTotal
+  };
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+async function markFailed(prisma: any, executionId: string, message: string): Promise<void> {
+  await prisma.transferExecution
+    .update({
+      where: { id: executionId },
+      data: {
+        status: "FAILED",
+        finishedAt: new Date(),
+        errorMessage: message
+      }
+    })
+    .catch(() => {});
 }
 
 /**
