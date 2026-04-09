@@ -1,8 +1,67 @@
-import { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "./client.js";
+import { PrismaClient as RegistryPrismaClient } from "./registry-client.js";
+import { USALI_ACCOUNTS, SYSTEM_ACCOUNT_TYPES } from "../modules/setup/usali-template.js";
+import { seedTransferDeskSystemData } from "./seed-transfer-desk.js";
 
 const prisma = new PrismaClient();
+const registryPrisma = new RegistryPrismaClient({
+  datasourceUrl: process.env.REGISTRY_DATABASE_URL ?? process.env.DATABASE_URL
+});
 
 async function main(): Promise<void> {
+  // ── System Account Type Definitions ──────────────────────────────────────
+  const typeDefMap = new Map<string, string>();
+  for (const atd of SYSTEM_ACCOUNT_TYPES) {
+    // System types have null entityId — use findFirst + create/update instead of upsert
+    // since Prisma doesn't support null in composite unique constraints for upsert
+    const existing = await prisma.accountTypeDefinition.findFirst({
+      where: { code: atd.code, entityId: null }
+    });
+    let row;
+    if (existing) {
+      row = await prisma.accountTypeDefinition.update({
+        where: { id: existing.id },
+        data: {
+          name: atd.name,
+          category: atd.category,
+          normalBalance: atd.normalBalance,
+          sortOrder: atd.sortOrder
+        }
+      });
+    } else {
+      row = await prisma.accountTypeDefinition.create({
+        data: {
+          id: atd.id,
+          code: atd.code,
+          name: atd.name,
+          category: atd.category,
+          normalBalance: atd.normalBalance,
+          isSystem: true,
+          sortOrder: atd.sortOrder
+        }
+      });
+    }
+    typeDefMap.set(atd.code, row.id);
+  }
+  console.log(`Seeded ${SYSTEM_ACCOUNT_TYPES.length} system account type definitions.`);
+
+  // ── Demo Tenant ─────────────────────────────────────────────────────────
+  await registryPrisma.tenant.upsert({
+    where: { slug: "demo-hotels" },
+    update: {},
+    create: {
+      slug: "demo-hotels",
+      name: "HFP Demo Hotels",
+      databaseUrl: process.env.DATABASE_URL ?? "postgresql://hfp:password@localhost:5432/hfp_db",
+      adminEmail: "admin@hfp.local",
+      plan: "enterprise",
+      maxProperties: 10,
+      isActive: true,
+      provisionedAt: new Date()
+    }
+  });
+  console.log("Seeded demo-hotels tenant.");
+
   const group = await (prisma.entity as any).upsert({
     where: { id: "00000000-0000-0000-0000-000000000001" },
     update: { maxProperties: 10 },
@@ -376,145 +435,10 @@ async function main(): Promise<void> {
     }
   });
 
-  const usaliAccounts: Array<{
-    code: string;
-    name: string;
-    type: "ASSET" | "LIABILITY" | "EQUITY" | "REVENUE" | "EXPENSE";
-    normalBalance: "DEBIT" | "CREDIT";
-    usaliCategory?: string;
-    usaliDepartment?: string;
-    parentCode?: string;
-    level: number;
-    allowPosting: boolean;
-  }> = [
-    {
-      code: "1000",
-      name: "Cash and Cash Equivalents",
-      type: "ASSET",
-      normalBalance: "DEBIT",
-      usaliCategory: "Current Assets",
-      level: 1,
-      allowPosting: true
-    },
-    {
-      code: "2000",
-      name: "Accounts Payable Control",
-      type: "LIABILITY",
-      normalBalance: "CREDIT",
-      usaliCategory: "Current Liabilities",
-      level: 1,
-      allowPosting: true
-    },
-    {
-      code: "3000",
-      name: "Retained Earnings",
-      type: "EQUITY",
-      normalBalance: "CREDIT",
-      usaliCategory: "Equity",
-      level: 1,
-      allowPosting: true
-    },
-    {
-      code: "4000",
-      name: "Total Revenue",
-      type: "REVENUE",
-      normalBalance: "CREDIT",
-      usaliCategory: "Revenue",
-      level: 1,
-      allowPosting: false
-    },
-    {
-      code: "4100",
-      name: "Rooms Revenue",
-      type: "REVENUE",
-      normalBalance: "CREDIT",
-      usaliCategory: "Revenue",
-      usaliDepartment: "Rooms",
-      parentCode: "4000",
-      level: 2,
-      allowPosting: true
-    },
-    {
-      code: "4200",
-      name: "Food Revenue",
-      type: "REVENUE",
-      normalBalance: "CREDIT",
-      usaliCategory: "Revenue",
-      usaliDepartment: "Food and Beverage",
-      parentCode: "4000",
-      level: 2,
-      allowPosting: true
-    },
-    {
-      code: "4300",
-      name: "Beverage Revenue",
-      type: "REVENUE",
-      normalBalance: "CREDIT",
-      usaliCategory: "Revenue",
-      usaliDepartment: "Food and Beverage",
-      parentCode: "4000",
-      level: 2,
-      allowPosting: true
-    },
-    {
-      code: "5000",
-      name: "Total Departmental Expenses",
-      type: "EXPENSE",
-      normalBalance: "DEBIT",
-      usaliCategory: "Departmental Expenses",
-      level: 1,
-      allowPosting: false
-    },
-    {
-      code: "5100",
-      name: "Rooms Payroll Expense",
-      type: "EXPENSE",
-      normalBalance: "DEBIT",
-      usaliCategory: "Departmental Expenses",
-      usaliDepartment: "Rooms",
-      parentCode: "5000",
-      level: 2,
-      allowPosting: true
-    },
-    {
-      code: "5200",
-      name: "Food Cost Expense",
-      type: "EXPENSE",
-      normalBalance: "DEBIT",
-      usaliCategory: "Departmental Expenses",
-      usaliDepartment: "Food and Beverage",
-      parentCode: "5000",
-      level: 2,
-      allowPosting: true
-    },
-    {
-      code: "5300",
-      name: "Admin and General Expense",
-      type: "EXPENSE",
-      normalBalance: "DEBIT",
-      usaliCategory: "Undistributed Expenses",
-      usaliDepartment: "Admin and General",
-      parentCode: "5000",
-      level: 2,
-      allowPosting: true
-    },
-    {
-      code: "5400",
-      name: "Utilities Expense",
-      type: "EXPENSE",
-      normalBalance: "DEBIT",
-      usaliCategory: "Undistributed Expenses",
-      usaliDepartment: "Utilities",
-      parentCode: "5000",
-      level: 2,
-      allowPosting: true
-    }
-  ];
-
   for (const entityId of [propertyA.id, propertyB.id]) {
     const byCode = new Map<string, string>();
 
-    for (const account of usaliAccounts) {
+    for (const account of USALI_ACCOUNTS) {
       const existing = await prisma.account.findUnique({
         where: { entityId_code: { entityId, code: account.code } }
       });
@@ -524,6 +448,7 @@ async function main(): Promise<void> {
         update: {
           name: account.name,
           type: account.type,
+          accountTypeDefId: typeDefMap.get(account.type),
           normalBalance: account.normalBalance,
           usaliCategory: account.usaliCategory,
           usaliDepartment: account.usaliDepartment,
@@ -536,6 +461,7 @@ async function main(): Promise<void> {
           code: account.code,
           name: account.name,
           type: account.type,
+          accountTypeDefId: typeDefMap.get(account.type),
           normalBalance: account.normalBalance,
           usaliCategory: account.usaliCategory,
           usaliDepartment: account.usaliDepartment,
@@ -682,6 +608,9 @@ async function main(): Promise<void> {
   }
 
   console.log(`Seeded ${SYSTEM_PERMISSIONS.length} permissions, ${SYSTEM_ROLES.length} roles.`);
+
+  // ── Transfer Desk System Profiles ──────────────────────────────────────────
+  await seedTransferDeskSystemData(prisma);
 }
 
 main()

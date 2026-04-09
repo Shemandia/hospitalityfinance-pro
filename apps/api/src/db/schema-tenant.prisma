@@ -1317,6 +1317,8 @@ model TransferProfile {
   isValid             Boolean     @default(false) @map("is_valid")
   /// Increments on every save; profile_versions captures the snapshot
   version             Int         @default(1)
+  /// System profiles ship with every tenant and cannot be deleted
+  isSystem            Boolean     @default(false) @map("is_system")
   /// Soft delete flag
   isActive            Boolean     @default(true) @map("is_active")
   /// Save behavior: NONE / INPUT / OUTPUT / BOTH

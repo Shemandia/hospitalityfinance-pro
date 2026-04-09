@@ -2444,6 +2444,15 @@ export async function registerIntegrationRouter(app: FastifyInstance): Promise<v
         { preHandler: [requireRole(["ADMIN", "SUPERADMIN"])] },
         async (request, reply) => {
           try {
+            const existing = await (prisma as unknown as PrismaClient).transferProfile.findUnique({
+              where: { id: request.params.id }
+            });
+            if (!existing) {
+              return reply.status(404).send({ error: "Profile not found" });
+            }
+            if (existing.isSystem) {
+              return reply.status(403).send({ error: "System profiles cannot be deleted" });
+            }
             const updated = await (prisma as unknown as PrismaClient).transferProfile.update({
               where: { id: request.params.id },
               data: { isActive: false }
