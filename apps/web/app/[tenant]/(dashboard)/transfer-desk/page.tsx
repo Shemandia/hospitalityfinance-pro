@@ -83,7 +83,7 @@ const NAV_SECTIONS: NavSection[] = [
     description: "FSD file format definitions",
     icon: FileCog,
     minRole: "designer",
-    status: "stub"
+    status: "ready"
   },
   {
     href: "/transfer-desk/transformations",
