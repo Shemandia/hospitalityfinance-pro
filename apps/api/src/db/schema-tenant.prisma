@@ -96,6 +96,28 @@ enum JournalStatus {
   PENDING_APPROVAL
   POSTED
   REVERSED
+  RETURNED
+  VOIDED
+}
+
+enum RejectionReturnsTo {
+  PREVIOUS_STAGE
+  ORIGINATOR
+  SPECIFIC_STAGE
+}
+
+enum AuthorizationDecisionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SKIPPED
+}
+
+enum AuthorizationSetStatus {
+  OPEN
+  SUBMITTED
+  APPROVED
+  REJECTED
 }
 
 enum WorkflowModule {
@@ -272,44 +294,50 @@ model Entity {
   updatedAt          DateTime   @updatedAt @map("updated_at")
 
   // Relations
-  users                   EntityUser[]
-  userRoles               UserRole[]
-  periods                 Period[]
-  accounts                Account[]
-  journals                Journal[]
-  accountBalances         AccountPeriodBalance[]
-  approvalRules           ApprovalRule[]
-  journalApprovals        JournalApproval[]
-  auditEvents             AuditEvent[]
-  reportDefinitions       ReportDefinition[]
-  apInvoices              APInvoice[]
-  arInvoices              ARInvoice[]
-  apPayments              APPayment[]
-  suppliers               Supplier[]
-  purchaseOrders          PurchaseOrder[]
-  goodsReceivedNotes      GoodsReceivedNote[]
-  paymentRuns             PaymentRun[]
-  customers               Customer[]
-  arReceipts              ARReceipt[]
-  budgetDefinitions       BudgetDefinition[]
-  connectorMappings       ConnectorMapping[]
-  importLogs              ImportLog[]
-  interfaceDefinitions    InterfaceDefinition[]
-  pmsStatistics           PMSStatistic[]
-  bankStatements          BankStatement[]
-  consolidationParentRuns ConsolidationRun[]       @relation("ConsolidationParent")
-  consolidationEntityRuns ConsolidationRunEntity[] @relation("ConsolidationEntity")
-  journalTypes            JournalType[]
-  recurringJournals       RecurringJournal[]
-  accountTypeDefinitions  AccountTypeDefinition[]
-  ledgerSetups            LedgerSetup[]
-  processLocks            ProcessLock[]
-  periodCloseStatuses     PeriodCloseStatus[]
-  analysisDimensions      AnalysisDimension[]
-  allocationDefinitions   AllocationDefinition[]
-  fixedAssets             FixedAsset[]
-  assetCategories         AssetCategory[]
-  depreciationTables      DepreciationTable[]
+  users                    EntityUser[]
+  userRoles                UserRole[]
+  periods                  Period[]
+  accounts                 Account[]
+  journals                 Journal[]
+  accountBalances          AccountPeriodBalance[]
+  approvalRules            ApprovalRule[]
+  journalApprovals         JournalApproval[]
+  auditEvents              AuditEvent[]
+  reportDefinitions        ReportDefinition[]
+  apInvoices               APInvoice[]
+  arInvoices               ARInvoice[]
+  apPayments               APPayment[]
+  suppliers                Supplier[]
+  purchaseOrders           PurchaseOrder[]
+  goodsReceivedNotes       GoodsReceivedNote[]
+  paymentRuns              PaymentRun[]
+  customers                Customer[]
+  arReceipts               ARReceipt[]
+  budgetDefinitions        BudgetDefinition[]
+  connectorMappings        ConnectorMapping[]
+  importLogs               ImportLog[]
+  interfaceDefinitions     InterfaceDefinition[]
+  pmsStatistics            PMSStatistic[]
+  bankStatements           BankStatement[]
+  consolidationParentRuns  ConsolidationRun[]        @relation("ConsolidationParent")
+  consolidationEntityRuns  ConsolidationRunEntity[]  @relation("ConsolidationEntity")
+  journalTypes             JournalType[]
+  recurringJournals        RecurringJournal[]
+  accountTypeDefinitions   AccountTypeDefinition[]
+  ledgerSetups             LedgerSetup[]
+  processLocks             ProcessLock[]
+  periodCloseStatuses      PeriodCloseStatus[]
+  analysisDimensions       AnalysisDimension[]
+  allocationDefinitions    AllocationDefinition[]
+  fixedAssets              FixedAsset[]
+  assetCategories          AssetCategory[]
+  depreciationTables       DepreciationTable[]
+  authorizationStages      AuthorizationStage[]
+  authorizationTeams       AuthorizationTeam[]
+  authorizationDelegations AuthorizationDelegation[]
+  rejectionCodes           RejectionCode[]
+  authorizationSets        AuthorizationSet[]
+  journalAuthorizations    JournalAuthorization[]
 
   @@index([parentId])
   @@map("entities")
@@ -330,18 +358,23 @@ model User {
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
-  entities              EntityUser[]
-  roles                 UserRole[]
-  createdJournals       Journal[]              @relation("JournalCreatedBy")
-  approvedJournals      Journal[]              @relation("JournalApprovedBy")
-  journalApprovals      JournalApproval[]
-  auditEvents           AuditEvent[]
-  loginAudits           LoginAudit[]
-  recurringJournals     RecurringJournal[]     @relation("RecurringJournalCreatedBy")
-  processLocks          ProcessLock[]
-  periodCloseStatuses   PeriodCloseStatus[]
-  allocationDefinitions AllocationDefinition[] @relation("AllocationCreatedBy")
-  fixedAssets           FixedAsset[]           @relation("AssetCreatedBy")
+  entities                     EntityUser[]
+  roles                        UserRole[]
+  createdJournals              Journal[]                 @relation("JournalCreatedBy")
+  approvedJournals             Journal[]                 @relation("JournalApprovedBy")
+  journalApprovals             JournalApproval[]
+  auditEvents                  AuditEvent[]
+  loginAudits                  LoginAudit[]
+  recurringJournals            RecurringJournal[]        @relation("RecurringJournalCreatedBy")
+  processLocks                 ProcessLock[]
+  periodCloseStatuses          PeriodCloseStatus[]
+  allocationDefinitions        AllocationDefinition[]    @relation("AllocationCreatedBy")
+  fixedAssets                  FixedAsset[]              @relation("AssetCreatedBy")
+  authorizationTeamMembers     AuthorizationTeamMember[]
+  authorizationDelegationsFrom AuthorizationDelegation[] @relation("DelegationFrom")
+  authorizationDelegationsTo   AuthorizationDelegation[] @relation("DelegationTo")
+  authorizationSetsCreated     AuthorizationSet[]        @relation("AuthSetCreatedBy")
+  journalAuthDecisions         JournalAuthorization[]    @relation("AuthDecidedBy")
 
   @@map("users")
 }
@@ -516,29 +549,32 @@ model Account {
 // ── Journal Type (configurable per-entity) ─────────────────────────────────
 
 model JournalType {
-  id                  String          @id @default(uuid())
-  entityId            String          @map("entity_id")
-  code                String          @db.VarChar(10)
-  name                String          @db.VarChar(100)
-  description         String?         @db.VarChar(500)
+  id                    String          @id @default(uuid())
+  entityId              String          @map("entity_id")
+  code                  String          @db.VarChar(10)
+  name                  String          @db.VarChar(100)
+  description           String?         @db.VarChar(500)
   /// Which JournalSource values are allowed for this type (empty = unrestricted)
-  allowedSources      JournalSource[] @default([]) @map("allowed_sources")
+  allowedSources        JournalSource[] @default([]) @map("allowed_sources")
   /// Which account type codes can appear on lines (empty = unrestricted)
-  allowedAccountTypes String[]        @default([]) @map("allowed_account_types")
+  allowedAccountTypes   String[]        @default([]) @map("allowed_account_types")
   /// Prefix for auto-numbering (e.g. "RV" → RV-2026-0001)
-  numberPrefix        String          @map("number_prefix") @db.VarChar(10)
+  numberPrefix          String          @map("number_prefix") @db.VarChar(10)
   /// Auto-reverse in the next open period on posting
-  autoReverse         Boolean         @default(false) @map("auto_reverse")
+  autoReverse           Boolean         @default(false) @map("auto_reverse")
   /// Whether journals of this type require debit/credit balance (false for statistical)
-  requireBalance      Boolean         @default(true) @map("require_balance")
-  isActive            Boolean         @default(true) @map("is_active")
+  requireBalance        Boolean         @default(true) @map("require_balance")
+  /// Whether journals of this type require multi-stage authorization before posting
+  authorizationRequired Boolean         @default(false) @map("authorization_required")
+  isActive              Boolean         @default(true) @map("is_active")
   /// Auto-increment counter for this type's numbering (per entity)
-  nextNumber          Int             @default(1) @map("next_number")
-  createdAt           DateTime        @default(now()) @map("created_at")
-  updatedAt           DateTime        @updatedAt @map("updated_at")
+  nextNumber            Int             @default(1) @map("next_number")
+  createdAt             DateTime        @default(now()) @map("created_at")
+  updatedAt             DateTime        @updatedAt @map("updated_at")
 
-  entity   Entity    @relation(fields: [entityId], references: [id])
-  journals Journal[]
+  entity              Entity               @relation(fields: [entityId], references: [id])
+  journals            Journal[]
+  authorizationStages AuthorizationStage[]
 
   @@unique([entityId, code])
   @@map("journal_types")
@@ -609,31 +645,38 @@ model RecurringJournalLine {
 }
 
 model Journal {
-  id                 String            @id @default(uuid())
-  entityId           String            @map("entity_id")
-  periodId           String            @map("period_id")
-  journalTypeId      String?           @map("journal_type_id")
-  reference          String?
-  description        String?
-  source             JournalSource
-  status             JournalStatus     @default(DRAFT)
-  postedAt           DateTime?         @map("posted_at")
-  functionalCurrency String            @map("functional_currency")
-  createdById        String            @map("created_by")
-  approvedById       String?           @map("approved_by")
-  createdAt          DateTime          @default(now()) @map("created_at")
-  updatedAt          DateTime          @updatedAt @map("updated_at")
-  entity             Entity            @relation(fields: [entityId], references: [id])
-  period             Period            @relation(fields: [periodId], references: [id])
-  journalType        JournalType?      @relation(fields: [journalTypeId], references: [id])
-  createdBy          User              @relation("JournalCreatedBy", fields: [createdById], references: [id])
-  approvedBy         User?             @relation("JournalApprovedBy", fields: [approvedById], references: [id])
-  lines              JournalLine[]
-  approvals          JournalApproval[]
+  id                    String                 @id @default(uuid())
+  entityId              String                 @map("entity_id")
+  periodId              String                 @map("period_id")
+  journalTypeId         String?                @map("journal_type_id")
+  reference             String?
+  description           String?
+  source                JournalSource
+  status                JournalStatus          @default(DRAFT)
+  postedAt              DateTime?              @map("posted_at")
+  functionalCurrency    String                 @map("functional_currency")
+  createdById           String                 @map("created_by")
+  approvedById          String?                @map("approved_by")
+  /// Current authorization stage sequence order (null = not in authorization workflow)
+  currentAuthStageOrder Int?                   @map("current_auth_stage_order")
+  /// Authorization set this journal belongs to (for batch approval)
+  authorizationSetId    String?                @map("authorization_set_id")
+  createdAt             DateTime               @default(now()) @map("created_at")
+  updatedAt             DateTime               @updatedAt @map("updated_at")
+  entity                Entity                 @relation(fields: [entityId], references: [id])
+  period                Period                 @relation(fields: [periodId], references: [id])
+  journalType           JournalType?           @relation(fields: [journalTypeId], references: [id])
+  createdBy             User                   @relation("JournalCreatedBy", fields: [createdById], references: [id])
+  approvedBy            User?                  @relation("JournalApprovedBy", fields: [approvedById], references: [id])
+  authorizationSet      AuthorizationSet?      @relation(fields: [authorizationSetId], references: [id])
+  lines                 JournalLine[]
+  approvals             JournalApproval[]
+  authorizations        JournalAuthorization[]
 
   @@index([entityId, periodId, status])
   @@index([entityId, createdAt])
   @@index([entityId, journalTypeId])
+  @@index([entityId, authorizationSetId])
   @@map("journals")
 }
 
@@ -1849,6 +1892,8 @@ model LedgerSetup {
   fullYearDepreciationFirstYear Boolean            @default(false) @map("full_year_depreciation_first_year")
   /// Subtract residual/final value before calculating depreciation
   excludeFinalValueFromDepn     Boolean            @default(true) @map("exclude_final_value_from_depn")
+  /// Require multi-stage authorization for journal posting (global default, overridden by JournalType)
+  authorizationRequired         Boolean            @default(false) @map("authorization_required")
   createdAt                     DateTime           @default(now()) @map("created_at")
   updatedAt                     DateTime           @updatedAt @map("updated_at")
 
@@ -2138,4 +2183,157 @@ model DepreciationTable {
 
   @@unique([entityId, code])
   @@map("depreciation_tables")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Multi-stage Authorization Workflow (spec Module 4 — Authorization Facility)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model AuthorizationStage {
+  id                 String             @id @default(uuid())
+  entityId           String             @map("entity_id")
+  /// Unique stage code within entity (e.g. "STAGE-1", "FINAL")
+  stageCode          String             @map("stage_code") @db.VarChar(20)
+  stageName          String             @map("stage_name") @db.VarChar(100)
+  /// Sequence order — stage 1 must approve before stage 2 sees the transaction
+  stageOrder         Int                @map("stage_order")
+  /// Number of approvals from the team needed to advance this stage (default 1 = any member)
+  requiredApprovers  Int                @default(1) @map("required_approvers")
+  /// Automatically advance to next stage after required approvals met
+  autoAdvance        Boolean            @default(true) @map("auto_advance")
+  /// Where a rejection returns the transaction to
+  rejectionReturnsTo RejectionReturnsTo @default(ORIGINATOR) @map("rejection_returns_to")
+  /// If rejectionReturnsTo = SPECIFIC_STAGE, which stage to return to
+  returnToStageId    String?            @map("return_to_stage_id")
+  /// Optional: only applies to this journal type (null = global for entity)
+  journalTypeId      String?            @map("journal_type_id")
+  /// Optional: only applies when journal amount >= this threshold
+  amountThreshold    Decimal?           @map("amount_threshold") @db.Decimal(18, 4)
+  /// Which team can approve at this stage
+  userTeamId         String             @map("user_team_id")
+  isActive           Boolean            @default(true) @map("is_active")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+
+  entity                Entity                 @relation(fields: [entityId], references: [id])
+  journalType           JournalType?           @relation(fields: [journalTypeId], references: [id])
+  userTeam              AuthorizationTeam      @relation(fields: [userTeamId], references: [id])
+  returnToStage         AuthorizationStage?    @relation("StageReturnTo", fields: [returnToStageId], references: [id])
+  stagesReturningHere   AuthorizationStage[]   @relation("StageReturnTo")
+  journalAuthorizations JournalAuthorization[]
+
+  @@unique([entityId, stageCode])
+  @@index([entityId, journalTypeId, stageOrder])
+  @@map("authorization_stages")
+}
+
+model AuthorizationTeam {
+  id        String   @id @default(uuid())
+  entityId  String   @map("entity_id")
+  code      String   @db.VarChar(20)
+  name      String   @db.VarChar(100)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  entity      Entity                    @relation(fields: [entityId], references: [id])
+  members     AuthorizationTeamMember[]
+  stages      AuthorizationStage[]
+  delegations AuthorizationDelegation[]
+
+  @@unique([entityId, code])
+  @@map("authorization_teams")
+}
+
+model AuthorizationTeamMember {
+  id     String @id @default(uuid())
+  teamId String @map("team_id")
+  userId String @map("user_id")
+
+  team AuthorizationTeam @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User              @relation(fields: [userId], references: [id])
+
+  @@unique([teamId, userId])
+  @@map("authorization_team_members")
+}
+
+model AuthorizationDelegation {
+  id          String   @id @default(uuid())
+  entityId    String   @map("entity_id")
+  /// User granting their authority
+  delegatorId String   @map("delegator_id")
+  /// User receiving delegated authority
+  delegateId  String   @map("delegate_id")
+  /// Team scope for the delegation
+  teamId      String   @map("team_id")
+  validFrom   DateTime @map("valid_from") @db.Date
+  validTo     DateTime @map("valid_to") @db.Date
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  entity    Entity            @relation(fields: [entityId], references: [id])
+  delegator User              @relation("DelegationFrom", fields: [delegatorId], references: [id])
+  delegate  User              @relation("DelegationTo", fields: [delegateId], references: [id])
+  team      AuthorizationTeam @relation(fields: [teamId], references: [id])
+
+  @@index([entityId, delegateId, isActive])
+  @@map("authorization_delegations")
+}
+
+model RejectionCode {
+  id          String   @id @default(uuid())
+  entityId    String   @map("entity_id")
+  code        String   @db.VarChar(20)
+  description String   @db.VarChar(255)
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  entity                Entity                 @relation(fields: [entityId], references: [id])
+  journalAuthorizations JournalAuthorization[]
+
+  @@unique([entityId, code])
+  @@map("rejection_codes")
+}
+
+model AuthorizationSet {
+  id          String                 @id @default(uuid())
+  entityId    String                 @map("entity_id")
+  name        String                 @db.VarChar(200)
+  status      AuthorizationSetStatus @default(OPEN)
+  createdById String                 @map("created_by")
+  createdAt   DateTime               @default(now()) @map("created_at")
+  updatedAt   DateTime               @updatedAt @map("updated_at")
+
+  entity    Entity    @relation(fields: [entityId], references: [id])
+  createdBy User      @relation("AuthSetCreatedBy", fields: [createdById], references: [id])
+  journals  Journal[]
+
+  @@index([entityId, status])
+  @@map("authorization_sets")
+}
+
+model JournalAuthorization {
+  id              String                      @id @default(uuid())
+  entityId        String                      @map("entity_id")
+  journalId       String                      @map("journal_id")
+  stageId         String                      @map("stage_id")
+  /// Denormalized stage order for efficient query
+  stageOrder      Int                         @map("stage_order")
+  status          AuthorizationDecisionStatus @default(PENDING)
+  decidedById     String?                     @map("decided_by")
+  rejectionCodeId String?                     @map("rejection_code_id")
+  comments        String?
+  decidedAt       DateTime?                   @map("decided_at")
+  createdAt       DateTime                    @default(now()) @map("created_at")
+
+  entity        Entity             @relation(fields: [entityId], references: [id])
+  journal       Journal            @relation(fields: [journalId], references: [id])
+  stage         AuthorizationStage @relation(fields: [stageId], references: [id])
+  decidedBy     User?              @relation("AuthDecidedBy", fields: [decidedById], references: [id])
+  rejectionCode RejectionCode?     @relation(fields: [rejectionCodeId], references: [id])
+
+  @@unique([journalId, stageId])
+  @@index([entityId, journalId, stageOrder])
+  @@index([entityId, status])
+  @@map("journal_authorizations")
 }
