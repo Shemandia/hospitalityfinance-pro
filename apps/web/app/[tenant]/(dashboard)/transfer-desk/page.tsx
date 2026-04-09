@@ -91,7 +91,7 @@ const NAV_SECTIONS: NavSection[] = [
     description: "TML mapping definitions and visual mapper",
     icon: Workflow,
     minRole: "designer",
-    status: "stub"
+    status: "ready"
   },
   {
     href: "/transfer-desk/lookups",
