@@ -48,6 +48,7 @@ enum JournalSource {
   FX_REVAL
   AP
   AR
+  COLLN
 }
 
 enum JournalStatus {

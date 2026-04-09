@@ -89,6 +89,7 @@ enum JournalSource {
   DEPRC // Fixed-asset depreciation batch
   ALLOC // Corporate allocation batch
   REVAL // FX revaluation (replaces FX_REVAL going forward; kept for backward compat)
+  COLLN // Payment collection run (AR direct debit / receipt batch)
 }
 
 enum JournalStatus {
@@ -664,6 +665,10 @@ model Journal {
   currentAuthStageOrder Int?                   @map("current_auth_stage_order")
   /// Authorization set this journal belongs to (for batch approval)
   authorizationSetId    String?                @map("authorization_set_id")
+  /// Auto-reversal flag: if true, a mirrored reversal journal is created in the next period
+  isAutoReversible      Boolean                @default(false) @map("is_auto_reversible")
+  /// Self-reference to the original journal this entry reverses (for auto-reversal tracking)
+  reversalOfId          String?                @map("reversal_of_id")
   createdAt             DateTime               @default(now()) @map("created_at")
   updatedAt             DateTime               @updatedAt @map("updated_at")
   entity                Entity                 @relation(fields: [entityId], references: [id])
@@ -672,6 +677,8 @@ model Journal {
   createdBy             User                   @relation("JournalCreatedBy", fields: [createdById], references: [id])
   approvedBy            User?                  @relation("JournalApprovedBy", fields: [approvedById], references: [id])
   authorizationSet      AuthorizationSet?      @relation(fields: [authorizationSetId], references: [id])
+  reversalOf            Journal?               @relation("JournalReversal", fields: [reversalOfId], references: [id])
+  reversals             Journal[]              @relation("JournalReversal")
   lines                 JournalLine[]
   approvals             JournalApproval[]
   authorizations        JournalAuthorization[]
@@ -948,6 +955,7 @@ model APPayment {
 model PaymentRun {
   id             String              @id @default(uuid())
   entityId       String              @map("entity_id")
+  profileId      String?             @map("profile_id")
   startDate      DateTime            @map("start_date")
   endDate        DateTime            @map("end_date")
   status         PaymentRunStatus
@@ -959,6 +967,7 @@ model PaymentRun {
   createdAt      DateTime            @default(now()) @map("created_at")
   updatedAt      DateTime            @updatedAt @map("updated_at")
   entity         Entity              @relation(fields: [entityId], references: [id])
+  profile        PaymentProfile?     @relation(fields: [profileId], references: [id])
   items          PaymentRunItem[]
   invoices       PaymentRunInvoice[]
   payments       APPayment[]
@@ -2339,4 +2348,88 @@ model JournalAuthorization {
   @@index([entityId, journalId, stageOrder])
   @@index([entityId, status])
   @@map("journal_authorizations")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Payment Profiles (spec Module 4 — PYP configurable payment/collection runs)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+enum PaymentProfileDirection {
+  PAY // AP — outgoing payments to suppliers
+  COLLECT // AR — incoming collections from customers (direct debit)
+}
+
+enum FXHandling {
+  ORIGINAL // Pay at original transaction FX rate
+  CURRENT_RATE // Pay at current (latest) FX rate
+}
+
+model PaymentProfile {
+  id                String                  @id @default(uuid())
+  entityId          String                  @map("entity_id")
+  name              String                  @db.VarChar(200)
+  direction         PaymentProfileDirection
+  paymentMethod     PaymentMethod           @map("payment_method")
+  /// Bank account ID for disbursement/receipt (string ref — no FK to allow flexible setup)
+  bankAccountId     String?                 @map("bank_account_id")
+  currency          String?                 @db.Char(3)
+  fxHandling        FXHandling              @default(ORIGINAL) @map("fx_handling")
+  /// Selection criteria: { supplierIds?, customerIds?, amountMin?, amountMax?, dueDateFrom?, dueDateTo?, accountTypes? }
+  selectionCriteria Json                    @default("{}") @map("selection_criteria")
+  /// Grouping rules: { consolidatePerSupplier: bool, consolidatePerCustomer: bool }
+  groupingRules     Json                    @default("{}") @map("grouping_rules")
+  /// Maximum total payment/collection amount per run
+  totalPaymentLimit Decimal?                @map("total_payment_limit") @db.Decimal(18, 4)
+  remittanceAdvice  Boolean                 @default(true) @map("remittance_advice")
+  isActive          Boolean                 @default(true) @map("is_active")
+  isSystem          Boolean                 @default(false) @map("is_system")
+  description       String?                 @db.VarChar(500)
+  createdAt         DateTime                @default(now()) @map("created_at")
+  updatedAt         DateTime                @updatedAt @map("updated_at")
+
+  entity      Entity       @relation(fields: [entityId], references: [id])
+  paymentRuns PaymentRun[]
+
+  @@index([entityId, direction, isActive])
+  @@map("payment_profiles")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Revaluation Profiles (spec Module 8 — LER ledger revaluation configuration)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+enum RevaluationRateType {
+  CLOSING
+  AVERAGE
+  CUSTOM
+}
+
+model RevaluationProfile {
+  id                String               @id @default(uuid())
+  entityId          String               @map("entity_id")
+  name              String               @db.VarChar(200)
+  /// Account type filter: ["ASSET","LIABILITY","EQUITY","REVENUE","EXPENSE"] or subset
+  accountTypeFilter Json                 @default("[]") @map("account_type_filter")
+  accountCodeFrom   String?              @map("account_code_from") @db.VarChar(15)
+  accountCodeTo     String?              @map("account_code_to") @db.VarChar(15)
+  /// Specific currency to revalue (NULL = all non-functional currencies)
+  currencyFilter    String?              @map("currency_filter") @db.Char(3)
+  rateType          RevaluationRateType  @default(CLOSING) @map("rate_type")
+  /// Account code for posting unrealized FX gains
+  gainAccountCode   String               @map("gain_account_code") @db.VarChar(15)
+  /// Account code for posting unrealized FX losses
+  lossAccountCode   String               @map("loss_account_code") @db.VarChar(15)
+  /// Auto-reverse the revaluation journal in the next period (standard IAS 21 practice)
+  autoReverse       Boolean              @default(true) @map("auto_reverse")
+  /// Whether to post revaluation entries or just produce a report
+  postDifferences   Boolean              @default(true) @map("post_differences")
+  isActive          Boolean              @default(true) @map("is_active")
+  description       String?              @db.VarChar(500)
+  createdAt         DateTime             @default(now()) @map("created_at")
+  updatedAt         DateTime             @updatedAt @map("updated_at")
+
+  entity Entity @relation(fields: [entityId], references: [id])
+
+  @@index([entityId, isActive])
+  @@map("revaluation_profiles")
 }
