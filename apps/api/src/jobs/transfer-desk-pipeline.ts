@@ -15,6 +15,14 @@
  */
 
 import { parse, write, type FsdSchema, type FsdRecordValue } from "@hfp/fsd-engine";
+import {
+  executeTransformation,
+  createSandbox,
+  BUILTIN_FUNCTIONS_SOURCE,
+  type TmlDefinition,
+  type TmlRecord,
+  type Sandbox
+} from "@hfp/tml-engine";
 import { GLService } from "../modules/gl/service.js";
 import { APService } from "../modules/ap/service.js";
 import { ARService } from "../modules/ar/service.js";
@@ -66,6 +74,11 @@ export type ProfileWithRelations = {
   savePayload: "NONE" | "INPUT" | "OUTPUT" | "BOTH";
   sourceFormat: { id: string; fsdXml: string; classification: string } | null;
   targetFormat: { id: string; fsdXml: string; classification: string } | null;
+  transformation: {
+    id: string;
+    rulesJson: unknown;
+    functionsJson: unknown;
+  } | null;
 };
 
 export type PipelineResult = {
@@ -147,20 +160,54 @@ export async function executeImport(
     };
   }
 
-  // 4. Map parsed records to target service inputs
+  // 4. Apply TML transformation (if profile has a transformation)
+  let recordsForMapping: FsdRecordValue[] = parseResult.records;
+
+  if (profile.transformation?.rulesJson) {
+    const tmlResult = applyTransformation(profile.transformation, parseResult.records);
+
+    // Log transformation errors
+    if (tmlResult.errors.length > 0) {
+      const logData = tmlResult.errors.map((e) => ({
+        executionId,
+        recordIndex: e.recordIndex,
+        status: "FAILED" as const,
+        sourceData: parseResult.records[e.recordIndex] as any,
+        transformedData: null,
+        errorCode: "TRANSFORM_ERROR",
+        errorMessage: `[${e.ruleType}] ${e.message}`
+      }));
+      await ctx.db.transferExecutionLog.createMany({ data: logData });
+    }
+
+    // If ALL records failed transformation, fail the execution
+    if (tmlResult.succeeded === 0 && tmlResult.failed > 0) {
+      return {
+        recordsTotal: parseResult.records.length,
+        recordsSucceeded: 0,
+        recordsFailed: tmlResult.failed,
+        errorMessage: `All ${tmlResult.failed} records failed transformation: ${tmlResult.errors[0]?.message ?? "unknown error"}`
+      };
+    }
+
+    // Use transformed records for mapping (cast back to FsdRecordValue)
+    recordsForMapping = tmlResult.records as FsdRecordValue[];
+  }
+
+  // 5. Map parsed records to target service inputs
   const targetParams: TargetParams = {
     ...(profile.targetParams as TargetParams | null),
     entityId: String(runtimeParams.entityId ?? ""),
     periodId: String(runtimeParams.periodId ?? (profile.targetParams as any)?.periodId ?? "")
   };
 
-  const mapResult = mapRecordsToTarget(profile.targetComponent, parseResult.records, targetParams);
+  const mapResult = mapRecordsToTarget(profile.targetComponent, recordsForMapping, targetParams);
 
   if (!mapResult.ok) {
     return failExecution(ctx, executionId, mapResult.code, mapResult.message);
   }
 
-  // 5. Write to target component
+  // 6. Write to target component
   const result = await runWithContext(
     {
       tenantSlug: ctx.tenantSlug,
@@ -171,7 +218,7 @@ export async function executeImport(
     () => writeToTarget(ctx, executionId, profile, mapResult, parseResult.records, targetParams)
   );
 
-  // 6. Save payloads if configured
+  // 7. Save payloads if configured
   if (profile.savePayload === "INPUT" || profile.savePayload === "BOTH") {
     const inputKey = `${ctx.tenantSlug}/${executionId}/input.txt`;
     await ctx.storage.write(inputKey, fileContent).catch(() => {});
@@ -542,6 +589,38 @@ export async function executeProcess(
     "UNSUPPORTED_PROCESS",
     `Process profile "${profile.name}" (${profile.targetComponent ?? "unknown"}) is not yet supported. Process execution will be available in a future sprint.`
   );
+}
+
+// ── TML transformation ──────────────────────────────────────────────────────
+
+function applyTransformation(
+  transformation: { rulesJson: unknown; functionsJson: unknown },
+  records: FsdRecordValue[]
+): ReturnType<typeof executeTransformation> {
+  // Parse TML definition from DB JSONB columns
+  const definition: TmlDefinition = {
+    rules: Array.isArray(transformation.rulesJson)
+      ? (transformation.rulesJson as TmlDefinition["rules"])
+      : ((transformation.rulesJson as any)?.rules ?? []),
+    functions: Array.isArray(transformation.functionsJson)
+      ? (transformation.functionsJson as TmlDefinition["functions"])
+      : undefined
+  };
+
+  // Create sandbox if there are transform rules or user functions
+  const hasTransformRules = definition.rules.some((r) => r.type === "transform");
+  const hasUserFunctions = (definition.functions?.length ?? 0) > 0;
+  let sandbox: Sandbox | null = null;
+
+  if (hasTransformRules || hasUserFunctions) {
+    sandbox = createSandbox(definition.functions ?? [], BUILTIN_FUNCTIONS_SOURCE);
+  }
+
+  try {
+    return executeTransformation(definition, records as TmlRecord[], sandbox);
+  } finally {
+    sandbox?.dispose();
+  }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

@@ -124,7 +124,10 @@ async function processJob(
       where: { id: profileId },
       include: {
         sourceFormat: true,
-        targetFormat: true
+        targetFormat: true,
+        transformation: {
+          select: { id: true, rulesJson: true, functionsJson: true }
+        }
       }
     });
   } catch (err) {
