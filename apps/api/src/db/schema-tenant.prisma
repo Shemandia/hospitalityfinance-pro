@@ -138,6 +138,9 @@ enum ReportType {
   BALANCE_SHEET
   CASHFLOW
   CUSTOM
+  FAL
+  FSL
+  FTL
 }
 
 enum ReportRunStatus {

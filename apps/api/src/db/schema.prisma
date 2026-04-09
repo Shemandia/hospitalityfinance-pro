@@ -75,6 +75,9 @@ enum ReportType {
   BALANCE_SHEET
   CASHFLOW
   CUSTOM
+  FAL
+  FSL
+  FTL
 }
 
 enum ReportRunStatus {
@@ -184,6 +187,7 @@ model Tenant {
   databaseUrl        String             @map("database_url") // PostgreSQL connection string for this tenant
   domain             String?            @unique // Custom domain, e.g. "finance.marriott.com"
   adminEmail         String             @map("admin_email") // Primary contact
+  countryCode        String             @default("") @map("country_code") @db.VarChar(2) // ISO 3166-1 alpha-2
   plan               String             @default("standard") // standard, enterprise, trial
   maxProperties      Int                @default(10) @map("max_properties")
   isActive           Boolean            @default(true) @map("is_active")

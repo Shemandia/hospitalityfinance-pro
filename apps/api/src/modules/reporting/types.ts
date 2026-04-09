@@ -7,7 +7,16 @@ export const createReportRunSchema = z.object({
 
 export const createReportDefinitionSchema = z.object({
   name: z.string().min(1).max(200),
-  type: z.enum(["USALI_PL", "TRIAL_BALANCE", "BALANCE_SHEET", "CASHFLOW", "CUSTOM"]),
+  type: z.enum([
+    "USALI_PL",
+    "TRIAL_BALANCE",
+    "BALANCE_SHEET",
+    "CASHFLOW",
+    "CUSTOM",
+    "FAL",
+    "FSL",
+    "FTL"
+  ]),
   template: z.object({
     report: z.string(),
     sections: z.array(z.string()).optional(),
