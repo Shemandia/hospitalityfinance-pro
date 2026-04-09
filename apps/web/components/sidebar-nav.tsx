@@ -32,6 +32,7 @@ import {
   ChevronDown,
   Tags,
   SlidersHorizontal,
+  Package,
   type LucideIcon
 } from "lucide-react";
 
@@ -87,7 +88,8 @@ const navGroups: NavGroup[] = [
       { href: "/reports/cashflow", label: "Cash Flow", icon: Activity },
       { href: "/reports/builder", label: "Report Builder", icon: SlidersHorizontal },
       { href: "/bank/reconciliation", label: "Bank Recon", icon: Landmark },
-      { href: "/allocations", label: "Allocations", icon: SlidersHorizontal }
+      { href: "/allocations", label: "Allocations", icon: SlidersHorizontal },
+      { href: "/fixed-assets", label: "Fixed Assets", icon: Package }
     ]
   },
   {
