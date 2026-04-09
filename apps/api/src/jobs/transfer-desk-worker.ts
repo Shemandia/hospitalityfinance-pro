@@ -39,6 +39,7 @@ import {
   type ProfileWithRelations
 } from "./transfer-desk-pipeline.js";
 import { getStorageBackend } from "./transfer-desk-storage.js";
+import { executeAutomation, type AutomationStep } from "./automation-engine.js";
 
 // ── Per-tenant worker cache ────────────────────────────────────────────────
 
@@ -92,8 +93,43 @@ async function processJob(
   tenantSlug: string,
   tenantDbUrl: string
 ): Promise<{ executionId: string; status: "COMPLETED" | "FAILED"; recordsTotal: number }> {
-  const { executionId, profileId } = job.data;
+  const { executionId, profileId, automationId } = job.data;
   const prisma = getTenantClient(tenantSlug, tenantDbUrl) as any;
+
+  // ── Automation job (scheduled via repeatable) ──────────────────────────
+  // If this is an automation trigger from the scheduler (empty executionId),
+  // load the automation and run all its steps via the automation engine.
+  if (automationId && !executionId) {
+    console.log(`[TransferDeskWorker:${tenantSlug}] Running automation ${automationId}`);
+
+    const automation = await prisma.transferAutomation.findUnique({
+      where: { id: automationId },
+      include: {
+        steps: { orderBy: { stepOrder: "asc" } }
+      }
+    });
+
+    if (!automation) {
+      throw new Error(`Automation ${automationId} not found`);
+    }
+
+    const result = await executeAutomation(
+      {
+        db: prisma,
+        tenantSlug,
+        tenantDbUrl,
+        triggeredBy: "scheduler"
+      },
+      automationId,
+      automation.steps as AutomationStep[]
+    );
+
+    return {
+      executionId: `automation:${automationId}`,
+      status: result.status === "COMPLETED" ? "COMPLETED" : "FAILED",
+      recordsTotal: result.stepsTotal
+    };
+  }
 
   console.log(
     `[TransferDeskWorker:${tenantSlug}] Picked up execution ${executionId} (profile ${profileId})`
