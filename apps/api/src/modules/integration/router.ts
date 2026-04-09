@@ -1163,6 +1163,63 @@ export async function registerIntegrationRouter(app: FastifyInstance): Promise<v
         return errors;
       }
 
+      // ── Transfer Desk: Format CRUD (TD-API-030+) ──────────────────────────
+
+      // TD-API-030 — GET /transfer-desk/formats (list)
+      router.get("/transfer-desk/formats", async (request, reply) => {
+        try {
+          const { classification } = request.query as { classification?: string };
+          const db = prisma as unknown as PrismaClient;
+          const data = await db.transferFormat.findMany({
+            where: {
+              ...(classification ? { classification: classification as any } : {})
+            },
+            select: {
+              id: true,
+              name: true,
+              description: true,
+              classification: true,
+              isSystem: true,
+              isValid: true,
+              createdAt: true,
+              updatedAt: true,
+              _count: {
+                select: {
+                  sourceProfiles: true,
+                  targetProfiles: true
+                }
+              }
+            },
+            orderBy: [{ name: "asc" }]
+          });
+          return reply.send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      // TD-API-031 — GET /transfer-desk/formats/:id (detail with FSD)
+      router.get<{ Params: { id: string } }>(
+        "/transfer-desk/formats/:id",
+        async (request, reply) => {
+          try {
+            const db = prisma as unknown as PrismaClient;
+            const data = await db.transferFormat.findUnique({
+              where: { id: request.params.id }
+            });
+            if (!data) {
+              return reply.code(404).send({
+                data: null,
+                errors: [{ code: "NOT_FOUND", message: "Format not found" }]
+              });
+            }
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
       // TD-API-009 — GET /transfer-desk/profiles (list)
       router.get("/transfer-desk/profiles", async (request, reply) => {
         try {
