@@ -2274,14 +2274,16 @@ export async function registerIntegrationRouter(app: FastifyInstance): Promise<v
       // TD-API-009 — GET /transfer-desk/profiles (list)
       router.get("/transfer-desk/profiles", async (request, reply) => {
         try {
-          const { profileType, isActive } = request.query as {
+          const { profileType, isActive, isSystem } = request.query as {
             profileType?: string;
             isActive?: string;
+            isSystem?: string;
           };
           const data = await (prisma as unknown as PrismaClient).transferProfile.findMany({
             where: {
               ...(profileType ? { profileType: profileType as any } : {}),
-              ...(isActive !== undefined ? { isActive: isActive === "true" } : {})
+              ...(isActive !== undefined ? { isActive: isActive === "true" } : {}),
+              ...(isSystem !== undefined ? { isSystem: isSystem === "true" } : {})
             },
             orderBy: [{ profileType: "asc" }, { name: "asc" }],
             include: {

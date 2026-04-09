@@ -7,18 +7,17 @@
  *   - Left sidebar navigation to all TD sections (Profiles, Automations, etc.)
  *   - Quick-actions toolbar (New profile, Run profile, Browse files)
  *   - Recent Executions widget
- *   - System Profiles cards (read-only pre-built profiles for Opera, Jana, Bank)
+ *   - System Profiles cards (loaded from DB — isSystem=true profiles)
  *
  * RBAC: section visibility is gated by useUserRole's canTransferDesk* helpers.
- *
- * Note: most subroutes (profiles, automations, formats, transformations,
- * lookups) are not yet implemented. Their nav links resolve to a placeholder
- * "Coming soon" view until the respective wizards/designers are built.
  */
 
 import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
 import { useUserRole } from "../../../../components/use-user-role";
+import { useApiContext } from "../../../../components/use-api-context";
 import { useTenantHref } from "../../../../hooks/use-tenant-router";
+import { listTransferProfiles, type TransferProfileSummary } from "../../../../lib/gl-api";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../../components/ui/card";
 import { Badge } from "../../../../components/ui/badge";
 import { Button } from "../../../../components/ui/button";
@@ -37,8 +36,10 @@ import {
   Building2,
   Hotel,
   Landmark,
+  CreditCard,
   ArrowRight,
-  Lock
+  Lock,
+  Loader2
 } from "lucide-react";
 
 type NavSection = {
@@ -127,53 +128,52 @@ const NAV_SECTIONS: NavSection[] = [
   }
 ];
 
-type SystemProfile = {
-  name: string;
-  vendor: string;
-  description: string;
-  fileTypes: string[];
+/** Map sourceComponent values to icons and colors */
+function getProfileIcon(sourceComponent: string | null): {
   icon: React.ComponentType<{ className?: string }>;
   iconColor: string;
-};
-
-const SYSTEM_PROFILES: SystemProfile[] = [
-  {
-    name: "Opera PMS Revenue",
-    vendor: "Oracle Hospitality",
-    description: "Daily night-audit revenue posting from Opera Cloud (EZZRV file)",
-    fileTypes: ["EZZRV", "EZZCL", "EZZMS", "EZZDS"],
-    icon: Hotel,
-    iconColor: "text-blue-600 bg-blue-50"
-  },
-  {
-    name: "Sky Jana Purchasing Vouchers",
-    vendor: "Sky Jana MMS",
-    description: "AP invoice headers from Sky Jana procurement (whole-integer TZS)",
-    fileTypes: ["SAF (.txt)"],
-    icon: Building2,
-    iconColor: "text-emerald-600 bg-emerald-50"
-  },
-  {
-    name: "Sky Jana Internal Movements",
-    vendor: "Sky Jana MMS",
-    description: "Inter-store transfer journals (÷1000 implied decimals)",
-    fileTypes: ["SAF (.txt)"],
-    icon: Building2,
-    iconColor: "text-emerald-600 bg-emerald-50"
-  },
-  {
-    name: "Bank Statement (MT940)",
-    vendor: "Generic SWIFT MT940",
-    description: "Bank statement import for reconciliation against GL bank accounts",
-    fileTypes: ["MT940 (.sta)"],
-    icon: Landmark,
-    iconColor: "text-amber-600 bg-amber-50"
+} {
+  switch (sourceComponent) {
+    case "OPERA_CLOUD":
+      return { icon: Hotel, iconColor: "text-blue-600 bg-blue-50" };
+    case "SKY_JANA_MMS":
+      return { icon: Building2, iconColor: "text-emerald-600 bg-emerald-50" };
+    case "SIMPHONY_POS":
+      return { icon: CreditCard, iconColor: "text-purple-600 bg-purple-50" };
+    case "SWIFT_MT940":
+      return { icon: Landmark, iconColor: "text-amber-600 bg-amber-50" };
+    default:
+      return { icon: Database, iconColor: "text-slate-600 bg-slate-50" };
   }
-];
+}
+
+/** Map sourceComponent to vendor display name */
+function getVendorName(sourceComponent: string | null): string {
+  switch (sourceComponent) {
+    case "OPERA_CLOUD":
+      return "Oracle Hospitality";
+    case "SKY_JANA_MMS":
+      return "Sky Jana MMS";
+    case "SIMPHONY_POS":
+      return "Oracle Simphony";
+    case "SWIFT_MT940":
+      return "Generic SWIFT MT940";
+    default:
+      return "Custom";
+  }
+}
 
 export default function TransferDeskLandingPage() {
   const tenantHref = useTenantHref();
   const role = useUserRole();
+  const apiCtx = useApiContext();
+
+  const { data: profileData, isLoading: profilesLoading } = useQuery({
+    queryKey: ["transfer-profiles", "system"],
+    queryFn: () => listTransferProfiles(apiCtx, { isSystem: true, isActive: true })
+  });
+
+  const systemProfiles: TransferProfileSummary[] = profileData?.data ?? [];
 
   function canSee(min: NavSection["minRole"]): boolean {
     switch (min) {
@@ -286,42 +286,58 @@ export default function TransferDeskLandingPage() {
             <h2 className="text-sm font-semibold text-slate-700">System Profiles</h2>
             <span className="text-[11px] text-slate-400">Pre-built integrations · read-only</span>
           </div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            {SYSTEM_PROFILES.map((p) => {
-              const Icon = p.icon;
-              return (
-                <Card key={p.name} className="hover:border-slate-300 transition-colors">
-                  <CardContent className="p-4 flex gap-3">
-                    <div
-                      className={`h-10 w-10 rounded-lg flex items-center justify-center shrink-0 ${p.iconColor}`}
-                    >
-                      <Icon className="h-5 w-5" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <h3 className="font-semibold text-sm text-slate-800 truncate">{p.name}</h3>
-                        <Badge variant="secondary" className="text-[10px] shrink-0">
-                          system
-                        </Badge>
+          {profilesLoading ? (
+            <div className="flex items-center justify-center py-12 text-muted-foreground gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading system profiles...
+            </div>
+          ) : systemProfiles.length === 0 ? (
+            <div className="text-center py-8 text-sm text-slate-400">
+              No system profiles found. Run the seed script to populate them.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              {systemProfiles.map((p) => {
+                const { icon: Icon, iconColor } = getProfileIcon(p.sourceComponent);
+                const vendor = getVendorName(p.sourceComponent);
+                return (
+                  <Card key={p.id} className="hover:border-slate-300 transition-colors">
+                    <CardContent className="p-4 flex gap-3">
+                      <div
+                        className={`h-10 w-10 rounded-lg flex items-center justify-center shrink-0 ${iconColor}`}
+                      >
+                        <Icon className="h-5 w-5" />
                       </div>
-                      <p className="text-[11px] text-slate-400 mt-0.5">{p.vendor}</p>
-                      <p className="text-xs text-slate-600 mt-1.5 line-clamp-2">{p.description}</p>
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        {p.fileTypes.map((ft) => (
-                          <span
-                            key={ft}
-                            className="inline-block rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono text-slate-600"
-                          >
-                            {ft}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <h3 className="font-semibold text-sm text-slate-800 truncate">
+                            {p.name}
+                          </h3>
+                          <Badge variant="secondary" className="text-[10px] shrink-0">
+                            system
+                          </Badge>
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-0.5">{vendor}</p>
+                        <p className="text-xs text-slate-600 mt-1.5 line-clamp-2">
+                          {p.description}
+                        </p>
+                        <div className="flex flex-wrap gap-1 mt-2">
+                          {p.sourceFormat && (
+                            <span className="inline-block rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono text-slate-600">
+                              {p.sourceFormat.name}
+                            </span>
+                          )}
+                          <span className="inline-block rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono text-slate-600">
+                            → {p.targetComponent ?? "GL_JOURNAL"}
                           </span>
-                        ))}
+                        </div>
                       </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* MVP notice */}

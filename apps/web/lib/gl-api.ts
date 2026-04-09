@@ -3039,6 +3039,7 @@ export type TransferProfileSummary = {
   transformationId: string | null;
   filterId: string | null;
   isValid: boolean;
+  isSystem: boolean;
   isActive: boolean;
   version: number;
   savePayload: "NONE" | "INPUT" | "OUTPUT" | "BOTH";
@@ -3080,11 +3081,12 @@ export type TransferProfileInput = {
 
 export function listTransferProfiles(
   context: ApiContext,
-  filters: { profileType?: TransferProfileType; isActive?: boolean } = {}
+  filters: { profileType?: TransferProfileType; isActive?: boolean; isSystem?: boolean } = {}
 ) {
   const q = new URLSearchParams();
   if (filters.profileType) q.set("profileType", filters.profileType);
   if (filters.isActive !== undefined) q.set("isActive", String(filters.isActive));
+  if (filters.isSystem !== undefined) q.set("isSystem", String(filters.isSystem));
   const qs = q.toString();
   return request<TransferProfileSummary[]>(
     context,
