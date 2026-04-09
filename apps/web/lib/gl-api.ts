@@ -2465,6 +2465,90 @@ export type TransferProfileType =
   | "INTERNAL_TRANSFER"
   | "EXTERNAL_TRANSFER";
 
+/** Hard-coded profile type definitions for the creation wizard */
+export const TRANSFER_PROFILE_TYPES: ReadonlyArray<{
+  value: TransferProfileType;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "IMPORT",
+    label: "Import",
+    description: "Read data from an external file or system and write it into an HFP component"
+  },
+  {
+    value: "EXPORT",
+    label: "Export",
+    description: "Extract data from an HFP component and write it to a file or external system"
+  },
+  {
+    value: "PROCESS",
+    label: "Process",
+    description: "Run an internal process against an HFP component (e.g. allocations, revaluations)"
+  },
+  {
+    value: "INTERNAL_TRANSFER",
+    label: "Internal Transfer",
+    description: "Move data between two HFP components within the same property"
+  },
+  {
+    value: "EXTERNAL_TRANSFER",
+    label: "External Transfer",
+    description: "Move data between an HFP component and an external system endpoint"
+  }
+] as const;
+
+// ────────────────────────────────────────────────────────────────────────────
+// Transfer Desk — Format types & client (TD-API-030..031)
+// ────────────────────────────────────────────────────────────────────────────
+
+export type FormatClassification =
+  | "DELIMITED"
+  | "SINGLE_FIXED"
+  | "MULTIPLE_FIXED"
+  | "OTHER_FLAT"
+  | "USER_XML"
+  | "SIMPLE_XML";
+
+export type TransferFormatSummary = {
+  id: string;
+  name: string;
+  description: string | null;
+  classification: FormatClassification;
+  isSystem: boolean;
+  isValid: boolean;
+  createdAt: string;
+  updatedAt: string;
+  _count?: { sourceProfiles: number; targetProfiles: number };
+};
+
+export type TransferFormatDetail = TransferFormatSummary & {
+  fsdXml: string;
+  guiState: unknown | null;
+  validationErrors: unknown | null;
+  createdById: string | null;
+};
+
+export function listTransferFormats(
+  context: ApiContext,
+  filters: { classification?: FormatClassification } = {}
+) {
+  const q = new URLSearchParams();
+  if (filters.classification) q.set("classification", filters.classification);
+  const qs = q.toString();
+  return request<TransferFormatSummary[]>(
+    context,
+    `/api/v1/integration/transfer-desk/formats${qs ? `?${qs}` : ""}`
+  );
+}
+
+export function getTransferFormat(context: ApiContext, formatId: string) {
+  return request<TransferFormatDetail>(
+    context,
+    `/api/v1/integration/transfer-desk/formats/${formatId}`
+  );
+}
+
 export type TransferProfileSummary = {
   id: string;
   name: string;
