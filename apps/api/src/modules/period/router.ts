@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "../../db/client.js";
 import { ZodError } from "zod";
 import { prisma } from "../../db/prisma.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
@@ -74,6 +74,17 @@ export async function registerPeriodRouter(app: FastifyInstance): Promise<void> 
           const entityId = requireEntityId(request.entityId);
           const query = periodListQuerySchema.parse(request.query);
           const data = await periodService.listPeriods(entityId, query);
+          return reply.send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      router.post<{ Params: { id: string } }>("/periods/:id/soft-close", async (request, reply) => {
+        try {
+          const entityId = requireEntityId(request.entityId);
+          const closedBy = requireUserId(request.user?.sub);
+          const data = await periodService.softClosePeriod(entityId, request.params.id, closedBy);
           return reply.send({ data, errors: [] });
         } catch (error) {
           return mapError(reply, error);

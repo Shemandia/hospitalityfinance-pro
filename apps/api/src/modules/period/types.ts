@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const periodListQuerySchema = z.object({
   year: z.coerce.number().int().optional(),
-  status: z.enum(["OPEN", "CLOSED", "LOCKED"]).optional()
+  status: z.enum(["OPEN", "SOFT_CLOSE", "CLOSED", "LOCKED"]).optional()
 });
 
 export const periodCreateSchema = z.object({
