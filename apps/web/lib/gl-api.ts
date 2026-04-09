@@ -2243,6 +2243,154 @@ export async function seedSystemReportDefinitions(context: ApiContext) {
   );
 }
 
+// ── Payment Profiles ────────────────────────────────────────────────────────
+
+export type PaymentProfileSummary = {
+  id: string;
+  entityId: string;
+  name: string;
+  direction: "PAY" | "COLLECT";
+  paymentMethod: string;
+  bankAccountId: string | null;
+  currency: string | null;
+  fxHandling: string;
+  selectionCriteria: Record<string, unknown>;
+  groupingRules: Record<string, unknown>;
+  totalPaymentLimit: number | null;
+  remittanceAdvice: boolean;
+  isActive: boolean;
+  isSystem: boolean;
+  description: string | null;
+  createdAt: string;
+};
+
+export async function getPaymentProfiles(context: ApiContext, direction?: "PAY" | "COLLECT") {
+  const qs = direction ? `?direction=${direction}` : "";
+  return request<PaymentProfileSummary[]>(context, `/api/v1/ap/payment-profiles${qs}`);
+}
+
+export async function getPaymentProfile(context: ApiContext, id: string) {
+  return request<PaymentProfileSummary>(context, `/api/v1/ap/payment-profiles/${id}`);
+}
+
+export async function createPaymentProfile(context: ApiContext, payload: Record<string, unknown>) {
+  return request<PaymentProfileSummary>(context, "/api/v1/ap/payment-profiles", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updatePaymentProfile(
+  context: ApiContext,
+  id: string,
+  payload: Record<string, unknown>
+) {
+  return request<PaymentProfileSummary>(context, `/api/v1/ap/payment-profiles/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function deletePaymentProfile(context: ApiContext, id: string) {
+  return request<null>(context, `/api/v1/ap/payment-profiles/${id}`, { method: "DELETE" });
+}
+
+export async function runCollectionRun(
+  context: ApiContext,
+  payload: { profileId: string; periodId: string; bankAccountId?: string; referencePrefix?: string }
+) {
+  return request<{ collectedCount: number; totalAmount: number; journalId: string | null }>(
+    context,
+    "/api/v1/ap/collection-runs",
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+}
+
+// ── Revaluation Profiles ────────────────────────────────────────────────────
+
+export type RevaluationProfileSummary = {
+  id: string;
+  entityId: string;
+  name: string;
+  accountTypeFilter: string[];
+  accountCodeFrom: string | null;
+  accountCodeTo: string | null;
+  currencyFilter: string | null;
+  rateType: string;
+  gainAccountCode: string;
+  lossAccountCode: string;
+  autoReverse: boolean;
+  postDifferences: boolean;
+  isActive: boolean;
+  description: string | null;
+  createdAt: string;
+};
+
+export type RevaluationResult = {
+  profileName: string;
+  periodName: string;
+  closingDate: string;
+  rateType: string;
+  totalGain: number;
+  totalLoss: number;
+  netGainLoss: number;
+  lines: Array<{
+    accountCode: string;
+    accountName: string;
+    currency: string;
+    originalFunctionalBalance: number;
+    revaluedFunctionalBalance: number;
+    difference: number;
+    fxRate: number;
+  }>;
+  journalId: string | null;
+  reversalJournalId: string | null;
+};
+
+export async function getRevaluationProfiles(context: ApiContext) {
+  return request<RevaluationProfileSummary[]>(context, "/api/v1/fx/revaluation-profiles");
+}
+
+export async function createRevaluationProfile(
+  context: ApiContext,
+  payload: Record<string, unknown>
+) {
+  return request<RevaluationProfileSummary>(context, "/api/v1/fx/revaluation-profiles", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateRevaluationProfile(
+  context: ApiContext,
+  id: string,
+  payload: Record<string, unknown>
+) {
+  return request<RevaluationProfileSummary>(context, `/api/v1/fx/revaluation-profiles/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function deleteRevaluationProfile(context: ApiContext, id: string) {
+  return request<null>(context, `/api/v1/fx/revaluation-profiles/${id}`, { method: "DELETE" });
+}
+
+export async function runLedgerRevaluation(
+  context: ApiContext,
+  payload: {
+    profileId: string;
+    periodId: string;
+    closingDate: string;
+    customRate?: number;
+  }
+) {
+  return request<RevaluationResult>(context, "/api/v1/fx/ledger-revaluation", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
 // ── Simphony POS ─────────────────────────────────────────────────────────────
 
 export async function runSimphonyImport(

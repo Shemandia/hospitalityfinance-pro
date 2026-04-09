@@ -1,11 +1,12 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "../../db/client.js";
 import { ZodError } from "zod";
 import { prisma } from "../../db/prisma.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
 import { requireRole } from "../../middleware/requireRole.js";
 import { requireWriteAccess } from "../../middleware/requireWriteAccess.js";
 import { APService, APServiceError } from "./service.js";
+import { PaymentProfileService, PaymentProfileServiceError } from "./payment-profile-service.js";
 import {
   apInvoiceCreateSchema,
   apInvoiceListQuerySchema,
@@ -15,8 +16,14 @@ import {
   supplierCreateSchema,
   supplierUpdateSchema
 } from "./types.js";
+import {
+  createPaymentProfileSchema,
+  updatePaymentProfileSchema,
+  runCollectionSchema
+} from "./payment-profile-types.js";
 
 const apService = new APService(prisma as unknown as PrismaClient);
+const paymentProfileService = new PaymentProfileService(prisma as unknown as PrismaClient);
 
 function mapError(reply: FastifyReply, error: unknown) {
   if (error instanceof ZodError) {
@@ -32,6 +39,13 @@ function mapError(reply: FastifyReply, error: unknown) {
   }
 
   if (error instanceof APServiceError) {
+    return reply.code(error.statusCode).send({
+      data: null,
+      errors: [{ code: error.code, message: error.message }]
+    });
+  }
+
+  if (error instanceof PaymentProfileServiceError) {
     return reply.code(error.statusCode).send({
       data: null,
       errors: [{ code: error.code, message: error.message }]
@@ -259,6 +273,16 @@ export async function registerAPRouter(app: FastifyInstance): Promise<void> {
         }
       });
 
+      router.delete<{ Params: { id: string } }>("/payment-runs/:id", async (request, reply) => {
+        try {
+          const entityId = requireEntityId(request.entityId);
+          const data = await apService.deletePaymentRun(entityId, request.params.id);
+          return reply.send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
       router.post<{ Params: { id: string } }>(
         "/payment-runs/:id/approve",
         async (request, reply) => {
@@ -275,7 +299,10 @@ export async function registerAPRouter(app: FastifyInstance): Promise<void> {
 
       router.post<{ Params: { id: string } }>(
         "/payment-runs/:id/confirm",
-        { preHandler: [requireRole(["ADMIN", "SUPERADMIN"])] },
+        {
+          preHandler: [requireRole(["ADMIN", "SUPERADMIN"])],
+          config: { rateLimit: { max: 10, timeWindow: "1 minute" } }
+        },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
@@ -328,7 +355,7 @@ export async function registerAPRouter(app: FastifyInstance): Promise<void> {
               (ri) => ri.invoice.supplierId === supplierId
             );
 
-            const { Prisma } = await import("@prisma/client");
+            const { Prisma } = await import("../../db/client.js");
             const { renderPaymentVoucherPdf } = await import("./payment-voucher-pdf.js");
 
             const pdfBuffer = await renderPaymentVoucherPdf({
@@ -382,9 +409,29 @@ export async function registerAPRouter(app: FastifyInstance): Promise<void> {
             }
 
             const { readFile } = await import("node:fs/promises");
-            const { basename } = await import("node:path");
-            const content = await readFile(paymentRun.bankFilePath, "utf8");
-            const filename = basename(paymentRun.bankFilePath);
+            const { basename, resolve, normalize } = await import("node:path");
+
+            // Prevent path traversal: ensure file is within allowed directory.
+            // Must match where the AP service writes the file (PAYMENT_RUN_OUTPUT_DIR).
+            const allowedDir = resolve(
+              process.cwd(),
+              process.env.PAYMENT_RUN_OUTPUT_DIR ?? "payment-runs"
+            );
+            const resolvedPath = resolve(paymentRun.bankFilePath);
+            if (!normalize(resolvedPath).startsWith(normalize(allowedDir))) {
+              return reply.code(403).send({
+                data: null,
+                errors: [
+                  {
+                    code: "AP_PATH_FORBIDDEN",
+                    message: "Bank file path is outside allowed directory."
+                  }
+                ]
+              });
+            }
+
+            const content = await readFile(resolvedPath, "utf8");
+            const filename = basename(resolvedPath);
 
             const ext = filename.split(".").pop()?.toLowerCase();
             const contentType =
@@ -394,6 +441,115 @@ export async function registerAPRouter(app: FastifyInstance): Promise<void> {
               .header("Content-Type", contentType)
               .header("Content-Disposition", `attachment; filename="${filename}"`)
               .send(content);
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+      // ── Payment Profiles ──────────────────────────────────────────────────
+
+      router.get("/payment-profiles", async (request, reply) => {
+        try {
+          const entityId = request.entityId;
+          if (!entityId)
+            return reply.code(400).send({
+              data: null,
+              errors: [{ code: "MISSING_ENTITY", message: "X-Entity-ID required." }]
+            });
+          const direction = (request.query as any)?.direction as string | undefined;
+          const data = await paymentProfileService.listProfiles(
+            entityId,
+            direction === "PAY" || direction === "COLLECT" ? direction : undefined
+          );
+          return reply.send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      router.get<{ Params: { id: string } }>("/payment-profiles/:id", async (request, reply) => {
+        try {
+          const entityId = request.entityId;
+          if (!entityId)
+            return reply.code(400).send({
+              data: null,
+              errors: [{ code: "MISSING_ENTITY", message: "X-Entity-ID required." }]
+            });
+          const data = await paymentProfileService.getProfile(entityId, request.params.id);
+          return reply.send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      router.post("/payment-profiles", async (request, reply) => {
+        try {
+          const entityId = request.entityId;
+          if (!entityId)
+            return reply.code(400).send({
+              data: null,
+              errors: [{ code: "MISSING_ENTITY", message: "X-Entity-ID required." }]
+            });
+          const payload = createPaymentProfileSchema.parse(request.body);
+          const data = await paymentProfileService.createProfile(entityId, payload);
+          return reply.code(201).send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      router.put<{ Params: { id: string } }>("/payment-profiles/:id", async (request, reply) => {
+        try {
+          const entityId = request.entityId;
+          if (!entityId)
+            return reply.code(400).send({
+              data: null,
+              errors: [{ code: "MISSING_ENTITY", message: "X-Entity-ID required." }]
+            });
+          const payload = updatePaymentProfileSchema.parse(request.body);
+          const data = await paymentProfileService.updateProfile(
+            entityId,
+            request.params.id,
+            payload
+          );
+          return reply.send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      router.delete<{ Params: { id: string } }>("/payment-profiles/:id", async (request, reply) => {
+        try {
+          const entityId = request.entityId;
+          if (!entityId)
+            return reply.code(400).send({
+              data: null,
+              errors: [{ code: "MISSING_ENTITY", message: "X-Entity-ID required." }]
+            });
+          await paymentProfileService.deleteProfile(entityId, request.params.id);
+          return reply.code(204).send();
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      // ── Collection Run ────────────────────────────────────────────────────
+
+      router.post(
+        "/collection-runs",
+        { config: { rateLimit: { max: 5, timeWindow: "1 minute" } } },
+        async (request, reply) => {
+          try {
+            const entityId = request.entityId;
+            if (!entityId)
+              return reply.code(400).send({
+                data: null,
+                errors: [{ code: "MISSING_ENTITY", message: "X-Entity-ID required." }]
+              });
+            const payload = runCollectionSchema.parse(request.body);
+            const actorId = (request as any).user?.id ?? (request as any).user?.sub ?? "system";
+            const data = await paymentProfileService.runCollection(entityId, payload, actorId);
+            return reply.code(201).send({ data, errors: [] });
           } catch (error) {
             return mapError(reply, error);
           }

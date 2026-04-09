@@ -30,6 +30,7 @@ import {
   Landmark,
   CalendarDays,
   ChevronDown,
+  RefreshCcw,
   Tags,
   SlidersHorizontal,
   Package,
@@ -114,6 +115,8 @@ const navGroups: NavGroup[] = [
       { href: "/audit", label: "Audit Log", icon: ClipboardList },
       { href: "/settings/approval-rules", label: "Approval Rules", icon: ShieldCheck },
       { href: "/settings/authorization", label: "Authorization Setup", icon: Layers },
+      { href: "/settings/payment-profiles", label: "Payment Profiles", icon: Banknote },
+      { href: "/settings/revaluation-profiles", label: "Revaluation Profiles", icon: RefreshCcw },
       { href: "/settings/integrations", label: "Integrations", icon: Plug },
       { href: "/settings/integrations/saf-import", label: "SAF Import", icon: FileUp },
       { href: "/settings/integrations/transfer-desk", label: "Transfer Desk", icon: GitBranch }
