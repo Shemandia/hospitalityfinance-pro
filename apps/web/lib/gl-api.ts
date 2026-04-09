@@ -2549,6 +2549,78 @@ export function getTransferFormat(context: ApiContext, formatId: string) {
   );
 }
 
+// ── Format auto-detection (TD-API-032) ──────────────────────────────────────
+
+export type DetectedField = {
+  name: string;
+  type: "string" | "integer" | "number" | "date" | "boolean";
+  required: boolean;
+  maxLength: number;
+  minLength: number;
+  startPos?: number;
+  length?: number;
+  sampleValues: string[];
+};
+
+export type DetectionResult = {
+  classification: FormatClassification;
+  delimiter?: string;
+  recordSep: string;
+  encoding: string;
+  hasHeaders: boolean;
+  fields: DetectedField[];
+  confidence: number;
+  previewRows: Record<string, string>[];
+  suggestedSchema: unknown;
+};
+
+export function detectFormatFromFile(context: ApiContext, fileContent: string) {
+  return request<DetectionResult>(context, "/api/v1/integration/transfer-desk/formats/detect", {
+    method: "POST",
+    body: JSON.stringify({ fileContent })
+  });
+}
+
+// ── Format create / update (TD-API-033..034) ────────────────────────────────
+
+export type FormatCreateInput = {
+  name: string;
+  description?: string;
+  classification: FormatClassification;
+  fsdXml: string;
+  guiState?: unknown;
+};
+
+export type FormatUpdateInput = {
+  name?: string;
+  description?: string;
+  classification?: FormatClassification;
+  fsdXml?: string;
+  guiState?: unknown;
+};
+
+export function createTransferFormat(context: ApiContext, input: FormatCreateInput) {
+  return request<TransferFormatDetail>(context, "/api/v1/integration/transfer-desk/formats", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function updateTransferFormat(
+  context: ApiContext,
+  formatId: string,
+  input: FormatUpdateInput
+) {
+  return request<TransferFormatDetail>(
+    context,
+    `/api/v1/integration/transfer-desk/formats/${formatId}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(input)
+    }
+  );
+}
+
 export type TransferProfileSummary = {
   id: string;
   name: string;
