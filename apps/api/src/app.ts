@@ -20,6 +20,7 @@ import { registerIntegrationRouter } from "./modules/integration/router.js";
 import { registerKPIRouter } from "./modules/kpi/router.js";
 import { registerProcessLockRouter } from "./modules/process-lock/router.js";
 import { registerAllocationRouter } from "./modules/allocation/router.js";
+import { registerFixedAssetRouter } from "./modules/fixed-asset/router.js";
 import { registerAdminRouter } from "./modules/admin/router.js";
 import { registerTenantRouter } from "./modules/tenant/router.js";
 import { registerAccountTypeRouter } from "./modules/account-type/router.js";
@@ -504,6 +505,7 @@ export async function createApp(): Promise<FastifyInstance> {
   await registerKPIRouter(app);
   await registerProcessLockRouter(app);
   await registerAllocationRouter(app);
+  await registerFixedAssetRouter(app);
   await registerAdminRouter(app);
   await registerTenantRouter(app);
   registerAccountTypeRouter(app);

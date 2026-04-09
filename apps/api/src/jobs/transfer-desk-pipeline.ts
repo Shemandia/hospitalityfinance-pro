@@ -27,6 +27,7 @@ import { GLService } from "../modules/gl/service.js";
 import { APService } from "../modules/ap/service.js";
 import { ARService } from "../modules/ar/service.js";
 import { AllocationService } from "../modules/allocation/service.js";
+import { FixedAssetService } from "../modules/fixed-asset/service.js";
 import { runWithContext } from "../db/requestContext.js";
 import { mapRecordsToTarget, type TargetParams } from "./transfer-desk-record-mapper.js";
 import type { StorageBackend } from "./transfer-desk-storage.js";
@@ -590,6 +591,10 @@ export async function executeProcess(
     return executeAllocationProcess(ctx, executionId, profile);
   }
 
+  if (targetComponent === "DEPRECIATION") {
+    return executeDepreciationProcess(ctx, executionId, profile);
+  }
+
   return failExecution(
     ctx,
     executionId,
@@ -661,6 +666,65 @@ async function executeAllocationProcess(
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown allocation error";
     return failExecution(ctx, executionId, "ALLOCATION_FAILED", message);
+  }
+}
+
+/**
+ * Execute a depreciation process profile.
+ * targetParams should contain: { entityId, periodId, executedBy? }
+ */
+async function executeDepreciationProcess(
+  ctx: PipelineContext,
+  executionId: string,
+  profile: ProfileWithRelations
+): Promise<PipelineResult> {
+  const params = (profile.targetParams ?? {}) as Record<string, string>;
+
+  const entityId = params.entityId;
+  if (!entityId) {
+    return failExecution(
+      ctx,
+      executionId,
+      "MISSING_ENTITY_ID",
+      "Depreciation process profile requires targetParams.entityId."
+    );
+  }
+
+  const periodId = params.periodId;
+  if (!periodId) {
+    return failExecution(
+      ctx,
+      executionId,
+      "MISSING_PERIOD_ID",
+      "Depreciation process profile requires targetParams.periodId."
+    );
+  }
+
+  const userId = params.executedBy ?? "system";
+
+  try {
+    const fixedAssetService = new FixedAssetService(ctx.db as any);
+    const result = await fixedAssetService.runDepreciation(entityId, periodId, userId);
+
+    await ctx.db.transferExecutionLog
+      .create({
+        data: {
+          executionId,
+          recordIndex: 0,
+          status: "SUCCESS",
+          payload: {
+            periodId,
+            journalId: result.journalId ?? null,
+            assetsProcessed: result.lines?.length ?? 0
+          }
+        }
+      })
+      .catch(() => {});
+
+    return { status: "COMPLETED", totalRecords: 1, successCount: 1, failCount: 0 };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown depreciation error";
+    return failExecution(ctx, executionId, "DEPRECIATION_FAILED", message);
   }
 }
 
