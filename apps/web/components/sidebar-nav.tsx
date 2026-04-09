@@ -89,7 +89,8 @@ const navGroups: NavGroup[] = [
       { href: "/reports/builder", label: "Report Builder", icon: SlidersHorizontal },
       { href: "/bank/reconciliation", label: "Bank Recon", icon: Landmark },
       { href: "/allocations", label: "Allocations", icon: SlidersHorizontal },
-      { href: "/fixed-assets", label: "Fixed Assets", icon: Package }
+      { href: "/fixed-assets", label: "Fixed Assets", icon: Package },
+      { href: "/authorizations", label: "Authorizations", icon: ShieldCheck }
     ]
   },
   {
@@ -111,6 +112,7 @@ const navGroups: NavGroup[] = [
       { href: "/periods", label: "Periods", icon: CalendarDays },
       { href: "/audit", label: "Audit Log", icon: ClipboardList },
       { href: "/settings/approval-rules", label: "Approval Rules", icon: ShieldCheck },
+      { href: "/settings/authorization", label: "Authorization Setup", icon: Layers },
       { href: "/settings/integrations", label: "Integrations", icon: Plug },
       { href: "/settings/integrations/saf-import", label: "SAF Import", icon: FileUp },
       { href: "/settings/integrations/transfer-desk", label: "Transfer Desk", icon: GitBranch }
