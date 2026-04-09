@@ -1399,6 +1399,204 @@ export async function registerIntegrationRouter(app: FastifyInstance): Promise<v
         }
       );
 
+      // ─── Transformation endpoints ──────────────────────────────────────
+
+      // TD-API-040 — GET /transfer-desk/transformations (list)
+      router.get("/transfer-desk/transformations", async (request, reply) => {
+        try {
+          const { sourceComponent, targetComponent } = request.query as {
+            sourceComponent?: string;
+            targetComponent?: string;
+          };
+          const data = await (prisma as unknown as PrismaClient).transferTransformation.findMany({
+            where: {
+              ...(sourceComponent ? { sourceComponent } : {}),
+              ...(targetComponent ? { targetComponent } : {})
+            },
+            include: {
+              sourceFormat: { select: { id: true, name: true, classification: true } },
+              targetFormat: { select: { id: true, name: true, classification: true } },
+              _count: { select: { profiles: true } }
+            },
+            orderBy: { updatedAt: "desc" }
+          });
+          return reply.send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      // TD-API-041 — GET /transfer-desk/transformations/:id (detail)
+      router.get<{ Params: { id: string } }>(
+        "/transfer-desk/transformations/:id",
+        async (request, reply) => {
+          try {
+            const data = await (
+              prisma as unknown as PrismaClient
+            ).transferTransformation.findUnique({
+              where: { id: request.params.id },
+              include: {
+                sourceFormat: {
+                  select: { id: true, name: true, classification: true, fsdXml: true }
+                },
+                targetFormat: {
+                  select: { id: true, name: true, classification: true, fsdXml: true }
+                },
+                _count: { select: { profiles: true } }
+              }
+            });
+            if (!data) {
+              return reply.status(404).send({ error: "Transformation not found" });
+            }
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      // TD-API-042 — POST /transfer-desk/transformations (create)
+      router.post("/transfer-desk/transformations", async (request, reply) => {
+        try {
+          const body = request.body as {
+            name: string;
+            description?: string;
+            sourceFormatId?: string;
+            targetFormatId?: string;
+            sourceComponent?: string;
+            targetComponent?: string;
+            rulesJson?: unknown;
+            functionsJson?: unknown;
+          };
+
+          if (!body.name?.trim()) {
+            return reply.status(400).send({ error: "name is required" });
+          }
+
+          // Validate rulesJson if provided
+          let isValid = false;
+          let validationErrors: string[] | null = null;
+          if (body.rulesJson) {
+            try {
+              const rules = Array.isArray(body.rulesJson)
+                ? body.rulesJson
+                : ((body.rulesJson as any).rules ?? []);
+              isValid = rules.length > 0 && rules.every((r: any) => r.type && r.target);
+            } catch {
+              validationErrors = ["rulesJson is not valid"];
+            }
+          }
+
+          const data = await (prisma as unknown as PrismaClient).transferTransformation.create({
+            data: {
+              name: body.name.trim(),
+              description: body.description?.trim() || null,
+              sourceFormatId: body.sourceFormatId || null,
+              targetFormatId: body.targetFormatId || null,
+              sourceComponent: body.sourceComponent || null,
+              targetComponent: body.targetComponent || null,
+              rulesJson: (body.rulesJson as any) ?? undefined,
+              functionsJson: (body.functionsJson as any) ?? undefined,
+              isValid,
+              validationErrors: validationErrors ?? undefined
+            },
+            include: {
+              sourceFormat: { select: { id: true, name: true, classification: true } },
+              targetFormat: { select: { id: true, name: true, classification: true } }
+            }
+          });
+          return reply.status(201).send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      // TD-API-043 — PUT /transfer-desk/transformations/:id (update)
+      router.put<{ Params: { id: string } }>(
+        "/transfer-desk/transformations/:id",
+        async (request, reply) => {
+          try {
+            const existing = await (
+              prisma as unknown as PrismaClient
+            ).transferTransformation.findUnique({
+              where: { id: request.params.id }
+            });
+            if (!existing) {
+              return reply.status(404).send({ error: "Transformation not found" });
+            }
+            if (existing.isSystem) {
+              return reply.status(403).send({ error: "System transformations cannot be modified" });
+            }
+
+            const body = request.body as {
+              name?: string;
+              description?: string;
+              sourceFormatId?: string;
+              targetFormatId?: string;
+              sourceComponent?: string;
+              targetComponent?: string;
+              rulesJson?: unknown;
+              functionsJson?: unknown;
+            };
+
+            // Re-validate if rulesJson changed
+            let isValid = existing.isValid;
+            let validationErrors = existing.validationErrors;
+            if (body.rulesJson !== undefined) {
+              try {
+                const rules = Array.isArray(body.rulesJson)
+                  ? body.rulesJson
+                  : ((body.rulesJson as any)?.rules ?? []);
+                isValid = rules.length > 0 && rules.every((r: any) => r.type && r.target);
+                validationErrors = null;
+              } catch {
+                isValid = false;
+                validationErrors = ["rulesJson is not valid"] as any;
+              }
+            }
+
+            const data = await (prisma as unknown as PrismaClient).transferTransformation.update({
+              where: { id: request.params.id },
+              data: {
+                ...(body.name ? { name: body.name.trim() } : {}),
+                ...(body.description !== undefined
+                  ? { description: body.description?.trim() || null }
+                  : {}),
+                ...(body.sourceFormatId !== undefined
+                  ? { sourceFormatId: body.sourceFormatId || null }
+                  : {}),
+                ...(body.targetFormatId !== undefined
+                  ? { targetFormatId: body.targetFormatId || null }
+                  : {}),
+                ...(body.sourceComponent !== undefined
+                  ? { sourceComponent: body.sourceComponent || null }
+                  : {}),
+                ...(body.targetComponent !== undefined
+                  ? { targetComponent: body.targetComponent || null }
+                  : {}),
+                ...(body.rulesJson !== undefined
+                  ? {
+                      rulesJson: body.rulesJson as any,
+                      isValid,
+                      validationErrors: validationErrors ?? undefined
+                    }
+                  : {}),
+                ...(body.functionsJson !== undefined
+                  ? { functionsJson: body.functionsJson as any }
+                  : {})
+              },
+              include: {
+                sourceFormat: { select: { id: true, name: true, classification: true } },
+                targetFormat: { select: { id: true, name: true, classification: true } }
+              }
+            });
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
       // TD-API-009 — GET /transfer-desk/profiles (list)
       router.get("/transfer-desk/profiles", async (request, reply) => {
         try {
