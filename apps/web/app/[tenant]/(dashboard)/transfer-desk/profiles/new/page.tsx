@@ -15,8 +15,10 @@
 
 import { useState, useCallback } from "react";
 import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
 import { useTenantHref } from "../../../../../../hooks/use-tenant-router";
 import { useUserRole } from "../../../../../../components/use-user-role";
+import { useApiContext } from "../../../../../../components/use-api-context";
 import { Card, CardContent } from "../../../../../../components/ui/card";
 import { Button } from "../../../../../../components/ui/button";
 import { Input } from "../../../../../../components/ui/input";
@@ -40,7 +42,12 @@ import {
   ArrowLeftRight,
   Globe
 } from "lucide-react";
-import { TRANSFER_PROFILE_TYPES, type TransferProfileType } from "../../../../../../lib/gl-api";
+import {
+  TRANSFER_PROFILE_TYPES,
+  listTransferFormats,
+  type TransferProfileType,
+  type TransferFormatSummary
+} from "../../../../../../lib/gl-api";
 
 // ── Wizard form state ─────────────────────────────────────────────────────
 
@@ -275,6 +282,106 @@ function Step2SourceTarget({
   );
 }
 
+function Step3Formats({
+  form,
+  updateForm,
+  apiContext
+}: {
+  form: WizardFormState;
+  updateForm: (patch: Partial<WizardFormState>) => void;
+  apiContext: ReturnType<typeof useApiContext>;
+}) {
+  const formatsQ = useQuery({
+    queryKey: ["td-formats", apiContext?.tenantSlug],
+    queryFn: () => (apiContext ? listTransferFormats(apiContext) : Promise.resolve({ data: [] })),
+    enabled: Boolean(apiContext),
+    select: (r) => ((r as any).data as TransferFormatSummary[]) ?? []
+  });
+
+  const formats = formatsQ.data ?? [];
+
+  return (
+    <div className="space-y-6">
+      <p className="text-sm text-slate-500">
+        Select the data formats used by this profile. Formats define the file structure (delimited,
+        fixed-width, XML) that the Transfer Desk reads or writes.
+      </p>
+
+      {formatsQ.isLoading && <p className="text-xs text-slate-400">Loading formats…</p>}
+
+      {/* Source Format */}
+      <div className="space-y-1.5">
+        <Label className="text-sm font-medium text-slate-700">Source Format</Label>
+        <Select
+          value={form.sourceFormatId || undefined}
+          onValueChange={(v) => updateForm({ sourceFormatId: v })}
+        >
+          <SelectTrigger className="w-full max-w-md text-sm">
+            <SelectValue placeholder="Select source format…" />
+          </SelectTrigger>
+          <SelectContent>
+            {formats.map((f) => (
+              <SelectItem key={f.id} value={f.id}>
+                <span>{f.name}</span>
+                <span className="ml-2 text-[10px] text-slate-400">{f.classification}</span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-[11px] text-slate-400">
+          The FSD format definition for the inbound file/data.
+        </p>
+      </div>
+
+      {/* Target Format */}
+      <div className="space-y-1.5">
+        <Label className="text-sm font-medium text-slate-700">Target Format</Label>
+        <Select
+          value={form.targetFormatId || undefined}
+          onValueChange={(v) => updateForm({ targetFormatId: v })}
+        >
+          <SelectTrigger className="w-full max-w-md text-sm">
+            <SelectValue placeholder="Select target format…" />
+          </SelectTrigger>
+          <SelectContent>
+            {formats.map((f) => (
+              <SelectItem key={f.id} value={f.id}>
+                <span>{f.name}</span>
+                <span className="ml-2 text-[10px] text-slate-400">{f.classification}</span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-[11px] text-slate-400">
+          The FSD format definition for the outbound data.
+        </p>
+      </div>
+
+      {/* Transformation — placeholder selector (no backend list endpoint this sprint) */}
+      <div className="space-y-1.5">
+        <Label className="text-sm font-medium text-slate-700">Transformation (optional)</Label>
+        <Input
+          value={form.transformationId}
+          onChange={(e) => updateForm({ transformationId: e.target.value })}
+          placeholder="Transformation UUID (manual entry for now)"
+          className="max-w-md font-mono text-xs"
+        />
+        <p className="text-[11px] text-slate-400">
+          TML transformation to apply between source and target formats. The transformation browser
+          is coming in a future sprint.
+        </p>
+      </div>
+
+      {formats.length === 0 && !formatsQ.isLoading && (
+        <div className="rounded-md bg-amber-50 border border-amber-100 p-3 text-xs text-amber-700">
+          No formats have been created yet. You can still create the profile and assign formats
+          later.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StepPlaceholder({ step }: { step: number }) {
   return (
     <div className="flex items-center justify-center py-16 text-slate-400 text-sm">
@@ -288,6 +395,7 @@ function StepPlaceholder({ step }: { step: number }) {
 export default function NewTransferProfilePage() {
   const tenantHref = useTenantHref();
   const role = useUserRole();
+  const apiContext = useApiContext();
 
   const [currentStep, setCurrentStep] = useState(1);
   const [form, setForm] = useState<WizardFormState>(INITIAL_STATE);
@@ -390,7 +498,10 @@ export default function NewTransferProfilePage() {
         <CardContent className="p-6">
           {currentStep === 1 && <Step1TypeAndBasics form={form} updateForm={updateForm} />}
           {currentStep === 2 && <Step2SourceTarget form={form} updateForm={updateForm} />}
-          {currentStep >= 3 && currentStep <= 5 && <StepPlaceholder step={currentStep} />}
+          {currentStep === 3 && (
+            <Step3Formats form={form} updateForm={updateForm} apiContext={apiContext} />
+          )}
+          {currentStep >= 4 && currentStep <= 5 && <StepPlaceholder step={currentStep} />}
         </CardContent>
       </Card>
 
