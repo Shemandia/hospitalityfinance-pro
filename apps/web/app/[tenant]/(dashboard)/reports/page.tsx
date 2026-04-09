@@ -65,6 +65,15 @@ const REPORT_CARDS = [
     badge: "Financial"
   },
   {
+    title: "Report Runner",
+    description:
+      "Execute FAL/FSL/FTL reports interactively with live data grids and transaction drill-down.",
+    href: "/reports/runner",
+    icon: FileText,
+    accentClass: "bg-teal-600",
+    badge: "Interactive"
+  },
+  {
     title: "Report Builder",
     description:
       "Create custom reports, manage definitions, view generation history, and download PDFs.",

@@ -86,6 +86,7 @@ const navGroups: NavGroup[] = [
       { href: "/reports/usali-pl", label: "USALI P&L", icon: BarChart2 },
       { href: "/reports/balance-sheet", label: "Balance Sheet", icon: Scale },
       { href: "/reports/cashflow", label: "Cash Flow", icon: Activity },
+      { href: "/reports/runner", label: "Report Runner", icon: BarChart3 },
       { href: "/reports/builder", label: "Report Builder", icon: SlidersHorizontal },
       { href: "/bank/reconciliation", label: "Bank Recon", icon: Landmark },
       { href: "/allocations", label: "Allocations", icon: SlidersHorizontal },
