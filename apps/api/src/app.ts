@@ -18,6 +18,7 @@ import { registerBudgetRouter } from "./modules/budget/router.js";
 import { registerConsolidationRouter } from "./modules/consolidation/router.js";
 import { registerIntegrationRouter } from "./modules/integration/router.js";
 import { registerKPIRouter } from "./modules/kpi/router.js";
+import { registerProcessLockRouter } from "./modules/process-lock/router.js";
 import { registerAdminRouter } from "./modules/admin/router.js";
 import { registerTenantRouter } from "./modules/tenant/router.js";
 import { registerAccountTypeRouter } from "./modules/account-type/router.js";
@@ -161,23 +162,30 @@ export async function createApp(): Promise<FastifyInstance> {
   app.get("/api/v1/entities", { preHandler: [requireAuth] }, async (request) => {
     // Filter entities by user's JWT claim — only return entities the user has access to
     const userEntityIds = (request.user as any)?.entityIds as string[] | undefined;
-    const where = userEntityIds && userEntityIds.length > 0 ? { id: { in: userEntityIds } } : {}; // superadmin (empty entityIds) sees all
+    const isSuperAdmin = !userEntityIds || userEntityIds.length === 0;
+    const where = isSuperAdmin ? {} : { id: { in: userEntityIds } };
 
-    const entities = await prisma.entity.findMany({
-      where,
-      include: {
-        parent: { select: { id: true, name: true } },
-        _count: { select: { children: true, users: true } }
-      },
-      orderBy: { name: "asc" }
-    });
+    // Superadmin with no entity context: temporarily disable RLS to list all entities
+    // (RLS requires app.current_entity_id which doesn't exist for superadmin users)
+    if (isSuperAdmin) {
+      await (prisma as any).$executeRawUnsafe("ALTER TABLE entities DISABLE ROW LEVEL SECURITY");
+    }
 
-    // Also include child entities of granted parents (for GROUP → PROPERTY hierarchy)
-    const grantedIds = new Set(entities.map((e) => e.id));
-    const childEntities =
-      userEntityIds && userEntityIds.length > 0
+    try {
+      const entities = await prisma.entity.findMany({
+        where,
+        include: {
+          parent: { select: { id: true, name: true } },
+          _count: { select: { children: true, users: true } }
+        },
+        orderBy: { name: "asc" }
+      });
+
+      // Also include child entities of granted parents (for GROUP → PROPERTY hierarchy)
+      const grantedIds = new Set(entities.map((e) => e.id));
+      const childEntities = !isSuperAdmin
         ? await prisma.entity.findMany({
-            where: { parentId: { in: userEntityIds }, id: { notIn: [...grantedIds] } },
+            where: { parentId: { in: userEntityIds! }, id: { notIn: [...grantedIds] } },
             include: {
               parent: { select: { id: true, name: true } },
               _count: { select: { children: true, users: true } }
@@ -186,7 +194,14 @@ export async function createApp(): Promise<FastifyInstance> {
           })
         : [];
 
-    return { data: [...entities, ...childEntities], errors: [] };
+      return { data: [...entities, ...childEntities], errors: [] };
+    } finally {
+      if (isSuperAdmin) {
+        await (prisma as any)
+          .$executeRawUnsafe("ALTER TABLE entities ENABLE ROW LEVEL SECURITY")
+          .catch(() => {});
+      }
+    }
   });
 
   app.get<{ Params: { id: string } }>(
@@ -300,14 +315,39 @@ export async function createApp(): Promise<FastifyInstance> {
           maxProperties: b.type === "GROUP" ? (b.maxProperties ?? 0) : 0
         }
       });
-      // Auto-assign requesting user to new entity
-      const userId = (request as any).user?.id ?? (request as any).userId;
-      if (userId) {
-        await prisma.entityUser
-          .create({
-            data: { entityId: entity.id, userId, role: "ADMIN" }
-          })
-          .catch(() => {});
+      // Auto-assign the requesting user to the new entity. The JWT payload
+      // exposes the Keycloak user via `sub`, but the EntityUser FK points at
+      // User.id (the tenant DB primary key), so we have to look up the User
+      // row by keycloakId first. Without this link, downstream services
+      // (SAF import, payroll import, etc.) fail with "No entity user found".
+      const keycloakSub =
+        typeof (request.user as any)?.sub === "string"
+          ? ((request.user as any).sub as string)
+          : null;
+      if (keycloakSub) {
+        try {
+          const userRow = await prisma.user.findUnique({
+            where: { keycloakId: keycloakSub },
+            select: { id: true }
+          });
+          if (userRow) {
+            await prisma.entityUser.upsert({
+              where: { entityId_userId: { entityId: entity.id, userId: userRow.id } },
+              create: { entityId: entity.id, userId: userRow.id, role: "ADMIN" },
+              update: {}
+            });
+          } else {
+            request.log.warn(
+              { keycloakSub, entityId: entity.id },
+              "Entity created but no User row matches the JWT sub — entity_users link skipped"
+            );
+          }
+        } catch (err) {
+          request.log.error(
+            { err, entityId: entity.id },
+            "Failed to auto-link requesting user to new entity"
+          );
+        }
       }
       reply.code(201);
       return { data: entity, errors: [] };
@@ -461,6 +501,7 @@ export async function createApp(): Promise<FastifyInstance> {
   await registerConsolidationRouter(app);
   await registerIntegrationRouter(app);
   await registerKPIRouter(app);
+  await registerProcessLockRouter(app);
   await registerAdminRouter(app);
   await registerTenantRouter(app);
   registerAccountTypeRouter(app);
