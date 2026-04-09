@@ -86,7 +86,8 @@ const navGroups: NavGroup[] = [
       { href: "/reports/balance-sheet", label: "Balance Sheet", icon: Scale },
       { href: "/reports/cashflow", label: "Cash Flow", icon: Activity },
       { href: "/reports/builder", label: "Report Builder", icon: SlidersHorizontal },
-      { href: "/bank/reconciliation", label: "Bank Recon", icon: Landmark }
+      { href: "/bank/reconciliation", label: "Bank Recon", icon: Landmark },
+      { href: "/allocations", label: "Allocations", icon: SlidersHorizontal }
     ]
   },
   {
