@@ -214,6 +214,22 @@ enum AllocationBalanceType {
   CLOSING // Closing balance (opening + movements)
 }
 
+// ── Fixed Asset enums ───────────────────────────────────────────────────────
+
+enum DepreciationMethod {
+  STRAIGHT_LINE
+  REDUCING_BALANCE
+  SUM_OF_DIGITS
+  USER_TABLE // Custom depreciation curve (stub — future sprint)
+  NONE // No depreciation (land, art, etc.)
+}
+
+enum AssetStatus {
+  ACTIVE
+  FULLY_DEPRECIATED
+  DISPOSED
+}
+
 // ─── Tenant Setup ────────────────────────────────────────────────────────────
 
 model TenantSetupProgress {
@@ -291,6 +307,9 @@ model Entity {
   periodCloseStatuses     PeriodCloseStatus[]
   analysisDimensions      AnalysisDimension[]
   allocationDefinitions   AllocationDefinition[]
+  fixedAssets             FixedAsset[]
+  assetCategories         AssetCategory[]
+  depreciationTables      DepreciationTable[]
 
   @@index([parentId])
   @@map("entities")
@@ -322,6 +341,7 @@ model User {
   processLocks          ProcessLock[]
   periodCloseStatuses   PeriodCloseStatus[]
   allocationDefinitions AllocationDefinition[] @relation("AllocationCreatedBy")
+  fixedAssets           FixedAsset[]           @relation("AssetCreatedBy")
 
   @@map("users")
 }
@@ -426,6 +446,7 @@ model Period {
   ledgerSetups          LedgerSetup[]
   periodCloseStatuses   PeriodCloseStatus[]
   allocationDefinitions AllocationDefinition[]
+  fixedAssets           FixedAsset[]
 
   @@unique([entityId, year, month])
   @@index([entityId, status])
@@ -1802,28 +1823,34 @@ model TransferExecutionLog {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 model LedgerSetup {
-  id                     String             @id @default(uuid())
-  entityId               String             @map("entity_id")
+  id                            String             @id @default(uuid())
+  entityId                      String             @map("entity_id")
   /// Ledger identifier A–K (default "A" = primary financials ledger)
-  ledger                 String             @default("A") @db.Char(1)
+  ledger                        String             @default("A") @db.Char(1)
   /// Open posting date range start (absolute YYYY-MM-DD, relative +/-nnn, or "T" for today)
-  openDateFrom           String?            @map("open_date_from") @db.VarChar(12)
+  openDateFrom                  String?            @map("open_date_from") @db.VarChar(12)
   /// Open posting date range end
-  openDateTo             String?            @map("open_date_to") @db.VarChar(12)
-  provisionalPosting     ProvisionalPosting @default(OPTIONAL) @map("provisional_posting")
-  useFinancialCalendar   Boolean            @default(false) @map("use_financial_calendar")
-  baseCurrency           String             @default("USD") @map("base_currency") @db.VarChar(3)
-  secondBaseCurrency     String?            @map("second_base_currency") @db.VarChar(3)
-  fourthCurrencyCode     String?            @map("fourth_currency_code") @db.VarChar(3)
-  roundingMethod         RoundingMethod     @default(NORMAL) @map("rounding_method")
-  roundingUnit           String?            @map("rounding_unit") @db.VarChar(20)
-  paymentRunEnabled      Boolean            @default(false) @map("payment_run_enabled")
-  payAtCurrentRates      Boolean            @default(true) @map("pay_at_current_rates")
-  nonMatchSystemPayments Boolean            @default(false) @map("non_match_system_payments")
+  openDateTo                    String?            @map("open_date_to") @db.VarChar(12)
+  provisionalPosting            ProvisionalPosting @default(OPTIONAL) @map("provisional_posting")
+  useFinancialCalendar          Boolean            @default(false) @map("use_financial_calendar")
+  baseCurrency                  String             @default("USD") @map("base_currency") @db.VarChar(3)
+  secondBaseCurrency            String?            @map("second_base_currency") @db.VarChar(3)
+  fourthCurrencyCode            String?            @map("fourth_currency_code") @db.VarChar(3)
+  roundingMethod                RoundingMethod     @default(NORMAL) @map("rounding_method")
+  roundingUnit                  String?            @map("rounding_unit") @db.VarChar(20)
+  paymentRunEnabled             Boolean            @default(false) @map("payment_run_enabled")
+  payAtCurrentRates             Boolean            @default(true) @map("pay_at_current_rates")
+  nonMatchSystemPayments        Boolean            @default(false) @map("non_match_system_payments")
   /// Tracks the current open period for this BU/ledger
-  currentPeriodId        String?            @map("current_period_id")
-  createdAt              DateTime           @default(now()) @map("created_at")
-  updatedAt              DateTime           @updatedAt @map("updated_at")
+  currentPeriodId               String?            @map("current_period_id")
+  /// Prevent retrospective depreciation recalculation once a period is closed
+  lockCalculatedDepreciation    Boolean            @default(false) @map("lock_calculated_depreciation")
+  /// Full year depreciation in the acquisition year (no proration)
+  fullYearDepreciationFirstYear Boolean            @default(false) @map("full_year_depreciation_first_year")
+  /// Subtract residual/final value before calculating depreciation
+  excludeFinalValueFromDepn     Boolean            @default(true) @map("exclude_final_value_from_depn")
+  createdAt                     DateTime           @default(now()) @map("created_at")
+  updatedAt                     DateTime           @updatedAt @map("updated_at")
 
   entity        Entity  @relation(fields: [entityId], references: [id])
   currentPeriod Period? @relation(fields: [currentPeriodId], references: [id])
@@ -2012,4 +2039,103 @@ model AllocationTarget {
 
   @@index([definitionId])
   @@map("allocation_targets")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Fixed Asset Register (spec Module 9 — Ch. 12)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model AssetCategory {
+  id                        String              @id @default(uuid())
+  entityId                  String              @map("entity_id")
+  code                      String              @db.VarChar(30)
+  name                      String              @db.VarChar(100)
+  /// Default useful life for new assets in this category
+  defaultUsefulLifeMonths   Int?                @map("default_useful_life_months")
+  defaultDepreciationMethod DepreciationMethod? @map("default_depreciation_method")
+  /// Default BS accumulated depreciation account code
+  defaultBsDepreciationAcct String?             @map("default_bs_depreciation_acct") @db.VarChar(50)
+  /// Default P&L depreciation expense account code
+  defaultPlDepreciationAcct String?             @map("default_pl_depreciation_acct") @db.VarChar(50)
+  isActive                  Boolean             @default(true) @map("is_active")
+  sortOrder                 Int                 @default(0) @map("sort_order")
+  createdAt                 DateTime            @default(now()) @map("created_at")
+  updatedAt                 DateTime            @updatedAt @map("updated_at")
+
+  entity Entity       @relation(fields: [entityId], references: [id])
+  assets FixedAsset[]
+
+  @@unique([entityId, code])
+  @@map("asset_categories")
+}
+
+model FixedAsset {
+  id                        String             @id @default(uuid())
+  entityId                  String             @map("entity_id")
+  /// Unique asset tag / code within entity (e.g. "FA-00142")
+  assetCode                 String             @map("asset_code") @db.VarChar(30)
+  /// Alternative lookup code
+  lookupCode                String?            @map("lookup_code") @db.VarChar(30)
+  description               String             @db.VarChar(255)
+  categoryId                String?            @map("category_id")
+  /// Balance sheet accumulated depreciation account code
+  bsDepreciationAccount     String             @map("bs_depreciation_account") @db.VarChar(50)
+  /// P&L depreciation expense account code
+  plDepreciationAccount     String             @map("pl_depreciation_account") @db.VarChar(50)
+  depreciationMethod        DepreciationMethod @default(STRAIGHT_LINE) @map("depreciation_method")
+  /// Annual depreciation rate as percentage (e.g. 20.00 = 20%)
+  depreciationRate          Decimal?           @map("depreciation_rate") @db.Decimal(8, 4)
+  /// Useful life in months
+  usefulLifeMonths          Int                @map("useful_life_months")
+  /// Period in which depreciation begins
+  depreciationStartPeriodId String?            @map("depreciation_start_period_id")
+  /// Days of depreciation in the first period (proration)
+  firstPeriodDays           Int?               @map("first_period_days")
+  /// Residual / salvage value
+  finalValue                Decimal            @default(0) @map("final_value") @db.Decimal(18, 4)
+  /// Acquisition cost (base currency)
+  grossValue                Decimal            @default(0) @map("gross_value") @db.Decimal(18, 4)
+  /// Total depreciation charged to date
+  accumulatedDepreciation   Decimal            @default(0) @map("accumulated_depreciation") @db.Decimal(18, 4)
+  /// Current net book value = grossValue − accumulatedDepreciation
+  netValue                  Decimal            @default(0) @map("net_value") @db.Decimal(18, 4)
+  /// Number of physical units (e.g. 100 chairs as one asset line)
+  assetQuantity             Decimal?           @map("asset_quantity") @db.Decimal(18, 4)
+  acquisitionDate           DateTime           @map("acquisition_date") @db.Date
+  disposalDate              DateTime?          @map("disposal_date") @db.Date
+  status                    AssetStatus        @default(ACTIVE)
+  /// Analysis dimensions: T1=Property, T2=Department, T3=Category, T4=Location, T5=Supplier
+  analysisCode1             String?            @map("analysis_code_1") @db.VarChar(50)
+  analysisCode2             String?            @map("analysis_code_2") @db.VarChar(50)
+  analysisCode3             String?            @map("analysis_code_3") @db.VarChar(50)
+  analysisCode4             String?            @map("analysis_code_4") @db.VarChar(50)
+  analysisCode5             String?            @map("analysis_code_5") @db.VarChar(50)
+  createdById               String?            @map("created_by")
+  createdAt                 DateTime           @default(now()) @map("created_at")
+  updatedAt                 DateTime           @updatedAt @map("updated_at")
+
+  entity                  Entity         @relation(fields: [entityId], references: [id])
+  category                AssetCategory? @relation(fields: [categoryId], references: [id])
+  createdBy               User?          @relation("AssetCreatedBy", fields: [createdById], references: [id])
+  depreciationStartPeriod Period?        @relation(fields: [depreciationStartPeriodId], references: [id])
+
+  @@unique([entityId, assetCode])
+  @@index([entityId, status])
+  @@index([entityId, categoryId])
+  @@map("fixed_assets")
+}
+
+model DepreciationTable {
+  id       String  @id @default(uuid())
+  entityId String  @map("entity_id")
+  code     String  @db.VarChar(20)
+  name     String  @db.VarChar(100)
+  /// Array of { period: number, rate: number } defining the depreciation curve
+  entries  Json    @default("[]")
+  isActive Boolean @default(true) @map("is_active")
+
+  entity Entity @relation(fields: [entityId], references: [id])
+
+  @@unique([entityId, code])
+  @@map("depreciation_tables")
 }
