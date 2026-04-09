@@ -319,6 +319,216 @@ async function writeToTarget(
   };
 }
 
+// ── Export pipeline ─────────────────────────────────────────────────────────
+
+export async function executeExport(
+  ctx: PipelineContext,
+  executionId: string,
+  profile: ProfileWithRelations,
+  runtimeParams: Record<string, unknown>
+): Promise<PipelineResult> {
+  // 1. Validate prerequisites
+  if (!profile.targetFormat) {
+    return failExecution(
+      ctx,
+      executionId,
+      "MISSING_TARGET_FORMAT",
+      "Export profile has no target format definition"
+    );
+  }
+  if (!profile.sourceComponent) {
+    return failExecution(
+      ctx,
+      executionId,
+      "MISSING_SOURCE_COMPONENT",
+      "Export profile has no source component"
+    );
+  }
+
+  // 2. Parse FSD definition
+  let fsdSchema: FsdSchema;
+  try {
+    fsdSchema = JSON.parse(profile.targetFormat.fsdXml) as FsdSchema;
+  } catch {
+    return failExecution(ctx, executionId, "INVALID_FSD", "Target format fsdXml is not valid JSON");
+  }
+
+  // 3. Read records from source component
+  const entityId = String(runtimeParams.entityId ?? "");
+  let sourceRecords: FsdRecordValue[];
+
+  try {
+    sourceRecords = await runWithContext(
+      {
+        tenantSlug: ctx.tenantSlug,
+        tenantDbUrl: ctx.tenantDbUrl,
+        entityId: entityId || null,
+        userId: String(runtimeParams.triggeredBy ?? "system")
+      },
+      () => readFromSource(ctx, profile.sourceComponent!, entityId, runtimeParams)
+    );
+  } catch (err) {
+    return failExecution(
+      ctx,
+      executionId,
+      "SOURCE_READ_ERROR",
+      `Failed to read from source "${profile.sourceComponent}": ${(err as Error).message}`
+    );
+  }
+
+  if (sourceRecords.length === 0) {
+    return failExecution(
+      ctx,
+      executionId,
+      "NO_RECORDS",
+      `No records found in source "${profile.sourceComponent}" for the given parameters`
+    );
+  }
+
+  // 4. Write records to FSD format
+  const writeResult = write(fsdSchema, sourceRecords);
+
+  if (writeResult.errors.length > 0 && !writeResult.output) {
+    const logData = writeResult.errors.map((e, i) => ({
+      executionId,
+      recordIndex: e.recordIndex ?? i,
+      status: "FAILED" as const,
+      sourceData: null,
+      transformedData: null,
+      errorCode: e.code,
+      errorMessage: e.message
+    }));
+    await ctx.db.transferExecutionLog.createMany({ data: logData });
+
+    return {
+      recordsTotal: sourceRecords.length,
+      recordsSucceeded: 0,
+      recordsFailed: sourceRecords.length,
+      errorMessage: `FSD write failed: ${writeResult.errors[0]!.message}`
+    };
+  }
+
+  // 5. Save output file
+  const outputPath = resolveOutputFilePath(profile, runtimeParams, ctx.tenantSlug, executionId);
+  try {
+    await ctx.storage.write(outputPath, writeResult.output);
+  } catch (err) {
+    return failExecution(
+      ctx,
+      executionId,
+      "FILE_WRITE_ERROR",
+      `Failed to write output file "${outputPath}": ${(err as Error).message}`
+    );
+  }
+
+  // 6. Log success for all records
+  const logData = sourceRecords.map((rec, i) => ({
+    executionId,
+    recordIndex: i,
+    status: "SUCCESS" as const,
+    sourceData: rec as any,
+    transformedData: null
+  }));
+  await ctx.db.transferExecutionLog.createMany({ data: logData });
+
+  // 7. Save payloads if configured
+  if (profile.savePayload === "INPUT" || profile.savePayload === "BOTH") {
+    const inputKey = `${ctx.tenantSlug}/${executionId}/input.json`;
+    await ctx.storage.write(inputKey, JSON.stringify(sourceRecords)).catch(() => {});
+    await ctx.db.transferExecution.update({
+      where: { id: executionId },
+      data: { inputPayloadKey: inputKey }
+    });
+  }
+  if (profile.savePayload === "OUTPUT" || profile.savePayload === "BOTH") {
+    const outputKey = `${ctx.tenantSlug}/${executionId}/output.txt`;
+    await ctx.storage.write(outputKey, writeResult.output).catch(() => {});
+    await ctx.db.transferExecution.update({
+      where: { id: executionId },
+      data: { outputPayloadKey: outputKey }
+    });
+  }
+
+  await ctx.db.transferExecution.update({
+    where: { id: executionId },
+    data: { outputPayloadKey: outputPath }
+  });
+
+  return {
+    recordsTotal: sourceRecords.length,
+    recordsSucceeded: sourceRecords.length,
+    recordsFailed: writeResult.errors.length
+  };
+}
+
+// ── Read from source (inside runWithContext) ─────────────────────────────────
+
+const SUPPORTED_READ_COMPONENTS = new Set(["GL_JOURNAL", "AP_INVOICE", "AR_INVOICE"]);
+
+async function readFromSource(
+  ctx: PipelineContext,
+  sourceComponent: string,
+  entityId: string,
+  runtimeParams: Record<string, unknown>
+): Promise<FsdRecordValue[]> {
+  if (!SUPPORTED_READ_COMPONENTS.has(sourceComponent)) {
+    throw new Error(
+      `Source component "${sourceComponent}" is not supported for data reading. Supported: ${[...SUPPORTED_READ_COMPONENTS].join(", ")}`
+    );
+  }
+
+  if (sourceComponent === "GL_JOURNAL") {
+    const glService = new GLService(ctx.db as any);
+    const result = await glService.listJournals(entityId, {
+      periodId: runtimeParams.periodId ? String(runtimeParams.periodId) : undefined,
+      status: "POSTED",
+      limit: 100
+    });
+    // Flatten journal lines into FSD records
+    const records: FsdRecordValue[] = [];
+    const journals = Array.isArray(result) ? result : ((result as any).data ?? []);
+    for (const journal of journals) {
+      const lines = (journal as any).lines ?? [];
+      for (const line of lines) {
+        records.push({
+          journalId: (journal as any).id,
+          reference: (journal as any).reference ?? "",
+          periodId: (journal as any).periodId ?? "",
+          description: (line as any).description ?? "",
+          accountId: (line as any).accountId ?? "",
+          debit: String((line as any).debit ?? "0"),
+          credit: String((line as any).credit ?? "0"),
+          currency: (line as any).currency ?? "",
+          fxRate: String((line as any).fxRate ?? "1")
+        });
+      }
+    }
+    return records;
+  }
+
+  if (sourceComponent === "AP_INVOICE") {
+    const apService = new APService(ctx.db as any);
+    const result = await (apService as any).listInvoices(entityId, {
+      limit: 100,
+      ...runtimeParams
+    });
+    const invoices = Array.isArray(result) ? result : ((result as any).data ?? []);
+    return invoices.map((inv: any) => ({ ...inv }) as FsdRecordValue);
+  }
+
+  if (sourceComponent === "AR_INVOICE") {
+    const arService = new ARService(ctx.db as any);
+    const result = await (arService as any).listInvoices(entityId, {
+      limit: 100,
+      ...runtimeParams
+    });
+    const invoices = Array.isArray(result) ? result : ((result as any).data ?? []);
+    return invoices.map((inv: any) => ({ ...inv }) as FsdRecordValue);
+  }
+
+  return [];
+}
+
 // ── Process pipeline (stub) ──────────────────────────────────────────────────
 
 export async function executeProcess(
@@ -349,6 +559,21 @@ function resolveInputFilePath(
     return `${tenantSlug}/${(profile.sourceParams as any).fileName}`;
   }
   return `${tenantSlug}/input.csv`;
+}
+
+function resolveOutputFilePath(
+  profile: ProfileWithRelations,
+  runtimeParams: Record<string, unknown>,
+  tenantSlug: string,
+  executionId: string
+): string {
+  if (runtimeParams.outputFilePath) {
+    return String(runtimeParams.outputFilePath);
+  }
+  if (profile.targetParams && (profile.targetParams as any).fileName) {
+    return `${tenantSlug}/${(profile.targetParams as any).fileName}`;
+  }
+  return `${tenantSlug}/exports/${executionId}.txt`;
 }
 
 async function failExecution(
