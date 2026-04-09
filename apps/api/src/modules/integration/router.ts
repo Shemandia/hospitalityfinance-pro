@@ -1597,6 +1597,343 @@ export async function registerIntegrationRouter(app: FastifyInstance): Promise<v
         }
       );
 
+      // ─── Automation endpoints ─────────────────────────────────────────
+
+      // TD-API-050 — GET /transfer-desk/automations (list)
+      router.get("/transfer-desk/automations", async (request, reply) => {
+        try {
+          const data = await (prisma as unknown as PrismaClient).transferAutomation.findMany({
+            include: {
+              steps: {
+                select: { id: true, stepOrder: true, profileId: true, failOnError: true },
+                orderBy: { stepOrder: "asc" }
+              },
+              schedules: {
+                select: {
+                  id: true,
+                  cronExpression: true,
+                  timezone: true,
+                  isActive: true,
+                  nextRunAt: true
+                }
+              },
+              _count: { select: { steps: true, schedules: true, executions: true } }
+            },
+            orderBy: { updatedAt: "desc" }
+          });
+          return reply.send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      // TD-API-051 — GET /transfer-desk/automations/:id (detail)
+      router.get<{ Params: { id: string } }>(
+        "/transfer-desk/automations/:id",
+        async (request, reply) => {
+          try {
+            const data = await (prisma as unknown as PrismaClient).transferAutomation.findUnique({
+              where: { id: request.params.id },
+              include: {
+                steps: {
+                  include: {
+                    profile: { select: { id: true, name: true, profileType: true } }
+                  },
+                  orderBy: { stepOrder: "asc" }
+                },
+                schedules: true,
+                executions: {
+                  select: {
+                    id: true,
+                    status: true,
+                    startedAt: true,
+                    finishedAt: true,
+                    recordsTotal: true,
+                    recordsSucceeded: true,
+                    recordsFailed: true,
+                    errorMessage: true
+                  },
+                  orderBy: { createdAt: "desc" },
+                  take: 20
+                }
+              }
+            });
+            if (!data) {
+              return reply.status(404).send({ error: "Automation not found" });
+            }
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      // TD-API-052 — POST /transfer-desk/automations (create)
+      router.post("/transfer-desk/automations", async (request, reply) => {
+        try {
+          const body = request.body as {
+            name: string;
+            description?: string;
+            steps?: Array<{
+              profileId: string;
+              stepOrder: number;
+              failOnError?: boolean;
+              sourceParamOverrides?: Record<string, unknown>;
+              targetParamOverrides?: Record<string, unknown>;
+            }>;
+            schedules?: Array<{
+              cronExpression: string;
+              timezone?: string;
+              isActive?: boolean;
+              runAsUser?: string;
+            }>;
+          };
+
+          if (!body.name?.trim()) {
+            return reply.status(400).send({ error: "name is required" });
+          }
+
+          const data = await (prisma as unknown as PrismaClient).transferAutomation.create({
+            data: {
+              name: body.name.trim(),
+              description: body.description?.trim() || null,
+              isEnabled: true,
+              steps: body.steps?.length
+                ? {
+                    create: body.steps.map((s) => ({
+                      profileId: s.profileId,
+                      stepOrder: s.stepOrder,
+                      failOnError: s.failOnError ?? true,
+                      sourceParamOverrides: s.sourceParamOverrides ?? undefined,
+                      targetParamOverrides: s.targetParamOverrides ?? undefined
+                    }))
+                  }
+                : undefined,
+              schedules: body.schedules?.length
+                ? {
+                    create: body.schedules.map((s) => ({
+                      cronExpression: s.cronExpression,
+                      timezone: s.timezone ?? "UTC",
+                      isActive: s.isActive ?? true,
+                      runAsUser: s.runAsUser ?? null
+                    }))
+                  }
+                : undefined
+            },
+            include: {
+              steps: {
+                include: {
+                  profile: { select: { id: true, name: true, profileType: true } }
+                },
+                orderBy: { stepOrder: "asc" }
+              },
+              schedules: true
+            }
+          });
+          return reply.status(201).send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      // TD-API-053 — PUT /transfer-desk/automations/:id (update)
+      router.put<{ Params: { id: string } }>(
+        "/transfer-desk/automations/:id",
+        async (request, reply) => {
+          try {
+            const existing = await (
+              prisma as unknown as PrismaClient
+            ).transferAutomation.findUnique({
+              where: { id: request.params.id }
+            });
+            if (!existing) {
+              return reply.status(404).send({ error: "Automation not found" });
+            }
+
+            const body = request.body as {
+              name?: string;
+              description?: string;
+              isEnabled?: boolean;
+              steps?: Array<{
+                id?: string;
+                profileId: string;
+                stepOrder: number;
+                failOnError?: boolean;
+                sourceParamOverrides?: Record<string, unknown>;
+                targetParamOverrides?: Record<string, unknown>;
+              }>;
+              schedules?: Array<{
+                id?: string;
+                cronExpression: string;
+                timezone?: string;
+                isActive?: boolean;
+                runAsUser?: string;
+              }>;
+            };
+
+            // If steps provided, delete+recreate (simpler than upsert for ordered lists)
+            if (body.steps) {
+              await (prisma as unknown as PrismaClient).transferAutomationStep.deleteMany({
+                where: { automationId: request.params.id }
+              });
+            }
+            if (body.schedules) {
+              await (prisma as unknown as PrismaClient).transferAutomationSchedule.deleteMany({
+                where: { automationId: request.params.id }
+              });
+            }
+
+            const data = await (prisma as unknown as PrismaClient).transferAutomation.update({
+              where: { id: request.params.id },
+              data: {
+                ...(body.name ? { name: body.name.trim() } : {}),
+                ...(body.description !== undefined
+                  ? { description: body.description?.trim() || null }
+                  : {}),
+                ...(body.isEnabled !== undefined ? { isEnabled: body.isEnabled } : {}),
+                ...(body.steps
+                  ? {
+                      steps: {
+                        create: body.steps.map((s) => ({
+                          profileId: s.profileId,
+                          stepOrder: s.stepOrder,
+                          failOnError: s.failOnError ?? true,
+                          sourceParamOverrides: s.sourceParamOverrides ?? undefined,
+                          targetParamOverrides: s.targetParamOverrides ?? undefined
+                        }))
+                      }
+                    }
+                  : {}),
+                ...(body.schedules
+                  ? {
+                      schedules: {
+                        create: body.schedules.map((s) => ({
+                          cronExpression: s.cronExpression,
+                          timezone: s.timezone ?? "UTC",
+                          isActive: s.isActive ?? true,
+                          runAsUser: s.runAsUser ?? null
+                        }))
+                      }
+                    }
+                  : {})
+              },
+              include: {
+                steps: {
+                  include: {
+                    profile: { select: { id: true, name: true, profileType: true } }
+                  },
+                  orderBy: { stepOrder: "asc" }
+                },
+                schedules: true
+              }
+            });
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      // TD-API-054 — DELETE /transfer-desk/automations/:id
+      router.delete<{ Params: { id: string } }>(
+        "/transfer-desk/automations/:id",
+        async (request, reply) => {
+          try {
+            const existing = await (
+              prisma as unknown as PrismaClient
+            ).transferAutomation.findUnique({
+              where: { id: request.params.id }
+            });
+            if (!existing) {
+              return reply.status(404).send({ error: "Automation not found" });
+            }
+
+            // Cascade delete steps and schedules
+            await (prisma as unknown as PrismaClient).transferAutomationStep.deleteMany({
+              where: { automationId: request.params.id }
+            });
+            await (prisma as unknown as PrismaClient).transferAutomationSchedule.deleteMany({
+              where: { automationId: request.params.id }
+            });
+            await (prisma as unknown as PrismaClient).transferAutomation.delete({
+              where: { id: request.params.id }
+            });
+
+            return reply.send({ data: { id: request.params.id, deleted: true }, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      // TD-API-055 — POST /transfer-desk/automations/:id/run (immediate execution)
+      router.post<{ Params: { id: string } }>(
+        "/transfer-desk/automations/:id/run",
+        async (request, reply) => {
+          try {
+            const automation = await (
+              prisma as unknown as PrismaClient
+            ).transferAutomation.findUnique({
+              where: { id: request.params.id },
+              include: {
+                steps: {
+                  include: { profile: { select: { id: true, name: true } } },
+                  orderBy: { stepOrder: "asc" }
+                }
+              }
+            });
+            if (!automation) {
+              return reply.status(404).send({ error: "Automation not found" });
+            }
+            if (automation.steps.length === 0) {
+              return reply
+                .status(400)
+                .send({ error: "Automation has no steps — nothing to execute" });
+            }
+
+            const body = (request.body as { runtimeParams?: Record<string, unknown> }) ?? {};
+
+            // Create execution rows for each step and enqueue them
+            const stepExecutions: Array<{
+              stepOrder: number;
+              executionId: string;
+              profileId: string;
+            }> = [];
+
+            for (const step of automation.steps) {
+              const execution = await (prisma as unknown as PrismaClient).transferExecution.create({
+                data: {
+                  profileId: step.profileId,
+                  automationId: automation.id,
+                  automationStepOrder: step.stepOrder,
+                  status: "QUEUED",
+                  triggeredBy: (request as any).userId ?? "system",
+                  runtimeParams: body.runtimeParams ?? undefined
+                }
+              });
+              stepExecutions.push({
+                stepOrder: step.stepOrder,
+                executionId: execution.id,
+                profileId: step.profileId
+              });
+            }
+
+            // Return immediately — the automation-engine will pick these up
+            return reply.status(201).send({
+              data: {
+                automationId: automation.id,
+                automationName: automation.name,
+                stepsQueued: stepExecutions.length,
+                stepExecutions
+              },
+              errors: []
+            });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
       // TD-API-009 — GET /transfer-desk/profiles (list)
       router.get("/transfer-desk/profiles", async (request, reply) => {
         try {

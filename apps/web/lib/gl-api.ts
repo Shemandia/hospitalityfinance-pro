@@ -2732,6 +2732,159 @@ export function updateTransferTransformation(
   );
 }
 
+// ── Automation types + CRUD (TD-API-050..055) ───────────────────────────
+
+export type TransferAutomationStepSummary = {
+  id: string;
+  automationId: string;
+  profileId: string;
+  stepOrder: number;
+  failOnError: boolean;
+  sourceParamOverrides: Record<string, unknown> | null;
+  targetParamOverrides: Record<string, unknown> | null;
+  profile?: { id: string; name: string; profileType: TransferProfileType };
+};
+
+export type TransferAutomationScheduleSummary = {
+  id: string;
+  automationId: string;
+  cronExpression: string;
+  timezone: string;
+  isActive: boolean;
+  runAsUser: string | null;
+  nextRunAt: string | null;
+  bullmqRepeatKey: string | null;
+};
+
+export type TransferAutomationSummary = {
+  id: string;
+  name: string;
+  description: string | null;
+  isEnabled: boolean;
+  createdById: string | null;
+  createdAt: string;
+  updatedAt: string;
+  steps: TransferAutomationStepSummary[];
+  schedules: TransferAutomationScheduleSummary[];
+  _count?: { steps: number; schedules: number; executions: number };
+};
+
+export type TransferAutomationDetail = TransferAutomationSummary & {
+  executions?: Array<{
+    id: string;
+    status: TransferExecutionStatus;
+    startedAt: string | null;
+    finishedAt: string | null;
+    recordsTotal: number;
+    recordsSucceeded: number;
+    recordsFailed: number;
+    errorMessage: string | null;
+  }>;
+};
+
+export type AutomationCreateInput = {
+  name: string;
+  description?: string;
+  steps?: Array<{
+    profileId: string;
+    stepOrder: number;
+    failOnError?: boolean;
+    sourceParamOverrides?: Record<string, unknown>;
+    targetParamOverrides?: Record<string, unknown>;
+  }>;
+  schedules?: Array<{
+    cronExpression: string;
+    timezone?: string;
+    isActive?: boolean;
+    runAsUser?: string;
+  }>;
+};
+
+export type AutomationUpdateInput = {
+  name?: string;
+  description?: string;
+  isEnabled?: boolean;
+  steps?: Array<{
+    id?: string;
+    profileId: string;
+    stepOrder: number;
+    failOnError?: boolean;
+    sourceParamOverrides?: Record<string, unknown>;
+    targetParamOverrides?: Record<string, unknown>;
+  }>;
+  schedules?: Array<{
+    id?: string;
+    cronExpression: string;
+    timezone?: string;
+    isActive?: boolean;
+    runAsUser?: string;
+  }>;
+};
+
+export function listTransferAutomations(context: ApiContext) {
+  return request<TransferAutomationSummary[]>(
+    context,
+    `/api/v1/integration/transfer-desk/automations`
+  );
+}
+
+export function getTransferAutomation(context: ApiContext, id: string) {
+  return request<TransferAutomationDetail>(
+    context,
+    `/api/v1/integration/transfer-desk/automations/${id}`
+  );
+}
+
+export function createTransferAutomation(context: ApiContext, input: AutomationCreateInput) {
+  return request<TransferAutomationDetail>(
+    context,
+    "/api/v1/integration/transfer-desk/automations",
+    {
+      method: "POST",
+      body: JSON.stringify(input)
+    }
+  );
+}
+
+export function updateTransferAutomation(
+  context: ApiContext,
+  id: string,
+  input: AutomationUpdateInput
+) {
+  return request<TransferAutomationDetail>(
+    context,
+    `/api/v1/integration/transfer-desk/automations/${id}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(input)
+    }
+  );
+}
+
+export function deleteTransferAutomation(context: ApiContext, id: string) {
+  return request<{ id: string; deleted: true }>(
+    context,
+    `/api/v1/integration/transfer-desk/automations/${id}`,
+    { method: "DELETE" }
+  );
+}
+
+export function runTransferAutomation(
+  context: ApiContext,
+  id: string,
+  runtimeParams?: Record<string, unknown>
+) {
+  return request<{
+    automationId: string;
+    automationName: string;
+    stepsQueued: number;
+    stepExecutions: Array<{ stepOrder: number; executionId: string; profileId: string }>;
+  }>(context, `/api/v1/integration/transfer-desk/automations/${id}/run`, {
+    method: "POST",
+    body: JSON.stringify({ runtimeParams })
+  });
+}
+
 export type TransferProfileSummary = {
   id: string;
   name: string;
