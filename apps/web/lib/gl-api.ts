@@ -2137,6 +2137,112 @@ export async function removeReportSchedule(context: ApiContext, definitionId: st
   });
 }
 
+// ── Synchronous Report Execution (FAL/FSL/FTL) ─────────────────────────────
+
+export type ReportColumnDef = {
+  key: string;
+  label: string;
+  align: "left" | "right";
+};
+
+export type ReportRow = {
+  rowIndex: number;
+  type: "heading" | "data" | "subtotal" | "formula" | "blank";
+  label: string;
+  values: Record<string, number | null>;
+  formatting?: {
+    bold?: boolean;
+    underline?: "NONE" | "SINGLE" | "DOUBLE";
+    indent?: number;
+    level?: number;
+  };
+  drillDown?: {
+    accountCodeFrom: string;
+    accountCodeTo: string;
+    periodId: string;
+    accountTypes?: string[];
+  };
+};
+
+export type ReportResult = {
+  columns: ReportColumnDef[];
+  rows: ReportRow[];
+  metadata: {
+    reportName: string;
+    reportType: string;
+    entityId: string;
+    periodName: string;
+    generatedAt: string;
+  };
+};
+
+export type DrillDownRow = {
+  date: string;
+  reference: string;
+  description: string;
+  source: string;
+  journalType: string;
+  accountCode: string;
+  accountName: string;
+  debit: number;
+  credit: number;
+  amount: number;
+};
+
+export async function executeReportSync(
+  context: ApiContext,
+  payload: {
+    definitionId: string;
+    periodId: string;
+    comparativePeriodId?: string;
+    budgetDefinitionId?: string;
+    overrides?: Record<string, unknown>;
+  }
+) {
+  return request<ReportResult>(context, "/api/v1/reports/execute", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function drillDown(
+  context: ApiContext,
+  payload: {
+    accountCodeFrom: string;
+    accountCodeTo: string;
+    periodId: string;
+    accountTypes?: string[];
+  }
+) {
+  return request<{ rows: DrillDownRow[]; total: number }>(context, "/api/v1/reports/drill-down", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function cloneReportDefinition(
+  context: ApiContext,
+  definitionId: string,
+  name?: string
+) {
+  return request<ReportDefinitionSummary>(
+    context,
+    `/api/v1/reports/definitions/${definitionId}/clone`,
+    {
+      method: "POST",
+      body: JSON.stringify(name ? { name } : {})
+    }
+  );
+}
+
+export async function seedSystemReportDefinitions(context: ApiContext) {
+  return request<{ created: number; definitions?: string[] }>(
+    context,
+    "/api/v1/reports/seed-system",
+    { method: "POST" }
+  );
+}
+
 // ── Simphony POS ─────────────────────────────────────────────────────────────
 
 export async function runSimphonyImport(

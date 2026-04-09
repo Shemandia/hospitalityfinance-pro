@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "../../db/client.js";
 import { ZodError } from "zod";
 import { prisma } from "../../db/prisma.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
@@ -9,6 +9,8 @@ import {
   createReportDefinitionSchema,
   updateReportDefinitionSchema
 } from "./types.js";
+import { executeReportSchema, drillDownSchema, reportTemplateSchema } from "./report-types.js";
+import { executeReport, SYSTEM_DEFINITIONS } from "./report-engine.js";
 import { ReportingService, ReportingServiceError } from "./service.js";
 
 const reportingService = new ReportingService(prisma as unknown as PrismaClient);
@@ -287,16 +289,20 @@ export async function registerReportingRouter(app: FastifyInstance): Promise<voi
 
       // ── Report Runs ─────────────────────────────────────────────────────
 
-      router.post("/reports/runs", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const payload = createReportRunSchema.parse(request.body ?? {});
-          const data = await reportingService.createRun(entityId, payload);
-          return reply.code(202).send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.post(
+        "/reports/runs",
+        { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const payload = createReportRunSchema.parse(request.body ?? {});
+            const data = await reportingService.createRun(entityId, payload);
+            return reply.code(202).send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.get<{ Params: { id: string } }>("/reports/runs/:id", async (request, reply) => {
         try {
@@ -401,6 +407,22 @@ export async function registerReportingRouter(app: FastifyInstance): Promise<voi
                 value: "CUSTOM",
                 label: "Custom Report",
                 description: "Custom account grouping by USALI department and category"
+              },
+              {
+                value: "FAL",
+                label: "Financial Account Listing",
+                description: "Flexible account-level detail report with code range and type filters"
+              },
+              {
+                value: "FSL",
+                label: "Financial Statement Listing",
+                description:
+                  "Formatted financial statement with configurable row/column definitions"
+              },
+              {
+                value: "FTL",
+                label: "Financial Transaction Listing",
+                description: "Transaction-level drill-down with period, account, and amount filters"
               }
             ],
             templateOptions: {
@@ -422,6 +444,186 @@ export async function registerReportingRouter(app: FastifyInstance): Promise<voi
           },
           errors: []
         });
+      });
+
+      // ── Synchronous Report Execution ──────────────────────────────────────
+
+      router.post(
+        "/reports/execute",
+        { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const input = executeReportSchema.parse(request.body);
+
+            const definition = await (prisma as unknown as PrismaClient).reportDefinition.findFirst(
+              {
+                where: { id: input.definitionId, entityId }
+              }
+            );
+            if (!definition) {
+              return reply.code(404).send({
+                data: null,
+                errors: [{ code: "NOT_FOUND", message: "Report definition not found." }]
+              });
+            }
+
+            const template = reportTemplateSchema.parse(
+              input.overrides
+                ? { ...(definition.template as Record<string, unknown>), ...input.overrides }
+                : definition.template
+            );
+
+            const result = await executeReport(
+              prisma as unknown as PrismaClient,
+              entityId,
+              definition.name,
+              template,
+              {
+                periodId: input.periodId,
+                comparativePeriodId: input.comparativePeriodId,
+                budgetDefinitionId: input.budgetDefinitionId
+              }
+            );
+
+            return reply.send({ data: result, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      // ── Drill-Down ────────────────────────────────────────────────────────
+
+      router.post("/reports/drill-down", async (request, reply) => {
+        try {
+          const entityId = requireEntityId(request.entityId);
+          const input = drillDownSchema.parse(request.body);
+
+          const lines = await (prisma as unknown as PrismaClient).journalLine.findMany({
+            where: {
+              journal: { entityId, periodId: input.periodId },
+              account: {
+                code: { gte: input.accountCodeFrom, lte: input.accountCodeTo },
+                ...(input.accountTypes?.length ? { type: { in: input.accountTypes as any } } : {})
+              }
+            },
+            include: {
+              account: { select: { code: true, name: true } },
+              journal: {
+                select: {
+                  reference: true,
+                  date: true,
+                  description: true,
+                  source: true,
+                  journalType: { select: { name: true } }
+                }
+              }
+            },
+            orderBy: [{ journal: { date: "desc" } }, { account: { code: "asc" } }],
+            take: 500
+          });
+
+          const rows = lines.map((line: any) => ({
+            date: line.journal.date,
+            reference: line.journal.reference,
+            description: line.journal.description || line.description,
+            source: line.journal.source,
+            journalType: line.journal.journalType?.name,
+            accountCode: line.account.code,
+            accountName: line.account.name,
+            debit: Number(line.debit),
+            credit: Number(line.credit),
+            amount: Number(line.debit) - Number(line.credit)
+          }));
+
+          return reply.send({ data: { rows, total: rows.length }, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      // ── Clone Definition ──────────────────────────────────────────────────
+
+      router.post<{ Params: { id: string } }>(
+        "/reports/definitions/:id/clone",
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const source = await (prisma as unknown as PrismaClient).reportDefinition.findFirst({
+              where: { id: request.params.id, entityId }
+            });
+            if (!source) {
+              return reply.code(404).send({
+                data: null,
+                errors: [{ code: "NOT_FOUND", message: "Report definition not found." }]
+              });
+            }
+
+            const body = (request.body as Record<string, unknown>) ?? {};
+            const cloneName =
+              typeof body.name === "string" && body.name.length > 0
+                ? body.name
+                : `${source.name} (Copy)`;
+
+            const data = await (prisma as unknown as PrismaClient).reportDefinition.create({
+              data: {
+                entityId,
+                name: cloneName,
+                type: source.type,
+                template: source.template as any,
+                isSystem: false
+              }
+            });
+
+            return reply.code(201).send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      // ── Seed System Definitions ───────────────────────────────────────────
+
+      router.post("/reports/seed-system", async (request, reply) => {
+        try {
+          const entityId = requireEntityId(request.entityId);
+
+          const existing = await (prisma as unknown as PrismaClient).reportDefinition.findMany({
+            where: { entityId, isSystem: true },
+            select: { name: true }
+          });
+          const existingNames = new Set(existing.map((d: any) => d.name));
+
+          const toCreate = SYSTEM_DEFINITIONS.filter((def) => !existingNames.has(def.name));
+
+          if (toCreate.length === 0) {
+            return reply.send({
+              data: { created: 0, message: "All system definitions already exist." },
+              errors: []
+            });
+          }
+
+          await (prisma as unknown as PrismaClient).reportDefinition.createMany({
+            data: toCreate.map((def) => ({
+              entityId,
+              name: def.name,
+              type: def.type as any,
+              template: def.template as any,
+              isSystem: true
+            }))
+          });
+
+          return reply.code(201).send({
+            data: {
+              created: toCreate.length,
+              definitions: toCreate.map((d) => d.name)
+            },
+            errors: []
+          });
+        } catch (error) {
+          return mapError(reply, error);
+        }
       });
     },
     { prefix: "/api/v1" }
