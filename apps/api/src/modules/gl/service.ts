@@ -1,6 +1,7 @@
-import { Prisma, PrismaClient } from "@prisma/client";
-import { setEntityDbContext } from "../../db/tenantContext.js";
+import { Prisma, PrismaClient } from "../../db/client.js";
+import { setEntityDbContext, clearEntityDbContext } from "../../db/tenantContext.js";
 import { sendApprovalEmail } from "../../shared/email.js";
+import { AuthorizationService } from "../authorization/service.js";
 import { GLRepository, JournalTypeRepository } from "./repository.js";
 import type {
   AccountCreateInput,
@@ -251,6 +252,15 @@ export class GLService {
     journal: PostingJournal,
     approvedById: string
   ) {
+    // Verify journal is still in a postable state (prevents approve-during-reject race)
+    if (!["DRAFT", "PENDING_APPROVAL"].includes(journal.status)) {
+      throw new GLServiceError(
+        "GL_JOURNAL_STATUS_INVALID",
+        `Journal status ${journal.status} cannot be posted.`,
+        409
+      );
+    }
+
     if (journal.period.status !== "OPEN") {
       throw new GLServiceError(
         "GL_PERIOD_CLOSED",
@@ -261,7 +271,21 @@ export class GLService {
 
     this.validateBalance(this.toJournalInputLines(journal));
 
-    await repository.setJournalStatus(journal.entityId, journal.id, "POSTED", approvedById);
+    // Conditional update: only succeeds if journal is still in expected state
+    const result = await repository.setJournalStatusConditional(
+      journal.entityId,
+      journal.id,
+      "POSTED",
+      approvedById,
+      ["DRAFT", "PENDING_APPROVAL"]
+    );
+    if (result === 0) {
+      throw new GLServiceError(
+        "GL_JOURNAL_STATUS_CHANGED",
+        "Journal status was changed by another user. Please refresh.",
+        409
+      );
+    }
 
     for (const line of journal.lines) {
       await repository.updateAccountBalance(
@@ -410,35 +434,78 @@ export class GLService {
 
     const journalAmount = this.computeJournalAmount(input.lines);
 
-    const result = await this.prisma.$transaction(async (transaction) => {
-      await setEntityDbContext(transaction, entityId);
-      const repository = this.repository(transaction);
-      const created = await repository.createJournal(entityId, createdById, input);
-      const rule = await repository.getApprovalRuleForAmount(entityId, "GL", journalAmount);
+    let result;
+    try {
+      result = await this.prisma.$transaction(async (transaction) => {
+        await setEntityDbContext(transaction, entityId);
+        const repository = this.repository(transaction);
+        const created = await repository.createJournal(entityId, createdById, input);
+        const rule = await repository.getApprovalRuleForAmount(entityId, "GL", journalAmount);
 
-      if (!rule || rule.requiredApprovers.length === 0) {
+        if (!rule || rule.requiredApprovers.length === 0) {
+          return {
+            journal: created,
+            approvalRecipients: [] as Array<{ id: string; email: string; name: string }>
+          };
+        }
+
+        await repository.setJournalStatus(entityId, created.id, "PENDING_APPROVAL", null);
+        await repository.createJournalApprovals(entityId, created.id, rule.requiredApprovers);
+
+        const approvals = await repository.getJournalApprovalEntries(entityId, created.id);
+        const recipients = approvals.map((entry) => ({
+          id: entry.approver.id,
+          email: entry.approver.email,
+          name: entry.approver.name
+        }));
+
+        const refreshed = await repository.getJournalWithLines(entityId, created.id);
         return {
-          journal: created,
-          approvalRecipients: [] as Array<{ id: string; email: string; name: string }>
+          journal: refreshed ?? created,
+          approvalRecipients: recipients
         };
+      });
+    } finally {
+      clearEntityDbContext();
+    }
+
+    // ── Multi-stage authorization check ──────────────────────────────────
+    // If the journal was NOT already routed by the legacy ApprovalRule system,
+    // check whether multi-stage authorization is required (LedgerSetup or JournalType).
+    if (result.approvalRecipients.length === 0) {
+      try {
+        const ledgerSetup = await (this.prisma as any).ledgerSetup.findFirst({
+          where: { entityId, ledger: "A" }
+        });
+        const journalType = input.journalTypeId
+          ? await (this.prisma as any).journalType.findFirst({
+              where: { id: input.journalTypeId, entityId }
+            })
+          : null;
+
+        const authRequired =
+          ledgerSetup?.authorizationRequired || journalType?.authorizationRequired;
+
+        if (authRequired) {
+          const authService = new AuthorizationService(this.prisma);
+          const authResult = await authService.submitForAuthorization(entityId, result.journal.id);
+          if (authResult.required) {
+            // Re-fetch journal to get updated status
+            const refreshed = await this.repository(this.prisma).getJournalWithLines(
+              entityId,
+              result.journal.id
+            );
+            return refreshed ?? result.journal;
+          }
+        }
+      } catch {
+        // Authorization check failure should not block journal creation — log and continue
+        console.warn(
+          "[GLService] Multi-stage authorization check failed for journal",
+          result.journal.id
+        );
       }
-
-      await repository.setJournalStatus(entityId, created.id, "PENDING_APPROVAL", null);
-      await repository.createJournalApprovals(entityId, created.id, rule.requiredApprovers);
-
-      const approvals = await repository.getJournalApprovalEntries(entityId, created.id);
-      const recipients = approvals.map((entry) => ({
-        id: entry.approver.id,
-        email: entry.approver.email,
-        name: entry.approver.name
-      }));
-
-      const refreshed = await repository.getJournalWithLines(entityId, created.id);
-      return {
-        journal: refreshed ?? created,
-        approvalRecipients: recipients
-      };
-    });
+    }
 
     const appBaseUrl = process.env.APP_BASE_URL ?? "http://localhost:3000";
 
@@ -469,173 +536,218 @@ export class GLService {
   }
 
   async postJournal(entityId: string, journalId: string, approvedById: string) {
-    return this.prisma.$transaction(async (transaction) => {
-      await setEntityDbContext(transaction, entityId);
-      const repository = this.repository(transaction);
-      const journal = await repository.getJournalWithLines(entityId, journalId);
+    try {
+      return await this.prisma.$transaction(async (transaction) => {
+        await setEntityDbContext(transaction, entityId);
+        const repository = this.repository(transaction);
+        const journal = await repository.getJournalWithLines(entityId, journalId);
 
-      if (!journal) {
-        throw new GLServiceError("GL_JOURNAL_NOT_FOUND", "Journal not found.", 404);
-      }
+        if (!journal) {
+          throw new GLServiceError("GL_JOURNAL_NOT_FOUND", "Journal not found.", 404);
+        }
 
-      if (journal.status !== "DRAFT") {
-        throw new GLServiceError(
-          "GL_JOURNAL_INVALID_STATUS",
-          "Only draft journals can be posted directly.",
-          409
-        );
-      }
+        if (journal.status !== "DRAFT") {
+          throw new GLServiceError(
+            "GL_JOURNAL_INVALID_STATUS",
+            "Only draft journals can be posted directly.",
+            409
+          );
+        }
 
-      await this.postJournalInternal(repository, journal as PostingJournal, approvedById);
-      return repository.getJournalWithLines(entityId, journal.id);
-    });
+        // Verify multi-stage authorization is complete (if applicable)
+        const authService = new AuthorizationService(this.prisma);
+        const isAuthorized = await authService.isFullyAuthorized(journalId);
+        if (!isAuthorized) {
+          throw new GLServiceError(
+            "GL_AUTHORIZATION_INCOMPLETE",
+            "Cannot post: authorization stages are not complete.",
+            409
+          );
+        }
+
+        await this.postJournalInternal(repository, journal as PostingJournal, approvedById);
+        return repository.getJournalWithLines(entityId, journal.id);
+      });
+    } finally {
+      clearEntityDbContext();
+    }
   }
 
   async approveJournal(entityId: string, journalId: string, approverId: string, reason?: string) {
-    return this.prisma.$transaction(async (transaction) => {
-      await setEntityDbContext(transaction, entityId);
-      const repository = this.repository(transaction);
-      const journal = await repository.getJournalWithLines(entityId, journalId);
+    try {
+      return await this.prisma.$transaction(async (transaction) => {
+        await setEntityDbContext(transaction, entityId);
+        const repository = this.repository(transaction);
+        const journal = await repository.getJournalWithLines(entityId, journalId);
 
-      if (!journal) {
-        throw new GLServiceError("GL_JOURNAL_NOT_FOUND", "Journal not found.", 404);
-      }
-
-      if (journal.status !== "PENDING_APPROVAL") {
-        throw new GLServiceError(
-          "GL_JOURNAL_NOT_PENDING_APPROVAL",
-          "Journal is not awaiting approval.",
-          409
-        );
-      }
-
-      await repository.upsertJournalApprovalDecision(
-        entityId,
-        journalId,
-        approverId,
-        "APPROVED",
-        reason
-      );
-
-      const amount = this.computeJournalAmount(this.toJournalInputLines(journal as PostingJournal));
-      const rule = await repository.getApprovalRuleForAmount(entityId, "GL", amount);
-      const approvals = await repository.getJournalApprovalEntries(entityId, journalId);
-
-      const approvedCount = approvals.filter((entry) => entry.status === "APPROVED").length;
-      const requiredCount = approvals.length;
-      const shouldPost = rule?.requireAll
-        ? approvedCount === requiredCount && requiredCount > 0
-        : approvedCount > 0;
-
-      if (shouldPost) {
-        const current = await repository.getJournalWithLines(entityId, journalId);
-        if (!current) {
+        if (!journal) {
           throw new GLServiceError("GL_JOURNAL_NOT_FOUND", "Journal not found.", 404);
         }
-        await this.postJournalInternal(repository, current as PostingJournal, approverId);
-      }
 
-      return repository.getJournalWithLines(entityId, journalId);
-    });
+        if (journal.status !== "PENDING_APPROVAL") {
+          throw new GLServiceError(
+            "GL_JOURNAL_NOT_PENDING_APPROVAL",
+            "Journal is not awaiting approval.",
+            409
+          );
+        }
+
+        await repository.upsertJournalApprovalDecision(
+          entityId,
+          journalId,
+          approverId,
+          "APPROVED",
+          reason
+        );
+
+        const amount = this.computeJournalAmount(
+          this.toJournalInputLines(journal as PostingJournal)
+        );
+        const rule = await repository.getApprovalRuleForAmount(entityId, "GL", amount);
+        const approvals = await repository.getJournalApprovalEntries(entityId, journalId);
+
+        const approvedCount = approvals.filter((entry) => entry.status === "APPROVED").length;
+        const requiredCount = approvals.length;
+        const shouldPost = rule?.requireAll
+          ? approvedCount === requiredCount && requiredCount > 0
+          : approvedCount > 0;
+
+        if (shouldPost) {
+          const current = await repository.getJournalWithLines(entityId, journalId);
+          if (!current) {
+            throw new GLServiceError("GL_JOURNAL_NOT_FOUND", "Journal not found.", 404);
+          }
+          await this.postJournalInternal(repository, current as PostingJournal, approverId);
+        }
+
+        return repository.getJournalWithLines(entityId, journalId);
+      });
+    } finally {
+      clearEntityDbContext();
+    }
   }
 
   async rejectJournal(entityId: string, journalId: string, approverId: string, reason?: string) {
-    return this.prisma.$transaction(async (transaction) => {
-      await setEntityDbContext(transaction, entityId);
-      const repository = this.repository(transaction);
-      const journal = await repository.getJournalWithLines(entityId, journalId);
+    try {
+      return await this.prisma.$transaction(async (transaction) => {
+        await setEntityDbContext(transaction, entityId);
+        const repository = this.repository(transaction);
+        const journal = await repository.getJournalWithLines(entityId, journalId);
 
-      if (!journal) {
-        throw new GLServiceError("GL_JOURNAL_NOT_FOUND", "Journal not found.", 404);
-      }
+        if (!journal) {
+          throw new GLServiceError("GL_JOURNAL_NOT_FOUND", "Journal not found.", 404);
+        }
 
-      if (journal.status !== "PENDING_APPROVAL") {
-        throw new GLServiceError(
-          "GL_JOURNAL_NOT_PENDING_APPROVAL",
-          "Journal is not awaiting approval.",
-          409
-        );
-      }
-
-      await repository.upsertJournalApprovalDecision(
-        entityId,
-        journalId,
-        approverId,
-        "REJECTED",
-        reason
-      );
-      await repository.markPendingApprovalsRejected(entityId, journalId, reason);
-
-      // Reverse account balances if journal was already posted
-      if (journal.status === "POSTED") {
-        for (const line of journal.lines) {
-          await repository.updateAccountBalance(
-            entityId,
-            line.accountId,
-            journal.periodId,
-            line.creditFunctional, // swapped: credits become debits
-            line.debitFunctional, // swapped: debits become credits
-            line.account.type
+        if (journal.status !== "PENDING_APPROVAL") {
+          throw new GLServiceError(
+            "GL_JOURNAL_NOT_PENDING_APPROVAL",
+            "Journal is not awaiting approval.",
+            409
           );
         }
-      }
 
-      await repository.setJournalStatus(entityId, journalId, "DRAFT", null);
+        await repository.upsertJournalApprovalDecision(
+          entityId,
+          journalId,
+          approverId,
+          "REJECTED",
+          reason
+        );
+        await repository.markPendingApprovalsRejected(entityId, journalId, reason);
 
-      return repository.getJournalWithLines(entityId, journalId);
-    });
+        // Reverse account balances if journal was already posted
+        if (journal.status === "POSTED") {
+          for (const line of journal.lines) {
+            await repository.updateAccountBalance(
+              entityId,
+              line.accountId,
+              journal.periodId,
+              line.creditFunctional, // swapped: credits become debits
+              line.debitFunctional, // swapped: debits become credits
+              line.account.type
+            );
+          }
+        }
+
+        await repository.setJournalStatus(entityId, journalId, "DRAFT", null);
+
+        return repository.getJournalWithLines(entityId, journalId);
+      });
+    } finally {
+      clearEntityDbContext();
+    }
   }
 
   async reverseJournal(entityId: string, journalId: string, createdById: string) {
-    return this.prisma.$transaction(async (transaction) => {
-      await setEntityDbContext(transaction, entityId);
-      const repository = this.repository(transaction);
-      const existing = await repository.getJournalWithLines(entityId, journalId);
+    try {
+      return await this.prisma.$transaction(async (transaction) => {
+        await setEntityDbContext(transaction, entityId);
+        const repository = this.repository(transaction);
+        const existing = await repository.getJournalWithLines(entityId, journalId);
 
-      if (!existing) {
-        throw new GLServiceError("GL_JOURNAL_NOT_FOUND", "Journal not found.", 404);
-      }
+        if (!existing) {
+          throw new GLServiceError("GL_JOURNAL_NOT_FOUND", "Journal not found.", 404);
+        }
 
-      if (existing.status !== "POSTED") {
-        throw new GLServiceError(
-          "GL_JOURNAL_NOT_POSTED",
-          "Only posted journals can be reversed.",
-          409
-        );
-      }
+        if (existing.status !== "POSTED") {
+          throw new GLServiceError(
+            "GL_JOURNAL_NOT_POSTED",
+            "Only posted journals can be reversed.",
+            409
+          );
+        }
 
-      const reversal = await repository.createJournal(entityId, createdById, {
-        periodId: existing.periodId,
-        reference: `REV-${existing.reference ?? existing.id}`,
-        description: `Reversal of journal ${existing.id}`,
-        source: existing.source as JournalCreateInput["source"],
-        functionalCurrency: existing.functionalCurrency,
-        lines: existing.lines.map((line: any) => ({
-          accountId: line.accountId,
-          debit: line.credit.toString(),
-          credit: line.debit.toString(),
-          currency: line.currency,
-          fxRate: line.fxRate.toString(),
-          description: line.description ?? undefined,
-          lineNumber: line.lineNumber,
-          dimension1: line.dimension1 ?? undefined,
-          dimension2: line.dimension2 ?? undefined,
-          dimension3: line.dimension3 ?? undefined,
-          dimension4: line.dimension4 ?? undefined,
-          dimension5: line.dimension5 ?? undefined,
-          dimension6: line.dimension6 ?? undefined
-        }))
+        const reversal = await repository.createJournal(entityId, createdById, {
+          periodId: existing.periodId,
+          reference: `REV-${existing.reference ?? existing.id}`,
+          description: `Reversal of journal ${existing.id}`,
+          source: existing.source as JournalCreateInput["source"],
+          functionalCurrency: existing.functionalCurrency,
+          lines: existing.lines.map((line: any) => ({
+            accountId: line.accountId,
+            debit: line.credit.toString(),
+            credit: line.debit.toString(),
+            currency: line.currency,
+            fxRate: line.fxRate.toString(),
+            description: line.description ?? undefined,
+            lineNumber: line.lineNumber,
+            dimension1: line.dimension1 ?? undefined,
+            dimension2: line.dimension2 ?? undefined,
+            dimension3: line.dimension3 ?? undefined,
+            dimension4: line.dimension4 ?? undefined,
+            dimension5: line.dimension5 ?? undefined,
+            dimension6: line.dimension6 ?? undefined
+          }))
+        });
+
+        await repository.setJournalStatus(entityId, existing.id, "REVERSED", createdById);
+        const postedReversal = await repository.getJournalWithLines(entityId, reversal.id);
+        if (!postedReversal) {
+          throw new GLServiceError("GL_JOURNAL_NOT_FOUND", "Reversal journal not found.", 404);
+        }
+        await this.postJournalInternal(repository, postedReversal as PostingJournal, createdById);
+
+        return repository.getJournalWithLines(entityId, reversal.id);
       });
+    } finally {
+      clearEntityDbContext();
+    }
+  }
 
-      await repository.setJournalStatus(entityId, existing.id, "REVERSED", createdById);
-      const postedReversal = await repository.getJournalWithLines(entityId, reversal.id);
-      if (!postedReversal) {
-        throw new GLServiceError("GL_JOURNAL_NOT_FOUND", "Reversal journal not found.", 404);
-      }
-      await this.postJournalInternal(repository, postedReversal as PostingJournal, createdById);
-
-      return repository.getJournalWithLines(entityId, reversal.id);
-    });
+  async getAccountCurrentBalance(entityId: string, accountId: string) {
+    const repo = this.repository(this.prisma);
+    const account = await repo.findAccountById(entityId, accountId);
+    if (!account) {
+      throw new GLServiceError("GL_ACCOUNT_NOT_FOUND", "Account not found.", 404);
+    }
+    const balance = await repo.getAccountCurrentBalance(entityId, accountId);
+    return {
+      accountId: account.id,
+      code: account.code,
+      name: account.name,
+      type: account.type,
+      ...balance
+    };
   }
 
   async getAccountLedger(
