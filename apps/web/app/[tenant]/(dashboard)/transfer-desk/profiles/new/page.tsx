@@ -19,8 +19,21 @@ import { useTenantHref } from "../../../../../../hooks/use-tenant-router";
 import { useUserRole } from "../../../../../../components/use-user-role";
 import { Card, CardContent } from "../../../../../../components/ui/card";
 import { Button } from "../../../../../../components/ui/button";
-import { ArrowLeft, ArrowRight, Check, ListChecks, Lock } from "lucide-react";
-import type { TransferProfileType } from "../../../../../../lib/gl-api";
+import { Input } from "../../../../../../components/ui/input";
+import { Label } from "../../../../../../components/ui/label";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  ListChecks,
+  Lock,
+  Download,
+  Upload,
+  Cog,
+  ArrowLeftRight,
+  Globe
+} from "lucide-react";
+import { TRANSFER_PROFILE_TYPES, type TransferProfileType } from "../../../../../../lib/gl-api";
 
 // ── Wizard form state ─────────────────────────────────────────────────────
 
@@ -63,7 +76,99 @@ const STEPS = [
   { number: 5, label: "Review & Submit" }
 ] as const;
 
-// ── Step placeholder components (replaced in commits 4-8) ─────────────────
+// ── Step components ───────────────────────────────────────────────────────
+
+const TYPE_ICONS: Record<TransferProfileType, React.ComponentType<{ className?: string }>> = {
+  IMPORT: Download,
+  EXPORT: Upload,
+  PROCESS: Cog,
+  INTERNAL_TRANSFER: ArrowLeftRight,
+  EXTERNAL_TRANSFER: Globe
+};
+
+const TYPE_COLORS: Record<TransferProfileType, string> = {
+  IMPORT: "border-blue-200 bg-blue-50 text-blue-700",
+  EXPORT: "border-purple-200 bg-purple-50 text-purple-700",
+  PROCESS: "border-slate-200 bg-slate-50 text-slate-700",
+  INTERNAL_TRANSFER: "border-amber-200 bg-amber-50 text-amber-700",
+  EXTERNAL_TRANSFER: "border-emerald-200 bg-emerald-50 text-emerald-700"
+};
+
+function Step1TypeAndBasics({
+  form,
+  updateForm
+}: {
+  form: WizardFormState;
+  updateForm: (patch: Partial<WizardFormState>) => void;
+}) {
+  return (
+    <div className="space-y-6">
+      {/* Profile type selector */}
+      <div className="space-y-2">
+        <Label className="text-sm font-medium text-slate-700">Profile Type</Label>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {TRANSFER_PROFILE_TYPES.map((pt) => {
+            const Icon = TYPE_ICONS[pt.value];
+            const isSelected = form.profileType === pt.value;
+            return (
+              <button
+                key={pt.value}
+                type="button"
+                onClick={() => updateForm({ profileType: pt.value })}
+                className={`
+                  flex flex-col items-start gap-2 rounded-lg border-2 p-4 text-left
+                  transition-all hover:shadow-sm
+                  ${
+                    isSelected
+                      ? `${TYPE_COLORS[pt.value]} border-current shadow-sm`
+                      : "border-slate-150 bg-white hover:border-slate-300"
+                  }
+                `}
+              >
+                <div className="flex items-center gap-2">
+                  <Icon className="h-4 w-4" />
+                  <span className="text-sm font-semibold">{pt.label}</span>
+                </div>
+                <p className="text-[11px] leading-snug opacity-75">{pt.description}</p>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Name */}
+      <div className="space-y-1.5">
+        <Label htmlFor="profile-name" className="text-sm font-medium text-slate-700">
+          Profile Name <span className="text-red-400">*</span>
+        </Label>
+        <Input
+          id="profile-name"
+          value={form.name}
+          onChange={(e) => updateForm({ name: e.target.value })}
+          placeholder="e.g. Opera PMS Revenue Import"
+          maxLength={100}
+          className="max-w-md"
+        />
+      </div>
+
+      {/* Description */}
+      <div className="space-y-1.5">
+        <Label htmlFor="profile-desc" className="text-sm font-medium text-slate-700">
+          Description
+        </Label>
+        <textarea
+          id="profile-desc"
+          value={form.description}
+          onChange={(e) => updateForm({ description: e.target.value })}
+          placeholder="Optional description of what this profile does…"
+          rows={3}
+          maxLength={500}
+          className="w-full max-w-md rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+        />
+      </div>
+    </div>
+  );
+}
 
 function StepPlaceholder({ step }: { step: number }) {
   return (
@@ -178,7 +283,8 @@ export default function NewTransferProfilePage() {
       {/* Step content */}
       <Card>
         <CardContent className="p-6">
-          <StepPlaceholder step={currentStep} />
+          {currentStep === 1 && <Step1TypeAndBasics form={form} updateForm={updateForm} />}
+          {currentStep >= 2 && currentStep <= 5 && <StepPlaceholder step={currentStep} />}
         </CardContent>
       </Card>
 
