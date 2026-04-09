@@ -26,6 +26,7 @@ import {
 import { GLService } from "../modules/gl/service.js";
 import { APService } from "../modules/ap/service.js";
 import { ARService } from "../modules/ar/service.js";
+import { AllocationService } from "../modules/allocation/service.js";
 import { runWithContext } from "../db/requestContext.js";
 import { mapRecordsToTarget, type TargetParams } from "./transfer-desk-record-mapper.js";
 import type { StorageBackend } from "./transfer-desk-storage.js";
@@ -583,12 +584,84 @@ export async function executeProcess(
   executionId: string,
   profile: ProfileWithRelations
 ): Promise<PipelineResult> {
+  const targetComponent = profile.targetComponent ?? "";
+
+  if (targetComponent === "ALLOCATION") {
+    return executeAllocationProcess(ctx, executionId, profile);
+  }
+
   return failExecution(
     ctx,
     executionId,
     "UNSUPPORTED_PROCESS",
-    `Process profile "${profile.name}" (${profile.targetComponent ?? "unknown"}) is not yet supported. Process execution will be available in a future sprint.`
+    `Process profile "${profile.name}" (${targetComponent || "unknown"}) is not yet supported.`
   );
+}
+
+/**
+ * Execute an allocation process profile.
+ * targetParams should contain: { definitionId, periodId? }
+ */
+async function executeAllocationProcess(
+  ctx: PipelineContext,
+  executionId: string,
+  profile: ProfileWithRelations
+): Promise<PipelineResult> {
+  const params = (profile.targetParams ?? {}) as Record<string, string>;
+  const definitionId = params.definitionId;
+
+  if (!definitionId) {
+    return failExecution(
+      ctx,
+      executionId,
+      "MISSING_DEFINITION_ID",
+      "Allocation process profile requires targetParams.definitionId."
+    );
+  }
+
+  const entityId = params.entityId;
+  if (!entityId) {
+    return failExecution(
+      ctx,
+      executionId,
+      "MISSING_ENTITY_ID",
+      "Allocation process profile requires targetParams.entityId."
+    );
+  }
+
+  const userId = params.executedBy ?? "system";
+  const periodId = params.periodId ?? undefined;
+
+  try {
+    const allocationService = new AllocationService(ctx.db as any);
+    const result = await allocationService.executeAllocation(
+      entityId,
+      definitionId,
+      userId,
+      periodId
+    );
+
+    await ctx.db.transferExecutionLog
+      .create({
+        data: {
+          executionId,
+          recordIndex: 0,
+          status: "SUCCESS",
+          payload: {
+            definitionId,
+            journalId: result.journalId ?? null,
+            sourceAmount: result.sourceAmount,
+            lineCount: result.lines.length
+          }
+        }
+      })
+      .catch(() => {});
+
+    return { status: "COMPLETED", totalRecords: 1, successCount: 1, failCount: 0 };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown allocation error";
+    return failExecution(ctx, executionId, "ALLOCATION_FAILED", message);
+  }
 }
 
 // ── TML transformation ──────────────────────────────────────────────────────
