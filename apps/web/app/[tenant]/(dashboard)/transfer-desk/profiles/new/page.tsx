@@ -45,6 +45,7 @@ import {
 import {
   TRANSFER_PROFILE_TYPES,
   listTransferFormats,
+  getTransferFormat,
   type TransferProfileType,
   type TransferFormatSummary
 } from "../../../../../../lib/gl-api";
@@ -382,6 +383,129 @@ function Step3Formats({
   );
 }
 
+const CLASSIFICATION_LABELS: Record<string, string> = {
+  DELIMITED: "Delimited (CSV / TSV / pipe)",
+  SINGLE_FIXED: "Single fixed-width record",
+  MULTIPLE_FIXED: "Multiple fixed-width records",
+  OTHER_FLAT: "Other flat file",
+  USER_XML: "User-defined XML",
+  SIMPLE_XML: "Simple XML"
+};
+
+function FsdFormatCard({
+  label,
+  formatId,
+  apiContext
+}: {
+  label: string;
+  formatId: string;
+  apiContext: ReturnType<typeof useApiContext>;
+}) {
+  const formatQ = useQuery({
+    queryKey: ["td-format-detail", formatId],
+    queryFn: () => (apiContext ? getTransferFormat(apiContext, formatId) : Promise.resolve(null)),
+    enabled: Boolean(apiContext) && Boolean(formatId),
+    select: (r) => (r as any)?.data ?? null
+  });
+
+  const format = formatQ.data;
+
+  if (formatQ.isLoading) {
+    return <p className="text-xs text-slate-400">Loading {label.toLowerCase()} format…</p>;
+  }
+  if (!format) return null;
+
+  return (
+    <div className="space-y-3">
+      <h3 className="text-sm font-semibold text-slate-700">{label}</h3>
+      <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
+        <div>
+          <span className="text-slate-400">Name</span>
+          <p className="font-medium text-slate-700">{format.name}</p>
+        </div>
+        <div>
+          <span className="text-slate-400">Classification</span>
+          <p className="font-medium text-slate-700">
+            {CLASSIFICATION_LABELS[format.classification] ?? format.classification}
+          </p>
+        </div>
+        <div>
+          <span className="text-slate-400">Valid</span>
+          <p
+            className={
+              format.isValid ? "text-emerald-600 font-medium" : "text-amber-600 font-medium"
+            }
+          >
+            {format.isValid ? "Yes" : "No"}
+          </p>
+        </div>
+        <div>
+          <span className="text-slate-400">System format</span>
+          <p className="font-medium text-slate-700">{format.isSystem ? "Yes" : "No"}</p>
+        </div>
+      </div>
+
+      {/* Raw FSD XML textarea */}
+      <div className="space-y-1">
+        <Label className="text-xs text-slate-500">Raw FSD Definition</Label>
+        <textarea
+          readOnly
+          value={format.fsdXml ?? ""}
+          rows={10}
+          className="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-[11px] text-slate-600 leading-relaxed resize-y focus:outline-none"
+        />
+      </div>
+    </div>
+  );
+}
+
+function Step4FsdViewer({
+  form,
+  apiContext
+}: {
+  form: WizardFormState;
+  apiContext: ReturnType<typeof useApiContext>;
+}) {
+  const hasSource = Boolean(form.sourceFormatId);
+  const hasTarget = Boolean(form.targetFormatId);
+
+  if (!hasSource && !hasTarget) {
+    return (
+      <div className="flex items-center justify-center py-16 text-slate-400 text-sm">
+        No formats selected. Go back to Step 3 to select source or target formats, or skip this
+        step.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <p className="text-sm text-slate-500">
+        Read-only preview of the selected FSD format definitions. The full graphical FSD builder is
+        planned for a future sprint.
+      </p>
+
+      {hasSource && (
+        <FsdFormatCard
+          label="Source Format"
+          formatId={form.sourceFormatId}
+          apiContext={apiContext}
+        />
+      )}
+
+      {hasSource && hasTarget && <hr className="border-slate-100" />}
+
+      {hasTarget && (
+        <FsdFormatCard
+          label="Target Format"
+          formatId={form.targetFormatId}
+          apiContext={apiContext}
+        />
+      )}
+    </div>
+  );
+}
+
 function StepPlaceholder({ step }: { step: number }) {
   return (
     <div className="flex items-center justify-center py-16 text-slate-400 text-sm">
@@ -501,7 +625,8 @@ export default function NewTransferProfilePage() {
           {currentStep === 3 && (
             <Step3Formats form={form} updateForm={updateForm} apiContext={apiContext} />
           )}
-          {currentStep >= 4 && currentStep <= 5 && <StepPlaceholder step={currentStep} />}
+          {currentStep === 4 && <Step4FsdViewer form={form} apiContext={apiContext} />}
+          {currentStep === 5 && <StepPlaceholder step={currentStep} />}
         </CardContent>
       </Card>
 
