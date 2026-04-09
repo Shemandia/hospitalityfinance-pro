@@ -49,6 +49,8 @@ enum JournalSource {
   AP
   AR
   COLLN
+  YEAREND
+  INTERCO
 }
 
 enum JournalStatus {

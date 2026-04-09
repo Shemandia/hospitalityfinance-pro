@@ -90,6 +90,8 @@ enum JournalSource {
   ALLOC // Corporate allocation batch
   REVAL // FX revaluation (replaces FX_REVAL going forward; kept for backward compat)
   COLLN // Payment collection run (AR direct debit / receipt batch)
+  YEAREND // Year-end P&L cleardown to retained earnings
+  INTERCO // Intercompany cross-entity journal
 }
 
 enum JournalStatus {
@@ -342,6 +344,11 @@ model Entity {
   rejectionCodes           RejectionCode[]
   authorizationSets        AuthorizationSet[]
   journalAuthorizations    JournalAuthorization[]
+  yearEndConfigs           YearEndConfig[]
+  icAccountPairsOwned      IntercompanyAccountPair[] @relation("ICPairOwner")
+  icAccountPairsCounter    IntercompanyAccountPair[] @relation("ICPairCounterparty")
+  icJournalsSource         IntercompanyJournal[]     @relation("ICJournalSource")
+  icJournalsMirror         IntercompanyJournal[]     @relation("ICJournalMirror")
 
   @@index([parentId])
   @@map("entities")
@@ -682,6 +689,8 @@ model Journal {
   lines                 JournalLine[]
   approvals             JournalApproval[]
   authorizations        JournalAuthorization[]
+  icSourceJournals      IntercompanyJournal[]  @relation("ICSourceJournal")
+  icMirrorJournals      IntercompanyJournal[]  @relation("ICMirrorJournal")
 
   @@index([entityId, periodId, status])
   @@index([entityId, createdAt])
@@ -2432,4 +2441,96 @@ model RevaluationProfile {
 
   @@index([entityId, isActive])
   @@map("revaluation_profiles")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Year-End Configuration (spec Module 10 — Year-End Cleardown)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model YearEndConfig {
+  id                      String   @id @default(uuid())
+  entityId                String   @map("entity_id")
+  /// Account code of the Retained Earnings / Accumulated P&L account
+  retainedEarningsCode    String   @map("retained_earnings_code") @db.VarChar(15)
+  /// Optional: journal type to use for the year-end journal
+  journalTypeCode         String?  @map("journal_type_code") @db.VarChar(20)
+  /// Fiscal year start month (1-12). Default 1 = January fiscal year.
+  fiscalYearStartMonth    Int      @default(1) @map("fiscal_year_start_month")
+  description             String?  @db.VarChar(500)
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
+
+  entity Entity @relation(fields: [entityId], references: [id])
+
+  @@unique([entityId])
+  @@map("year_end_configs")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Intercompany Journals (spec Module 3 — Cross-Entity Postings)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+enum IntercompanyJournalStatus {
+  PENDING_SOURCE_APPROVAL
+  PENDING_MIRROR_APPROVAL
+  PENDING_BOTH_APPROVAL
+  APPROVED
+  POSTED
+  REJECTED
+}
+
+model IntercompanyAccountPair {
+  id                     String   @id @default(uuid())
+  entityId               String   @map("entity_id")
+  counterpartyEntityId   String   @map("counterparty_entity_id")
+  /// IC Receivable account code in this entity
+  icReceivableCode       String   @map("ic_receivable_code") @db.VarChar(15)
+  /// IC Payable account code in this entity
+  icPayableCode          String   @map("ic_payable_code") @db.VarChar(15)
+  isActive               Boolean  @default(true) @map("is_active")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  entity             Entity @relation("ICPairOwner", fields: [entityId], references: [id])
+  counterpartyEntity Entity @relation("ICPairCounterparty", fields: [counterpartyEntityId], references: [id])
+
+  @@unique([entityId, counterpartyEntityId])
+  @@map("intercompany_account_pairs")
+}
+
+model IntercompanyJournal {
+  id                   String                      @id @default(uuid())
+  /// Entity that initiated the IC transaction
+  sourceEntityId       String                      @map("source_entity_id")
+  /// Counterparty entity receiving the mirror entry
+  mirrorEntityId       String                      @map("mirror_entity_id")
+  /// Journal in the source entity
+  sourceJournalId      String?                     @map("source_journal_id")
+  /// Mirror journal in the counterparty entity
+  mirrorJournalId      String?                     @map("mirror_journal_id")
+  status               IntercompanyJournalStatus   @default(PENDING_BOTH_APPROVAL)
+  /// Amount in functional currency of the source entity
+  amount               Decimal                     @db.Decimal(18, 4)
+  currency             String                      @db.VarChar(3)
+  reference            String                      @db.VarChar(60)
+  description          String?                     @db.VarChar(500)
+  sourceApprovedById   String?                     @map("source_approved_by")
+  sourceApprovedAt     DateTime?                   @map("source_approved_at")
+  mirrorApprovedById   String?                     @map("mirror_approved_by")
+  mirrorApprovedAt     DateTime?                   @map("mirror_approved_at")
+  rejectedById         String?                     @map("rejected_by")
+  rejectedAt           DateTime?                   @map("rejected_at")
+  rejectionReason      String?                     @map("rejection_reason") @db.VarChar(500)
+  createdById          String                      @map("created_by")
+  createdAt            DateTime                    @default(now()) @map("created_at")
+  updatedAt            DateTime                    @updatedAt @map("updated_at")
+
+  sourceEntity  Entity   @relation("ICJournalSource", fields: [sourceEntityId], references: [id])
+  mirrorEntity  Entity   @relation("ICJournalMirror", fields: [mirrorEntityId], references: [id])
+  sourceJournal Journal? @relation("ICSourceJournal", fields: [sourceJournalId], references: [id])
+  mirrorJournal Journal? @relation("ICMirrorJournal", fields: [mirrorJournalId], references: [id])
+
+  @@index([sourceEntityId, status])
+  @@index([mirrorEntityId, status])
+  @@map("intercompany_journals")
 }
