@@ -22,6 +22,13 @@ import { Button } from "../../../../../../components/ui/button";
 import { Input } from "../../../../../../components/ui/input";
 import { Label } from "../../../../../../components/ui/label";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../../../../../../components/ui/select";
+import {
   ArrowLeft,
   ArrowRight,
   Check,
@@ -44,9 +51,7 @@ export type WizardFormState = {
   description: string;
   // Step 2
   sourceComponent: string;
-  sourceMethod: string;
   targetComponent: string;
-  targetMethod: string;
   // Step 3
   sourceFormatId: string;
   targetFormatId: string;
@@ -58,13 +63,22 @@ const INITIAL_STATE: WizardFormState = {
   name: "",
   description: "",
   sourceComponent: "",
-  sourceMethod: "",
   targetComponent: "",
-  targetMethod: "",
   sourceFormatId: "",
   targetFormatId: "",
   transformationId: ""
 };
+
+/** Components available as source/target in transfer profiles (matches backend GET /transfer-desk/components) */
+const TRANSFER_COMPONENTS = [
+  { value: "GL_JOURNAL", label: "General Ledger Journal" },
+  { value: "AP_INVOICE", label: "AP Invoice" },
+  { value: "AR_INVOICE", label: "AR Invoice" },
+  { value: "AR_RECEIPT", label: "AR Receipt" },
+  { value: "COA_ACCOUNT", label: "Chart of Accounts" },
+  { value: "BUDGET", label: "Budget" },
+  { value: "BANK_STATEMENT", label: "Bank Statement" }
+] as const;
 
 // ── Step definitions ──────────────────────────────────────────────────────
 
@@ -166,6 +180,97 @@ function Step1TypeAndBasics({
           className="w-full max-w-md rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-100"
         />
       </div>
+    </div>
+  );
+}
+
+/** Which component fields are required/shown per profile type */
+function getComponentVisibility(profileType: TransferProfileType | null) {
+  switch (profileType) {
+    case "IMPORT":
+      return { showSource: false, showTarget: true, targetRequired: true };
+    case "EXPORT":
+      return { showSource: true, showTarget: false, targetRequired: false };
+    case "PROCESS":
+      return { showSource: false, showTarget: true, targetRequired: true };
+    case "INTERNAL_TRANSFER":
+    case "EXTERNAL_TRANSFER":
+      return { showSource: true, showTarget: true, targetRequired: true };
+    default:
+      return { showSource: true, showTarget: true, targetRequired: false };
+  }
+}
+
+function Step2SourceTarget({
+  form,
+  updateForm
+}: {
+  form: WizardFormState;
+  updateForm: (patch: Partial<WizardFormState>) => void;
+}) {
+  const vis = getComponentVisibility(form.profileType);
+
+  return (
+    <div className="space-y-6">
+      <p className="text-sm text-slate-500">
+        Configure the source and target components for this{" "}
+        <span className="font-medium text-slate-700">
+          {form.profileType?.replace(/_/g, " ").toLowerCase()}
+        </span>{" "}
+        profile.
+      </p>
+
+      {vis.showSource && (
+        <div className="space-y-1.5">
+          <Label className="text-sm font-medium text-slate-700">Source Component</Label>
+          <Select
+            value={form.sourceComponent || undefined}
+            onValueChange={(v) => updateForm({ sourceComponent: v })}
+          >
+            <SelectTrigger className="w-full max-w-md text-sm">
+              <SelectValue placeholder="Select source component…" />
+            </SelectTrigger>
+            <SelectContent>
+              {TRANSFER_COMPONENTS.map((c) => (
+                <SelectItem key={c.value} value={c.value}>
+                  {c.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-[11px] text-slate-400">Where data is read from.</p>
+        </div>
+      )}
+
+      {vis.showTarget && (
+        <div className="space-y-1.5">
+          <Label className="text-sm font-medium text-slate-700">
+            Target Component{vis.targetRequired && <span className="text-red-400 ml-0.5">*</span>}
+          </Label>
+          <Select
+            value={form.targetComponent || undefined}
+            onValueChange={(v) => updateForm({ targetComponent: v })}
+          >
+            <SelectTrigger className="w-full max-w-md text-sm">
+              <SelectValue placeholder="Select target component…" />
+            </SelectTrigger>
+            <SelectContent>
+              {TRANSFER_COMPONENTS.map((c) => (
+                <SelectItem key={c.value} value={c.value}>
+                  {c.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-[11px] text-slate-400">Where data is written to.</p>
+        </div>
+      )}
+
+      {!vis.showSource && !vis.showTarget && (
+        <div className="rounded-md bg-slate-50 border border-slate-100 p-4 text-sm text-slate-500">
+          No component selection needed for this profile type.
+        </div>
+      )}
     </div>
   );
 }
@@ -284,7 +389,8 @@ export default function NewTransferProfilePage() {
       <Card>
         <CardContent className="p-6">
           {currentStep === 1 && <Step1TypeAndBasics form={form} updateForm={updateForm} />}
-          {currentStep >= 2 && currentStep <= 5 && <StepPlaceholder step={currentStep} />}
+          {currentStep === 2 && <Step2SourceTarget form={form} updateForm={updateForm} />}
+          {currentStep >= 3 && currentStep <= 5 && <StepPlaceholder step={currentStep} />}
         </CardContent>
       </Card>
 
