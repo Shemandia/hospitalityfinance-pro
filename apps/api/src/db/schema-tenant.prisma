@@ -37,8 +37,39 @@ enum NormalBalance {
 
 enum PeriodStatus {
   OPEN
+  SOFT_CLOSE // Intermediate: revaluation/depreciation/allocation may still run
   CLOSED
   LOCKED
+}
+
+// ── Ledger Setup enums ───────────────────────────────────────────────────────
+
+enum ProvisionalPosting {
+  MANDATORY
+  OPTIONAL
+  PROHIBITED
+}
+
+enum RoundingMethod {
+  NORMAL
+  TRUNCATE_TO_UNIT
+}
+
+// ── Analysis Dimension enums ─────────────────────────────────────────────────
+
+enum DimensionValidationType {
+  NONE
+  LIST
+  RANGE
+}
+
+// ── Period Close Status enum ─────────────────────────────────────────────────
+
+enum PeriodCloseState {
+  PC_OPEN
+  SOFT_CLOSE
+  HARD_CLOSE
+  PC_LOCKED
 }
 
 enum JournalSource {
@@ -51,13 +82,13 @@ enum JournalSource {
   AR
   // Added per Financials Admin spec FA-ENUM-001 — used by Transfer Desk imports
   // and period-end processes for filtering and reporting.
-  IMPORT  // Generic Transfer Desk profile import
-  SYSTM   // System-generated (rounding, balancing, automatic adjustments)
-  PAYMT   // Payment run posting (bank disbursement leg)
-  PAYDS   // Payment discount (early-pay discount taken)
-  DEPRC   // Fixed-asset depreciation batch
-  ALLOC   // Corporate allocation batch
-  REVAL   // FX revaluation (replaces FX_REVAL going forward; kept for backward compat)
+  IMPORT // Generic Transfer Desk profile import
+  SYSTM // System-generated (rounding, balancing, automatic adjustments)
+  PAYMT // Payment run posting (bank disbursement leg)
+  PAYDS // Payment discount (early-pay discount taken)
+  DEPRC // Fixed-asset depreciation batch
+  ALLOC // Corporate allocation batch
+  REVAL // FX revaluation (replaces FX_REVAL going forward; kept for backward compat)
 }
 
 enum JournalStatus {
@@ -235,6 +266,10 @@ model Entity {
   journalTypes            JournalType[]
   recurringJournals       RecurringJournal[]
   accountTypeDefinitions  AccountTypeDefinition[]
+  ledgerSetups            LedgerSetup[]
+  processLocks            ProcessLock[]
+  periodCloseStatuses     PeriodCloseStatus[]
+  analysisDimensions      AnalysisDimension[]
 
   @@index([parentId])
   @@map("entities")
@@ -255,14 +290,16 @@ model User {
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
-  entities          EntityUser[]
-  roles             UserRole[]
-  createdJournals   Journal[]          @relation("JournalCreatedBy")
-  approvedJournals  Journal[]          @relation("JournalApprovedBy")
-  journalApprovals  JournalApproval[]
-  auditEvents       AuditEvent[]
-  loginAudits       LoginAudit[]
-  recurringJournals RecurringJournal[] @relation("RecurringJournalCreatedBy")
+  entities            EntityUser[]
+  roles               UserRole[]
+  createdJournals     Journal[]           @relation("JournalCreatedBy")
+  approvedJournals    Journal[]           @relation("JournalApprovedBy")
+  journalApprovals    JournalApproval[]
+  auditEvents         AuditEvent[]
+  loginAudits         LoginAudit[]
+  recurringJournals   RecurringJournal[]  @relation("RecurringJournalCreatedBy")
+  processLocks        ProcessLock[]
+  periodCloseStatuses PeriodCloseStatus[]
 
   @@map("users")
 }
@@ -350,20 +387,22 @@ model UserRole {
 // ─── Period Management ────────────────────────────────────────────────────────
 
 model Period {
-  id         String                 @id @default(uuid())
-  entityId   String                 @map("entity_id")
-  year       Int
-  month      Int
-  name       String
-  status     PeriodStatus           @default(OPEN)
-  openedAt   DateTime?              @map("opened_at")
-  closedAt   DateTime?              @map("closed_at")
-  createdAt  DateTime               @default(now()) @map("created_at")
-  updatedAt  DateTime               @updatedAt @map("updated_at")
-  entity     Entity                 @relation(fields: [entityId], references: [id])
-  journals   Journal[]
-  balances   AccountPeriodBalance[]
-  apInvoices APInvoice[]
+  id                  String                 @id @default(uuid())
+  entityId            String                 @map("entity_id")
+  year                Int
+  month               Int
+  name                String
+  status              PeriodStatus           @default(OPEN)
+  openedAt            DateTime?              @map("opened_at")
+  closedAt            DateTime?              @map("closed_at")
+  createdAt           DateTime               @default(now()) @map("created_at")
+  updatedAt           DateTime               @updatedAt @map("updated_at")
+  entity              Entity                 @relation(fields: [entityId], references: [id])
+  journals            Journal[]
+  balances            AccountPeriodBalance[]
+  apInvoices          APInvoice[]
+  ledgerSetups        LedgerSetup[]
+  periodCloseStatuses PeriodCloseStatus[]
 
   @@unique([entityId, year, month])
   @@index([entityId, status])
@@ -511,6 +550,12 @@ model RecurringJournalLine {
   dimension2         String? @db.VarChar(50)
   dimension3         String? @db.VarChar(50)
   dimension4         String? @db.VarChar(50)
+  dimension5         String? @db.VarChar(50)
+  dimension6         String? @db.VarChar(50)
+  dimension7         String? @db.VarChar(50)
+  dimension8         String? @db.VarChar(50)
+  dimension9         String? @db.VarChar(50)
+  dimension10        String? @db.VarChar(50)
   lineNumber         Int     @map("line_number")
 
   recurringJournal RecurringJournal @relation(fields: [recurringJournalId], references: [id], onDelete: Cascade)
@@ -565,6 +610,10 @@ model JournalLine {
   dimension4       String?           @db.VarChar(50)
   dimension5       String?           @db.VarChar(50)
   dimension6       String?           @db.VarChar(50)
+  dimension7       String?           @db.VarChar(50)
+  dimension8       String?           @db.VarChar(50)
+  dimension9       String?           @db.VarChar(50)
+  dimension10      String?           @db.VarChar(50)
   lineNumber       Int               @map("line_number")
   createdAt        DateTime          @default(now()) @map("created_at")
   updatedAt        DateTime          @updatedAt @map("updated_at")
@@ -1298,43 +1347,43 @@ enum SavePayloadOption {
 // ── TD-DB-003: transfer_profiles ─────────────────────────────────────────────
 
 model TransferProfile {
-  id                  String      @id @default(uuid())
-  name                String      @unique
-  description         String?
-  profileType         ProfileType @map("profile_type")
+  id               String            @id @default(uuid())
+  name             String            @unique
+  description      String?
+  profileType      ProfileType       @map("profile_type")
   /// External component (e.g. "OPERA_CLOUD"); free-text to allow custom systems
-  sourceComponent     String?     @map("source_component")
+  sourceComponent  String?           @map("source_component")
   /// HFP target component (GL_JOURNAL, AP_INVOICE, AR_INVOICE, etc.)
-  targetComponent     String?     @map("target_component")
-  sourceFormatId      String?     @map("source_format_id")
-  targetFormatId      String?     @map("target_format_id")
-  transformationId    String?     @map("transformation_id")
-  filterId            String?     @map("filter_id")
+  targetComponent  String?           @map("target_component")
+  sourceFormatId   String?           @map("source_format_id")
+  targetFormatId   String?           @map("target_format_id")
+  transformationId String?           @map("transformation_id")
+  filterId         String?           @map("filter_id")
   /// Runtime parameters (JSONB) — e.g. ledger, posting_options, file_handling
-  sourceParams        Json?       @map("source_params")
-  targetParams        Json?       @map("target_params")
+  sourceParams     Json?             @map("source_params")
+  targetParams     Json?             @map("target_params")
   /// Whether this profile passes its own validation rules; false blocks execute
-  isValid             Boolean     @default(false) @map("is_valid")
+  isValid          Boolean           @default(false) @map("is_valid")
   /// Increments on every save; profile_versions captures the snapshot
-  version             Int         @default(1)
+  version          Int               @default(1)
   /// System profiles ship with every tenant and cannot be deleted
-  isSystem            Boolean     @default(false) @map("is_system")
+  isSystem         Boolean           @default(false) @map("is_system")
   /// Soft delete flag
-  isActive            Boolean     @default(true) @map("is_active")
+  isActive         Boolean           @default(true) @map("is_active")
   /// Save behavior: NONE / INPUT / OUTPUT / BOTH
-  savePayload         SavePayloadOption @default(NONE) @map("save_payload")
-  createdById         String?     @map("created_by")
-  createdAt           DateTime    @default(now()) @map("created_at")
-  updatedAt           DateTime    @updatedAt @map("updated_at")
+  savePayload      SavePayloadOption @default(NONE) @map("save_payload")
+  createdById      String?           @map("created_by")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
 
-  sourceFormat        TransferFormat?         @relation("TransferProfileSourceFormat", fields: [sourceFormatId], references: [id])
-  targetFormat        TransferFormat?         @relation("TransferProfileTargetFormat", fields: [targetFormatId], references: [id])
-  transformation      TransferTransformation? @relation(fields: [transformationId], references: [id])
-  filter              TransferFilter?         @relation(fields: [filterId], references: [id])
-  versions            TransferProfileVersion[]
-  journalRanges       TransferJournalRange[]
-  executions          TransferExecution[]
-  automationSteps     TransferAutomationStep[]
+  sourceFormat    TransferFormat?          @relation("TransferProfileSourceFormat", fields: [sourceFormatId], references: [id])
+  targetFormat    TransferFormat?          @relation("TransferProfileTargetFormat", fields: [targetFormatId], references: [id])
+  transformation  TransferTransformation?  @relation(fields: [transformationId], references: [id])
+  filter          TransferFilter?          @relation(fields: [filterId], references: [id])
+  versions        TransferProfileVersion[]
+  journalRanges   TransferJournalRange[]
+  executions      TransferExecution[]
+  automationSteps TransferAutomationStep[]
 
   @@index([profileType, isActive])
   @@map("transfer_profiles")
@@ -1343,16 +1392,16 @@ model TransferProfile {
 // ── TD-DB-004: transfer_profile_versions ─────────────────────────────────────
 
 model TransferProfileVersion {
-  id          String   @id @default(uuid())
-  profileId   String   @map("profile_id")
-  version     Int
+  id         String   @id @default(uuid())
+  profileId  String   @map("profile_id")
+  version    Int
   /// Full snapshot of the profile at this version (JSONB)
-  snapshot    Json
-  changedBy   String?  @map("changed_by")
-  changedAt   DateTime @default(now()) @map("changed_at")
-  changeNote  String?  @map("change_note")
+  snapshot   Json
+  changedBy  String?  @map("changed_by")
+  changedAt  DateTime @default(now()) @map("changed_at")
+  changeNote String?  @map("change_note")
 
-  profile     TransferProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  profile TransferProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@unique([profileId, version])
   @@index([profileId, changedAt])
@@ -1373,7 +1422,7 @@ model TransferFilter {
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
-  profiles        TransferProfile[]
+  profiles TransferProfile[]
 
   @@map("transfer_filters")
 }
@@ -1400,7 +1449,7 @@ model TransferJournalRange {
   lastExecutionId   String?  @map("last_execution_id")
   updatedAt         DateTime @updatedAt @map("updated_at")
 
-  profile           TransferProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  profile TransferProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@unique([profileId, entityId, ledger])
   @@index([entityId])
@@ -1418,9 +1467,9 @@ model TransferAutomation {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  steps       TransferAutomationStep[]
-  schedules   TransferAutomationSchedule[]
-  executions  TransferExecution[]
+  steps      TransferAutomationStep[]
+  schedules  TransferAutomationSchedule[]
+  executions TransferExecution[]
 
   @@map("transfer_automations")
 }
@@ -1428,17 +1477,17 @@ model TransferAutomation {
 // ── TD-DB-008: transfer_automation_steps ─────────────────────────────────────
 
 model TransferAutomationStep {
-  id                    String   @id @default(uuid())
-  automationId          String   @map("automation_id")
-  profileId             String   @map("profile_id")
-  stepOrder             Int      @map("step_order")
-  failOnError           Boolean  @default(true) @map("fail_on_error")
+  id                   String  @id @default(uuid())
+  automationId         String  @map("automation_id")
+  profileId            String  @map("profile_id")
+  stepOrder            Int     @map("step_order")
+  failOnError          Boolean @default(true) @map("fail_on_error")
   /// Per-step parameter overrides; merged onto profile.sourceParams at run time
-  sourceParamOverrides  Json?    @map("source_param_overrides")
-  targetParamOverrides  Json?    @map("target_param_overrides")
+  sourceParamOverrides Json?   @map("source_param_overrides")
+  targetParamOverrides Json?   @map("target_param_overrides")
 
-  automation            TransferAutomation @relation(fields: [automationId], references: [id], onDelete: Cascade)
-  profile               TransferProfile    @relation(fields: [profileId], references: [id])
+  automation TransferAutomation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  profile    TransferProfile    @relation(fields: [profileId], references: [id])
 
   @@unique([automationId, stepOrder])
   @@index([profileId])
@@ -1448,21 +1497,21 @@ model TransferAutomationStep {
 // ── TD-DB-009: transfer_automation_schedules ─────────────────────────────────
 
 model TransferAutomationSchedule {
-  id              String   @id @default(uuid())
-  automationId    String   @map("automation_id")
+  id              String    @id @default(uuid())
+  automationId    String    @map("automation_id")
   /// Standard 5-field cron expression
-  cronExpression  String   @map("cron_expression")
+  cronExpression  String    @map("cron_expression")
   /// IANA timezone (e.g. "Africa/Dar_es_Salaam"); next_run_at is stored in UTC
   timezone        String
-  isActive        Boolean  @default(true) @map("is_active")
+  isActive        Boolean   @default(true) @map("is_active")
   /// User the automation runs as (Keycloak sub); needed for tenant context
-  runAsUser       String?  @map("run_as_user")
+  runAsUser       String?   @map("run_as_user")
   nextRunAt       DateTime? @map("next_run_at")
   /// BullMQ repeat job key — used to deregister the schedule
-  bullmqRepeatKey String?  @map("bullmq_repeat_key")
-  createdAt       DateTime @default(now()) @map("created_at")
+  bullmqRepeatKey String?   @map("bullmq_repeat_key")
+  createdAt       DateTime  @default(now()) @map("created_at")
 
-  automation      TransferAutomation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  automation TransferAutomation @relation(fields: [automationId], references: [id], onDelete: Cascade)
 
   @@index([nextRunAt])
   @@map("transfer_automation_schedules")
@@ -1471,24 +1520,24 @@ model TransferAutomationSchedule {
 // ── TD-DB-010: transfer_formats (FSD) ────────────────────────────────────────
 
 model TransferFormat {
-  id              String               @id @default(uuid())
-  name            String               @unique
-  description     String?
-  classification  FormatClassification
+  id               String               @id @default(uuid())
+  name             String               @unique
+  description      String?
+  classification   FormatClassification
   /// Raw FSD XML — the source-of-truth definition
-  fsdXml          String               @map("fsd_xml") @db.Text
+  fsdXml           String               @map("fsd_xml") @db.Text
   /// Optional GUI editor state (visual designer position, palette, etc.)
-  guiState        Json?                @map("gui_state")
+  guiState         Json?                @map("gui_state")
   /// True for pre-built system formats that cannot be deleted
-  isSystem        Boolean              @default(false) @map("is_system")
-  isValid         Boolean              @default(false) @map("is_valid")
-  validationErrors Json?               @map("validation_errors")
-  createdById     String?              @map("created_by")
-  createdAt       DateTime             @default(now()) @map("created_at")
-  updatedAt       DateTime             @updatedAt @map("updated_at")
+  isSystem         Boolean              @default(false) @map("is_system")
+  isValid          Boolean              @default(false) @map("is_valid")
+  validationErrors Json?                @map("validation_errors")
+  createdById      String?              @map("created_by")
+  createdAt        DateTime             @default(now()) @map("created_at")
+  updatedAt        DateTime             @updatedAt @map("updated_at")
 
-  sourceProfiles  TransferProfile[]    @relation("TransferProfileSourceFormat")
-  targetProfiles  TransferProfile[]    @relation("TransferProfileTargetFormat")
+  sourceProfiles   TransferProfile[]        @relation("TransferProfileSourceFormat")
+  targetProfiles   TransferProfile[]        @relation("TransferProfileTargetFormat")
   sourceTransforms TransferTransformation[] @relation("TransferTransformationSourceFormat")
   targetTransforms TransferTransformation[] @relation("TransferTransformationTargetFormat")
 
@@ -1499,30 +1548,30 @@ model TransferFormat {
 // ── TD-DB-011: transfer_transformations (TML) ────────────────────────────────
 
 model TransferTransformation {
-  id                String     @id @default(uuid())
-  name              String     @unique
-  description       String?
-  scriptType        ScriptType @default(TML) @map("script_type")
-  sourceFormatId    String?    @map("source_format_id")
-  targetFormatId    String?    @map("target_format_id")
-  sourceComponent   String?    @map("source_component")
-  targetComponent   String?    @map("target_component")
+  id               String     @id @default(uuid())
+  name             String     @unique
+  description      String?
+  scriptType       ScriptType @default(TML) @map("script_type")
+  sourceFormatId   String?    @map("source_format_id")
+  targetFormatId   String?    @map("target_format_id")
+  sourceComponent  String?    @map("source_component")
+  targetComponent  String?    @map("target_component")
   /// Raw TML XML — the source-of-truth definition
-  tmlXml            String?    @map("tml_xml") @db.Text
+  tmlXml           String?    @map("tml_xml") @db.Text
   /// Parsed TML rules as JSONB (for the visual mapper)
-  rulesJson         Json?      @map("rules_json")
+  rulesJson        Json?      @map("rules_json")
   /// User-defined JS function library (CDATA-wrapped JS)
-  functionsJson     Json?      @map("functions_json")
-  isSystem          Boolean    @default(false) @map("is_system")
-  isValid           Boolean    @default(false) @map("is_valid")
-  validationErrors  Json?      @map("validation_errors")
-  createdById       String?    @map("created_by")
-  createdAt         DateTime   @default(now()) @map("created_at")
-  updatedAt         DateTime   @updatedAt @map("updated_at")
+  functionsJson    Json?      @map("functions_json")
+  isSystem         Boolean    @default(false) @map("is_system")
+  isValid          Boolean    @default(false) @map("is_valid")
+  validationErrors Json?      @map("validation_errors")
+  createdById      String?    @map("created_by")
+  createdAt        DateTime   @default(now()) @map("created_at")
+  updatedAt        DateTime   @updatedAt @map("updated_at")
 
-  sourceFormat      TransferFormat?  @relation("TransferTransformationSourceFormat", fields: [sourceFormatId], references: [id])
-  targetFormat      TransferFormat?  @relation("TransferTransformationTargetFormat", fields: [targetFormatId], references: [id])
-  profiles          TransferProfile[]
+  sourceFormat TransferFormat?   @relation("TransferTransformationSourceFormat", fields: [sourceFormatId], references: [id])
+  targetFormat TransferFormat?   @relation("TransferTransformationTargetFormat", fields: [targetFormatId], references: [id])
+  profiles     TransferProfile[]
 
   @@map("transfer_transformations")
 }
@@ -1537,8 +1586,8 @@ model TransferLookupTable {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  columns     TransferLookupColumn[]
-  rows        TransferLookupRow[]
+  columns TransferLookupColumn[]
+  rows    TransferLookupRow[]
 
   @@map("transfer_lookup_tables")
 }
@@ -1546,13 +1595,13 @@ model TransferLookupTable {
 // ── TD-DB-013: transfer_lookup_columns ───────────────────────────────────────
 
 model TransferLookupColumn {
-  id          String   @id @default(uuid())
-  tableId     String   @map("table_id")
+  id          String @id @default(uuid())
+  tableId     String @map("table_id")
   name        String
-  columnOrder Int      @map("column_order")
+  columnOrder Int    @map("column_order")
 
-  table       TransferLookupTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
-  values      TransferLookupValue[]
+  table  TransferLookupTable   @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  values TransferLookupValue[]
 
   @@unique([tableId, name])
   @@unique([tableId, columnOrder])
@@ -1565,18 +1614,18 @@ model TransferLookupColumn {
 // Always zero-pad numeric values when defining ranges (per spec TD-BL-021).
 
 model TransferLookupRow {
-  id              String   @id @default(uuid())
-  tableId         String   @map("table_id")
+  id           String  @id @default(uuid())
+  tableId      String  @map("table_id")
   /// Business unit scope: NULL = global data (matches any BU)
-  businessUnit    String?  @map("business_unit")
+  businessUnit String? @map("business_unit")
   /// Inclusive lower bound (alpha-collated)
-  rangeFrom       String   @map("range_from")
+  rangeFrom    String  @map("range_from")
   /// Inclusive upper bound (alpha-collated)
-  rangeTo         String   @map("range_to")
-  rowOrder        Int      @map("row_order")
+  rangeTo      String  @map("range_to")
+  rowOrder     Int     @map("row_order")
 
-  table           TransferLookupTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
-  values          TransferLookupValue[]
+  table  TransferLookupTable   @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  values TransferLookupValue[]
 
   @@index([tableId, businessUnit, rangeFrom, rangeTo])
   @@index([tableId, rowOrder])
@@ -1586,16 +1635,16 @@ model TransferLookupRow {
 // ── TD-DB-015: transfer_lookup_values ────────────────────────────────────────
 
 model TransferLookupValue {
-  id          String          @id @default(uuid())
-  rowId       String          @map("row_id")
-  columnId    String          @map("column_id")
-  valueType   LookupValueType @map("value_type")
+  id         String          @id @default(uuid())
+  rowId      String          @map("row_id")
+  columnId   String          @map("column_id")
+  valueType  LookupValueType @map("value_type")
   /// Parameter for the value type (the constant string, the source field path, etc.)
-  valueParam  String?         @map("value_param")
-  isDefault   Boolean         @default(false) @map("is_default")
+  valueParam String?         @map("value_param")
+  isDefault  Boolean         @default(false) @map("is_default")
 
-  row         TransferLookupRow    @relation(fields: [rowId], references: [id], onDelete: Cascade)
-  column      TransferLookupColumn @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  row    TransferLookupRow    @relation(fields: [rowId], references: [id], onDelete: Cascade)
+  column TransferLookupColumn @relation(fields: [columnId], references: [id], onDelete: Cascade)
 
   @@unique([rowId, columnId])
   @@map("transfer_lookup_values")
@@ -1614,10 +1663,10 @@ model TransferFolder {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  parent      TransferFolder?  @relation("TransferFolderHierarchy", fields: [parentId], references: [id])
-  children    TransferFolder[] @relation("TransferFolderHierarchy")
-  access      TransferFolderAccess[]
-  files       TransferFile[]
+  parent   TransferFolder?        @relation("TransferFolderHierarchy", fields: [parentId], references: [id])
+  children TransferFolder[]       @relation("TransferFolderHierarchy")
+  access   TransferFolderAccess[]
+  files    TransferFile[]
 
   @@unique([parentId, name])
   @@map("transfer_folders")
@@ -1626,16 +1675,16 @@ model TransferFolder {
 // ── TD-DB-017: transfer_folder_access ────────────────────────────────────────
 
 model TransferFolderAccess {
-  id        String   @id @default(uuid())
-  folderId  String   @map("folder_id")
+  id        String  @id @default(uuid())
+  folderId  String  @map("folder_id")
   /// Role identifier (e.g. "transfer:user", "transfer:designer")
-  roleName  String   @map("role_name")
+  roleName  String  @map("role_name")
   /// What this role can do in this folder
-  canRead   Boolean  @default(true) @map("can_read")
-  canWrite  Boolean  @default(false) @map("can_write")
-  canDelete Boolean  @default(false) @map("can_delete")
+  canRead   Boolean @default(true) @map("can_read")
+  canWrite  Boolean @default(false) @map("can_write")
+  canDelete Boolean @default(false) @map("can_delete")
 
-  folder    TransferFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  folder TransferFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
 
   @@unique([folderId, roleName])
   @@map("transfer_folder_access")
@@ -1657,7 +1706,7 @@ model TransferFile {
   uploadedById String?  @map("uploaded_by")
   uploadedAt   DateTime @default(now()) @map("uploaded_at")
 
-  folder       TransferFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  folder TransferFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
 
   @@index([folderId, uploadedAt])
   @@map("transfer_files")
@@ -1669,32 +1718,32 @@ model TransferFile {
 // COMPLETED/FAILED/CANCELLED. Per-record details live in transfer_execution_logs.
 
 model TransferExecution {
-  id              String          @id @default(uuid())
-  profileId       String          @map("profile_id")
+  id                  String          @id @default(uuid())
+  profileId           String          @map("profile_id")
   /// Set when this execution is part of an automation pipeline
-  automationId    String?         @map("automation_id")
-  automationStepOrder Int?        @map("automation_step_order")
-  status          ExecutionStatus @default(QUEUED)
+  automationId        String?         @map("automation_id")
+  automationStepOrder Int?            @map("automation_step_order")
+  status              ExecutionStatus @default(QUEUED)
   /// BullMQ job ID for cancellation and progress streaming
-  jobId           String?         @map("job_id")
+  jobId               String?         @map("job_id")
   /// Triggering user (Keycloak sub)
-  triggeredBy     String?         @map("triggered_by")
-  recordsTotal    Int             @default(0) @map("records_total")
-  recordsSucceeded Int            @default(0) @map("records_succeeded")
-  recordsFailed   Int             @default(0) @map("records_failed")
+  triggeredBy         String?         @map("triggered_by")
+  recordsTotal        Int             @default(0) @map("records_total")
+  recordsSucceeded    Int             @default(0) @map("records_succeeded")
+  recordsFailed       Int             @default(0) @map("records_failed")
   /// S3 key of the saved input payload (when save_payload includes INPUT)
-  inputPayloadKey  String?        @map("input_payload_key")
-  outputPayloadKey String?        @map("output_payload_key")
-  errorMessage    String?         @map("error_message") @db.Text
+  inputPayloadKey     String?         @map("input_payload_key")
+  outputPayloadKey    String?         @map("output_payload_key")
+  errorMessage        String?         @map("error_message") @db.Text
   /// Snapshot of the runtime parameters used for this execution
-  runtimeParams   Json?           @map("runtime_params")
-  startedAt       DateTime?       @map("started_at")
-  finishedAt      DateTime?       @map("finished_at")
-  createdAt       DateTime        @default(now()) @map("created_at")
+  runtimeParams       Json?           @map("runtime_params")
+  startedAt           DateTime?       @map("started_at")
+  finishedAt          DateTime?       @map("finished_at")
+  createdAt           DateTime        @default(now()) @map("created_at")
 
-  profile         TransferProfile     @relation(fields: [profileId], references: [id])
-  automation      TransferAutomation? @relation(fields: [automationId], references: [id])
-  logs            TransferExecutionLog[]
+  profile    TransferProfile        @relation(fields: [profileId], references: [id])
+  automation TransferAutomation?    @relation(fields: [automationId], references: [id])
+  logs       TransferExecutionLog[]
 
   @@index([profileId, createdAt])
   @@index([status])
@@ -1707,20 +1756,145 @@ model TransferExecution {
 // One row per source record processed. BIGSERIAL primary key for sortable order.
 
 model TransferExecutionLog {
-  id              BigInt              @id @default(autoincrement())
-  executionId     String              @map("execution_id")
-  recordIndex     Int                 @map("record_index")
+  id              BigInt             @id @default(autoincrement())
+  executionId     String             @map("execution_id")
+  recordIndex     Int                @map("record_index")
   status          ExecutionLogStatus
   /// Source record as JSONB (parsed from FSD)
-  sourceData      Json?               @map("source_data")
+  sourceData      Json?              @map("source_data")
   /// Transformed output as JSONB (after TML)
-  transformedData Json?               @map("transformed_data")
-  errorCode       String?             @map("error_code")
-  errorMessage    String?             @map("error_message") @db.Text
+  transformedData Json?              @map("transformed_data")
+  errorCode       String?            @map("error_code")
+  errorMessage    String?            @map("error_message") @db.Text
 
-  execution       TransferExecution   @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  execution TransferExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
 
   @@index([executionId, recordIndex])
   @@index([executionId, status])
   @@map("transfer_execution_logs")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Ledger Setup (spec Module 1.2.1 — per BU/ledger posting configuration)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model LedgerSetup {
+  id                     String             @id @default(uuid())
+  entityId               String             @map("entity_id")
+  /// Ledger identifier A–K (default "A" = primary financials ledger)
+  ledger                 String             @default("A") @db.Char(1)
+  /// Open posting date range start (absolute YYYY-MM-DD, relative +/-nnn, or "T" for today)
+  openDateFrom           String?            @map("open_date_from") @db.VarChar(12)
+  /// Open posting date range end
+  openDateTo             String?            @map("open_date_to") @db.VarChar(12)
+  provisionalPosting     ProvisionalPosting @default(OPTIONAL) @map("provisional_posting")
+  useFinancialCalendar   Boolean            @default(false) @map("use_financial_calendar")
+  baseCurrency           String             @default("USD") @map("base_currency") @db.VarChar(3)
+  secondBaseCurrency     String?            @map("second_base_currency") @db.VarChar(3)
+  fourthCurrencyCode     String?            @map("fourth_currency_code") @db.VarChar(3)
+  roundingMethod         RoundingMethod     @default(NORMAL) @map("rounding_method")
+  roundingUnit           String?            @map("rounding_unit") @db.VarChar(20)
+  paymentRunEnabled      Boolean            @default(false) @map("payment_run_enabled")
+  payAtCurrentRates      Boolean            @default(true) @map("pay_at_current_rates")
+  nonMatchSystemPayments Boolean            @default(false) @map("non_match_system_payments")
+  /// Tracks the current open period for this BU/ledger
+  currentPeriodId        String?            @map("current_period_id")
+  createdAt              DateTime           @default(now()) @map("created_at")
+  updatedAt              DateTime           @updatedAt @map("updated_at")
+
+  entity        Entity  @relation(fields: [entityId], references: [id])
+  currentPeriod Period? @relation(fields: [currentPeriodId], references: [id])
+
+  @@unique([entityId, ledger])
+  @@map("ledger_setups")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Process Locks (spec Module 10 — exclusive locking for period-end processes)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model ProcessLock {
+  id           String    @id @default(uuid())
+  entityId     String    @map("entity_id")
+  /// Process type: PERIOD_CLOSE, PERIOD_REOPEN, REVALUATION, DEPRECIATION, ALLOCATION, PAYMENT_RUN, etc.
+  processType  String    @map("process_type") @db.VarChar(50)
+  /// Ledger identifier (default "A")
+  ledger       String    @default("A") @db.Char(1)
+  acquiredAt   DateTime  @default(now()) @map("acquired_at")
+  /// Lock expires after this time (prevents permanent deadlocks from crashes)
+  expiresAt    DateTime  @map("expires_at")
+  releasedAt   DateTime? @map("released_at")
+  /// User who acquired the lock (NULL for system/worker processes)
+  acquiredById String?   @map("acquired_by")
+  /// BullMQ worker instance ID (for cleanup)
+  workerId     String?   @map("worker_id") @db.VarChar(100)
+  isActive     Boolean   @default(true) @map("is_active")
+
+  entity     Entity @relation(fields: [entityId], references: [id])
+  acquiredBy User?  @relation(fields: [acquiredById], references: [id])
+
+  @@index([entityId, processType, ledger, isActive])
+  @@map("process_locks")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Period Close Status (spec Module 10 — tracks period-end process completion)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model PeriodCloseStatus {
+  id               String           @id @default(uuid())
+  entityId         String           @map("entity_id")
+  periodId         String           @map("period_id")
+  ledger           String           @default("A") @db.Char(1)
+  status           PeriodCloseState @default(PC_OPEN)
+  revaluationRun   Boolean          @default(false) @map("revaluation_run")
+  depreciationRun  Boolean          @default(false) @map("depreciation_run")
+  allocationsRun   Boolean          @default(false) @map("allocations_run")
+  yearEndProcessed Boolean          @default(false) @map("year_end_processed")
+  closedById       String?          @map("closed_by")
+  closedAt         DateTime?        @map("closed_at")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+
+  entity   Entity @relation(fields: [entityId], references: [id])
+  period   Period @relation(fields: [periodId], references: [id])
+  closedBy User?  @relation(fields: [closedById], references: [id])
+
+  @@unique([entityId, periodId, ledger])
+  @@map("period_close_statuses")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Analysis Dimensions (spec Module 2.2.2 — T1–T10 dimension definitions)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model AnalysisDimension {
+  id              String                  @id @default(uuid())
+  entityId        String                  @map("entity_id")
+  /// Dimension number 1–10 (maps to T1–T10 / dimension1–dimension10)
+  dimensionNumber Int                     @map("dimension_number")
+  dimensionName   String                  @map("dimension_name") @db.VarChar(50)
+  isRequired      Boolean                 @default(false) @map("is_required")
+  validationType  DimensionValidationType @default(NONE) @map("validation_type")
+  createdAt       DateTime                @default(now()) @map("created_at")
+  updatedAt       DateTime                @updatedAt @map("updated_at")
+
+  entity Entity         @relation(fields: [entityId], references: [id])
+  codes  AnalysisCode[]
+
+  @@unique([entityId, dimensionNumber])
+  @@map("analysis_dimensions")
+}
+
+model AnalysisCode {
+  id          String  @id @default(uuid())
+  dimensionId String  @map("dimension_id")
+  code        String  @db.VarChar(30)
+  description String? @db.VarChar(100)
+  isActive    Boolean @default(true) @map("is_active")
+
+  dimension AnalysisDimension @relation(fields: [dimensionId], references: [id], onDelete: Cascade)
+
+  @@unique([dimensionId, code])
+  @@map("analysis_codes")
 }
