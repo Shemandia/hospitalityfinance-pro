@@ -194,6 +194,26 @@ enum FXRateSource {
   MANUAL
 }
 
+// ── Corporate Allocation enums ──────────────────────────────────────────────
+
+enum AllocationType {
+  CHARGE // Target posting + offset account; source untouched
+  SPLIT // Target posting + reversal on source; source zeroed
+}
+
+enum AllocationBasisType {
+  FIXED_PERCENTAGE // User-defined % per target
+  FIXED_AMOUNT // User-defined absolute amount per target
+  ACCOUNT_BALANCE // Ratio derived from ledger balances (ratio accounts)
+  STATISTICAL_KEY // Ratio derived from statistical account values
+}
+
+enum AllocationBalanceType {
+  OPENING // Opening balance of the period
+  MOVEMENTS // In-period movements only
+  CLOSING // Closing balance (opening + movements)
+}
+
 // ─── Tenant Setup ────────────────────────────────────────────────────────────
 
 model TenantSetupProgress {
@@ -270,6 +290,7 @@ model Entity {
   processLocks            ProcessLock[]
   periodCloseStatuses     PeriodCloseStatus[]
   analysisDimensions      AnalysisDimension[]
+  allocationDefinitions   AllocationDefinition[]
 
   @@index([parentId])
   @@map("entities")
@@ -290,16 +311,17 @@ model User {
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
-  entities            EntityUser[]
-  roles               UserRole[]
-  createdJournals     Journal[]           @relation("JournalCreatedBy")
-  approvedJournals    Journal[]           @relation("JournalApprovedBy")
-  journalApprovals    JournalApproval[]
-  auditEvents         AuditEvent[]
-  loginAudits         LoginAudit[]
-  recurringJournals   RecurringJournal[]  @relation("RecurringJournalCreatedBy")
-  processLocks        ProcessLock[]
-  periodCloseStatuses PeriodCloseStatus[]
+  entities              EntityUser[]
+  roles                 UserRole[]
+  createdJournals       Journal[]              @relation("JournalCreatedBy")
+  approvedJournals      Journal[]              @relation("JournalApprovedBy")
+  journalApprovals      JournalApproval[]
+  auditEvents           AuditEvent[]
+  loginAudits           LoginAudit[]
+  recurringJournals     RecurringJournal[]     @relation("RecurringJournalCreatedBy")
+  processLocks          ProcessLock[]
+  periodCloseStatuses   PeriodCloseStatus[]
+  allocationDefinitions AllocationDefinition[] @relation("AllocationCreatedBy")
 
   @@map("users")
 }
@@ -387,22 +409,23 @@ model UserRole {
 // ─── Period Management ────────────────────────────────────────────────────────
 
 model Period {
-  id                  String                 @id @default(uuid())
-  entityId            String                 @map("entity_id")
-  year                Int
-  month               Int
-  name                String
-  status              PeriodStatus           @default(OPEN)
-  openedAt            DateTime?              @map("opened_at")
-  closedAt            DateTime?              @map("closed_at")
-  createdAt           DateTime               @default(now()) @map("created_at")
-  updatedAt           DateTime               @updatedAt @map("updated_at")
-  entity              Entity                 @relation(fields: [entityId], references: [id])
-  journals            Journal[]
-  balances            AccountPeriodBalance[]
-  apInvoices          APInvoice[]
-  ledgerSetups        LedgerSetup[]
-  periodCloseStatuses PeriodCloseStatus[]
+  id                    String                 @id @default(uuid())
+  entityId              String                 @map("entity_id")
+  year                  Int
+  month                 Int
+  name                  String
+  status                PeriodStatus           @default(OPEN)
+  openedAt              DateTime?              @map("opened_at")
+  closedAt              DateTime?              @map("closed_at")
+  createdAt             DateTime               @default(now()) @map("created_at")
+  updatedAt             DateTime               @updatedAt @map("updated_at")
+  entity                Entity                 @relation(fields: [entityId], references: [id])
+  journals              Journal[]
+  balances              AccountPeriodBalance[]
+  apInvoices            APInvoice[]
+  ledgerSetups          LedgerSetup[]
+  periodCloseStatuses   PeriodCloseStatus[]
+  allocationDefinitions AllocationDefinition[]
 
   @@unique([entityId, year, month])
   @@index([entityId, status])
@@ -1897,4 +1920,96 @@ model AnalysisCode {
 
   @@unique([dimensionId, code])
   @@map("analysis_codes")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Corporate Allocations (spec Module 6 — Ch. 7)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model AllocationDefinition {
+  id                String         @id @default(uuid())
+  entityId          String         @map("entity_id")
+  name              String         @db.VarChar(100)
+  description       String?        @db.VarChar(500)
+  allocationType    AllocationType @map("allocation_type")
+  /// Optional: lock allocation to a specific period. Null = uses current period at run time.
+  periodId          String?        @map("period_id")
+  /// When true, this definition participates in a stepped sequence (run in sequenceOrder).
+  isSteppedSequence Boolean        @default(false) @map("is_stepped_sequence")
+  sequenceOrder     Int            @default(0) @map("sequence_order")
+  isActive          Boolean        @default(true) @map("is_active")
+  /// System-shipped definitions are read-only (clonable but not deletable).
+  isSystem          Boolean        @default(false) @map("is_system")
+  createdById       String?        @map("created_by")
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+
+  entity    Entity             @relation(fields: [entityId], references: [id])
+  period    Period?            @relation(fields: [periodId], references: [id])
+  createdBy User?              @relation("AllocationCreatedBy", fields: [createdById], references: [id])
+  sources   AllocationSource[]
+  targets   AllocationTarget[]
+
+  @@unique([entityId, name])
+  @@index([entityId, isActive])
+  @@index([entityId, isSteppedSequence, sequenceOrder])
+  @@map("allocation_definitions")
+}
+
+model AllocationSource {
+  id               String                @id @default(uuid())
+  definitionId     String                @map("definition_id")
+  /// Account code range start (inclusive)
+  accountCodeFrom  String                @map("account_code_from") @db.VarChar(50)
+  /// Account code range end (inclusive). Same as accountCodeFrom for single account.
+  accountCodeTo    String                @map("account_code_to") @db.VarChar(50)
+  /// Optional analysis code filters (up to 3 dimensions)
+  analysisCode1    String?               @map("analysis_code_1") @db.VarChar(50)
+  analysisCode2    String?               @map("analysis_code_2") @db.VarChar(50)
+  analysisCode3    String?               @map("analysis_code_3") @db.VarChar(50)
+  /// Which balance to read: OPENING, MOVEMENTS, or CLOSING
+  balanceType      AllocationBalanceType @default(MOVEMENTS) @map("balance_type")
+  /// Skip source if absolute amount below this threshold
+  minimumThreshold Decimal?              @map("minimum_threshold") @db.Decimal(18, 4)
+  /// Cap source amount at this maximum
+  maximumThreshold Decimal?              @map("maximum_threshold") @db.Decimal(18, 4)
+  /// Ordering for multi-source definitions (processed sequentially)
+  sourceOrder      Int                   @default(0) @map("source_order")
+
+  definition AllocationDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
+
+  @@index([definitionId])
+  @@map("allocation_sources")
+}
+
+model AllocationTarget {
+  id                   String              @id @default(uuid())
+  definitionId         String              @map("definition_id")
+  /// Account to post the allocated amount to
+  targetAccountCode    String              @map("target_account_code") @db.VarChar(50)
+  /// Offset account for CHARGE type (contra entry). Null for SPLIT (uses source account).
+  offsetAccountCode    String?             @map("offset_account_code") @db.VarChar(50)
+  /// How the allocation amount is determined for this target
+  basisType            AllocationBasisType @map("basis_type")
+  /// For FIXED_PERCENTAGE: the percentage (0–100) allocated to this target
+  fixedPercentage      Decimal?            @map("fixed_percentage") @db.Decimal(8, 4)
+  /// For FIXED_AMOUNT: the absolute amount allocated to this target
+  fixedAmount          Decimal?            @map("fixed_amount") @db.Decimal(18, 4)
+  /// For ACCOUNT_BALANCE: ratio account range start
+  ratioAccountCodeFrom String?             @map("ratio_account_code_from") @db.VarChar(50)
+  /// For ACCOUNT_BALANCE: ratio account range end
+  ratioAccountCodeTo   String?             @map("ratio_account_code_to") @db.VarChar(50)
+  /// For STATISTICAL_KEY: the statistical key identifier
+  statisticalKey       String?             @map("statistical_key") @db.VarChar(50)
+  /// For STATISTICAL_KEY: the statistical value for this target
+  statisticalValue     Decimal?            @map("statistical_value") @db.Decimal(18, 4)
+  /// Free-form analysis code assignments for the generated journal lines (JSON object)
+  analysisCodes        Json?               @map("analysis_codes")
+  /// Ordering for multi-target definitions
+  targetOrder          Int                 @default(0) @map("target_order")
+
+  definition AllocationDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
+
+  @@index([definitionId])
+  @@map("allocation_targets")
 }
