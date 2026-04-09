@@ -1934,6 +1934,343 @@ export async function registerIntegrationRouter(app: FastifyInstance): Promise<v
         }
       );
 
+      // ─── Lookup Table endpoints ────────────────────────────────────────
+
+      // TD-API-060 — GET /transfer-desk/lookups (list)
+      router.get("/transfer-desk/lookups", async (request, reply) => {
+        try {
+          const data = await (prisma as unknown as PrismaClient).transferLookupTable.findMany({
+            include: {
+              _count: { select: { columns: true, rows: true } }
+            },
+            orderBy: { updatedAt: "desc" }
+          });
+          return reply.send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      // TD-API-061 — GET /transfer-desk/lookups/:id (detail with full data)
+      router.get<{ Params: { id: string } }>(
+        "/transfer-desk/lookups/:id",
+        async (request, reply) => {
+          try {
+            const data = await (prisma as unknown as PrismaClient).transferLookupTable.findUnique({
+              where: { id: request.params.id },
+              include: {
+                columns: { orderBy: { columnOrder: "asc" } },
+                rows: {
+                  orderBy: { rowOrder: "asc" },
+                  include: {
+                    values: {
+                      include: {
+                        column: { select: { id: true, name: true } }
+                      }
+                    }
+                  }
+                }
+              }
+            });
+            if (!data) {
+              return reply.status(404).send({ error: "Lookup table not found" });
+            }
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      // TD-API-062 — POST /transfer-desk/lookups (create)
+      router.post("/transfer-desk/lookups", async (request, reply) => {
+        try {
+          const body = request.body as {
+            name: string;
+            description?: string;
+            columns?: Array<{ name: string; columnOrder: number }>;
+          };
+
+          if (!body.name?.trim()) {
+            return reply.status(400).send({ error: "name is required" });
+          }
+
+          const data = await (prisma as unknown as PrismaClient).transferLookupTable.create({
+            data: {
+              name: body.name.trim(),
+              description: body.description?.trim() || null,
+              columns: body.columns?.length
+                ? {
+                    create: body.columns.map((c) => ({
+                      name: c.name,
+                      columnOrder: c.columnOrder
+                    }))
+                  }
+                : undefined
+            },
+            include: {
+              columns: { orderBy: { columnOrder: "asc" } },
+              _count: { select: { rows: true } }
+            }
+          });
+          return reply.status(201).send({ data, errors: [] });
+        } catch (error) {
+          return mapError(reply, error);
+        }
+      });
+
+      // TD-API-063 — PUT /transfer-desk/lookups/:id (update metadata + columns)
+      router.put<{ Params: { id: string } }>(
+        "/transfer-desk/lookups/:id",
+        async (request, reply) => {
+          try {
+            const existing = await (
+              prisma as unknown as PrismaClient
+            ).transferLookupTable.findUnique({
+              where: { id: request.params.id }
+            });
+            if (!existing) {
+              return reply.status(404).send({ error: "Lookup table not found" });
+            }
+
+            const body = request.body as {
+              name?: string;
+              description?: string;
+              columns?: Array<{ id?: string; name: string; columnOrder: number }>;
+            };
+
+            // If columns provided, delete+recreate
+            if (body.columns) {
+              await (prisma as unknown as PrismaClient).transferLookupColumn.deleteMany({
+                where: { tableId: request.params.id }
+              });
+            }
+
+            const data = await (prisma as unknown as PrismaClient).transferLookupTable.update({
+              where: { id: request.params.id },
+              data: {
+                ...(body.name ? { name: body.name.trim() } : {}),
+                ...(body.description !== undefined
+                  ? { description: body.description?.trim() || null }
+                  : {}),
+                ...(body.columns
+                  ? {
+                      columns: {
+                        create: body.columns.map((c) => ({
+                          name: c.name,
+                          columnOrder: c.columnOrder
+                        }))
+                      }
+                    }
+                  : {})
+              },
+              include: {
+                columns: { orderBy: { columnOrder: "asc" } },
+                _count: { select: { rows: true } }
+              }
+            });
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      // TD-API-064 — POST /transfer-desk/lookups/:id/rows (bulk upsert rows)
+      router.post<{ Params: { id: string } }>(
+        "/transfer-desk/lookups/:id/rows",
+        async (request, reply) => {
+          try {
+            const tableId = request.params.id;
+            const existing = await (
+              prisma as unknown as PrismaClient
+            ).transferLookupTable.findUnique({
+              where: { id: tableId }
+            });
+            if (!existing) {
+              return reply.status(404).send({ error: "Lookup table not found" });
+            }
+
+            const body = request.body as {
+              rows: Array<{
+                id?: string;
+                businessUnit?: string;
+                rangeFrom?: string;
+                rangeTo?: string;
+                rowOrder: number;
+                values: Array<{
+                  columnId: string;
+                  valueType: "CONSTANT" | "COPY" | "MAP_TO" | "OMIT" | "REVERSE_SIGN";
+                  valueParam?: string;
+                  isDefault?: boolean;
+                }>;
+              }>;
+            };
+
+            if (!body.rows) {
+              return reply.status(400).send({ error: "rows array is required" });
+            }
+
+            // Delete existing rows + values, then recreate (atomic replace)
+            await (prisma as unknown as PrismaClient).transferLookupValue.deleteMany({
+              where: { row: { tableId } }
+            });
+            await (prisma as unknown as PrismaClient).transferLookupRow.deleteMany({
+              where: { tableId }
+            });
+
+            // Create rows with nested values
+            for (const row of body.rows) {
+              await (prisma as unknown as PrismaClient).transferLookupRow.create({
+                data: {
+                  tableId,
+                  businessUnit: row.businessUnit ?? null,
+                  rangeFrom: row.rangeFrom ?? null,
+                  rangeTo: row.rangeTo ?? null,
+                  rowOrder: row.rowOrder,
+                  values: {
+                    create: row.values.map((v) => ({
+                      columnId: v.columnId,
+                      valueType: v.valueType,
+                      valueParam: v.valueParam ?? null,
+                      isDefault: v.isDefault ?? false
+                    }))
+                  }
+                }
+              });
+            }
+
+            // Return updated table
+            const data = await (prisma as unknown as PrismaClient).transferLookupTable.findUnique({
+              where: { id: tableId },
+              include: {
+                columns: { orderBy: { columnOrder: "asc" } },
+                rows: {
+                  orderBy: { rowOrder: "asc" },
+                  include: { values: true }
+                }
+              }
+            });
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      // TD-API-065 — DELETE /transfer-desk/lookups/:id
+      router.delete<{ Params: { id: string } }>(
+        "/transfer-desk/lookups/:id",
+        async (request, reply) => {
+          try {
+            const existing = await (
+              prisma as unknown as PrismaClient
+            ).transferLookupTable.findUnique({
+              where: { id: request.params.id }
+            });
+            if (!existing) {
+              return reply.status(404).send({ error: "Lookup table not found" });
+            }
+
+            // Cascade: values → rows → columns → table
+            await (prisma as unknown as PrismaClient).transferLookupValue.deleteMany({
+              where: { row: { tableId: request.params.id } }
+            });
+            await (prisma as unknown as PrismaClient).transferLookupRow.deleteMany({
+              where: { tableId: request.params.id }
+            });
+            await (prisma as unknown as PrismaClient).transferLookupColumn.deleteMany({
+              where: { tableId: request.params.id }
+            });
+            await (prisma as unknown as PrismaClient).transferLookupTable.delete({
+              where: { id: request.params.id }
+            });
+
+            return reply.send({ data: { id: request.params.id, deleted: true }, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      // TD-API-066 — POST /transfer-desk/lookups/:id/import-csv
+      router.post<{ Params: { id: string } }>(
+        "/transfer-desk/lookups/:id/import-csv",
+        async (request, reply) => {
+          try {
+            const tableId = request.params.id;
+            const existing = await (
+              prisma as unknown as PrismaClient
+            ).transferLookupTable.findUnique({
+              where: { id: tableId },
+              include: { columns: { orderBy: { columnOrder: "asc" } } }
+            });
+            if (!existing) {
+              return reply.status(404).send({ error: "Lookup table not found" });
+            }
+
+            const body = request.body as { csvContent: string; hasHeader?: boolean };
+            if (!body.csvContent?.trim()) {
+              return reply.status(400).send({ error: "csvContent is required" });
+            }
+
+            // Parse CSV
+            const lines = body.csvContent.trim().split("\n");
+            const startIdx = body.hasHeader !== false ? 1 : 0; // skip header by default
+            const columnMap = new Map(existing.columns.map((c: any) => [c.columnOrder, c.id]));
+
+            // Clear existing rows
+            await (prisma as unknown as PrismaClient).transferLookupValue.deleteMany({
+              where: { row: { tableId } }
+            });
+            await (prisma as unknown as PrismaClient).transferLookupRow.deleteMany({
+              where: { tableId }
+            });
+
+            let imported = 0;
+            for (let i = startIdx; i < lines.length; i++) {
+              const cells = lines[i]!.split(",").map((c) => c.trim());
+              // First 3 cells: businessUnit, rangeFrom, rangeTo (metadata columns)
+              // Remaining cells map to lookup columns by order
+              const row = await (prisma as unknown as PrismaClient).transferLookupRow.create({
+                data: {
+                  tableId,
+                  businessUnit: cells[0] || null,
+                  rangeFrom: cells[1] || null,
+                  rangeTo: cells[2] || null,
+                  rowOrder: i - startIdx
+                }
+              });
+
+              // Create values for each column
+              for (let colIdx = 0; colIdx < existing.columns.length; colIdx++) {
+                const columnId = columnMap.get(colIdx);
+                const cellValue = cells[3 + colIdx] ?? "";
+                if (columnId) {
+                  await (prisma as unknown as PrismaClient).transferLookupValue.create({
+                    data: {
+                      rowId: row.id,
+                      columnId,
+                      valueType: "CONSTANT",
+                      valueParam: cellValue || null,
+                      isDefault: false
+                    }
+                  });
+                }
+              }
+              imported++;
+            }
+
+            return reply.send({
+              data: { tableId, rowsImported: imported },
+              errors: []
+            });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
       // TD-API-009 — GET /transfer-desk/profiles (list)
       router.get("/transfer-desk/profiles", async (request, reply) => {
         try {

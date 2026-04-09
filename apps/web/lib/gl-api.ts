@@ -2885,6 +2885,148 @@ export function runTransferAutomation(
   });
 }
 
+// ── Lookup Table types + CRUD (TD-API-060..066) ─────────────────────────
+
+export type LookupValueType = "CONSTANT" | "COPY" | "MAP_TO" | "OMIT" | "REVERSE_SIGN";
+
+export type TransferLookupColumnSummary = {
+  id: string;
+  tableId: string;
+  name: string;
+  columnOrder: number;
+};
+
+export type TransferLookupValueSummary = {
+  id: string;
+  rowId: string;
+  columnId: string;
+  valueType: LookupValueType;
+  valueParam: string | null;
+  isDefault: boolean;
+  column?: { id: string; name: string };
+};
+
+export type TransferLookupRowSummary = {
+  id: string;
+  tableId: string;
+  businessUnit: string | null;
+  rangeFrom: string | null;
+  rangeTo: string | null;
+  rowOrder: number;
+  values: TransferLookupValueSummary[];
+};
+
+export type TransferLookupTableSummary = {
+  id: string;
+  name: string;
+  description: string | null;
+  createdAt: string;
+  updatedAt: string;
+  _count?: { columns: number; rows: number };
+};
+
+export type TransferLookupTableDetail = TransferLookupTableSummary & {
+  columns: TransferLookupColumnSummary[];
+  rows: TransferLookupRowSummary[];
+};
+
+export type LookupTableCreateInput = {
+  name: string;
+  description?: string;
+  columns?: Array<{ name: string; columnOrder: number }>;
+};
+
+export type LookupTableUpdateInput = {
+  name?: string;
+  description?: string;
+  columns?: Array<{ id?: string; name: string; columnOrder: number }>;
+};
+
+export type LookupRowInput = {
+  id?: string;
+  businessUnit?: string;
+  rangeFrom?: string;
+  rangeTo?: string;
+  rowOrder: number;
+  values: Array<{
+    columnId: string;
+    valueType: LookupValueType;
+    valueParam?: string;
+    isDefault?: boolean;
+  }>;
+};
+
+export function listTransferLookupTables(context: ApiContext) {
+  return request<TransferLookupTableSummary[]>(
+    context,
+    `/api/v1/integration/transfer-desk/lookups`
+  );
+}
+
+export function getTransferLookupTable(context: ApiContext, id: string) {
+  return request<TransferLookupTableDetail>(
+    context,
+    `/api/v1/integration/transfer-desk/lookups/${id}`
+  );
+}
+
+export function createTransferLookupTable(context: ApiContext, input: LookupTableCreateInput) {
+  return request<TransferLookupTableDetail>(context, "/api/v1/integration/transfer-desk/lookups", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function updateTransferLookupTable(
+  context: ApiContext,
+  id: string,
+  input: LookupTableUpdateInput
+) {
+  return request<TransferLookupTableDetail>(
+    context,
+    `/api/v1/integration/transfer-desk/lookups/${id}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(input)
+    }
+  );
+}
+
+export function saveLookupTableRows(context: ApiContext, id: string, rows: LookupRowInput[]) {
+  return request<TransferLookupTableDetail>(
+    context,
+    `/api/v1/integration/transfer-desk/lookups/${id}/rows`,
+    {
+      method: "POST",
+      body: JSON.stringify({ rows })
+    }
+  );
+}
+
+export function deleteTransferLookupTable(context: ApiContext, id: string) {
+  return request<{ id: string; deleted: true }>(
+    context,
+    `/api/v1/integration/transfer-desk/lookups/${id}`,
+    { method: "DELETE" }
+  );
+}
+
+export function importLookupTableCsv(
+  context: ApiContext,
+  id: string,
+  csvContent: string,
+  hasHeader = true
+) {
+  return request<{ tableId: string; rowsImported: number }>(
+    context,
+    `/api/v1/integration/transfer-desk/lookups/${id}/import-csv`,
+    {
+      method: "POST",
+      body: JSON.stringify({ csvContent, hasHeader })
+    }
+  );
+}
+
 export type TransferProfileSummary = {
   id: string;
   name: string;
