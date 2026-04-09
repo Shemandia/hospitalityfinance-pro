@@ -144,14 +144,10 @@ export default function TransferDeskProfileListPage() {
           </p>
         </div>
         {role.canTransferDeskDesigner && (
-          <Button
-            variant="teal"
-            size="sm"
-            disabled
-            className="gap-1.5"
-            title="Creation wizard coming in sprint 4"
-          >
-            <Plus className="h-3.5 w-3.5" /> New Profile
+          <Button asChild variant="teal" size="sm" className="gap-1.5">
+            <Link href={tenantHref("/transfer-desk/profiles/new")}>
+              <Plus className="h-3.5 w-3.5" /> New Profile
+            </Link>
           </Button>
         )}
       </div>
