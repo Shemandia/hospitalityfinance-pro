@@ -3492,3 +3492,121 @@ export function cancelTransferExecution(context: ApiContext, executionId: string
     { method: "POST", body: "{}" }
   );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Year-End / Period-Close
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export type YearEndConfig = {
+  id: string;
+  entityId: string;
+  retainedEarningsCode: string;
+  journalTypeCode: string | null;
+  fiscalYearStartMonth: number;
+  description: string | null;
+};
+
+export type YearEndCleardownResult = {
+  periodName: string;
+  fiscalYear: number;
+  retainedEarningsCode: string;
+  totalRevenue: number;
+  totalExpense: number;
+  netProfitLoss: number;
+  lines: Array<{
+    accountCode: string;
+    accountName: string;
+    accountType: string;
+    closingBalance: number;
+    cleardownAmount: number;
+  }>;
+  journalId: string | null;
+};
+
+export async function getYearEndConfig(context: ApiContext) {
+  return request<YearEndConfig | null>(context, "/api/v1/period-close/year-end-config");
+}
+
+export async function saveYearEndConfig(context: ApiContext, payload: Record<string, unknown>) {
+  return request<YearEndConfig>(context, "/api/v1/period-close/year-end-config", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function runYearEndCleardownApi(
+  context: ApiContext,
+  payload: Record<string, unknown>
+) {
+  return request<YearEndCleardownResult>(context, "/api/v1/period-close/year-end-cleardown", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Intercompany
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export type ICAccountPairSummary = {
+  id: string;
+  entityId: string;
+  counterpartyEntityId: string;
+  icReceivableCode: string;
+  icPayableCode: string;
+  isActive: boolean;
+};
+
+export type ICJournalSummary = {
+  id: string;
+  sourceEntityId: string;
+  mirrorEntityId: string;
+  sourceJournalId: string | null;
+  mirrorJournalId: string | null;
+  status: string;
+  amount: number;
+  currency: string;
+  reference: string;
+  description: string | null;
+  createdAt: string;
+};
+
+export async function getICAccountPairs(context: ApiContext) {
+  return request<ICAccountPairSummary[]>(context, "/api/v1/intercompany/account-pairs");
+}
+
+export async function createICAccountPair(context: ApiContext, payload: Record<string, unknown>) {
+  return request<ICAccountPairSummary>(context, "/api/v1/intercompany/account-pairs", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function deleteICAccountPair(context: ApiContext, id: string) {
+  return request<null>(context, `/api/v1/intercompany/account-pairs/${id}`, { method: "DELETE" });
+}
+
+export async function getICJournals(context: ApiContext) {
+  return request<ICJournalSummary[]>(context, "/api/v1/intercompany/journals");
+}
+
+export async function createICJournal(context: ApiContext, payload: Record<string, unknown>) {
+  return request<ICJournalSummary>(context, "/api/v1/intercompany/journals", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function approveICJournal(context: ApiContext, id: string) {
+  return request<ICJournalSummary>(context, `/api/v1/intercompany/journals/${id}/approve`, {
+    method: "POST",
+    body: "{}"
+  });
+}
+
+export async function rejectICJournal(context: ApiContext, id: string, reason?: string) {
+  return request<ICJournalSummary>(context, `/api/v1/intercompany/journals/${id}/reject`, {
+    method: "POST",
+    body: JSON.stringify({ reason })
+  });
+}
