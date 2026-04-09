@@ -34,6 +34,9 @@ importers:
       "@fastify/rate-limit":
         specifier: "9"
         version: 9.1.0
+      "@hfp/fsd-engine":
+        specifier: workspace:^
+        version: link:../../packages/fsd-engine
       "@prisma/client":
         specifier: ^5.22.0
         version: 5.22.0(prisma@5.22.0)

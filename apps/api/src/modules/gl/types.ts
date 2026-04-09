@@ -1,13 +1,13 @@
 import { z } from "zod";
 
-const decimalRegex = /^\d+(\.\d{1,8})?$/;
+const decimalRegex = /^-?\d+(\.\d{1,8})?$/;
 
 const decimalStringSchema = z
   .string()
-  .regex(decimalRegex, "Expected a positive decimal string.")
+  .regex(decimalRegex, "Expected a decimal string (e.g. '100.50' or '-50.25').")
   .transform((value) => value.trim());
 
-export const accountTypeSchema = z.enum(["ASSET", "LIABILITY", "EQUITY", "REVENUE", "EXPENSE"]);
+export const accountTypeSchema = z.string().min(1).max(30);
 
 export const normalBalanceSchema = z.enum(["DEBIT", "CREDIT"]);
 
@@ -61,7 +61,9 @@ export const journalCreateSchema = z.object({
   journalTypeId: z.string().uuid().optional(),
   reference: z.string().max(50).optional(),
   description: z.string().max(1000).optional(),
-  source: z.enum(["MANUAL", "PMS", "POS", "PAYROLL", "FX_REVAL", "AP", "AR"]).default("MANUAL"),
+  source: z
+    .enum(["MANUAL", "PMS", "POS", "PAYROLL", "FX_REVAL", "AP", "AR", "IMPORT"])
+    .default("MANUAL"),
   functionalCurrency: z.string().length(3),
   lines: z.array(journalLineCreateSchema).min(1),
   /** When a manual journal touches source-restricted accounts (e.g. REVENUE),
@@ -71,7 +73,16 @@ export const journalCreateSchema = z.object({
 
 // ── Journal Type CRUD ───────────────────────────────────────────────────────
 
-const journalSourceEnum = z.enum(["MANUAL", "PMS", "POS", "PAYROLL", "FX_REVAL", "AP", "AR"]);
+const journalSourceEnum = z.enum([
+  "MANUAL",
+  "PMS",
+  "POS",
+  "PAYROLL",
+  "FX_REVAL",
+  "AP",
+  "AR",
+  "IMPORT"
+]);
 
 export const journalTypeCreateSchema = z.object({
   code: z.string().min(1).max(10),
