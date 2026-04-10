@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Prisma } from "@prisma/client";
+import { Prisma } from "../src/db/client.js";
 import { serializeForAudit } from "../src/db/auditSerialization.js";
 
 describe("serializeForAudit", () => {

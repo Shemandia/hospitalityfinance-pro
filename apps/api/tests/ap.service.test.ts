@@ -4,6 +4,8 @@ import { APService, APServiceError } from "../src/modules/ap/service.js";
 describe("APService.postInvoice", () => {
   it("rejects posting when invoice status is not APPROVED", async () => {
     const transactionStub = {
+      $queryRaw: async () => [{ id: "inv-1", status: "DRAFT" }],
+      $executeRaw: async () => 0,
       aPInvoice: {
         findFirst: async () => ({
           id: "inv-1",
