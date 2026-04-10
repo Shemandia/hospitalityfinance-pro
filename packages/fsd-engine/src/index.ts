@@ -37,3 +37,6 @@ export * from "./parsers/delimited.js";
 export * from "./parsers/fixed-width.js";
 export * from "./parsers/xml.js";
 export { parse, write } from "./api.js";
+
+// Profile-level types, errors, and schema validator (wizard-facing)
+export * from "./profile/index.js";
