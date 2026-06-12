@@ -8,26 +8,135 @@
  *   3. Entity scope function behavior with mismatched IDs
  */
 
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { applyEntityScope } from "../src/db/entityScope.js";
 import { requireRole } from "../src/middleware/requireRole.js";
 import { requireWriteAccess } from "../src/middleware/requireWriteAccess.js";
 import { redactSensitiveFields } from "../src/shared/log-redactor.js";
 
+const dbMocks = vi.hoisted(() => {
+  const tx = {
+    $executeRawUnsafe: vi.fn(),
+    entity: {
+      findMany: vi.fn(),
+      findUnique: vi.fn()
+    },
+    entityUser: {
+      findMany: vi.fn(),
+      upsert: vi.fn()
+    },
+    loginAudit: {
+      create: vi.fn(),
+      findMany: vi.fn()
+    },
+    role: {
+      findUnique: vi.fn()
+    },
+    user: {
+      findMany: vi.fn(),
+      findUnique: vi.fn(),
+      upsert: vi.fn(),
+      update: vi.fn()
+    },
+    userRole: {
+      deleteMany: vi.fn(),
+      findFirst: vi.fn(),
+      findMany: vi.fn()
+    }
+  };
+
+  return {
+    prisma: {
+      $transaction: vi.fn(),
+      entity: tx.entity,
+      entityUser: tx.entityUser,
+      loginAudit: tx.loginAudit,
+      role: tx.role,
+      user: tx.user,
+      userRole: tx.userRole
+    },
+    tx
+  };
+});
+
+vi.mock("../src/db/prisma.js", () => ({ prisma: dbMocks.prisma }));
+vi.mock("../src/shared/email.js", () => ({
+  sendWelcomeEmail: vi.fn().mockResolvedValue(undefined)
+}));
+
+import {
+  assignRoleToUser,
+  createLoginAudit,
+  getUserRoles,
+  hasCrossEntityAdminAccess,
+  isEntityInActorLineage,
+  filterRowsToManagedEntities,
+  inviteUser,
+  listAllUsers,
+  listLoginAudits,
+  revokeRoleFromUser,
+  updateUserStatus
+} from "../src/modules/admin/service.js";
+import { isEntityManageableByActor } from "../src/modules/entity/router.js";
+
 // ── Test Entities ──────────────────────────────────────────────────────────────
 
 const ENTITY_A = "00000000-0000-0000-0000-000000000002"; // Property A (Jumeirah)
 const ENTITY_B = "00000000-0000-0000-0000-000000000003"; // Property B (Doha)
+const ENTITY_A_CHILD = "00000000-0000-0000-0000-000000000004";
+const ROLE_ID = "10000000-0000-0000-0000-000000000001";
+const USER_INSIDE = "20000000-0000-0000-0000-000000000001";
+const USER_OUTSIDE = "20000000-0000-0000-0000-000000000002";
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  dbMocks.prisma.$transaction.mockImplementation(async (fn: any) => fn(dbMocks.tx));
+  dbMocks.tx.$executeRawUnsafe.mockResolvedValue(undefined);
+  dbMocks.tx.entity.findMany.mockImplementation(async ({ where }: any) => {
+    if (where?.parentId === ENTITY_A) return [{ id: ENTITY_A_CHILD }];
+    return [];
+  });
+  dbMocks.tx.entity.findUnique.mockImplementation(async ({ where }: any) => {
+    if (where?.id === ENTITY_A) return { id: ENTITY_A, parentId: null };
+    if (where?.id === ENTITY_A_CHILD) return { id: ENTITY_A_CHILD, parentId: ENTITY_A };
+    if (where?.id === ENTITY_B) return { id: ENTITY_B, parentId: null };
+    return null;
+  });
+  dbMocks.tx.user.findUnique.mockImplementation(async ({ where }: any) => {
+    if (where?.id === USER_INSIDE || where?.id === USER_OUTSIDE) return { id: where.id };
+    return null;
+  });
+  dbMocks.tx.user.upsert.mockResolvedValue({
+    id: USER_INSIDE,
+    email: "inside@test.local",
+    name: "Inside User",
+    mustChangePassword: true
+  });
+  dbMocks.tx.user.update.mockResolvedValue({});
+  dbMocks.tx.entityUser.upsert.mockResolvedValue({});
+  dbMocks.tx.role.findUnique.mockResolvedValue({
+    id: ROLE_ID,
+    code: "ADMIN_USERS",
+    permissions: []
+  });
+});
 
 // ── Mock helpers ───────────────────────────────────────────────────────────────
 
-function mockRequest(opts: { entityId?: string; roles?: string[]; method?: string; sub?: string }) {
+function mockRequest(opts: {
+  entityId?: string;
+  roles?: string[];
+  permissions?: string[];
+  method?: string;
+  sub?: string;
+}) {
   return {
     entityId: opts.entityId,
     method: opts.method ?? "GET",
     user: {
       sub: opts.sub ?? "user-1",
-      roles: opts.roles ?? ["admin"]
+      roles: opts.roles ?? ["admin"],
+      permissions: opts.permissions ?? []
     }
   } as any;
 }
@@ -93,14 +202,10 @@ describe("Cross-Entity Data Isolation", () => {
       expect((scoped.data as any).entityId).toBe(ENTITY_A);
     });
 
-    it("create does NOT override explicitly set entityId", () => {
-      const scoped = applyEntityScope(
-        "create",
-        { data: { name: "Test", entityId: ENTITY_B } },
-        ENTITY_A
-      );
-      // Entity B's ID is preserved — this is by design (service layer validates separately)
-      expect((scoped.data as any).entityId).toBe(ENTITY_B);
+    it("create rejects an explicitly mismatched entityId", () => {
+      expect(() =>
+        applyEntityScope("create", { data: { name: "Test", entityId: ENTITY_B } }, ENTITY_A)
+      ).toThrow("Entity context mismatch");
     });
 
     it("update is not wrapped — protected by RLS instead", () => {
@@ -165,31 +270,352 @@ describe("Cross-Entity Data Isolation", () => {
 
 // ── RBAC Cross-Entity Tests ────────────────────────────────────────────────────
 
+describe("Admin entity-scope actor checks", () => {
+  it("allows platform/super admins to manage any entity lineage", () => {
+    expect(
+      isEntityInActorLineage([{ id: ENTITY_B, parentId: null }], {
+        permissions: [],
+        roles: ["SUPERADMIN"],
+        entityIds: []
+      })
+    ).toBe(true);
+    expect(
+      hasCrossEntityAdminAccess({ permissions: [], roles: ["PLATFORM_ADMIN"], entityIds: [] })
+    ).toBe(true);
+  });
+
+  it("allows tenant admins to manage descendants of assigned entities", () => {
+    expect(
+      isEntityInActorLineage(
+        [
+          { id: ENTITY_B, parentId: ENTITY_A },
+          { id: ENTITY_A, parentId: null }
+        ],
+        { permissions: [], roles: ["TENANT_ADMIN"], entityIds: [ENTITY_A] }
+      )
+    ).toBe(true);
+  });
+
+  it("blocks tenant admins from assigning or revoking unassigned entity lineage", () => {
+    expect(
+      isEntityInActorLineage(
+        [
+          { id: ENTITY_B, parentId: "00000000-0000-0000-0000-000000000009" },
+          { id: "00000000-0000-0000-0000-000000000009", parentId: null }
+        ],
+        { permissions: [], roles: ["TENANT_ADMIN"], entityIds: [ENTITY_A] }
+      )
+    ).toBe(false);
+  });
+
+  it("filters inspected user entity assignments to the tenant admin managed tree", () => {
+    const rows = filterRowsToManagedEntities(
+      [
+        { entityId: ENTITY_A, userId: "user-2" },
+        { entityId: ENTITY_B, userId: "user-2" }
+      ],
+      [ENTITY_A]
+    );
+
+    expect(rows).toEqual([{ entityId: ENTITY_A, userId: "user-2" }]);
+  });
+
+  it("allows superadmins to inspect all user entity assignments", () => {
+    const rows = [
+      { entityId: ENTITY_A, userId: "user-2" },
+      { entityId: ENTITY_B, userId: "user-2" }
+    ];
+
+    expect(filterRowsToManagedEntities(rows, null)).toEqual(rows);
+  });
+
+  it("filters all-users listing to the tenant admin managed tree", async () => {
+    dbMocks.tx.user.findMany.mockResolvedValue([{ id: USER_INSIDE, email: "inside@test.local" }]);
+
+    const users = await listAllUsers({
+      permissions: [],
+      roles: ["TENANT_ADMIN"],
+      entityIds: [ENTITY_A],
+      entityId: ENTITY_A
+    });
+
+    expect(users).toEqual([{ id: USER_INSIDE, email: "inside@test.local" }]);
+    expect(dbMocks.tx.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          entities: {
+            some: {
+              entityId: { in: [ENTITY_A, ENTITY_A_CHILD] }
+            }
+          }
+        }
+      })
+    );
+  });
+
+  it("allows platform admins to list users across entities", async () => {
+    dbMocks.tx.user.findMany.mockResolvedValue([
+      { id: USER_INSIDE, email: "inside@test.local" },
+      { id: USER_OUTSIDE, email: "outside@test.local" }
+    ]);
+
+    const users = await listAllUsers({
+      permissions: [],
+      roles: ["PLATFORM_ADMIN"],
+      entityIds: [],
+      entityId: undefined
+    });
+
+    expect(users).toHaveLength(2);
+    expect(dbMocks.tx.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {}
+      })
+    );
+  });
+
+  it("allows tenant admins to assign scoped roles to users inside the managed tree", async () => {
+    dbMocks.tx.entityUser.findMany.mockResolvedValue([{ entityId: ENTITY_A_CHILD }]);
+    dbMocks.tx.userRole.findFirst.mockResolvedValue(null);
+
+    const result = await assignRoleToUser(USER_INSIDE, ROLE_ID, {
+      permissions: [],
+      roles: ["TENANT_ADMIN"],
+      entityIds: [ENTITY_A],
+      entityId: ENTITY_A
+    });
+
+    expect(result).toEqual({
+      data: { userId: USER_INSIDE, roleId: ROLE_ID, entityId: ENTITY_A_CHILD }
+    });
+    expect(dbMocks.tx.$executeRawUnsafe).toHaveBeenCalledWith(
+      expect.stringContaining("INSERT INTO user_roles"),
+      USER_INSIDE,
+      ROLE_ID,
+      ENTITY_A_CHILD
+    );
+  });
+
+  it("assigns invite roles as entity-scoped for tenant admins", async () => {
+    dbMocks.tx.userRole.findFirst.mockResolvedValue(null);
+
+    const result = await inviteUser(
+      {
+        email: "inside@test.local",
+        name: "Inside User",
+        roleId: ROLE_ID,
+        entityIds: [ENTITY_A_CHILD]
+      },
+      ENTITY_A,
+      { tenantSlug: "test-tenant", tenantCode: "tenant01", tenantName: "Test Tenant" },
+      {
+        permissions: [],
+        roles: ["TENANT_ADMIN"],
+        entityIds: [ENTITY_A],
+        entityId: ENTITY_A
+      }
+    );
+
+    expect("error" in result).toBe(false);
+    expect(dbMocks.tx.$executeRawUnsafe).toHaveBeenCalledWith(
+      expect.stringContaining("INSERT INTO user_roles"),
+      USER_INSIDE,
+      ROLE_ID,
+      ENTITY_A_CHILD
+    );
+  });
+
+  it("denies tenant admins assigning roles to users outside the managed tree", async () => {
+    dbMocks.tx.entityUser.findMany.mockResolvedValue([]);
+
+    const result = await assignRoleToUser(USER_OUTSIDE, ROLE_ID, {
+      permissions: [],
+      roles: ["TENANT_ADMIN"],
+      entityIds: [ENTITY_A],
+      entityId: ENTITY_A
+    });
+
+    expect(result).toEqual({ error: "FORBIDDEN" });
+    expect(dbMocks.tx.userRole.findFirst).not.toHaveBeenCalled();
+    expect(dbMocks.tx.$executeRawUnsafe).not.toHaveBeenCalledWith(
+      expect.stringContaining("INSERT INTO user_roles"),
+      expect.anything(),
+      expect.anything(),
+      expect.anything()
+    );
+  });
+
+  it("denies tenant admins revoking roles for users outside the managed tree", async () => {
+    dbMocks.tx.entityUser.findMany.mockResolvedValue([]);
+
+    const result = await revokeRoleFromUser(USER_OUTSIDE, ROLE_ID, {
+      permissions: [],
+      roles: ["TENANT_ADMIN"],
+      entityIds: [ENTITY_A],
+      entityId: ENTITY_A
+    });
+
+    expect(result).toEqual({ error: "FORBIDDEN" });
+    expect(dbMocks.tx.userRole.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("denies tenant admins inspecting roles for users outside the managed tree", async () => {
+    dbMocks.tx.entityUser.findMany.mockResolvedValue([]);
+
+    const result = await getUserRoles(USER_OUTSIDE, {
+      permissions: [],
+      roles: ["TENANT_ADMIN"],
+      entityIds: [ENTITY_A],
+      entityId: ENTITY_A
+    });
+
+    expect(result).toEqual({ error: "FORBIDDEN" });
+    expect(dbMocks.tx.userRole.findMany).not.toHaveBeenCalled();
+  });
+
+  it("denies tenant admins updating status for users outside the managed tree", async () => {
+    dbMocks.tx.entityUser.findMany.mockResolvedValue([]);
+
+    const result = await updateUserStatus(USER_OUTSIDE, false, {
+      permissions: [],
+      roles: ["TENANT_ADMIN"],
+      entityIds: [ENTITY_A],
+      entityId: ENTITY_A
+    });
+
+    expect(result).toEqual({ error: "FORBIDDEN" });
+    expect(dbMocks.tx.user.update).not.toHaveBeenCalled();
+  });
+
+  it("allows superadmins to manage and inspect cross-entity user roles", async () => {
+    dbMocks.tx.userRole.findFirst.mockResolvedValue(null);
+    dbMocks.tx.userRole.findMany.mockResolvedValue([
+      { role: { id: ROLE_ID, code: "ADMIN_USERS" } }
+    ]);
+
+    const assignResult = await assignRoleToUser(USER_OUTSIDE, ROLE_ID, {
+      permissions: [],
+      roles: ["SUPERADMIN"],
+      entityIds: []
+    });
+    const rolesResult = await getUserRoles(USER_OUTSIDE, {
+      permissions: [],
+      roles: ["SUPERADMIN"],
+      entityIds: []
+    });
+
+    expect(assignResult).toEqual({
+      data: { userId: USER_OUTSIDE, roleId: ROLE_ID, entityId: null }
+    });
+    expect(rolesResult).toEqual({ data: [{ id: ROLE_ID, code: "ADMIN_USERS" }] });
+    expect(dbMocks.tx.userRole.findMany).toHaveBeenCalledWith({
+      where: { userId: USER_OUTSIDE },
+      include: { role: true }
+    });
+  });
+
+  it("prevents exposed login audit list/create paths from crossing entity scope", async () => {
+    const actor = {
+      permissions: [],
+      roles: ["TENANT_ADMIN"],
+      entityIds: [ENTITY_A],
+      entityId: ENTITY_A
+    };
+
+    await expect(listLoginAudits({ entityId: ENTITY_B }, actor)).resolves.toEqual({
+      error: "FORBIDDEN"
+    });
+    await expect(
+      createLoginAudit(
+        {
+          userId: USER_OUTSIDE,
+          email: "outside@test.local",
+          action: "LOGIN_SUCCESS",
+          entityId: ENTITY_B
+        },
+        actor
+      )
+    ).resolves.toEqual({ error: "FORBIDDEN" });
+    expect(dbMocks.tx.loginAudit.findMany).not.toHaveBeenCalled();
+    expect(dbMocks.tx.loginAudit.create).not.toHaveBeenCalled();
+  });
+
+  it("blocks tenant admins creating entities under an unassigned parent", () => {
+    expect(
+      isEntityManageableByActor([{ id: ENTITY_B, parentId: null }], {
+        roles: ["TENANT_ADMIN"],
+        entityIds: [ENTITY_A]
+      })
+    ).toBe(false);
+  });
+
+  it("blocks tenant admins moving entities to an unassigned parent", () => {
+    expect(
+      isEntityManageableByActor(
+        [
+          { id: ENTITY_B, parentId: "00000000-0000-0000-0000-000000000009" },
+          { id: "00000000-0000-0000-0000-000000000009", parentId: null }
+        ],
+        { roles: ["TENANT_ADMIN"], entityIds: [ENTITY_A] }
+      )
+    ).toBe(false);
+  });
+
+  it("blocks tenant admins deleting entities outside the managed tree", () => {
+    expect(
+      isEntityManageableByActor([{ id: ENTITY_B, parentId: null }], {
+        roles: ["TENANT_ADMIN"],
+        entityIds: [ENTITY_A]
+      })
+    ).toBe(false);
+  });
+});
+
 describe("RBAC blocks unauthorized cross-entity operations", () => {
   it("VIEWER cannot perform POST operations", async () => {
-    const req = mockRequest({ entityId: ENTITY_A, roles: ["viewer"], method: "POST" });
+    const req = mockRequest({
+      entityId: ENTITY_A,
+      roles: ["viewer"],
+      permissions: ["GL_READ"],
+      method: "POST"
+    });
     const reply = mockReply();
     await requireWriteAccess(req, reply);
     expect(reply.statusCode).toBe(403);
-    expect((reply.body as any)?.errors?.[0]?.code).toBe("INSUFFICIENT_ROLE");
+    expect((reply.body as any)?.errors?.[0]?.code).toBe("INSUFFICIENT_PERMISSIONS");
   });
 
   it("VIEWER cannot perform PUT operations", async () => {
-    const req = mockRequest({ entityId: ENTITY_A, roles: ["viewer"], method: "PUT" });
+    const req = mockRequest({
+      entityId: ENTITY_A,
+      roles: ["viewer"],
+      permissions: ["GL_READ"],
+      method: "PUT"
+    });
     const reply = mockReply();
     await requireWriteAccess(req, reply);
     expect(reply.statusCode).toBe(403);
   });
 
   it("VIEWER cannot perform DELETE operations", async () => {
-    const req = mockRequest({ entityId: ENTITY_A, roles: ["viewer"], method: "DELETE" });
+    const req = mockRequest({
+      entityId: ENTITY_A,
+      roles: ["viewer"],
+      permissions: ["GL_READ"],
+      method: "DELETE"
+    });
     const reply = mockReply();
     await requireWriteAccess(req, reply);
     expect(reply.statusCode).toBe(403);
   });
 
   it("CONTROLLER can perform write operations", async () => {
-    const req = mockRequest({ entityId: ENTITY_A, roles: ["controller"], method: "POST" });
+    const req = mockRequest({
+      entityId: ENTITY_A,
+      roles: ["controller"],
+      permissions: ["GL_READ", "GL_WRITE", "GL_POST"],
+      method: "POST"
+    });
     const reply = mockReply();
     await requireWriteAccess(req, reply);
     expect(reply.body).toBeNull(); // no error = allowed

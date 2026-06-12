@@ -12,27 +12,24 @@
  * All endpoints require ADMIN or SUPERADMIN role.
  */
 
-import type { FastifyInstance, FastifyReply } from "fastify";
-import type { PrismaClient } from "@prisma/client";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z, ZodError } from "zod";
-import { prisma } from "../../db/prisma.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
-import { requireRole } from "../../middleware/requireRole.js";
+import { requirePermission } from "../../middleware/requirePermission.js";
+import { hasExplicitCrossEntityAccess } from "../../plugins/auth.js";
 import {
   roleCreateSchema,
   roleUpdateSchema,
   permissionCreateSchema,
   rolePermissionSchema,
-  userRoleAssignSchema,
-  entityUserUpdateSchema,
   entityUserCreateSchema,
   userCreateSchema
 } from "./types.js";
+import * as svc from "./service.js";
 
 const assignScopeSchema = z.object({
   userId: z.string().uuid(),
   entityId: z.string().uuid(),
-  role: z.enum(["VIEWER", "CONTROLLER", "ADMIN", "SUPERADMIN"]),
   cascade: z.boolean().default(false)
 });
 
@@ -60,37 +57,65 @@ function requireEntityId(entityId: string | undefined): string {
   return entityId;
 }
 
-const db = prisma as unknown as PrismaClient;
-
-/** Recursively get all descendant entity IDs (children, grandchildren, etc.) */
-async function getDescendants(prismaClient: PrismaClient, parentId: string): Promise<string[]> {
-  const children = await prismaClient.entity.findMany({
-    where: { parentId },
-    select: { id: true }
-  });
-  const ids: string[] = [];
-  for (const child of children) {
-    ids.push(child.id);
-    const grandchildren = await getDescendants(prismaClient, child.id);
-    ids.push(...grandchildren);
+function mapScopeError(
+  reply: FastifyReply,
+  error: "USER_NOT_FOUND" | "FORBIDDEN" | "ROLE_NOT_FOUND"
+) {
+  if (error === "USER_NOT_FOUND" || error === "ROLE_NOT_FOUND") {
+    const message = error === "USER_NOT_FOUND" ? "User not found." : "Role not found.";
+    return reply.code(404).send({ data: null, errors: [{ code: error, message }] });
   }
-  return ids;
+  return reply.code(403).send({
+    data: null,
+    errors: [
+      {
+        code: error,
+        message:
+          "You cannot manage users outside your assigned entity scope or grant privileges exceeding your own."
+      }
+    ]
+  });
+}
+
+function getActorContext(request: FastifyRequest): svc.AdminActorContext {
+  const user = request.user as any;
+  return {
+    userId: typeof user?.sub === "string" ? user.sub : undefined,
+    roles: Array.isArray(user?.roles) ? user.roles : [],
+    permissions: Array.isArray(user?.permissions) ? user.permissions : [],
+    entityIds: Array.isArray(user?.entityIds) ? user.entityIds : [],
+    entityId: request.entityId
+  };
+}
+
+async function requireCrossEntityAdmin(request: FastifyRequest, reply: FastifyReply) {
+  const roles = Array.isArray((request.user as any)?.roles)
+    ? ((request.user as any).roles as string[])
+    : [];
+  if (!hasExplicitCrossEntityAccess(roles)) {
+    return reply.code(403).send({
+      data: null,
+      errors: [
+        {
+          code: "FORBIDDEN",
+          message: "Only SUPERADMIN can manage role and permission definitions."
+        }
+      ]
+    });
+  }
 }
 
 export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
   app.register(
     async (router) => {
       router.addHook("preHandler", requireAuth);
-      router.addHook("preHandler", requireRole(["ADMIN", "SUPERADMIN"]));
+      router.addHook("preHandler", requirePermission(["ADMIN_USERS", "ADMIN_ROLES_MANAGE"]));
 
       // ── Roles ─────────────────────────────────────────────────────────────
 
       router.get("/roles", async (_request, reply) => {
         try {
-          const data = await db.role.findMany({
-            include: { _count: { select: { permissions: true, users: true } } },
-            orderBy: { code: "asc" }
-          });
+          const data = await svc.listRoles();
           return reply.send({ data, errors: [] });
         } catch (error) {
           return mapError(reply, error);
@@ -99,13 +124,7 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
 
       router.get<{ Params: { id: string } }>("/roles/:id", async (request, reply) => {
         try {
-          const data = await db.role.findUnique({
-            where: { id: request.params.id },
-            include: {
-              permissions: { include: { permission: true } },
-              users: { include: { user: { select: { id: true, name: true, email: true } } } }
-            }
-          });
+          const data = await svc.getRoleById(request.params.id);
           if (!data)
             return reply
               .code(404)
@@ -116,117 +135,134 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
         }
       });
 
-      router.post("/roles", async (request, reply) => {
+      router.post("/roles", { preHandler: [requireCrossEntityAdmin] }, async (request, reply) => {
         try {
           const payload = roleCreateSchema.parse(request.body);
-          const data = await db.role.create({ data: payload });
+          const data = await svc.createRole(payload);
           return reply.code(201).send({ data, errors: [] });
         } catch (error) {
           return mapError(reply, error);
         }
       });
 
-      router.put<{ Params: { id: string } }>("/roles/:id", async (request, reply) => {
-        try {
-          const payload = roleUpdateSchema.parse(request.body);
-          const data = await db.role.update({
-            where: { id: request.params.id },
-            data: payload
-          });
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
-        }
-      });
-
-      router.delete<{ Params: { id: string } }>("/roles/:id", async (request, reply) => {
-        try {
-          // Check no users assigned
-          const userCount = await db.userRole.count({ where: { roleId: request.params.id } });
-          if (userCount > 0) {
-            return reply.code(409).send({
-              data: null,
-              errors: [
-                {
-                  code: "ROLE_IN_USE",
-                  message: `Cannot delete role with ${userCount} assigned user(s). Reassign users first.`
-                }
-              ]
-            });
+      router.put<{ Params: { id: string } }>(
+        "/roles/:id",
+        { preHandler: [requireCrossEntityAdmin] },
+        async (request, reply) => {
+          try {
+            const payload = roleUpdateSchema.parse(request.body);
+            const result = await svc.updateRole(request.params.id, payload);
+            if ("error" in result)
+              return reply
+                .code(404)
+                .send({ data: null, errors: [{ code: "NOT_FOUND", message: "Role not found." }] });
+            return reply.send({ data: result.data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
           }
-          await db.rolePermission.deleteMany({ where: { roleId: request.params.id } });
-          await db.role.delete({ where: { id: request.params.id } });
-          return reply.code(204).send();
-        } catch (error) {
-          return mapError(reply, error);
         }
-      });
+      );
+
+      router.delete<{ Params: { id: string } }>(
+        "/roles/:id",
+        { preHandler: [requireCrossEntityAdmin] },
+        async (request, reply) => {
+          try {
+            const result = await svc.deleteRole(request.params.id);
+            if ("error" in result) {
+              if (result.error === "NOT_FOUND")
+                return reply.code(404).send({
+                  data: null,
+                  errors: [{ code: "NOT_FOUND", message: "Role not found." }]
+                });
+              if (result.error === "SYSTEM_ROLE")
+                return reply.code(403).send({
+                  data: null,
+                  errors: [{ code: "SYSTEM_ROLE", message: "Cannot delete system role." }]
+                });
+              if (result.error === "ROLE_IN_USE")
+                return reply.code(409).send({
+                  data: null,
+                  errors: [
+                    {
+                      code: "ROLE_IN_USE",
+                      message: `Cannot delete role with ${result.userCount} assigned user(s). Reassign users first.`
+                    }
+                  ]
+                });
+            }
+            return reply.code(204).send();
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
 
       // ── Permissions ───────────────────────────────────────────────────────
 
       router.get("/permissions", async (_request, reply) => {
         try {
-          const data = await db.permission.findMany({
-            include: { _count: { select: { roles: true } } },
-            orderBy: { code: "asc" }
-          });
+          const data = await svc.listPermissions();
           return reply.send({ data, errors: [] });
         } catch (error) {
           return mapError(reply, error);
         }
       });
 
-      router.post("/permissions", async (request, reply) => {
-        try {
-          const payload = permissionCreateSchema.parse(request.body);
-          const data = await db.permission.create({ data: payload });
-          return reply.code(201).send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.post(
+        "/permissions",
+        { preHandler: [requireCrossEntityAdmin] },
+        async (request, reply) => {
+          try {
+            const payload = permissionCreateSchema.parse(request.body);
+            const data = await svc.createPermission(payload);
+            return reply.code(201).send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.delete<{ Params: { id: string } }>("/permissions/:id", async (request, reply) => {
-        try {
-          await db.rolePermission.deleteMany({ where: { permissionId: request.params.id } });
-          await db.permission.delete({ where: { id: request.params.id } });
-          return reply.code(204).send();
-        } catch (error) {
-          return mapError(reply, error);
+      router.delete<{ Params: { id: string } }>(
+        "/permissions/:id",
+        { preHandler: [requireCrossEntityAdmin] },
+        async (request, reply) => {
+          try {
+            await svc.deletePermission(request.params.id);
+            return reply.code(204).send();
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       // ── Role-Permission bindings ──────────────────────────────────────────
 
-      router.post<{ Params: { id: string } }>("/roles/:id/permissions", async (request, reply) => {
-        try {
-          const { permissionId } = rolePermissionSchema
-            .omit({ roleId: true })
-            .extend({
-              permissionId: rolePermissionSchema.shape.permissionId
-            })
-            .parse(request.body);
-          const data = await db.rolePermission.create({
-            data: { roleId: request.params.id, permissionId }
-          });
-          return reply.code(201).send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.post<{ Params: { id: string } }>(
+        "/roles/:id/permissions",
+        { preHandler: [requireCrossEntityAdmin] },
+        async (request, reply) => {
+          try {
+            const { permissionId } = rolePermissionSchema
+              .omit({ roleId: true })
+              .extend({
+                permissionId: rolePermissionSchema.shape.permissionId
+              })
+              .parse(request.body);
+            const data = await svc.bindPermissionToRole(request.params.id, permissionId);
+            return reply.code(201).send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.delete<{ Params: { id: string; permissionId: string } }>(
         "/roles/:id/permissions/:permissionId",
+        { preHandler: [requireCrossEntityAdmin] },
         async (request, reply) => {
           try {
-            await db.rolePermission.delete({
-              where: {
-                roleId_permissionId: {
-                  roleId: request.params.id,
-                  permissionId: request.params.permissionId
-                }
-              }
-            });
+            await svc.unbindPermissionFromRole(request.params.id, request.params.permissionId);
             return reply.code(204).send();
           } catch (error) {
             return mapError(reply, error);
@@ -239,11 +275,7 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
       router.get("/users", async (request, reply) => {
         try {
           const entityId = requireEntityId(request.entityId);
-          const data = await db.entityUser.findMany({
-            where: { entityId },
-            include: { user: { select: { id: true, name: true, email: true } } },
-            orderBy: { createdAt: "asc" }
-          });
+          const data = await svc.listEntityUsers(entityId);
           return reply.send({ data, errors: [] });
         } catch (error) {
           return mapError(reply, error);
@@ -254,35 +286,61 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
         try {
           const entityId = requireEntityId(request.entityId);
           const payload = entityUserCreateSchema.parse(request.body);
-
-          // Verify user exists
-          const user = await db.user.findUnique({ where: { id: payload.userId } });
-          if (!user)
+          const result = await svc.addEntityUser(entityId, payload.userId);
+          if ("error" in result)
             return reply.code(404).send({
               data: null,
               errors: [{ code: "USER_NOT_FOUND", message: "User not found." }]
             });
-
-          const data = await db.entityUser.create({
-            data: { entityId, userId: payload.userId, role: payload.role as any },
-            include: { user: { select: { id: true, name: true, email: true } } }
-          });
-          return reply.code(201).send({ data, errors: [] });
+          return reply.code(201).send({ data: result.data, errors: [] });
         } catch (error) {
           return mapError(reply, error);
         }
       });
 
-      router.put<{ Params: { userId: string } }>("/users/:userId/role", async (request, reply) => {
+      // ── Assign role to user ──────────────────────────────────────────────
+      router.post<{ Params: { userId: string } }>(
+        "/users/:userId/roles",
+        async (request, reply) => {
+          try {
+            const { roleId } = z.object({ roleId: z.string().uuid() }).parse(request.body);
+            const result = await svc.assignRoleToUser(
+              request.params.userId,
+              roleId,
+              getActorContext(request)
+            );
+            if ("error" in result && result.error) return mapScopeError(reply, result.error);
+            return reply.code(201).send({ data: result.data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      // ── Revoke role from user ─────────────────────────────────────────────
+      router.delete<{ Params: { userId: string; roleId: string } }>(
+        "/users/:userId/roles/:roleId",
+        async (request, reply) => {
+          try {
+            const result = await svc.revokeRoleFromUser(
+              request.params.userId,
+              request.params.roleId,
+              getActorContext(request)
+            );
+            if ("error" in result && result.error) return mapScopeError(reply, result.error);
+            return reply.code(204).send();
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
+
+      // ── Get user's roles ──────────────────────────────────────────────────
+      router.get<{ Params: { userId: string } }>("/users/:userId/roles", async (request, reply) => {
         try {
-          const entityId = requireEntityId(request.entityId);
-          const payload = entityUserUpdateSchema.parse(request.body);
-          const data = await db.entityUser.update({
-            where: { entityId_userId: { entityId, userId: request.params.userId } },
-            data: { role: payload.role as any },
-            include: { user: { select: { id: true, name: true, email: true } } }
-          });
-          return reply.send({ data, errors: [] });
+          const result = await svc.getUserRoles(request.params.userId, getActorContext(request));
+          if ("error" in result && result.error) return mapScopeError(reply, result.error);
+          return reply.send({ data: result.data, errors: [] });
         } catch (error) {
           return mapError(reply, error);
         }
@@ -291,43 +349,42 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
       router.delete<{ Params: { userId: string } }>("/users/:userId", async (request, reply) => {
         try {
           const entityId = requireEntityId(request.entityId);
-          await db.entityUser.delete({
-            where: { entityId_userId: { entityId, userId: request.params.userId } }
-          });
+          await svc.removeEntityUser(entityId, request.params.userId);
           return reply.code(204).send();
         } catch (error) {
           return mapError(reply, error);
         }
       });
 
-      // ── User invite (create user + assign to entity) ──────────────────────
+      // ── Create user + assign to entity + assign role ───────────────────
 
       router.post("/users/invite", async (request, reply) => {
         try {
-          const entityId = requireEntityId(request.entityId);
           const payload = userCreateSchema.parse(request.body);
-
-          // Upsert user (may already exist in another entity)
-          // keycloakId placeholder — will be updated when user registers in Keycloak
-          const user = await db.user.upsert({
-            where: { email: payload.email },
-            create: {
-              email: payload.email,
-              name: payload.name,
-              keycloakId: `pending-${Date.now()}`
+          const data = await svc.inviteUser(
+            payload,
+            request.entityId,
+            {
+              tenantSlug: request.tenantSlug,
+              tenantCode: (request.user as any)?.tenantCode,
+              tenantName: request.tenantSlug
+                ?.replace(/-/g, " ")
+                .replace(/\b\w/g, (c: string) => c.toUpperCase())
             },
-            update: { name: payload.name }
-          });
-
-          // Assign to entity
-          const entityUser = await db.entityUser.upsert({
-            where: { entityId_userId: { entityId, userId: user.id } },
-            create: { entityId, userId: user.id, role: payload.role as any },
-            update: { role: payload.role as any },
-            include: { user: { select: { id: true, name: true, email: true } } }
-          });
-
-          return reply.code(201).send({ data: entityUser, errors: [] });
+            getActorContext(request)
+          );
+          if ("error" in data) {
+            const status = data.error === "FORBIDDEN" ? 403 : 404;
+            const msg =
+              data.error === "FORBIDDEN"
+                ? "You cannot invite users into entities outside your assigned entity scope."
+                : "Entity not found.";
+            return reply.code(status).send({
+              data: null,
+              errors: [{ code: data.error, message: msg }]
+            });
+          }
+          return reply.code(201).send({ data, errors: [] });
         } catch (error) {
           return mapError(reply, error);
         }
@@ -337,54 +394,23 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
 
       router.get(
         "/all-users",
-        {
-          preHandler: [requireRole(["SUPERADMIN"])]
-        },
-        async (_request, reply) => {
+        { preHandler: [requirePermission("ADMIN_ENTITIES")] },
+        async (request, reply) => {
           try {
-            const data = await db.user.findMany({
-              select: { id: true, name: true, email: true, createdAt: true },
-              orderBy: { name: "asc" }
-            });
+            const data = await svc.listAllUsers(getActorContext(request));
             return reply.send({ data, errors: [] });
           } catch (error) {
             return mapError(reply, error);
           }
         }
       );
+
       // ── Entity Hierarchy (scope levels) ─────────────────────────────────────
 
-      router.get("/entity-tree", async (request, reply) => {
+      router.get("/entity-tree", async (_request, reply) => {
         try {
-          // Return full entity hierarchy tree for assignment UI
-          const allEntities = await db.entity.findMany({
-            select: {
-              id: true,
-              name: true,
-              code: true,
-              type: true,
-              parentId: true,
-              isActive: true,
-              functionalCurrency: true,
-              _count: { select: { children: true, users: true } }
-            },
-            orderBy: [{ type: "asc" }, { name: "asc" }]
-          });
-
-          // Build tree structure
-          const entityMap = new Map(
-            allEntities.map((e) => [e.id, { ...e, children: [] as typeof allEntities }])
-          );
-          const roots: typeof allEntities = [];
-          for (const entity of allEntities) {
-            if (entity.parentId && entityMap.has(entity.parentId)) {
-              (entityMap.get(entity.parentId) as any).children.push(entityMap.get(entity.id));
-            } else {
-              roots.push(entityMap.get(entity.id) as any);
-            }
-          }
-
-          return reply.send({ data: { flat: allEntities, tree: roots }, errors: [] });
+          const data = await svc.getEntityTree();
+          return reply.send({ data, errors: [] });
         } catch (error) {
           return mapError(reply, error);
         }
@@ -392,129 +418,73 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
 
       // ── Scope-aware user assignment ───────────────────────────────────────
 
-      /**
-       * Assign a user to an entity AND all its descendants.
-       * - Assigning at CORPORATE → user gets access to all CLUSTERs + PROPERTYs
-       * - Assigning at CLUSTER → user gets access to all PROPERTYs in cluster
-       * - Assigning at PROPERTY → user gets access to that property only
-       */
       router.post(
         "/users/assign-scope",
-        {
-          preHandler: [requireRole(["SUPERADMIN"])]
-        },
+        { preHandler: [requirePermission("ADMIN_ENTITIES")] },
         async (request, reply) => {
           try {
             const body = assignScopeSchema.parse(request.body);
-
-            const user = await db.user.findUnique({ where: { id: body.userId } });
-            if (!user)
-              return reply.code(404).send({
+            const result = await svc.assignScope(
+              body.userId,
+              body.entityId,
+              body.cascade,
+              getActorContext(request)
+            );
+            if ("error" in result) {
+              const status = result.error === "FORBIDDEN" ? 403 : 404;
+              const msg =
+                result.error === "USER_NOT_FOUND"
+                  ? "User not found."
+                  : result.error === "FORBIDDEN"
+                    ? "You cannot manage access outside your assigned entity scope."
+                    : "Entity not found.";
+              return reply.code(status).send({
                 data: null,
-                errors: [{ code: "USER_NOT_FOUND", message: "User not found." }]
+                errors: [{ code: result.error, message: msg }]
               });
-
-            const targetEntity = await db.entity.findUnique({
-              where: { id: body.entityId },
-              select: { id: true, name: true, type: true }
-            });
-            if (!targetEntity)
-              return reply.code(404).send({
-                data: null,
-                errors: [{ code: "ENTITY_NOT_FOUND", message: "Entity not found." }]
-              });
-
-            // Collect all entity IDs to assign
-            const entityIds: string[] = [body.entityId];
-
-            if (body.cascade) {
-              // Get all descendants recursively
-              const descendants = await getDescendants(db, body.entityId);
-              entityIds.push(...descendants);
             }
-
-            // Upsert EntityUser for each entity
-            let assigned = 0;
-            for (const eid of entityIds) {
-              await db.entityUser.upsert({
-                where: { entityId_userId: { entityId: eid, userId: body.userId } },
-                create: { entityId: eid, userId: body.userId, role: body.role as any },
-                update: { role: body.role as any }
-              });
-              assigned++;
-            }
-
-            return reply.code(201).send({
-              data: {
-                userId: body.userId,
-                role: body.role,
-                assignedEntities: assigned,
-                scope: targetEntity.type,
-                cascade: body.cascade
-              },
-              errors: []
-            });
+            return reply.code(201).send({ data: result.data, errors: [] });
           } catch (error) {
             return mapError(reply, error);
           }
         }
       );
 
-      /**
-       * Remove a user from an entity AND optionally all its descendants.
-       */
       router.post(
         "/users/revoke-scope",
-        {
-          preHandler: [requireRole(["SUPERADMIN"])]
-        },
+        { preHandler: [requirePermission("ADMIN_ENTITIES")] },
         async (request, reply) => {
           try {
             const body = revokeScopeSchema.parse(request.body);
-
-            const entityIds: string[] = [body.entityId];
-            if (body.cascade) {
-              const descendants = await getDescendants(db, body.entityId);
-              entityIds.push(...descendants);
+            const result = await svc.revokeScope(
+              body.userId,
+              body.entityId,
+              body.cascade,
+              getActorContext(request)
+            );
+            if ("error" in result) {
+              const status = result.error === "FORBIDDEN" ? 403 : 404;
+              const msg =
+                result.error === "FORBIDDEN"
+                  ? "You cannot manage access outside your assigned entity scope."
+                  : "Entity not found.";
+              return reply.code(status).send({
+                data: null,
+                errors: [{ code: result.error, message: msg }]
+              });
             }
-
-            const result = await db.entityUser.deleteMany({
-              where: { userId: body.userId, entityId: { in: entityIds } }
-            });
-
-            return reply.send({
-              data: { removedFrom: result.count, cascade: body.cascade },
-              errors: []
-            });
+            return reply.send({ data: result.data, errors: [] });
           } catch (error) {
             return mapError(reply, error);
           }
         }
       );
 
-      /**
-       * Get all entity assignments for a specific user (across all entities).
-       */
       router.get<{ Params: { userId: string } }>(
         "/users/:userId/entities",
         async (request, reply) => {
           try {
-            const data = await db.entityUser.findMany({
-              where: { userId: request.params.userId },
-              include: {
-                entity: {
-                  select: {
-                    id: true,
-                    name: true,
-                    code: true,
-                    type: true,
-                    parentId: true,
-                    isActive: true
-                  }
-                }
-              },
-              orderBy: { createdAt: "asc" }
-            });
+            const data = await svc.getUserEntities(request.params.userId, getActorContext(request));
             return reply.send({ data, errors: [] });
           } catch (error) {
             return mapError(reply, error);
@@ -531,32 +501,13 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
             return reply
               .code(401)
               .send({ data: null, errors: [{ code: "NO_USER", message: "Not authenticated." }] });
-
-          const user = await db.user.findUnique({
-            where: { id: userId },
-            select: {
-              id: true,
-              email: true,
-              name: true,
-              phone: true,
-              jobTitle: true,
-              department: true,
-              avatarUrl: true,
-              isActive: true,
-              lastLoginAt: true,
-              loginCount: true,
-              createdAt: true,
-              entities: {
-                include: { entity: { select: { id: true, name: true, type: true } } }
-              }
-            }
-          });
-          if (!user)
+          const data = await svc.getUserProfile(userId);
+          if (!data)
             return reply.code(404).send({
               data: null,
               errors: [{ code: "USER_NOT_FOUND", message: "User not found." }]
             });
-          return reply.send({ data: user, errors: [] });
+          return reply.send({ data, errors: [] });
         } catch (error) {
           return mapError(reply, error);
         }
@@ -569,31 +520,13 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
             return reply
               .code(401)
               .send({ data: null, errors: [{ code: "NO_USER", message: "Not authenticated." }] });
-
           const body = request.body as {
             name?: string;
             phone?: string;
             jobTitle?: string;
             department?: string;
           };
-
-          const data = await db.user.update({
-            where: { id: userId },
-            data: {
-              ...(body.name !== undefined && { name: body.name }),
-              ...(body.phone !== undefined && { phone: body.phone }),
-              ...(body.jobTitle !== undefined && { jobTitle: body.jobTitle }),
-              ...(body.department !== undefined && { department: body.department })
-            },
-            select: {
-              id: true,
-              email: true,
-              name: true,
-              phone: true,
-              jobTitle: true,
-              department: true
-            }
-          });
+          const data = await svc.updateUserProfile(userId, body);
           return reply.send({ data, errors: [] });
         } catch (error) {
           return mapError(reply, error);
@@ -613,30 +546,27 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
             entityId?: string;
             metadata?: Record<string, unknown>;
           };
-
-          const data = await db.loginAudit.create({
-            data: {
-              userId: body.userId,
-              email: body.email,
-              action: body.action,
-              ipAddress: body.ipAddress,
-              userAgent: body.userAgent,
-              entityId: body.entityId,
-              metadata: body.metadata as any
-            }
-          });
-
-          // Update user's lastLoginAt and loginCount on successful login
-          if (body.action === "LOGIN_SUCCESS") {
-            await db.user
-              .update({
-                where: { id: body.userId },
-                data: { lastLoginAt: new Date(), loginCount: { increment: 1 } }
-              })
-              .catch(() => {}); // non-critical
+          const result = await svc.createLoginAudit(
+            {
+              ...body,
+              entityId: body.entityId ?? request.entityId
+            },
+            getActorContext(request)
+          );
+          if ("error" in result) {
+            const status = result.error === "FORBIDDEN" ? 403 : 400;
+            const msg =
+              result.error === "ENTITY_REQUIRED"
+                ? "Entity context is required for login audit writes."
+                : result.error === "FORBIDDEN"
+                  ? "You cannot create login audit rows outside your assigned entity scope."
+                  : "Entity not found.";
+            return reply.code(status).send({
+              data: null,
+              errors: [{ code: result.error, message: msg }]
+            });
           }
-
-          return reply.code(201).send({ data, errors: [] });
+          return reply.code(201).send({ data: result.data, errors: [] });
         } catch (error) {
           return mapError(reply, error);
         }
@@ -644,21 +574,33 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
 
       router.get("/login-audit", async (request, reply) => {
         try {
-          const { userId, email, limit } = request.query as {
+          const { userId, email, limit, entityId } = request.query as {
             userId?: string;
             email?: string;
             limit?: string;
+            entityId?: string;
           };
-
-          const data = await db.loginAudit.findMany({
-            where: {
-              ...(userId ? { userId } : {}),
-              ...(email ? { email } : {})
+          const result = await svc.listLoginAudits(
+            {
+              userId,
+              email,
+              entityId,
+              limit: limit ? parseInt(limit, 10) : undefined
             },
-            orderBy: { createdAt: "desc" },
-            take: Math.min(parseInt(limit ?? "50", 10), 200)
-          });
-          return reply.send({ data, errors: [] });
+            getActorContext(request)
+          );
+          if ("error" in result) {
+            return reply.code(403).send({
+              data: null,
+              errors: [
+                {
+                  code: result.error,
+                  message: "You cannot list login audit rows outside your assigned entity scope."
+                }
+              ]
+            });
+          }
+          return reply.send({ data: result, errors: [] });
         } catch (error) {
           return mapError(reply, error);
         }
@@ -671,12 +613,13 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
         async (request, reply) => {
           try {
             const body = request.body as { isActive: boolean };
-            const data = await db.user.update({
-              where: { id: request.params.userId },
-              data: { isActive: body.isActive },
-              select: { id: true, email: true, name: true, isActive: true }
-            });
-            return reply.send({ data, errors: [] });
+            const result = await svc.updateUserStatus(
+              request.params.userId,
+              body.isActive,
+              getActorContext(request)
+            );
+            if ("error" in result && result.error) return mapScopeError(reply, result.error);
+            return reply.send({ data: result.data, errors: [] });
           } catch (error) {
             return mapError(reply, error);
           }
@@ -689,29 +632,18 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
         "/users/:userId/detail",
         async (request, reply) => {
           try {
-            const data = await db.user.findUnique({
-              where: { id: request.params.userId },
-              select: {
-                id: true,
-                email: true,
-                name: true,
-                phone: true,
-                jobTitle: true,
-                department: true,
-                isActive: true,
-                lastLoginAt: true,
-                loginCount: true,
-                createdAt: true,
-                entities: {
-                  include: { entity: { select: { id: true, name: true, type: true } } }
-                },
-                loginAudits: {
-                  orderBy: { createdAt: "desc" },
-                  take: 10,
-                  select: { id: true, action: true, ipAddress: true, createdAt: true }
-                }
-              }
-            });
+            const data = await svc.getUserDetail(request.params.userId, getActorContext(request));
+            if (data && "error" in data) {
+              return reply.code(403).send({
+                data: null,
+                errors: [
+                  {
+                    code: data.error,
+                    message: "You cannot view user detail outside your assigned entity scope."
+                  }
+                ]
+              });
+            }
             if (!data)
               return reply
                 .code(404)
