@@ -1,10 +1,18 @@
 import type { PrismaClient } from "../../db/client.js";
+import { Prisma } from "../../db/client.js";
 import { ProcessLockService } from "../process-lock/service.js";
+import { AuditService } from "../audit/service.js";
+import { GLRepository } from "../gl/repository.js";
 import type {
   RunYearEndCleardownInput,
   YearEndCleardownLineResult,
   YearEndCleardownResult
 } from "./year-end-types.js";
+
+// ── Decimal Helpers ─────────────────────────────────────────────────────────
+
+const D = (v: unknown): Prisma.Decimal => new Prisma.Decimal(String(v ?? 0));
+const ZERO = new Prisma.Decimal(0);
 
 // ── Errors ───────────────────────────────────────────────────────────────────
 
@@ -148,37 +156,35 @@ async function executeCleardown(
     }
   });
 
-  // Build balance map: accountId → closingBalance
-  const balanceMap = new Map<string, number>();
+  // Build balance map: accountId → closingBalance (Decimal)
+  const balanceMap = new Map<string, Prisma.Decimal>();
   for (const bal of balances) {
-    balanceMap.set(bal.accountId, Number(bal.closingBalance));
+    balanceMap.set(bal.accountId, D(bal.closingBalance));
   }
 
-  // Build cleardown lines
+  // Build cleardown lines using Decimal accumulators
   const lines: YearEndCleardownLineResult[] = [];
-  let totalRevenue = 0;
-  let totalExpense = 0;
+  let totalRevenueD = ZERO;
+  let totalExpenseD = ZERO;
 
   for (const account of plAccounts) {
-    const closingBalance = balanceMap.get(account.id) ?? 0;
-    if (Math.abs(closingBalance) < 0.01) continue;
+    const closingBalanceD = balanceMap.get(account.id) ?? ZERO;
+    if (closingBalanceD.abs().lt(new Prisma.Decimal("0.01"))) continue;
 
-    // Cleardown amount is the negative of the closing balance
-    // (to zero out the account)
-    const cleardownAmount = -closingBalance;
+    const cleardownAmountD = closingBalanceD.neg();
 
     if (account.type === "REVENUE") {
-      totalRevenue += closingBalance;
+      totalRevenueD = totalRevenueD.add(closingBalanceD);
     } else {
-      totalExpense += closingBalance;
+      totalExpenseD = totalExpenseD.add(closingBalanceD);
     }
 
     lines.push({
       accountCode: account.code,
       accountName: account.name,
       accountType: account.type,
-      closingBalance: round2(closingBalance),
-      cleardownAmount: round2(cleardownAmount)
+      closingBalance: closingBalanceD.toDecimalPlaces(4).toNumber(),
+      cleardownAmount: cleardownAmountD.toDecimalPlaces(4).toNumber()
     });
   }
 
@@ -187,101 +193,145 @@ async function executeCleardown(
     return makeEmptyResult(period, retainedEarningsCode);
   }
 
-  // Net P&L = Revenue + Expense (expense is typically negative in natural sign)
-  // Revenue accounts normally have credit (negative) balances, Expense have debit (positive)
-  const netProfitLoss = round2(totalRevenue + totalExpense);
+  // Canonical closing balances are normal-balance-positive, so P&L = revenue − expense
+  const netProfitLossD = totalRevenueD.sub(totalExpenseD);
 
-  // Build journal lines
+  // Build journal lines using Decimal-safe strings
   const journalLines: Array<{
     accountId: string;
-    debit: number;
-    credit: number;
+    debit: string;
+    credit: string;
     description: string;
   }> = [];
+
+  const DEBIT_NORMAL_TYPES = new Set(["ASSET", "EXPENSE", "CONTRA_REVENUE"]);
 
   for (const line of lines) {
     const account = plAccounts.find((a: any) => a.code === line.accountCode);
     if (!account) continue;
 
-    // To zero out: if closingBalance > 0, credit the account; if < 0, debit the account
-    if (line.closingBalance > 0) {
+    const balD = D(line.closingBalance);
+    // account_period_balances stores normal-balance-positive closing balances
+    // (GLRepository.updateAccountBalance). Zero a debit-normal account by
+    // crediting its balance; zero a credit-normal account by debiting it.
+    const isDebitNormal = DEBIT_NORMAL_TYPES.has(account.type);
+    const postAsCredit = isDebitNormal ? balD.gt(ZERO) : balD.lt(ZERO);
+
+    if (postAsCredit) {
       journalLines.push({
         accountId: account.id,
-        debit: 0,
-        credit: line.closingBalance,
+        debit: "0",
+        credit: balD.abs().toFixed(4),
         description: `Year-end cleardown ${line.accountCode} ${line.accountName}`
       });
     } else {
       journalLines.push({
         accountId: account.id,
-        debit: Math.abs(line.closingBalance),
-        credit: 0,
+        debit: balD.abs().toFixed(4),
+        credit: "0",
         description: `Year-end cleardown ${line.accountCode} ${line.accountName}`
       });
     }
   }
 
-  // Retained earnings offset line
-  // Total DR must equal Total CR. The RE line balances the journal.
-  const totalDebits = journalLines.reduce((s, l) => s + l.debit, 0);
-  const totalCredits = journalLines.reduce((s, l) => s + l.credit, 0);
+  // Retained earnings offset line — use Decimal to avoid float accumulation error
+  const totalDebitsD = journalLines.reduce((s, l) => s.add(D(l.debit)), ZERO);
+  const totalCreditsD = journalLines.reduce((s, l) => s.add(D(l.credit)), ZERO);
 
-  if (totalDebits > totalCredits) {
-    // Net profit: more credits from revenue accounts → DR P&L side, CR RE
+  if (totalDebitsD.gt(totalCreditsD)) {
     journalLines.push({
       accountId: reAccount.id,
-      debit: 0,
-      credit: round2(totalDebits - totalCredits),
+      debit: "0",
+      credit: totalDebitsD.sub(totalCreditsD).toDecimalPlaces(4).toFixed(4),
       description: `Year-end P&L transfer to Retained Earnings`
     });
-  } else if (totalCredits > totalDebits) {
-    // Net loss: more debits from expense accounts → CR P&L side, DR RE
+  } else if (totalCreditsD.gt(totalDebitsD)) {
     journalLines.push({
       accountId: reAccount.id,
-      debit: round2(totalCredits - totalDebits),
-      credit: 0,
+      debit: totalCreditsD.sub(totalDebitsD).toDecimalPlaces(4).toFixed(4),
+      credit: "0",
       description: `Year-end P&L transfer to Retained Earnings`
     });
   }
 
-  // Post the year-end journal
+  // Account types for canonical balance updates
+  const accountTypeById = new Map<string, string>(plAccounts.map((a: any) => [a.id, a.type]));
+  accountTypeById.set(reAccount.id, reAccount.type);
+
+  // Post the year-end journal + update status in a single transaction
   const reference = `YE-${period.year}-CLEARDOWN`;
-  const journal = await (prisma as any).journal.create({
-    data: {
-      entityId,
-      periodId: input.periodId,
-      reference,
-      description: `Year-end P&L cleardown — FY${period.year} to Retained Earnings (${retainedEarningsCode})`,
-      source: "YEAREND",
-      status: "POSTED",
-      postedAt: new Date(),
-      functionalCurrency: funcCurrency,
-      createdById: actorId,
-      lines: {
-        create: journalLines.map((jl) => ({
-          accountId: jl.accountId,
-          debit: jl.debit,
-          credit: jl.credit,
-          currency: funcCurrency,
-          fxRate: 1,
-          debitFunctional: jl.debit,
-          creditFunctional: jl.credit,
-          description: jl.description
-        }))
+  const journal = await prisma.$transaction(async (tx: any) => {
+    const created = await tx.journal.create({
+      data: {
+        entityId,
+        periodId: input.periodId,
+        reference,
+        description: `Year-end P&L cleardown — FY${period.year} to Retained Earnings (${retainedEarningsCode})`,
+        source: "YEAREND",
+        status: "POSTED",
+        postedAt: new Date(),
+        functionalCurrency: funcCurrency,
+        createdById: actorId,
+        lines: {
+          create: journalLines.map((jl) => ({
+            accountId: jl.accountId,
+            debit: jl.debit,
+            credit: jl.credit,
+            currency: funcCurrency,
+            fxRate: 1,
+            debitFunctional: jl.debit,
+            creditFunctional: jl.credit,
+            description: jl.description
+          }))
+        }
       }
-    }
+    });
+
+    // Update account balances so the cleardown is reflected in the trial balance
+    const glRepo = new GLRepository(tx);
+    await glRepo.batchUpdateAccountBalances(
+      entityId,
+      input.periodId,
+      journalLines.map((jl) => ({
+        accountId: jl.accountId,
+        debitFunctional: D(jl.debit),
+        creditFunctional: D(jl.credit),
+        accountType: accountTypeById.get(jl.accountId)!
+      }))
+    );
+
+    // Update PeriodCloseStatus inside the same transaction
+    await updatePeriodCloseStatusTx(tx, entityId, input.periodId);
+
+    return created;
   });
 
-  // Update PeriodCloseStatus
-  await updatePeriodCloseStatus(prisma, entityId, input.periodId);
+  // Synchronous audit trail
+  const auditService = new AuditService(prisma);
+  await auditService.createEvent({
+    entityId,
+    userId: actorId,
+    eventType: "YEAR_END_CLEARDOWN_EXECUTED",
+    resourceType: "YEAR_END_CLEARDOWN",
+    resourceId: journal.id,
+    afterState: {
+      journalId: journal.id,
+      periodId: input.periodId,
+      fiscalYear: period.year,
+      totalRevenue: totalRevenueD.toDecimalPlaces(2).toNumber(),
+      totalExpense: totalExpenseD.toDecimalPlaces(2).toNumber(),
+      netProfitLoss: netProfitLossD.toDecimalPlaces(2).toNumber(),
+      retainedEarningsCode
+    }
+  });
 
   return {
     periodName: period.name ?? `${period.year}-${String(period.month).padStart(2, "0")}`,
     fiscalYear: period.year,
     retainedEarningsCode,
-    totalRevenue: round2(totalRevenue),
-    totalExpense: round2(totalExpense),
-    netProfitLoss,
+    totalRevenue: totalRevenueD.toDecimalPlaces(2).toNumber(),
+    totalExpense: totalExpenseD.toDecimalPlaces(2).toNumber(),
+    netProfitLoss: netProfitLossD.toDecimalPlaces(2).toNumber(),
     lines,
     journalId: journal.id
   };
@@ -342,17 +392,21 @@ async function validateFinalPeriod(
 }
 
 async function updatePeriodCloseStatus(prisma: PrismaClient, entityId: string, periodId: string) {
-  const existing = await (prisma as any).periodCloseStatus.findFirst({
+  await updatePeriodCloseStatusTx(prisma, entityId, periodId);
+}
+
+async function updatePeriodCloseStatusTx(tx: any, entityId: string, periodId: string) {
+  const existing = await tx.periodCloseStatus.findFirst({
     where: { entityId, periodId, ledger: "A" }
   });
 
   if (existing) {
-    await (prisma as any).periodCloseStatus.update({
+    await tx.periodCloseStatus.update({
       where: { id: existing.id },
       data: { yearEndProcessed: true }
     });
   } else {
-    await (prisma as any).periodCloseStatus.create({
+    await tx.periodCloseStatus.create({
       data: {
         entityId,
         periodId,
@@ -377,6 +431,4 @@ function makeEmptyResult(period: any, retainedEarningsCode: string): YearEndClea
   };
 }
 
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
+// round2 removed — all rounding now uses Prisma.Decimal.toDecimalPlaces()

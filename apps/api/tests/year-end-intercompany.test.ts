@@ -7,6 +7,7 @@ import {
   IntercompanyService,
   IntercompanyServiceError
 } from "../src/modules/intercompany/service.js";
+import { GLRepository } from "../src/modules/gl/repository.js";
 
 // ── Mock Data ──────────────────────────────────────────────────────────────────
 
@@ -136,7 +137,8 @@ const IC_PAY_ACCOUNT = {
 // ── Mock Prisma ────────────────────────────────────────────────────────────────
 
 function createMockPrisma() {
-  return {
+  const mock: any = {
+    $transaction: vi.fn().mockImplementation(async (fn: any) => fn(mock)),
     entity: {
       findFirst: vi.fn().mockResolvedValue(ENTITY)
     },
@@ -162,6 +164,11 @@ function createMockPrisma() {
       findFirst: vi.fn().mockResolvedValue(null),
       create: vi.fn().mockResolvedValue({}),
       update: vi.fn().mockResolvedValue({})
+    },
+    auditEvent: {
+      create: vi
+        .fn()
+        .mockImplementation(({ data }: any) => Promise.resolve({ id: "audit-1", ...data }))
     },
     processLock: {
       findFirst: vi.fn().mockResolvedValue(null),
@@ -209,14 +216,19 @@ function createMockPrisma() {
         })
       )
     }
-  } as any;
+  };
+  return mock;
 }
 
 let mockPrisma: ReturnType<typeof createMockPrisma>;
+let balanceSpy: any;
 
 beforeEach(() => {
   vi.restoreAllMocks();
   mockPrisma = createMockPrisma();
+  balanceSpy = vi
+    .spyOn(GLRepository.prototype, "batchUpdateAccountBalances")
+    .mockResolvedValue(undefined as any);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -244,8 +256,8 @@ describe("Year-End Cleardown", () => {
       mockPrisma.account.findFirst.mockResolvedValue(RE_ACCOUNT);
       mockPrisma.account.findMany.mockResolvedValue([REVENUE_ACCOUNT_1, EXPENSE_ACCOUNT_1]);
       mockPrisma.accountPeriodBalance.findMany.mockResolvedValue([
-        { accountId: "acc-rev-1", closingBalance: -50000 }, // revenue = credit (negative)
-        { accountId: "acc-exp-1", closingBalance: 30000 } // expense = debit (positive)
+        { accountId: "acc-rev-1", closingBalance: 50000 }, // canonical: revenue positive
+        { accountId: "acc-exp-1", closingBalance: 30000 } // canonical: expense positive
       ]);
       mockPrisma.period.findMany.mockResolvedValue([]); // no later periods
 
@@ -253,9 +265,9 @@ describe("Year-End Cleardown", () => {
         periodId: PERIOD_ID
       });
 
-      expect(result.totalRevenue).toBe(-50000);
+      expect(result.totalRevenue).toBe(50000);
       expect(result.totalExpense).toBe(30000);
-      expect(result.netProfitLoss).toBe(-20000);
+      expect(result.netProfitLoss).toBe(20000);
       expect(result.lines).toHaveLength(2);
       expect(result.journalId).toBe("journal-1");
       expect(result.retainedEarningsCode).toBe("3100");
@@ -273,8 +285,8 @@ describe("Year-End Cleardown", () => {
         EXPENSE_ACCOUNT_2
       ]);
       mockPrisma.accountPeriodBalance.findMany.mockResolvedValue([
-        { accountId: "acc-rev-1", closingBalance: -80000 },
-        { accountId: "acc-rev-2", closingBalance: -20000 },
+        { accountId: "acc-rev-1", closingBalance: 80000 },
+        { accountId: "acc-rev-2", closingBalance: 20000 },
         { accountId: "acc-exp-1", closingBalance: 45000 },
         { accountId: "acc-exp-2", closingBalance: 15000 }
       ]);
@@ -289,13 +301,44 @@ describe("Year-End Cleardown", () => {
       expect(lines).toHaveLength(5);
 
       // Total debits must equal total credits (balanced journal)
-      const totalDR = lines.reduce((s: number, l: any) => s + l.debit, 0);
-      const totalCR = lines.reduce((s: number, l: any) => s + l.credit, 0);
+      const totalDR = lines.reduce((s: number, l: any) => s + Number(l.debit), 0);
+      const totalCR = lines.reduce((s: number, l: any) => s + Number(l.credit), 0);
       expect(totalDR).toBeCloseTo(totalCR, 2);
 
       // Journal source is YEAREND
       expect(createCall.data.source).toBe("YEAREND");
       expect(createCall.data.status).toBe("POSTED");
+    });
+
+    it("updates account balances so the cleardown actually zeroes the TB (NF2)", async () => {
+      mockPrisma.period.findFirst.mockResolvedValue(PERIOD_DEC);
+      mockPrisma.yearEndConfig.findFirst.mockResolvedValue(YE_CONFIG);
+      mockPrisma.journal.findFirst.mockResolvedValue(null);
+      mockPrisma.account.findFirst.mockResolvedValue(RE_ACCOUNT);
+      mockPrisma.account.findMany.mockResolvedValue([REVENUE_ACCOUNT_1, EXPENSE_ACCOUNT_1]);
+      mockPrisma.accountPeriodBalance.findMany.mockResolvedValue([
+        { accountId: "acc-rev-1", closingBalance: 100000 }, // canonical: revenue positive
+        { accountId: "acc-exp-1", closingBalance: 60000 }
+      ]);
+      mockPrisma.period.findMany.mockResolvedValue([]);
+
+      await runYearEndCleardown(mockPrisma, ENTITY_ID, ACTOR_ID, { periodId: PERIOD_ID });
+
+      expect(balanceSpy).toHaveBeenCalledTimes(1);
+      const [entityArg, periodArg, lines] = balanceSpy.mock.calls[0] as any[];
+      expect(entityArg).toBe(ENTITY_ID);
+      expect(periodArg).toBe(PERIOD_ID);
+
+      const toNum = (v: any) => (typeof v?.toNumber === "function" ? v.toNumber() : Number(v));
+      const byAccount = new Map(lines.map((l: any) => [l.accountId, l]));
+      // DR revenue 100000 zeroes the credit-normal balance
+      expect(toNum((byAccount.get("acc-rev-1") as any).debitFunctional)).toBe(100000);
+      expect((byAccount.get("acc-rev-1") as any).accountType).toBe("REVENUE");
+      // CR expense 60000 zeroes the debit-normal balance
+      expect(toNum((byAccount.get("acc-exp-1") as any).creditFunctional)).toBe(60000);
+      // CR retained earnings 40000 (profit)
+      expect(toNum((byAccount.get("acc-re") as any).creditFunctional)).toBe(40000);
+      expect((byAccount.get("acc-re") as any).accountType).toBe("EQUITY");
     });
 
     it("sets yearEndProcessed = true on PeriodCloseStatus", async () => {
@@ -305,7 +348,7 @@ describe("Year-End Cleardown", () => {
       mockPrisma.account.findFirst.mockResolvedValue(RE_ACCOUNT);
       mockPrisma.account.findMany.mockResolvedValue([REVENUE_ACCOUNT_1]);
       mockPrisma.accountPeriodBalance.findMany.mockResolvedValue([
-        { accountId: "acc-rev-1", closingBalance: -10000 }
+        { accountId: "acc-rev-1", closingBalance: 10000 }
       ]);
       mockPrisma.period.findMany.mockResolvedValue([]);
 
@@ -326,7 +369,7 @@ describe("Year-End Cleardown", () => {
       mockPrisma.account.findFirst.mockResolvedValue(RE_ACCOUNT);
       mockPrisma.account.findMany.mockResolvedValue([REVENUE_ACCOUNT_1]);
       mockPrisma.accountPeriodBalance.findMany.mockResolvedValue([
-        { accountId: "acc-rev-1", closingBalance: -5000 }
+        { accountId: "acc-rev-1", closingBalance: 5000 }
       ]);
       mockPrisma.period.findMany.mockResolvedValue([]);
       mockPrisma.periodCloseStatus.findFirst.mockResolvedValue({
@@ -435,7 +478,7 @@ describe("Year-End Cleardown", () => {
       mockPrisma.account.findFirst.mockResolvedValue(altRE);
       mockPrisma.account.findMany.mockResolvedValue([REVENUE_ACCOUNT_1]);
       mockPrisma.accountPeriodBalance.findMany.mockResolvedValue([
-        { accountId: "acc-rev-1", closingBalance: -10000 }
+        { accountId: "acc-rev-1", closingBalance: 10000 }
       ]);
       mockPrisma.period.findMany.mockResolvedValue([]);
 
@@ -496,7 +539,7 @@ describe("Year-End Cleardown", () => {
       mockPrisma.account.findFirst.mockResolvedValue(RE_ACCOUNT);
       mockPrisma.account.findMany.mockResolvedValue([REVENUE_ACCOUNT_1, EXPENSE_ACCOUNT_1]);
       mockPrisma.accountPeriodBalance.findMany.mockResolvedValue([
-        { accountId: "acc-rev-1", closingBalance: -10000 },
+        { accountId: "acc-rev-1", closingBalance: 10000 },
         { accountId: "acc-exp-1", closingBalance: 0 }
       ]);
       mockPrisma.period.findMany.mockResolvedValue([]);
@@ -738,7 +781,7 @@ describe("IntercompanyService", () => {
           },
           ACTOR_ID
         )
-      ).rejects.toThrow("Both entities need IC account pairs");
+      ).rejects.toThrow("No mirror IC account pair configured.");
     });
   });
 
