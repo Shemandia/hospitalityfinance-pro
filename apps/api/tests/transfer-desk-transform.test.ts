@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { FsdSchema } from "@hfp/fsd-engine";
 
+// Allow the (insecure) Node vm fallback on dev machines without isolated-vm
+process.env.TML_ALLOW_INSECURE_SANDBOX ??= "true";
+
 // ── Mock GL/AP/AR services before importing the pipeline ───────────────────
 
 const createJournalMock = vi.fn().mockResolvedValue({ id: "journal-001" });
