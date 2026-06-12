@@ -1,18 +1,20 @@
 import type { PrismaClient } from "../../db/client.js";
+import { Prisma } from "../../db/client.js";
 import { publishEvent } from "../../shared/rabbitmq.js";
 import { ProcessLockService, ProcessLockError } from "../process-lock/service.js";
+import { AuditService } from "../audit/service.js";
+
+import { ServiceError } from "../../shared/service-error.js";
 
 // ── Error ────────────────────────────────────────────────────────────────────
 
-export class FixedAssetServiceError extends Error {
-  constructor(
-    public readonly code: string,
-    message: string,
-    public readonly statusCode = 400
-  ) {
-    super(message);
-  }
-}
+export class FixedAssetServiceError extends ServiceError {}
+
+// ── Decimal Helpers ─────────────────────────────────────────────────────────
+
+const D = (v: unknown): Prisma.Decimal => new Prisma.Decimal(String(v ?? 0));
+const ZERO = new Prisma.Decimal(0);
+const FOUR_DP = 4;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -20,14 +22,14 @@ export type DepreciationLineResult = {
   assetId: string;
   assetCode: string;
   description: string;
-  depreciationAmount: number;
+  depreciationAmount: Prisma.Decimal;
   bsAccount: string;
   plAccount: string;
 };
 
 export type DepreciationRunResult = {
   periodId: string;
-  totalDepreciation: number;
+  totalDepreciation: Prisma.Decimal;
   assetCount: number;
   lines: DepreciationLineResult[];
   journalId?: string;
@@ -92,8 +94,8 @@ export class FixedAssetService {
       );
     }
 
-    const grossValue = Number(input.grossValue ?? 0);
-    const finalValue = Number(input.finalValue ?? 0);
+    const grossValue = D(input.grossValue);
+    const finalValue = D(input.finalValue);
 
     return (this.prisma as any).fixedAsset.create({
       data: {
@@ -111,7 +113,7 @@ export class FixedAssetService {
         firstPeriodDays: input.firstPeriodDays ?? null,
         finalValue,
         grossValue,
-        accumulatedDepreciation: 0,
+        accumulatedDepreciation: ZERO,
         netValue: grossValue,
         assetQuantity: input.assetQuantity ?? null,
         acquisitionDate: new Date(input.acquisitionDate),
@@ -202,23 +204,25 @@ export class FixedAssetService {
 
     for (const asset of assets) {
       const amount = this._calculateAssetDepreciation(asset, excludeFinal, fullYearFirst);
-      if (amount <= 0) continue;
+      if (amount.lte(ZERO)) continue;
 
       lines.push({
         assetId: asset.id,
         assetCode: asset.assetCode,
         description: asset.description,
-        depreciationAmount: Math.round(amount * 10000) / 10000,
+        depreciationAmount: amount.toDecimalPlaces(FOUR_DP),
         bsAccount: asset.bsDepreciationAccount,
         plAccount: asset.plDepreciationAccount
       });
     }
 
-    const totalDepreciation = lines.reduce((sum, l) => sum + l.depreciationAmount, 0);
+    const totalDepreciation = lines
+      .reduce((sum, l) => sum.add(l.depreciationAmount), ZERO)
+      .toDecimalPlaces(FOUR_DP);
 
     return {
       periodId,
-      totalDepreciation: Math.round(totalDepreciation * 10000) / 10000,
+      totalDepreciation,
       assetCount: lines.length,
       lines
     };
@@ -226,52 +230,48 @@ export class FixedAssetService {
 
   /**
    * Calculate monthly depreciation for a single asset.
+   * All arithmetic uses Prisma.Decimal to avoid IEEE 754 precision loss.
    */
   private _calculateAssetDepreciation(
     asset: any,
     excludeFinal: boolean,
-    fullYearFirst: boolean
-  ): number {
-    if (asset.depreciationMethod === "NONE") return 0;
+    _fullYearFirst: boolean
+  ): Prisma.Decimal {
+    if (asset.depreciationMethod === "NONE") return ZERO;
 
-    const grossValue = Number(asset.grossValue);
-    const accumulatedDepreciation = Number(asset.accumulatedDepreciation);
-    const netValue = Number(asset.netValue);
-    const finalValue = excludeFinal ? Number(asset.finalValue) : 0;
+    const grossValue = D(asset.grossValue);
+    const accumulatedDepreciation = D(asset.accumulatedDepreciation);
+    const netValue = D(asset.netValue);
+    const finalValue = excludeFinal ? D(asset.finalValue) : ZERO;
     const usefulLifeMonths = asset.usefulLifeMonths;
 
-    if (usefulLifeMonths <= 0) return 0;
+    if (usefulLifeMonths <= 0) return ZERO;
 
     // Cannot depreciate below final value
-    const depreciableFloor = finalValue;
-    if (netValue <= depreciableFloor) return 0;
+    if (netValue.lte(finalValue)) return ZERO;
 
-    let monthlyAmount = 0;
+    let monthlyAmount: Prisma.Decimal;
 
     switch (asset.depreciationMethod) {
       case "STRAIGHT_LINE": {
-        // (grossValue - finalValue) / usefulLifeMonths
-        const depreciableBase = grossValue - finalValue;
-        if (depreciableBase <= 0) return 0;
-        monthlyAmount = depreciableBase / usefulLifeMonths;
+        const depreciableBase = grossValue.sub(finalValue);
+        if (depreciableBase.lte(ZERO)) return ZERO;
+        monthlyAmount = depreciableBase.div(usefulLifeMonths).toDecimalPlaces(FOUR_DP);
         break;
       }
 
       case "REDUCING_BALANCE": {
-        // netValue * (annualRate / 100 / 12)
-        const annualRate = Number(asset.depreciationRate ?? 0);
-        if (annualRate <= 0) return 0;
-        const monthlyRate = annualRate / 100 / 12;
-        monthlyAmount = netValue * monthlyRate;
+        const annualRate = D(asset.depreciationRate);
+        if (annualRate.lte(ZERO)) return ZERO;
+        const monthlyRate = annualRate.div(100).div(12);
+        monthlyAmount = netValue.mul(monthlyRate).toDecimalPlaces(FOUR_DP);
         break;
       }
 
       case "SUM_OF_DIGITS": {
-        // Sum-of-years-digits: remaining_months / sum_of_all_months * depreciable_base
-        const depreciableBase = grossValue - finalValue;
-        if (depreciableBase <= 0) return 0;
+        const depreciableBase = grossValue.sub(finalValue);
+        if (depreciableBase.lte(ZERO)) return ZERO;
 
-        // How many months of depreciation have been charged
         const monthsCharged = this._estimateMonthsCharged(
           grossValue,
           finalValue,
@@ -279,30 +279,28 @@ export class FixedAssetService {
           usefulLifeMonths
         );
         const remainingMonths = Math.max(usefulLifeMonths - monthsCharged, 0);
-        if (remainingMonths <= 0) return 0;
+        if (remainingMonths <= 0) return ZERO;
 
-        // Sum of digits for remaining months
         const sumTotal = (usefulLifeMonths * (usefulLifeMonths + 1)) / 2;
-        monthlyAmount = (remainingMonths / sumTotal) * depreciableBase;
+        monthlyAmount = depreciableBase.mul(remainingMonths).div(sumTotal).toDecimalPlaces(FOUR_DP);
         break;
       }
 
       case "USER_TABLE": {
-        // Stub — will be implemented in a future sprint
-        return 0;
+        return ZERO;
       }
 
       default:
-        return 0;
+        return ZERO;
     }
 
     // Cap: don't depreciate below final value
-    const maxAllowed = netValue - depreciableFloor;
-    if (monthlyAmount > maxAllowed) {
+    const maxAllowed = netValue.sub(finalValue);
+    if (monthlyAmount.gt(maxAllowed)) {
       monthlyAmount = maxAllowed;
     }
 
-    return Math.max(monthlyAmount, 0);
+    return Prisma.Decimal.max(monthlyAmount, ZERO);
   }
 
   /**
@@ -310,16 +308,16 @@ export class FixedAssetService {
    * based on accumulated depreciation vs the straight-line monthly amount.
    */
   private _estimateMonthsCharged(
-    grossValue: number,
-    finalValue: number,
-    accumulatedDepreciation: number,
+    grossValue: Prisma.Decimal,
+    finalValue: Prisma.Decimal,
+    accumulatedDepreciation: Prisma.Decimal,
     usefulLifeMonths: number
   ): number {
-    const depreciableBase = grossValue - finalValue;
-    if (depreciableBase <= 0 || usefulLifeMonths <= 0) return 0;
-    const straightLineMonthly = depreciableBase / usefulLifeMonths;
-    if (straightLineMonthly <= 0) return 0;
-    return Math.round(accumulatedDepreciation / straightLineMonthly);
+    const depreciableBase = grossValue.sub(finalValue);
+    if (depreciableBase.lte(ZERO) || usefulLifeMonths <= 0) return 0;
+    const straightLineMonthly = depreciableBase.div(usefulLifeMonths);
+    if (straightLineMonthly.lte(ZERO)) return 0;
+    return accumulatedDepreciation.div(straightLineMonthly).round().toNumber();
   }
 
   /**
@@ -366,6 +364,27 @@ export class FixedAssetService {
         );
       }
 
+      const journalReference = `DEPRC-${period.year}-${String(period.month).padStart(2, "0")}`;
+
+      // Idempotency guard: a posted depreciation journal for this period means
+      // the run already completed — a second run would double depreciation.
+      const completedRun = await (this.prisma as any).journal.findFirst({
+        where: {
+          entityId,
+          periodId,
+          source: "DEPRC",
+          reference: journalReference,
+          status: "POSTED"
+        }
+      });
+      if (completedRun) {
+        throw new FixedAssetServiceError(
+          "DEPRECIATION_ALREADY_RUN",
+          `Depreciation has already been posted for this period (journal ${completedRun.id}).`,
+          409
+        );
+      }
+
       // Calculate
       const result = await this.calculateDepreciation(entityId, periodId);
 
@@ -395,19 +414,21 @@ export class FixedAssetService {
       const journalLines: any[] = [];
       let lineNum = 1;
       for (const line of result.lines) {
-        const plAcct = accountMap.get(line.plAccount);
-        const bsAcct = accountMap.get(line.bsAccount);
+        const plAcct: any = accountMap.get(line.plAccount);
+        const bsAcct: any = accountMap.get(line.bsAccount);
 
         if (!plAcct || !bsAcct) continue;
+
+        const amt = line.depreciationAmount.toFixed(FOUR_DP);
 
         // DR Depreciation Expense (P&L)
         journalLines.push({
           accountId: plAcct.id,
-          debit: line.depreciationAmount.toFixed(4),
+          debit: amt,
           credit: "0",
           currency: functionalCurrency,
           fxRate: "1",
-          debitFunctional: line.depreciationAmount.toFixed(4),
+          debitFunctional: amt,
           creditFunctional: "0",
           description: `Depreciation: ${line.assetCode} — ${line.description}`,
           lineNumber: lineNum++
@@ -417,11 +438,11 @@ export class FixedAssetService {
         journalLines.push({
           accountId: bsAcct.id,
           debit: "0",
-          credit: line.depreciationAmount.toFixed(4),
+          credit: amt,
           currency: functionalCurrency,
           fxRate: "1",
           debitFunctional: "0",
-          creditFunctional: line.depreciationAmount.toFixed(4),
+          creditFunctional: amt,
           description: `Accumulated depreciation: ${line.assetCode}`,
           lineNumber: lineNum++
         });
@@ -433,11 +454,29 @@ export class FixedAssetService {
 
       // Create and post journal + update asset values in a transaction
       const journal = await this.prisma.$transaction(async (tx: any) => {
+        // Authoritative idempotency recheck inside the transaction
+        const completedInTx = await tx.journal.findFirst({
+          where: {
+            entityId,
+            periodId,
+            source: "DEPRC",
+            reference: journalReference,
+            status: "POSTED"
+          }
+        });
+        if (completedInTx) {
+          throw new FixedAssetServiceError(
+            "DEPRECIATION_ALREADY_RUN",
+            `Depreciation has already been posted for this period (journal ${completedInTx.id}).`,
+            409
+          );
+        }
+
         const created = await tx.journal.create({
           data: {
             entityId,
             periodId,
-            reference: `DEPRC-${period.year}-${String(period.month).padStart(2, "0")}`,
+            reference: journalReference,
             description: `Fixed asset depreciation for ${period.name ?? `${period.year}-${String(period.month).padStart(2, "0")}`}`,
             source: "DEPRC",
             functionalCurrency,
@@ -452,9 +491,9 @@ export class FixedAssetService {
 
         // Update account balances
         for (const jl of created.lines) {
-          const debit = Number(jl.debitFunctional);
-          const credit = Number(jl.creditFunctional);
-          const net = debit - credit;
+          const debit = D(jl.debitFunctional);
+          const credit = D(jl.creditFunctional);
+          const net = debit.sub(credit);
 
           await tx.accountPeriodBalance.upsert({
             where: {
@@ -468,7 +507,7 @@ export class FixedAssetService {
               entityId,
               accountId: jl.accountId,
               periodId,
-              openingBalance: 0,
+              openingBalance: ZERO,
               periodDebits: debit,
               periodCredits: credit,
               closingBalance: net
@@ -486,15 +525,16 @@ export class FixedAssetService {
           const asset = await tx.fixedAsset.findFirst({ where: { id: line.assetId } });
           if (!asset) continue;
 
-          const newAccumulated = Number(asset.accumulatedDepreciation) + line.depreciationAmount;
-          const newNet = Number(asset.grossValue) - newAccumulated;
-          const isFullyDepreciated = newNet <= Number(asset.finalValue) + 0.0001;
+          const newAccumulated = D(asset.accumulatedDepreciation).add(line.depreciationAmount);
+          const newNet = D(asset.grossValue).sub(newAccumulated);
+          const threshold = D(asset.finalValue).add(new Prisma.Decimal("0.0001"));
+          const isFullyDepreciated = newNet.lte(threshold);
 
           await tx.fixedAsset.update({
             where: { id: line.assetId },
             data: {
               accumulatedDepreciation: newAccumulated,
-              netValue: Math.max(newNet, 0),
+              netValue: Prisma.Decimal.max(newNet, ZERO),
               status: isFullyDepreciated ? "FULLY_DEPRECIATED" : "ACTIVE"
             }
           });
@@ -520,10 +560,26 @@ export class FixedAssetService {
         entityId,
         periodId,
         journalId: journal.id,
-        totalDepreciation: result.totalDepreciation,
+        totalDepreciation: result.totalDepreciation.toFixed(FOUR_DP),
         assetCount: result.assetCount,
         executedBy
       }).catch(() => {});
+
+      // Synchronous audit trail
+      const auditService = new AuditService(this.prisma);
+      await auditService.createEvent({
+        entityId,
+        userId: executedBy,
+        eventType: "DEPRECIATION_EXECUTED",
+        resourceType: "DEPRECIATION",
+        resourceId: journal.id,
+        afterState: {
+          journalId: journal.id,
+          periodId,
+          totalDepreciation: result.totalDepreciation.toFixed(FOUR_DP),
+          assetCount: result.assetCount
+        }
+      });
 
       return result;
     } finally {
@@ -553,9 +609,9 @@ export class FixedAssetService {
       throw new FixedAssetServiceError("ASSET_ALREADY_DISPOSED", "Asset is already disposed.", 409);
     }
 
-    const netValue = Number(asset.netValue);
-    const proceeds = Number(input.disposalProceeds);
-    const gainLoss = proceeds - netValue; // positive = gain, negative = loss
+    const netValue = D(asset.netValue);
+    const proceeds = D(input.disposalProceeds);
+    const gainLoss = proceeds.sub(netValue); // positive = gain, negative = loss
 
     const ledgerSetup = await (this.prisma as any).ledgerSetup.findFirst({
       where: { entityId, ledger: "A" }
@@ -570,14 +626,15 @@ export class FixedAssetService {
     let lineNum = 1;
 
     // DR Proceeds account (Bank/AR)
-    if (proceedsAcct && proceeds > 0) {
+    if (proceedsAcct && proceeds.gt(ZERO)) {
+      const amt = proceeds.toFixed(FOUR_DP);
       journalLines.push({
         accountId: proceedsAcct.id,
-        debit: proceeds.toFixed(4),
+        debit: amt,
         credit: "0",
         currency: functionalCurrency,
         fxRate: "1",
-        debitFunctional: proceeds.toFixed(4),
+        debitFunctional: amt,
         creditFunctional: "0",
         description: `Disposal proceeds: ${asset.assetCode}`,
         lineNumber: lineNum++
@@ -586,15 +643,16 @@ export class FixedAssetService {
 
     // DR Accumulated Depreciation (reverse the accumulated balance)
     if (bsAcct) {
-      const accumDepr = Number(asset.accumulatedDepreciation);
-      if (accumDepr > 0) {
+      const accumDepr = D(asset.accumulatedDepreciation);
+      if (accumDepr.gt(ZERO)) {
+        const amt = accumDepr.toFixed(FOUR_DP);
         journalLines.push({
           accountId: bsAcct.id,
-          debit: accumDepr.toFixed(4),
+          debit: amt,
           credit: "0",
           currency: functionalCurrency,
           fxRate: "1",
-          debitFunctional: accumDepr.toFixed(4),
+          debitFunctional: amt,
           creditFunctional: "0",
           description: `Reverse accumulated depreciation: ${asset.assetCode}`,
           lineNumber: lineNum++
@@ -605,31 +663,32 @@ export class FixedAssetService {
     // CR Asset cost account (P&L depreciation account serves as cost clearing here)
     const plAcct = await this._resolveAccount(entityId, asset.plDepreciationAccount);
     if (plAcct) {
-      const grossValue = Number(asset.grossValue);
+      const grossAmt = D(asset.grossValue).toFixed(FOUR_DP);
       journalLines.push({
         accountId: plAcct.id,
         debit: "0",
-        credit: grossValue.toFixed(4),
+        credit: grossAmt,
         currency: functionalCurrency,
         fxRate: "1",
         debitFunctional: "0",
-        creditFunctional: grossValue.toFixed(4),
+        creditFunctional: grossAmt,
         description: `Disposal cost clearing: ${asset.assetCode}`,
         lineNumber: lineNum++
       });
     }
 
     // Gain/Loss line (if non-zero)
-    if (Math.abs(gainLoss) > 0.0001 && plAcct) {
+    if (gainLoss.abs().gt(new Prisma.Decimal("0.0001")) && plAcct) {
+      const absGainLoss = gainLoss.abs().toFixed(FOUR_DP);
       journalLines.push({
         accountId: plAcct.id,
-        debit: gainLoss < 0 ? Math.abs(gainLoss).toFixed(4) : "0",
-        credit: gainLoss > 0 ? gainLoss.toFixed(4) : "0",
+        debit: gainLoss.isNeg() ? absGainLoss : "0",
+        credit: gainLoss.isPos() ? gainLoss.toFixed(FOUR_DP) : "0",
         currency: functionalCurrency,
         fxRate: "1",
-        debitFunctional: gainLoss < 0 ? Math.abs(gainLoss).toFixed(4) : "0",
-        creditFunctional: gainLoss > 0 ? gainLoss.toFixed(4) : "0",
-        description: `Disposal ${gainLoss >= 0 ? "gain" : "loss"}: ${asset.assetCode}`,
+        debitFunctional: gainLoss.isNeg() ? absGainLoss : "0",
+        creditFunctional: gainLoss.isPos() ? gainLoss.toFixed(FOUR_DP) : "0",
+        description: `Disposal ${gainLoss.gte(ZERO) ? "gain" : "loss"}: ${asset.assetCode}`,
         lineNumber: lineNum++
       });
     }
@@ -661,8 +720,8 @@ export class FixedAssetService {
         data: {
           status: "DISPOSED",
           disposalDate: new Date(input.disposalDate),
-          netValue: 0,
-          accumulatedDepreciation: Number(asset.grossValue)
+          netValue: ZERO,
+          accumulatedDepreciation: D(asset.grossValue)
         }
       });
 
@@ -671,7 +730,7 @@ export class FixedAssetService {
 
     return {
       asset: await this.getAsset(entityId, assetId),
-      gainLoss,
+      gainLoss: gainLoss.toFixed(FOUR_DP),
       journalId: journal?.id ?? null
     };
   }
@@ -722,16 +781,17 @@ export class FixedAssetService {
       throw new FixedAssetServiceError("ASSET_DISPOSED", "Cannot revalue a disposed asset.", 409);
     }
 
-    const newGross = Number(input.newGrossValue);
-    const accumulated = Number(asset.accumulatedDepreciation);
-    const newNet = Math.max(newGross - accumulated, 0);
+    const newGross = D(input.newGrossValue);
+    const accumulated = D(asset.accumulatedDepreciation);
+    const newNet = Prisma.Decimal.max(newGross.sub(accumulated), ZERO);
+    const threshold = D(asset.finalValue).add(new Prisma.Decimal("0.0001"));
 
     return (this.prisma as any).fixedAsset.update({
       where: { id: assetId },
       data: {
         grossValue: newGross,
         netValue: newNet,
-        status: newNet <= Number(asset.finalValue) + 0.0001 ? "FULLY_DEPRECIATED" : "ACTIVE"
+        status: newNet.lte(threshold) ? "FULLY_DEPRECIATED" : "ACTIVE"
       },
       include: { category: true }
     });
@@ -747,13 +807,11 @@ export class FixedAssetService {
       throw new FixedAssetServiceError("ASSET_DISPOSED", "Cannot write off a disposed asset.", 409);
     }
 
-    const grossValue = Number(asset.grossValue);
-
     return (this.prisma as any).fixedAsset.update({
       where: { id: assetId },
       data: {
-        accumulatedDepreciation: grossValue,
-        netValue: 0,
+        accumulatedDepreciation: D(asset.grossValue),
+        netValue: ZERO,
         status: "FULLY_DEPRECIATED"
       },
       include: { category: true }

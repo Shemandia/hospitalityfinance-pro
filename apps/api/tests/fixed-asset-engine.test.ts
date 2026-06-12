@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { Prisma } from "../src/db/client.js";
 
 // ── Mock dependencies ──────────────────────────────────────────────────────
 
@@ -11,6 +12,12 @@ vi.mock("../src/jobs/mv-refresh-job.js", () => ({
 }));
 
 import { FixedAssetService, FixedAssetServiceError } from "../src/modules/fixed-asset/service.js";
+
+/** Convert Prisma.Decimal (or number) to number for test assertions */
+function toNum(v: unknown): number {
+  if (v instanceof Prisma.Decimal) return v.toNumber();
+  return Number(v);
+}
 
 // ── Mock DB ────────────────────────────────────────────────────────────────
 
@@ -119,6 +126,7 @@ function makeMockPrisma() {
   }
 
   const prisma = {
+    $executeRawUnsafe: vi.fn().mockResolvedValue(undefined),
     $transaction: vi.fn().mockImplementation(async (fn: any) => fn(prisma)),
     assetCategory: {
       findFirst: vi.fn().mockImplementation(({ where }: any) => {
@@ -285,6 +293,17 @@ function makeMockPrisma() {
       })
     },
     journal: {
+      findFirst: vi.fn().mockImplementation(({ where }: any) => {
+        const j = journals.find(
+          (j: any) =>
+            j.entityId === where.entityId &&
+            j.periodId === where.periodId &&
+            (!where.source || j.source === where.source) &&
+            (!where.reference || j.reference === where.reference) &&
+            (!where.status || j.status === where.status)
+        );
+        return Promise.resolve(j ?? null);
+      }),
       create: vi.fn().mockImplementation(({ data, include }: any) => {
         const journal = {
           id: nextId("jnl"),
@@ -320,6 +339,11 @@ function makeMockPrisma() {
         balances.push(newBal);
         return Promise.resolve(newBal);
       })
+    },
+    auditEvent: {
+      create: vi
+        .fn()
+        .mockImplementation(({ data }: any) => Promise.resolve({ id: nextId("audit"), ...data }))
     },
     periodCloseStatus: {
       findFirst: vi.fn().mockImplementation(({ where }: any) => {
@@ -471,9 +495,9 @@ describe("Fixed Asset CRUD", () => {
       acquisitionDate: "2025-01-15"
     });
     expect(asset.assetCode).toBe("FA-001");
-    expect(asset.grossValue).toBe(5000);
-    expect(asset.netValue).toBe(5000);
-    expect(asset.accumulatedDepreciation).toBe(0);
+    expect(toNum(asset.grossValue)).toBe(5000);
+    expect(toNum(asset.netValue)).toBe(5000);
+    expect(toNum(asset.accumulatedDepreciation)).toBe(0);
     expect(asset.status).toBe("ACTIVE");
   });
 
@@ -535,7 +559,7 @@ describe("Depreciation Calculation", () => {
 
     const result = await service.calculateDepreciation(ENTITY_ID, PERIOD_ID);
     expect(result.lines).toHaveLength(1);
-    expect(result.lines[0].depreciationAmount).toBe(2000); // 120000/60
+    expect(toNum(result.lines[0].depreciationAmount)).toBe(2000); // 120000/60
   });
 
   it("straight-line with residual value", async () => {
@@ -548,7 +572,7 @@ describe("Depreciation Calculation", () => {
     seedLedgerSetup();
 
     const result = await service.calculateDepreciation(ENTITY_ID, PERIOD_ID);
-    expect(result.lines[0].depreciationAmount).toBe(1800); // (120000-12000)/60
+    expect(toNum(result.lines[0].depreciationAmount)).toBe(1800); // (120000-12000)/60
   });
 
   it("reducing balance: netValue * rate/100/12", async () => {
@@ -600,7 +624,7 @@ describe("Depreciation Calculation", () => {
     const result = await service.calculateDepreciation(ENTITY_ID, PERIOD_ID);
     // Sum total = 12*13/2 = 78
     // First month: remainingMonths = 12, amount = (12/78) * 78000 = 12000
-    expect(result.lines[0].depreciationAmount).toBe(12000);
+    expect(toNum(result.lines[0].depreciationAmount)).toBe(12000);
   });
 
   it("NONE method returns zero", async () => {
@@ -633,7 +657,7 @@ describe("Depreciation Calculation", () => {
 
     const result = await service.calculateDepreciation(ENTITY_ID, PERIOD_ID);
     // SL monthly = 60000/60 = 1000, but capped at 500 (netValue - 0)
-    expect(result.lines[0].depreciationAmount).toBe(500);
+    expect(toNum(result.lines[0].depreciationAmount)).toBe(500);
   });
 
   it("skips fully depreciated asset (netValue <= finalValue)", async () => {
@@ -663,7 +687,7 @@ describe("Depreciation Calculation", () => {
 
     const result = await service.calculateDepreciation(ENTITY_ID, PERIOD_ID);
     // finalValue treated as 0 => 120000/60 = 2000
-    expect(result.lines[0].depreciationAmount).toBe(2000);
+    expect(toNum(result.lines[0].depreciationAmount)).toBe(2000);
   });
 
   it("multiple assets accumulate correctly", async () => {
@@ -673,7 +697,7 @@ describe("Depreciation Calculation", () => {
 
     const result = await service.calculateDepreciation(ENTITY_ID, PERIOD_ID);
     expect(result.lines).toHaveLength(2);
-    expect(result.totalDepreciation).toBe(3000);
+    expect(toNum(result.totalDepreciation)).toBe(3000);
   });
 
   it("zero rate reducing balance returns zero", async () => {
@@ -700,7 +724,7 @@ describe("Depreciation Execution", () => {
 
     const result = await service.runDepreciation(ENTITY_ID, PERIOD_ID, USER_ID);
     expect(result.journalId).toBeDefined();
-    expect(result.totalDepreciation).toBe(1000);
+    expect(toNum(result.totalDepreciation)).toBe(1000);
 
     // Verify journal was created
     expect(journals).toHaveLength(1);
@@ -728,8 +752,8 @@ describe("Depreciation Execution", () => {
     seedPCS();
 
     await service.runDepreciation(ENTITY_ID, PERIOD_ID, USER_ID);
-    expect(asset.accumulatedDepreciation).toBe(1000);
-    expect(asset.netValue).toBe(59000);
+    expect(toNum(asset.accumulatedDepreciation)).toBe(1000);
+    expect(toNum(asset.netValue)).toBe(59000);
     expect(asset.status).toBe("ACTIVE");
   });
 
@@ -748,6 +772,25 @@ describe("Depreciation Execution", () => {
 
     await service.runDepreciation(ENTITY_ID, PERIOD_ID, USER_ID);
     expect(asset.status).toBe("FULLY_DEPRECIATED");
+  });
+
+  it("refuses to run depreciation twice for the same period (NF4 idempotency)", async () => {
+    seedAsset({ grossValue: 60000, finalValue: 0, usefulLifeMonths: 60 });
+    seedAccounts();
+    seedPeriod("OPEN");
+    seedLedgerSetup();
+    seedPCS();
+
+    const first = await service.runDepreciation(ENTITY_ID, PERIOD_ID, USER_ID);
+    expect(first.journalId).toBeTruthy();
+
+    await expect(service.runDepreciation(ENTITY_ID, PERIOD_ID, USER_ID)).rejects.toMatchObject({
+      code: "DEPRECIATION_ALREADY_RUN",
+      statusCode: 409
+    });
+
+    // No second journal, no double accumulation
+    expect(journals).toHaveLength(1);
   });
 
   it("acquires and releases DEPRECIATION lock", async () => {
@@ -783,7 +826,7 @@ describe("Depreciation Execution", () => {
     seedPCS();
 
     const result = await service.runDepreciation(ENTITY_ID, PERIOD_ID, USER_ID);
-    expect(result.totalDepreciation).toBe(1000);
+    expect(toNum(result.totalDepreciation)).toBe(1000);
   });
 
   it("sets depreciationRun flag on PeriodCloseStatus", async () => {
@@ -806,7 +849,7 @@ describe("Depreciation Execution", () => {
 
     const result = await service.runDepreciation(ENTITY_ID, PERIOD_ID, USER_ID);
     expect(result.lines).toHaveLength(0);
-    expect(result.totalDepreciation).toBe(0);
+    expect(toNum(result.totalDepreciation)).toBe(0);
     expect(journals).toHaveLength(0);
   });
 
@@ -853,9 +896,9 @@ describe("Lifecycle — Dispose", () => {
       periodId: PERIOD_ID
     });
 
-    expect(result.gainLoss).toBe(10000); // 70000 - 60000 = gain
+    expect(toNum(result.gainLoss)).toBe(10000); // 70000 - 60000 = gain
     expect(result.asset.status).toBe("DISPOSED");
-    expect(result.asset.netValue).toBe(0);
+    expect(toNum(result.asset.netValue)).toBe(0);
   });
 
   it("disposes asset and calculates loss", async () => {
@@ -877,7 +920,7 @@ describe("Lifecycle — Dispose", () => {
       periodId: PERIOD_ID
     });
 
-    expect(result.gainLoss).toBe(-10000); // 50000 - 60000 = loss
+    expect(toNum(result.gainLoss)).toBe(-10000); // 50000 - 60000 = loss
   });
 
   it("rejects disposing an already disposed asset", async () => {
@@ -922,8 +965,8 @@ describe("Lifecycle — Revalue", () => {
       newGrossValue: 130000
     });
 
-    expect(result.grossValue).toBe(130000);
-    expect(result.netValue).toBe(110000); // 130000 - 20000
+    expect(toNum(result.grossValue)).toBe(130000);
+    expect(toNum(result.netValue)).toBe(110000); // 130000 - 20000
     expect(result.status).toBe("ACTIVE");
   });
 
@@ -963,8 +1006,8 @@ describe("Lifecycle — Write-off", () => {
     });
 
     const result = await service.writeOffAsset(ENTITY_ID, "asset-wo", USER_ID);
-    expect(result.netValue).toBe(0);
-    expect(result.accumulatedDepreciation).toBe(50000);
+    expect(toNum(result.netValue)).toBe(0);
+    expect(toNum(result.accumulatedDepreciation)).toBe(50000);
     expect(result.status).toBe("FULLY_DEPRECIATED");
   });
 
