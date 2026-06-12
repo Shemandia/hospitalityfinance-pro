@@ -1,14 +1,7 @@
-import { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "../../db/client.js";
+import { ServiceError } from "../../shared/service-error.js";
 
-export class ConsolidationServiceError extends Error {
-  constructor(
-    public readonly code: string,
-    message: string,
-    public readonly statusCode = 400
-  ) {
-    super(message);
-  }
-}
+export class ConsolidationServiceError extends ServiceError {}
 
 type ConsolidationRequest = {
   parentEntityId: string;
@@ -41,6 +34,49 @@ type ConsolidatedLine = {
 
 export class ConsolidationService {
   constructor(private readonly prisma: PrismaClient) {}
+
+  /** Walk parent_id upward from an entity (raw SQL — mirrors plugins/auth.ts). */
+  private async resolveEntityLineage(entityId: string): Promise<string[]> {
+    const lineage: string[] = [];
+    const visited = new Set<string>();
+    let currentId: string | null = entityId;
+
+    while (currentId && !visited.has(currentId)) {
+      visited.add(currentId);
+      const rows = (await (this.prisma as any).$queryRawUnsafe(
+        `SELECT id, parent_id as "parentId" FROM entities WHERE id = $1 LIMIT 1`,
+        currentId
+      )) as Array<{ id: string; parentId: string | null }>;
+      const entity = rows[0];
+      if (!entity) break;
+      lineage.push(entity.id);
+      currentId = entity.parentId;
+    }
+
+    return lineage;
+  }
+
+  /**
+   * NS3: every consolidated child must be a strict descendant of the parent.
+   * mv_period_account_balances ignores RLS, so this is the access boundary.
+   */
+  private async assertChildrenAreSubsidiaries(
+    parentEntityId: string,
+    childEntityIds: string[]
+  ): Promise<void> {
+    for (const childId of [...new Set(childEntityIds)]) {
+      const lineage = await this.resolveEntityLineage(childId);
+      const isStrictDescendant =
+        childId !== parentEntityId && lineage.slice(1).includes(parentEntityId);
+      if (!isStrictDescendant) {
+        throw new ConsolidationServiceError(
+          "CONSOL_CHILD_FORBIDDEN",
+          `Entity ${childId} is not a subsidiary of the consolidation parent.`,
+          403
+        );
+      }
+    }
+  }
 
   listRuns(parentEntityId: string, take = 50, skip = 0) {
     return this.prisma.consolidationRun.findMany({
@@ -84,6 +120,8 @@ export class ConsolidationService {
       );
     }
 
+    await this.assertChildrenAreSubsidiaries(request.parentEntityId, request.childEntityIds);
+
     const period = await this.prisma.period.findFirst({
       where: { id: request.periodId, entityId: request.parentEntityId }
     });
@@ -109,55 +147,76 @@ export class ConsolidationService {
     const eliminationWarnings: string[] = [];
     let totalCtaAmount = new Prisma.Decimal(0);
 
-    for (const childEntityId of request.childEntityIds) {
-      const childEntity = await this.prisma.entity.findUnique({
-        where: { id: childEntityId }
+    // ── Batch-load child entities and FX rates (eliminates N+1) ──────────────
+    const childEntities = await this.prisma.entity.findMany({
+      where: { id: { in: request.childEntityIds } }
+    });
+    const childEntityMap = new Map(childEntities.map((e) => [e.id, e]));
+
+    // Collect unique currencies that need translation
+    const currenciesNeedingRates = new Set<string>();
+    for (const entity of childEntities) {
+      if (entity.functionalCurrency !== request.reportingCurrency) {
+        currenciesNeedingRates.add(entity.functionalCurrency);
+      }
+    }
+
+    // Batch-load FX rates for all needed currencies (closing + average)
+    const periodEndDate = new Date(period.year, period.month, 0);
+    const fxRatesMap = new Map<string, { closing: Prisma.Decimal; average: Prisma.Decimal }>();
+
+    if (currenciesNeedingRates.size > 0) {
+      const allRates = await this.prisma.fXRate.findMany({
+        where: {
+          fromCurrency: { in: [...currenciesNeedingRates] },
+          toCurrency: request.reportingCurrency,
+          rateType: { in: ["CLOSING", "AVERAGE"] },
+          effectiveDate: { lte: periodEndDate }
+        },
+        orderBy: [{ effectiveDate: "desc" }]
       });
+
+      // Group by currency and pick the most recent rate per type
+      for (const rate of allRates) {
+        const key = rate.fromCurrency;
+        const existing = fxRatesMap.get(key) ?? {
+          closing: new Prisma.Decimal(0),
+          average: new Prisma.Decimal(0)
+        };
+        if (rate.rateType === "CLOSING" && existing.closing.isZero()) {
+          existing.closing = rate.rate;
+        }
+        if (rate.rateType === "AVERAGE" && existing.average.isZero()) {
+          existing.average = rate.rate;
+        }
+        fxRatesMap.set(key, existing);
+      }
+    }
+
+    // ── Process each child entity ────────────────────────────────────────────
+    for (const childEntityId of request.childEntityIds) {
+      const childEntity = childEntityMap.get(childEntityId);
       if (!childEntity) continue;
 
       const localCurrency = childEntity.functionalCurrency;
       const needsTranslation = localCurrency !== request.reportingCurrency;
 
-      // Get closing and average rates for this entity's currency
       let closingRate = new Prisma.Decimal(1);
       let averageRate = new Prisma.Decimal(1);
 
       if (needsTranslation) {
-        const closingRateRecord = await this.prisma.fXRate.findFirst({
-          where: {
-            fromCurrency: localCurrency,
-            toCurrency: request.reportingCurrency,
-            rateType: "CLOSING",
-            effectiveDate: {
-              lte: new Date(`${period.year}-${String(period.month).padStart(2, "0")}-28`)
-            }
-          },
-          orderBy: [{ effectiveDate: "desc" }]
-        });
-
-        const averageRateRecord = await this.prisma.fXRate.findFirst({
-          where: {
-            fromCurrency: localCurrency,
-            toCurrency: request.reportingCurrency,
-            rateType: "AVERAGE",
-            effectiveDate: {
-              lte: new Date(`${period.year}-${String(period.month).padStart(2, "0")}-28`)
-            }
-          },
-          orderBy: [{ effectiveDate: "desc" }]
-        });
-
-        if (!closingRateRecord || !averageRateRecord) {
+        const rates = fxRatesMap.get(localCurrency);
+        if (!rates || rates.closing.isZero() || rates.average.isZero()) {
           eliminationWarnings.push(
             `Missing FX rates for ${localCurrency}/${request.reportingCurrency} — entity ${childEntity.name} translated at 1:1`
           );
         } else {
-          closingRate = closingRateRecord.rate;
-          averageRate = averageRateRecord.rate;
+          closingRate = rates.closing;
+          averageRate = rates.average;
         }
       }
 
-      // Get trial balance for this child entity
+      // Get trial balance for this child entity (uses materialized view — must stay per-entity)
       const trialBalance = await this.prisma.$queryRaw<EntityTrialBalanceRow[]>`
         SELECT
           "accountId"      AS account_id,
