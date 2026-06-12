@@ -31,6 +31,11 @@ import { FixedAssetService } from "../modules/fixed-asset/service.js";
 import { runWithContext } from "../db/requestContext.js";
 import { mapRecordsToTarget, type TargetParams } from "./transfer-desk-record-mapper.js";
 import type { StorageBackend } from "./transfer-desk-storage.js";
+import {
+  stageJournalItems,
+  resolveReviewMode,
+  type StageContext
+} from "./transfer-desk-batch-stager.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -55,9 +60,32 @@ export type PipelineDb = {
   };
   transferExecution: {
     update: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<unknown>;
+    findUnique: (args: {
+      where: { id: string };
+      select?: Record<string, unknown>;
+    }) => Promise<{ automationId: string | null; triggeredBy: string | null } | null>;
   };
   transferExecutionLog: {
     create: (args: { data: Record<string, unknown> }) => Promise<unknown>;
+    createMany: (args: { data: Record<string, unknown>[] }) => Promise<unknown>;
+  };
+  account: {
+    findMany: (args: {
+      where: Record<string, unknown>;
+      select?: Record<string, unknown>;
+    }) => Promise<Array<{ id: string; code: string }>>;
+  };
+  period: {
+    findMany: (args: {
+      where: Record<string, unknown>;
+      select?: Record<string, unknown>;
+    }) => Promise<Array<{ id: string; status: string }>>;
+  };
+  transferBatch: {
+    create: (args: { data: Record<string, unknown> }) => Promise<{ id: string }>;
+    update: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<unknown>;
+  };
+  transferBatchItem: {
     createMany: (args: { data: Record<string, unknown>[] }) => Promise<unknown>;
   };
 };
@@ -74,6 +102,7 @@ export type ProfileWithRelations = {
   sourceParams: Record<string, unknown> | null;
   targetParams: Record<string, unknown> | null;
   savePayload: "NONE" | "INPUT" | "OUTPUT" | "BOTH";
+  reviewMode?: "HOLD" | "AUTO_COMMIT" | null;
   sourceFormat: { id: string; fsdXml: string; classification: string } | null;
   targetFormat: { id: string; fsdXml: string; classification: string } | null;
   transformation: {
@@ -88,6 +117,10 @@ export type PipelineResult = {
   recordsSucceeded: number;
   recordsFailed: number;
   errorMessage?: string;
+  status?: string;
+  totalRecords?: number;
+  successCount?: number;
+  failCount?: number;
 };
 
 // ── Import pipeline ──────────────────────────────────────────────────────────
@@ -209,6 +242,30 @@ export async function executeImport(
     return failExecution(ctx, executionId, mapResult.code, mapResult.message);
   }
 
+  // 5b. Resolve review mode — scheduled/automation runs always AUTO_COMMIT.
+  const execMeta = await ctx.db.transferExecution.findUnique({
+    where: { id: executionId },
+    select: { automationId: true, triggeredBy: true }
+  });
+  const effectiveMode = resolveReviewMode(profile.reviewMode ?? null, {
+    automationId: execMeta?.automationId ?? null,
+    triggeredBy: execMeta?.triggeredBy ?? null
+  });
+
+  // HOLD only applies to GL_JOURNAL in v1; other targets keep direct behaviour.
+  if (effectiveMode === "HOLD" && mapResult.component === "GL_JOURNAL") {
+    const createdById = String(runtimeParams.triggeredBy ?? execMeta?.triggeredBy ?? "system");
+    return stageHeldBatch(
+      ctx,
+      executionId,
+      profile,
+      mapResult,
+      parseResult.records,
+      targetParams,
+      createdById
+    );
+  }
+
   // 6. Write to target component
   const result = await runWithContext(
     {
@@ -255,16 +312,31 @@ async function writeToTarget(
   let failed = 0;
   const totalRecords = sourceRecords.length;
 
+  // Check if auto-post is enabled via profile targetParams or sourceParams
+  const autoPost =
+    (profile.targetParams as any)?.autoPost === true ||
+    (profile.sourceParams as any)?.__postingOptions?.autoPost === true;
+
   if (mapResult.component === "GL_JOURNAL") {
     const glService = new GLService(ctx.db as any);
+    const postUserId = String(targetParams.entityId ?? "system");
 
     for (const journal of mapResult.journals) {
       try {
-        await glService.createJournal(
-          journal.entityId,
-          String(targetParams.entityId ?? "system"),
-          journal.input
-        );
+        const created = await glService.createJournal(journal.entityId, postUserId, journal.input);
+
+        // Auto-post if enabled and journal is in DRAFT (no approval required)
+        if (autoPost && (created as any)?.status === "DRAFT" && (created as any)?.id) {
+          try {
+            await glService.postJournal(journal.entityId, (created as any).id, postUserId);
+          } catch (postErr) {
+            // Auto-post failure is non-fatal — journal stays as DRAFT
+            console.warn(
+              `[Pipeline] Auto-post failed for journal ${(created as any).id}: ${(postErr as Error).message}`
+            );
+          }
+        }
+
         // Log success for all source records in this journal
         for (const idx of journal.sourceIndices) {
           await ctx.db.transferExecutionLog.create({
@@ -365,6 +437,95 @@ async function writeToTarget(
     recordsTotal: totalRecords,
     recordsSucceeded: succeeded,
     recordsFailed: failed
+  };
+}
+
+async function stageHeldBatch(
+  ctx: PipelineContext,
+  executionId: string,
+  profile: ProfileWithRelations,
+  mapResult: Extract<ReturnType<typeof mapRecordsToTarget>, { ok: true; component: "GL_JOURNAL" }>,
+  sourceRecords: FsdRecordValue[],
+  targetParams: TargetParams,
+  createdById: string
+): Promise<PipelineResult> {
+  const entityId = targetParams.entityId ?? "";
+
+  // Pre-fetch validation context (active accounts + period statuses).
+  const accounts = await ctx.db.account.findMany({
+    where: { entityId, isActive: true },
+    select: { id: true, code: true }
+  });
+  const validAccountKeys = new Set<string>();
+  for (const a of accounts) {
+    validAccountKeys.add(a.id);
+    validAccountKeys.add(a.code);
+  }
+  const periodIds = [...new Set(mapResult.journals.map((j) => j.input.periodId).filter(Boolean))];
+  const periods = periodIds.length
+    ? await ctx.db.period.findMany({
+        where: { entityId, id: { in: periodIds } },
+        select: { id: true, status: true }
+      })
+    : [];
+  const periodStatusById = new Map(periods.map((p) => [p.id, p.status]));
+
+  const stageCtx: StageContext = { validAccountKeys, periodStatusById };
+  const items = stageJournalItems(mapResult.journals, stageCtx);
+
+  const heldItems = items.filter((i) => i.status === "HELD").length;
+  const errorItems = items.filter((i) => i.status === "ERROR").length;
+
+  const batch = await ctx.db.transferBatch.create({
+    data: {
+      entityId,
+      profileId: profile.id,
+      executionId,
+      targetComponent: "GL_JOURNAL",
+      status: "PENDING_REVIEW",
+      totalItems: items.length,
+      heldItems,
+      errorItems,
+      createdById
+    } as any
+  });
+
+  await ctx.db.transferBatchItem.createMany({
+    data: items.map((item) => ({
+      batchId: batch.id,
+      itemIndex: item.itemIndex,
+      status: item.status,
+      targetComponent: item.targetComponent,
+      payload: item.payload as any,
+      sourceRecordIndices: item.sourceRecordIndices,
+      validationStatus: item.validationStatus,
+      validationMessages: item.validationMessages as any
+    }))
+  });
+
+  await ctx.db.transferExecutionLog
+    .createMany({
+      data: items.flatMap((item) =>
+        item.sourceRecordIndices.map((idx) => ({
+          executionId,
+          recordIndex: idx,
+          status: item.status === "ERROR" ? "FAILED" : "SUCCESS",
+          sourceData: (sourceRecords[idx] ?? null) as any,
+          transformedData: item.payload as any,
+          errorCode: item.status === "ERROR" ? "STAGE_VALIDATION_ERROR" : null,
+          errorMessage:
+            item.status === "ERROR"
+              ? item.validationMessages.map((m) => m.message).join("; ")
+              : null
+        }))
+      )
+    })
+    .catch(() => {});
+
+  return {
+    recordsTotal: sourceRecords.length,
+    recordsSucceeded: heldItems,
+    recordsFailed: errorItems
   };
 }
 
@@ -662,7 +823,15 @@ async function executeAllocationProcess(
       })
       .catch(() => {});
 
-    return { status: "COMPLETED", totalRecords: 1, successCount: 1, failCount: 0 };
+    return {
+      recordsTotal: 1,
+      recordsSucceeded: 1,
+      recordsFailed: 0,
+      status: "COMPLETED",
+      totalRecords: 1,
+      successCount: 1,
+      failCount: 0
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown allocation error";
     return failExecution(ctx, executionId, "ALLOCATION_FAILED", message);
@@ -721,7 +890,15 @@ async function executeDepreciationProcess(
       })
       .catch(() => {});
 
-    return { status: "COMPLETED", totalRecords: 1, successCount: 1, failCount: 0 };
+    return {
+      recordsTotal: 1,
+      recordsSucceeded: 1,
+      recordsFailed: 0,
+      status: "COMPLETED",
+      totalRecords: 1,
+      successCount: 1,
+      failCount: 0
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown depreciation error";
     return failExecution(ctx, executionId, "DEPRECIATION_FAILED", message);
