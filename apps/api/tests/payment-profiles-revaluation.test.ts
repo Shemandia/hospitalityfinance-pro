@@ -7,6 +7,14 @@ import {
   runLedgerRevaluation,
   LedgerRevaluationError
 } from "../src/modules/fx/ledger-revaluation.js";
+import { GLRepository } from "../src/modules/gl/repository.js";
+
+function toNum(value: unknown): number {
+  if (value && typeof (value as { toNumber?: unknown }).toNumber === "function") {
+    return (value as { toNumber: () => number }).toNumber();
+  }
+  return Number(value);
+}
 
 // ── Mock Data ──────────────────────────────────────────────────────────────────
 
@@ -88,7 +96,8 @@ const ENTITY = { id: ENTITY_ID, functionalCurrency: "USD" };
 // ── Mock Prisma ────────────────────────────────────────────────────────────────
 
 function createMockPrisma() {
-  return {
+  const mock: any = {
+    $transaction: vi.fn().mockImplementation(async (fn: any) => fn(mock)),
     paymentProfile: {
       findMany: vi.fn().mockResolvedValue([]),
       findFirst: vi.fn().mockResolvedValue(null),
@@ -140,14 +149,19 @@ function createMockPrisma() {
       deleteMany: vi.fn().mockResolvedValue({}),
       delete: vi.fn().mockResolvedValue({})
     }
-  } as any;
+  };
+  return mock;
 }
 
 let mockPrisma: ReturnType<typeof createMockPrisma>;
+let balanceSpy: any;
 
 beforeEach(() => {
   vi.restoreAllMocks();
   mockPrisma = createMockPrisma();
+  balanceSpy = vi
+    .spyOn(GLRepository.prototype, "batchUpdateAccountBalances")
+    .mockResolvedValue(undefined as any);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -373,14 +387,14 @@ describe("PaymentProfileService", () => {
 
       // DR Bank
       const drLine = journalLines.find((l: any) => l.debit > 0);
-      expect(drLine.debit).toBe(7000);
-      expect(drLine.credit).toBe(0);
+      expect(toNum(drLine.debit)).toBe(7000);
+      expect(toNum(drLine.credit)).toBe(0);
       expect(drLine.accountId).toBe("acc-bank");
 
       // CR AR Control
       const crLine = journalLines.find((l: any) => l.credit > 0);
-      expect(crLine.credit).toBe(7000);
-      expect(crLine.debit).toBe(0);
+      expect(toNum(crLine.credit)).toBe(7000);
+      expect(toNum(crLine.debit)).toBe(0);
       expect(crLine.accountId).toBe("acc-ar");
     });
 
@@ -695,9 +709,53 @@ describe("Ledger Revaluation Engine", () => {
       const lines = createCall.data.lines.create;
       expect(lines).toHaveLength(2);
       expect(lines[0].accountId).toBe("acc-1"); // DR the account
-      expect(lines[0].debit).toBe(100); // 1000*1.2 - 1100 = 100
+      expect(lines[0].debit).toBe("100.0000"); // 1000*1.2 - 1100 = 100
       expect(lines[1].accountId).toBe("acc-gain"); // CR gain account
-      expect(lines[1].credit).toBe(100);
+      expect(lines[1].credit).toBe("100.0000");
+    });
+
+    it("updates account balances for the revaluation journal and its reversal (NF1)", async () => {
+      mockPrisma.revaluationProfile.findFirst.mockResolvedValue(REVAL_PROFILE);
+      mockPrisma.period.findFirst.mockResolvedValueOnce(PERIOD).mockResolvedValueOnce(NEXT_PERIOD);
+      mockPrisma.entity.findFirst.mockResolvedValue(ENTITY);
+      mockPrisma.account.findMany.mockResolvedValue([ACCOUNTS[0]]);
+
+      mockPrisma.journalLine.findMany.mockResolvedValue([
+        {
+          currency: "EUR",
+          debit: 1000,
+          credit: 0,
+          fxRate: 1.1,
+          debitFunctional: 1100,
+          creditFunctional: 0
+        }
+      ]);
+      mockPrisma.fXRate.findFirst.mockResolvedValue({ rate: 1.2 });
+      mockPrisma.account.findFirst
+        .mockResolvedValueOnce(GAIN_ACCOUNT)
+        .mockResolvedValueOnce(LOSS_ACCOUNT);
+
+      await runLedgerRevaluation(mockPrisma, ENTITY_ID, ACTOR_ID, BASE_INPUT);
+
+      // One balance update for the revaluation journal, one for the reversal
+      expect(balanceSpy).toHaveBeenCalledTimes(2);
+
+      const [entityArg, periodArg, lines] = balanceSpy.mock.calls[0] as any[];
+      expect(entityArg).toBe(ENTITY_ID);
+      expect(periodArg).toBe(PERIOD_ID);
+      const byAccount = new Map(lines.map((l: any) => [l.accountId, l]));
+      // Gain of 100: DR acc-1 (ASSET), CR acc-gain (REVENUE)
+      expect(toNum((byAccount.get("acc-1") as any).debitFunctional)).toBe(100);
+      expect((byAccount.get("acc-1") as any).accountType).toBe("ASSET");
+      expect(toNum((byAccount.get("acc-gain") as any).creditFunctional)).toBe(100);
+      expect((byAccount.get("acc-gain") as any).accountType).toBe("REVENUE");
+
+      const [, revPeriodArg, revLines] = balanceSpy.mock.calls[1] as any[];
+      expect(revPeriodArg).toBe(NEXT_PERIOD_ID);
+      const revByAccount = new Map(revLines.map((l: any) => [l.accountId, l]));
+      // Reversal flips the amounts
+      expect(toNum((revByAccount.get("acc-1") as any).creditFunctional)).toBe(100);
+      expect(toNum((revByAccount.get("acc-gain") as any).debitFunctional)).toBe(100);
     });
 
     it("posts DR Loss / CR Account for losses", async () => {
@@ -731,9 +789,9 @@ describe("Ledger Revaluation Engine", () => {
       const lines = mockPrisma.journal.create.mock.calls[0][0].data.lines.create;
       // Loss: DR Loss account, CR Account
       expect(lines[0].accountId).toBe("acc-loss");
-      expect(lines[0].debit).toBe(50);
+      expect(lines[0].debit).toBe("50.0000");
       expect(lines[1].accountId).toBe("acc-1");
-      expect(lines[1].credit).toBe(50);
+      expect(lines[1].credit).toBe("50.0000");
     });
   });
 
