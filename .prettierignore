@@ -1,0 +1,6 @@
+# Generated files
+pnpm-lock.yaml
+node_modules
+dist
+.next
+src/db/generated

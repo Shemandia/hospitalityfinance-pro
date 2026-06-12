@@ -1,11 +1,13 @@
 /**
  * @hfp/tml-engine — JavaScript sandbox
  *
- * Executes user-defined JavaScript functions in a secure context.
- * Prefers isolated-vm (V8 isolate) for security; falls back to Node's
- * vm module if isolated-vm is unavailable.
+ * Executes user-defined JavaScript functions inside an isolated-vm V8
+ * isolate. Fails closed if isolated-vm cannot be loaded — Node's vm
+ * module is NOT a security boundary and is only available behind an
+ * explicit non-production override (TML_ALLOW_INSECURE_SANDBOX=true).
  */
 
+import { createRequire } from "node:module";
 import * as vm from "node:vm";
 import type { TmlUserFunction } from "./types.js";
 
@@ -19,33 +21,101 @@ export interface Sandbox {
 export interface SandboxOptions {
   timeoutMs?: number;
   memoryMb?: number;
+  /** Test-only hook: override how isolated-vm is loaded. */
+  ivmLoader?: () => unknown;
+}
+
+export class SandboxValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SandboxValidationError";
+  }
+}
+
+export class SandboxUnavailableError extends Error {
+  constructor(cause?: unknown) {
+    super(
+      "isolated-vm is required to execute TML user functions but could not be loaded. " +
+        "Refusing to fall back to Node's vm module (not a security boundary). " +
+        "Install isolated-vm, or set TML_ALLOW_INSECURE_SANDBOX=true in non-production environments only."
+    );
+    this.name = "SandboxUnavailableError";
+    this.cause = cause;
+  }
 }
 
 const DEFAULT_TIMEOUT_MS = 2000;
 const DEFAULT_MEMORY_MB = 64;
 
+// ── Identifier validation ──────────────────────────────────────────────────
+
+const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+const FORBIDDEN_NAMES = new Set([
+  "eval",
+  "arguments",
+  "constructor",
+  "prototype",
+  "__proto__",
+  "globalThis",
+  "this",
+  "__call"
+]);
+
+export function validateUserFunctions(userFunctions: TmlUserFunction[]): void {
+  for (const fn of userFunctions) {
+    assertSafeIdentifier(fn.name, `function name "${fn.name}"`);
+    for (const param of fn.params) {
+      assertSafeIdentifier(param, `parameter "${param}" of function "${fn.name}"`);
+    }
+  }
+}
+
+function assertSafeIdentifier(value: string, label: string): void {
+  if (!IDENTIFIER_RE.test(value) || FORBIDDEN_NAMES.has(value)) {
+    throw new SandboxValidationError(
+      `Invalid TML ${label}: identifiers must match ${IDENTIFIER_RE} and not be a reserved name.`
+    );
+  }
+}
+
+// ── Loading isolated-vm ────────────────────────────────────────────────────
+
+const nodeRequire = createRequire(import.meta.url);
+
+function loadIsolatedVm(): unknown {
+  return nodeRequire("isolated-vm");
+}
+
+function insecureFallbackAllowed(): boolean {
+  return process.env.TML_ALLOW_INSECURE_SANDBOX === "true" && process.env.NODE_ENV !== "production";
+}
+
 /**
  * Create a sandbox with the given user functions and built-in function source.
- * Tries isolated-vm first; falls back to Node vm module.
+ * Validates all user-function identifiers, then requires isolated-vm.
  */
 export function createSandbox(
   userFunctions: TmlUserFunction[],
   builtinSource: string,
   options?: SandboxOptions
 ): Sandbox {
+  validateUserFunctions(userFunctions);
+
   const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const memoryMb = options?.memoryMb ?? DEFAULT_MEMORY_MB;
-
-  // Build combined source: builtins first, then user functions
   const fnSource = buildFunctionSource(userFunctions, builtinSource);
 
-  // Try isolated-vm first
+  let ivm: any;
   try {
-    return createIsolatedVmSandbox(fnSource, timeoutMs, memoryMb);
-  } catch {
-    // isolated-vm not available — fall back to Node vm
-    return createVmSandbox(fnSource, timeoutMs);
+    ivm = (options?.ivmLoader ?? loadIsolatedVm)();
+  } catch (cause) {
+    if (insecureFallbackAllowed()) {
+      return createVmSandbox(fnSource, timeoutMs);
+    }
+    throw new SandboxUnavailableError(cause);
   }
+
+  return createIsolatedVmSandbox(ivm, fnSource, timeoutMs, memoryMb);
 }
 
 // ── Function source builder ────────────────────────────────────────────────
@@ -62,11 +132,12 @@ function buildFunctionSource(userFunctions: TmlUserFunction[], builtinSource: st
 
 // ── isolated-vm sandbox ────────────────────────────────────────────────────
 
-function createIsolatedVmSandbox(fnSource: string, timeoutMs: number, memoryMb: number): Sandbox {
-  // Dynamic require to avoid hard dependency — isolated-vm may not be installed
-  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-  const ivm = require("isolated-vm");
-
+function createIsolatedVmSandbox(
+  ivm: any,
+  fnSource: string,
+  timeoutMs: number,
+  memoryMb: number
+): Sandbox {
   const isolate = new ivm.Isolate({ memoryLimit: memoryMb });
   const context = isolate.createContextSync();
 
@@ -99,16 +170,14 @@ function createIsolatedVmSandbox(fnSource: string, timeoutMs: number, memoryMb: 
   };
 }
 
-// ── Node vm fallback sandbox ───────────────────────────────────────────────
+// ── Node vm fallback (insecure — dev/test only, behind explicit env flag) ──
 
 function createVmSandbox(fnSource: string, timeoutMs: number): Sandbox {
   const sandbox: Record<string, unknown> = {};
   const ctx = vm.createContext(sandbox);
 
-  // Run function definitions in the sandbox context
   vm.runInContext(fnSource, ctx, { timeout: timeoutMs });
 
-  // Inject __call helper
   vm.runInContext(
     `function __call(name, argsJson) {
       var fn = eval(name);

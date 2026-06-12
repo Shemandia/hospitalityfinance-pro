@@ -8,6 +8,9 @@ import {
   type Sandbox
 } from "../src/index.js";
 
+// Allow the (insecure) Node vm fallback on dev machines without isolated-vm
+process.env.TML_ALLOW_INSECURE_SANDBOX ??= "true";
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 let activeSandbox: Sandbox | null = null;
@@ -553,5 +556,482 @@ describe("batch processing", () => {
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0]!.recordIndex).toBe(1);
     expect(result.errors[0]!.ruleType).toBe("lookup");
+  });
+});
+
+// ── 9. New core built-in functions ────────────────────────────────────────────
+
+describe("new core built-in functions", () => {
+  it("trim removes whitespace", () => {
+    const sb = sandbox();
+    const def: TmlDefinition = {
+      rules: [
+        {
+          type: "transform",
+          target: "out",
+          function: { name: "trim", params: [{ value: "val", fromSource: true }] }
+        }
+      ]
+    };
+    const result = executeTransformation(def, [{ val: "  hello  " }], sb);
+    expect(result.records[0]!.out).toBe("hello");
+  });
+
+  it("numberFormat formats with decimals and separators", () => {
+    const sb = sandbox();
+    const def: TmlDefinition = {
+      rules: [
+        {
+          type: "transform",
+          target: "out",
+          function: {
+            name: "numberFormat",
+            params: [
+              { value: "amount", fromSource: true, type: "number" },
+              { value: 2 },
+              { value: "," },
+              { value: "." }
+            ]
+          }
+        }
+      ]
+    };
+    const result = executeTransformation(def, [{ amount: 1234567.8 }], sb);
+    expect(result.records[0]!.out).toBe("1,234,567.80");
+  });
+
+  it("numberFormat handles negative numbers", () => {
+    const sb = sandbox();
+    const def: TmlDefinition = {
+      rules: [
+        {
+          type: "transform",
+          target: "out",
+          function: {
+            name: "numberFormat",
+            params: [
+              { value: "amt", fromSource: true, type: "number" },
+              { value: 2 },
+              { value: "," },
+              { value: "." }
+            ]
+          }
+        }
+      ]
+    };
+    const result = executeTransformation(def, [{ amt: -42500.5 }], sb);
+    expect(result.records[0]!.out).toBe("-42,500.50");
+  });
+
+  it("substring extracts part of a string", () => {
+    const sb = sandbox();
+    const def: TmlDefinition = {
+      rules: [
+        {
+          type: "transform",
+          target: "out",
+          function: {
+            name: "substring",
+            params: [{ value: "code", fromSource: true }, { value: 2 }, { value: 4 }]
+          }
+        }
+      ]
+    };
+    const result = executeTransformation(def, [{ code: "AB1234XY" }], sb);
+    expect(result.records[0]!.out).toBe("1234");
+  });
+
+  it("replace does global string replacement", () => {
+    const sb = sandbox();
+    const def: TmlDefinition = {
+      rules: [
+        {
+          type: "transform",
+          target: "out",
+          function: {
+            name: "replace",
+            params: [
+              { value: "txt", fromSource: true },
+              { value: "-" },
+              { value: "/" },
+              { value: 0 }
+            ]
+          }
+        }
+      ]
+    };
+    const result = executeTransformation(def, [{ txt: "2026-04-10" }], sb);
+    expect(result.records[0]!.out).toBe("2026/04/10");
+  });
+
+  it("replace supports regex", () => {
+    const sb = sandbox();
+    const def: TmlDefinition = {
+      rules: [
+        {
+          type: "transform",
+          target: "out",
+          function: {
+            name: "replace",
+            params: [
+              { value: "txt", fromSource: true },
+              { value: "\\d+" },
+              { value: "X" },
+              { value: 1 }
+            ]
+          }
+        }
+      ]
+    };
+    const result = executeTransformation(def, [{ txt: "abc123def456" }], sb);
+    expect(result.records[0]!.out).toBe("abcXdefX");
+  });
+
+  it("lookupValue maps via JSON mapping", () => {
+    const sb = sandbox();
+    const mapping = JSON.stringify({ USD: "US Dollar", EUR: "Euro" });
+    const def: TmlDefinition = {
+      rules: [
+        {
+          type: "transform",
+          target: "out",
+          function: {
+            name: "lookupValue",
+            params: [{ value: "curr", fromSource: true }, { value: mapping }, { value: "Unknown" }]
+          }
+        }
+      ]
+    };
+    const result = executeTransformation(def, [{ curr: "EUR" }, { curr: "GBP" }], sb);
+    expect(result.records[0]!.out).toBe("Euro");
+    expect(result.records[1]!.out).toBe("Unknown");
+  });
+
+  it("divide and multiply with 2dp rounding", () => {
+    const sb = sandbox();
+    const def: TmlDefinition = {
+      rules: [
+        {
+          type: "transform",
+          target: "divided",
+          function: {
+            name: "divide",
+            params: [{ value: "amt", fromSource: true, type: "number" }, { value: 3 }]
+          }
+        },
+        {
+          type: "transform",
+          target: "multiplied",
+          function: {
+            name: "multiply",
+            params: [{ value: "amt", fromSource: true, type: "number" }, { value: 1.15 }]
+          }
+        }
+      ]
+    };
+    const result = executeTransformation(def, [{ amt: 100 }], sb);
+    expect(result.records[0]!.divided).toBe(33.33);
+    expect(result.records[0]!.multiplied).toBe(115);
+  });
+
+  it("defaultValue returns fallback for empty/null", () => {
+    const sb = sandbox();
+    const def: TmlDefinition = {
+      rules: [
+        {
+          type: "transform",
+          target: "a",
+          function: {
+            name: "defaultValue",
+            params: [{ value: "x", fromSource: true }, { value: "N/A" }]
+          }
+        },
+        {
+          type: "transform",
+          target: "b",
+          function: {
+            name: "defaultValue",
+            params: [{ value: "y", fromSource: true }, { value: "N/A" }]
+          }
+        }
+      ]
+    };
+    const result = executeTransformation(def, [{ x: "", y: "hello" }], sb);
+    expect(result.records[0]!.a).toBe("N/A");
+    expect(result.records[0]!.b).toBe("hello");
+  });
+
+  it("concatFields joins values with separator", () => {
+    const sb = sandbox();
+    const def: TmlDefinition = {
+      rules: [
+        {
+          type: "transform",
+          target: "out",
+          function: {
+            name: "concatFields",
+            params: [
+              { value: "first", fromSource: true },
+              { value: "last", fromSource: true },
+              { value: " " }
+            ]
+          }
+        }
+      ]
+    };
+    const result = executeTransformation(def, [{ first: "John", last: "Doe" }], sb);
+    expect(result.records[0]!.out).toBe("John Doe");
+  });
+
+  it("splitField extracts part by delimiter", () => {
+    const sb = sandbox();
+    const def: TmlDefinition = {
+      rules: [
+        {
+          type: "transform",
+          target: "out",
+          function: {
+            name: "splitField",
+            params: [{ value: "code", fromSource: true }, { value: "-" }, { value: 1 }]
+          }
+        }
+      ]
+    };
+    const result = executeTransformation(def, [{ code: "4100-001-003" }], sb);
+    expect(result.records[0]!.out).toBe("001");
+  });
+
+  it("currencyCode maps abbreviation to ISO code", () => {
+    const sb = sandbox();
+    const mapping = JSON.stringify({ TSH: "TZS", US: "USD" });
+    const def: TmlDefinition = {
+      rules: [
+        {
+          type: "transform",
+          target: "out",
+          function: {
+            name: "currencyCode",
+            params: [{ value: "curr", fromSource: true }, { value: mapping }]
+          }
+        }
+      ]
+    };
+    const result = executeTransformation(def, [{ curr: "TSH" }, { curr: "EUR" }], sb);
+    expect(result.records[0]!.out).toBe("TZS");
+    expect(result.records[1]!.out).toBe("EUR"); // pass-through
+  });
+
+  it("accountSegment extracts segment from composite code", () => {
+    const sb = sandbox();
+    const def: TmlDefinition = {
+      rules: [
+        {
+          type: "transform",
+          target: "dept",
+          function: {
+            name: "accountSegment",
+            params: [{ value: "acct", fromSource: true }, { value: "-" }, { value: 1 }]
+          }
+        }
+      ]
+    };
+    const result = executeTransformation(def, [{ acct: "4100-001-003" }], sb);
+    expect(result.records[0]!.dept).toBe("001");
+  });
+});
+
+// ── 10. Hospitality built-in functions ────────────────────────────────────────
+
+describe("hospitality built-in functions", () => {
+  it("operaDate parses YYYYMMDD to ISO", () => {
+    const sb = sandbox();
+    const def: TmlDefinition = {
+      rules: [
+        {
+          type: "transform",
+          target: "out",
+          function: {
+            name: "operaDate",
+            params: [{ value: "dt", fromSource: true }, { value: "YYYYMMDD" }]
+          }
+        }
+      ]
+    };
+    const result = executeTransformation(def, [{ dt: "20260410" }], sb);
+    expect(result.records[0]!.out).toBe("2026-04-10");
+  });
+
+  it("operaDate parses YYMMDD to ISO", () => {
+    const sb = sandbox();
+    const def: TmlDefinition = {
+      rules: [
+        {
+          type: "transform",
+          target: "out",
+          function: {
+            name: "operaDate",
+            params: [{ value: "dt", fromSource: true }, { value: "YYMMDD" }]
+          }
+        }
+      ]
+    };
+    const result = executeTransformation(def, [{ dt: "260410" }], sb);
+    expect(result.records[0]!.out).toBe("2026-04-10");
+  });
+
+  it("janaAmount divides by 1000 (user-selected, explicit)", () => {
+    const sb = sandbox();
+    const def: TmlDefinition = {
+      rules: [
+        {
+          type: "transform",
+          target: "out",
+          function: {
+            name: "janaAmount",
+            params: [{ value: "amt", fromSource: true, type: "number" }]
+          }
+        }
+      ]
+    };
+    const result = executeTransformation(def, [{ amt: 385000 }], sb);
+    expect(result.records[0]!.out).toBe(385);
+  });
+
+  it("simphonyRvc maps RVC code to department", () => {
+    const sb = sandbox();
+    const mapping = JSON.stringify({ "101": "Front Office", "201": "F&B" });
+    const def: TmlDefinition = {
+      rules: [
+        {
+          type: "transform",
+          target: "dept",
+          function: {
+            name: "simphonyRvc",
+            params: [{ value: "rvc", fromSource: true }, { value: mapping }]
+          }
+        }
+      ]
+    };
+    const result = executeTransformation(def, [{ rvc: "201" }, { rvc: "999" }], sb);
+    expect(result.records[0]!.dept).toBe("F&B");
+    expect(result.records[1]!.dept).toBe("999"); // pass-through
+  });
+
+  it("usaliMap maps account prefix to USALI department", () => {
+    const sb = sandbox();
+    const def: TmlDefinition = {
+      rules: [
+        {
+          type: "transform",
+          target: "dept",
+          function: {
+            name: "usaliMap",
+            params: [{ value: "acct", fromSource: true }, { value: "12th" }]
+          }
+        }
+      ]
+    };
+    const result = executeTransformation(
+      def,
+      [{ acct: "4100" }, { acct: "6000" }, { acct: "9999" }],
+      sb
+    );
+    expect(result.records[0]!.dept).toBe("Rooms");
+    expect(result.records[1]!.dept).toBe("Administrative & General");
+    expect(result.records[2]!.dept).toBe("9999"); // no match, pass-through
+  });
+
+  it("entityCode maps property code via JSON", () => {
+    const sb = sandbox();
+    const mapping = JSON.stringify({ PROP01: "ent-001", PROP02: "ent-002" });
+    const def: TmlDefinition = {
+      rules: [
+        {
+          type: "transform",
+          target: "entity",
+          function: {
+            name: "entityCode",
+            params: [{ value: "prop", fromSource: true }, { value: mapping }]
+          }
+        }
+      ]
+    };
+    const result = executeTransformation(def, [{ prop: "PROP01" }, { prop: "PROP03" }], sb);
+    expect(result.records[0]!.entity).toBe("ent-001");
+    expect(result.records[1]!.entity).toBe("PROP03"); // pass-through
+  });
+
+  it("taxExtract splits tax-inclusive amount into net", () => {
+    const sb = sandbox();
+    const def: TmlDefinition = {
+      rules: [
+        {
+          type: "transform",
+          target: "net",
+          function: {
+            name: "taxExtract",
+            params: [
+              { value: "gross", fromSource: true, type: "number" },
+              { value: 0.18 },
+              { value: 1 },
+              { value: "net" }
+            ]
+          }
+        },
+        {
+          type: "transform",
+          target: "tax",
+          function: {
+            name: "taxExtract",
+            params: [
+              { value: "gross", fromSource: true, type: "number" },
+              { value: 0.18 },
+              { value: 1 },
+              { value: "tax" }
+            ]
+          }
+        }
+      ]
+    };
+    const result = executeTransformation(def, [{ gross: 118 }], sb);
+    expect(result.records[0]!.net).toBe(100);
+    expect(result.records[0]!.tax).toBe(18);
+  });
+
+  it("taxExtract handles tax-exclusive amount", () => {
+    const sb = sandbox();
+    const def: TmlDefinition = {
+      rules: [
+        {
+          type: "transform",
+          target: "net",
+          function: {
+            name: "taxExtract",
+            params: [
+              { value: "amount", fromSource: true, type: "number" },
+              { value: 0.15 },
+              { value: 0 },
+              { value: "net" }
+            ]
+          }
+        },
+        {
+          type: "transform",
+          target: "tax",
+          function: {
+            name: "taxExtract",
+            params: [
+              { value: "amount", fromSource: true, type: "number" },
+              { value: 0.15 },
+              { value: 0 },
+              { value: "tax" }
+            ]
+          }
+        }
+      ]
+    };
+    const result = executeTransformation(def, [{ amount: 200 }], sb);
+    expect(result.records[0]!.net).toBe(200);
+    expect(result.records[0]!.tax).toBe(30);
   });
 });
