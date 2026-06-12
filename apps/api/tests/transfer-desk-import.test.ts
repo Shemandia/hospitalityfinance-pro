@@ -80,7 +80,8 @@ function createStubDb() {
         update: vi.fn(async (args: any) => {
           execUpdates.push(args.data);
           return {};
-        })
+        }),
+        findUnique: vi.fn().mockResolvedValue(null)
       },
       transferExecutionLog: {
         create: vi.fn(async (args: any) => {
@@ -131,6 +132,9 @@ function makeImportProfile(overrides: Partial<ProfileWithRelations> = {}): Profi
     id: "prof-001",
     name: "Jana Voucher Import",
     profileType: "IMPORT",
+    // These tests assert the direct-write path; run them in AUTO_COMMIT mode
+    // (HOLD is the new default and would stage a batch instead).
+    reviewMode: "AUTO_COMMIT",
     sourceComponent: null,
     targetComponent: "GL_JOURNAL",
     sourceFormatId: "fmt-001",
@@ -150,6 +154,7 @@ function makeImportProfile(overrides: Partial<ProfileWithRelations> = {}): Profi
       classification: "DELIMITED"
     },
     targetFormat: null,
+    transformation: null,
     ...overrides
   };
 }

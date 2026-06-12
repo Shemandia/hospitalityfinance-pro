@@ -193,6 +193,9 @@ function makeProfile(overrides: Partial<ProfileWithRelations> = {}): ProfileWith
     id: "prof-001",
     name: "Jana Import",
     profileType: "IMPORT",
+    // These tests assert the direct-write path; run them in AUTO_COMMIT mode
+    // (HOLD is the new default and would stage a batch instead).
+    reviewMode: "AUTO_COMMIT",
     sourceComponent: null,
     targetComponent: "GL_JOURNAL",
     sourceFormatId: "fmt-001",

@@ -103,6 +103,30 @@ enum JournalStatus {
   VOIDED
 }
 
+enum TransferBatchStatus {
+  PENDING_REVIEW
+  COMMITTED
+  DISCARDED
+}
+
+enum TransferBatchItemStatus {
+  HELD
+  COMMITTED
+  REJECTED
+  ERROR
+}
+
+enum TransferValidationStatus {
+  OK
+  WARNING
+  ERROR
+}
+
+enum TransferReviewMode {
+  HOLD
+  AUTO_COMMIT
+}
+
 enum RejectionReturnsTo {
   PREVIOUS_STAGE
   ORIGINATOR
@@ -220,6 +244,7 @@ enum FXRateSource {
   ECB
   OANDA
   MANUAL
+  OPEN_ER_API
 }
 
 // ── Corporate Allocation enums ──────────────────────────────────────────────
@@ -349,6 +374,14 @@ model Entity {
   icAccountPairsCounter    IntercompanyAccountPair[] @relation("ICPairCounterparty")
   icJournalsSource         IntercompanyJournal[]     @relation("ICJournalSource")
   icJournalsMirror         IntercompanyJournal[]     @relation("ICJournalMirror")
+  icPairsAsA               ICEntityPair[]            @relation("ICPairEntityA")
+  icPairsAsB               ICEntityPair[]            @relation("ICPairEntityB")
+  icTxnsInitiated          ICTransaction[]           @relation("ICTxnInitiator")
+  icTxnsCounterparty       ICTransaction[]           @relation("ICTxnCounterparty")
+  paymentProfiles          PaymentProfile[]
+  revaluationProfiles      RevaluationProfile[]
+  bankAccounts             BankAccount[]
+  taxCodes                 TaxCode[]
 
   @@index([parentId])
   @@map("entities")
@@ -357,7 +390,7 @@ model Entity {
 model User {
   id          String    @id @default(uuid())
   email       String    @unique
-  keycloakId  String    @unique @map("keycloak_id")
+  keycloakId  String?   @unique @map("keycloak_id") // Nullable: not needed for native auth users
   name        String
   phone       String?
   jobTitle    String?   @map("job_title")
@@ -365,9 +398,19 @@ model User {
   avatarUrl   String?   @map("avatar_url")
   isActive    Boolean   @default(true) @map("is_active")
   lastLoginAt DateTime? @map("last_login_at")
+  lastLoginIp String?   @map("last_login_ip") @db.VarChar(45)
   loginCount  Int       @default(0) @map("login_count")
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  // Native auth fields
+  passwordHash         String?   @map("password_hash") @db.VarChar(255)
+  passwordChangedAt    DateTime? @map("password_changed_at")
+  failedLoginAttempts  Int       @default(0) @map("failed_login_attempts")
+  lockedUntil          DateTime? @map("locked_until")
+  mustChangePassword   Boolean   @default(false) @map("must_change_password")
+  passwordResetToken   String?   @map("password_reset_token") @db.VarChar(255)
+  passwordResetExpires DateTime? @map("password_reset_expires")
 
   entities                     EntityUser[]
   roles                        UserRole[]
@@ -410,8 +453,8 @@ model LoginAudit {
 model EntityUser {
   entityId  String     @map("entity_id")
   userId    String     @map("user_id")
-  role      EntityRole
-  createdAt DateTime   @default(now()) @map("created_at")
+  role      EntityRole? // Deprecated: roles now assigned via UserRole table
+  createdAt DateTime    @default(now()) @map("created_at")
   entity    Entity     @relation(fields: [entityId], references: [id])
   user      User       @relation(fields: [userId], references: [id])
 
@@ -425,6 +468,7 @@ model Role {
   code        String           @unique
   name        String
   description String?
+  isSystem    Boolean          @default(false) @map("is_system")
   createdAt   DateTime         @default(now()) @map("created_at")
   updatedAt   DateTime         @updatedAt @map("updated_at")
   permissions RolePermission[]
@@ -437,6 +481,7 @@ model Permission {
   id          String           @id @default(uuid())
   code        String           @unique
   description String?
+  category    String?          @map("category")
   createdAt   DateTime         @default(now()) @map("created_at")
   updatedAt   DateTime         @updatedAt @map("updated_at")
   roles       RolePermission[]
@@ -551,6 +596,7 @@ model Account {
   connectorMappings     ConnectorMapping[]
   bankStatements        BankStatement[]
   recurringJournalLines RecurringJournalLine[]
+  bankAccounts          BankAccount[]
 
   @@unique([entityId, code])
   @@index([entityId, parentId])
@@ -691,6 +737,8 @@ model Journal {
   authorizations        JournalAuthorization[]
   icSourceJournals      IntercompanyJournal[]  @relation("ICSourceJournal")
   icMirrorJournals      IntercompanyJournal[]  @relation("ICMirrorJournal")
+  icTxnInitiatorJournals   ICTransaction[]    @relation("ICTxnInitiatorJournal")
+  icTxnCounterpartyJournals ICTransaction[]   @relation("ICTxnCounterpartyJournal")
 
   @@index([entityId, periodId, status])
   @@index([entityId, createdAt])
@@ -705,6 +753,10 @@ model JournalLine {
   accountId        String            @map("account_id")
   debit            Decimal           @db.Decimal(18, 4)
   credit           Decimal           @db.Decimal(18, 4)
+  /// Statistical value for STATISTICAL-type account postings (memo accounts).
+  /// Financial postings leave this NULL. For stats imports: debit=0, credit=0,
+  /// statValue holds the parsed quantity (÷1000 from SAF).
+  statValue        Decimal?          @map("stat_value") @db.Decimal(18, 3)
   currency         String            @db.Char(3)
   fxRate           Decimal           @default(1) @map("fx_rate") @db.Decimal(14, 8)
   debitFunctional  Decimal           @default(0) @map("debit_functional") @db.Decimal(18, 4)
@@ -858,13 +910,16 @@ model APInvoiceLine {
   amount      Decimal   @db.Decimal(18, 4)
   glAccountId String?   @map("gl_account_id")
   taxCode     String?   @map("tax_code")
+  taxCodeId   String?   @map("tax_code_id")
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
   invoice     APInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   glAccount   Account?  @relation(fields: [glAccountId], references: [id])
+  taxCodeRef  TaxCode?  @relation(fields: [taxCodeId], references: [id])
 
   @@index([invoiceId])
   @@index([glAccountId])
+  @@index([taxCodeId])
   @@map("ap_invoice_lines")
 }
 
@@ -953,11 +1008,13 @@ model APPayment {
   entity        Entity                @relation(fields: [entityId], references: [id])
   supplier      Supplier?             @relation(fields: [supplierId], references: [id])
   paymentRun    PaymentRun?           @relation(fields: [paymentRunId], references: [id])
+  bankAccount   BankAccount?          @relation(fields: [bankAccountId], references: [id])
   allocations   APPaymentAllocation[]
 
   @@index([entityId, status, paymentDate])
   @@index([supplierId])
   @@index([paymentRunId])
+  @@index([bankAccountId])
   @@map("ap_payments")
 }
 
@@ -1098,9 +1155,11 @@ model ARReceipt {
   updatedAt     DateTime       @updatedAt @map("updated_at")
   entity        Entity         @relation(fields: [entityId], references: [id])
   customer      Customer       @relation(fields: [customerId], references: [id])
+  bankAccount   BankAccount?   @relation(fields: [bankAccountId], references: [id])
   allocations   ARAllocation[]
 
   @@index([entityId, customerId, receiptDate])
+  @@index([bankAccountId])
   @@map("ar_receipts")
 }
 
@@ -1479,8 +1538,9 @@ model TransferProfile {
   /// Soft delete flag
   isActive         Boolean           @default(true) @map("is_active")
   /// Save behavior: NONE / INPUT / OUTPUT / BOTH
-  savePayload      SavePayloadOption @default(NONE) @map("save_payload")
-  createdById      String?           @map("created_by")
+  savePayload      SavePayloadOption  @default(NONE) @map("save_payload")
+  reviewMode       TransferReviewMode @default(HOLD) @map("review_mode")
+  createdById      String?            @map("created_by")
   createdAt        DateTime          @default(now()) @map("created_at")
   updatedAt        DateTime          @updatedAt @map("updated_at")
 
@@ -1880,6 +1940,54 @@ model TransferExecutionLog {
   @@index([executionId, recordIndex])
   @@index([executionId, status])
   @@map("transfer_execution_logs")
+}
+
+// ── TD-DB-019: transfer_batches ──────────────────────────────────────────────
+
+model TransferBatch {
+  id              String              @id @default(uuid())
+  entityId        String              @map("entity_id")
+  profileId       String              @map("profile_id")
+  executionId     String              @map("execution_id")
+  targetComponent String              @map("target_component")
+  status          TransferBatchStatus @default(PENDING_REVIEW)
+  totalItems      Int                 @default(0) @map("total_items")
+  heldItems       Int                 @default(0) @map("held_items")
+  rejectedItems   Int                 @default(0) @map("rejected_items")
+  committedItems  Int                 @default(0) @map("committed_items")
+  errorItems      Int                 @default(0) @map("error_items")
+  createdById     String              @map("created_by")
+  createdAt       DateTime            @default(now()) @map("created_at")
+  reviewedById    String?             @map("reviewed_by")
+  committedAt     DateTime?           @map("committed_at")
+
+  items TransferBatchItem[]
+
+  @@index([entityId, status])
+  @@index([profileId])
+  @@map("transfer_batches")
+}
+
+// ── TD-DB-020: transfer_batch_items ──────────────────────────────────────────
+
+model TransferBatchItem {
+  id                  String                   @id @default(uuid())
+  batchId             String                   @map("batch_id")
+  itemIndex           Int                      @map("item_index")
+  status              TransferBatchItemStatus  @default(HELD)
+  targetComponent     String                   @map("target_component")
+  payload             Json
+  sourceRecordIndices Int[]                    @map("source_record_indices")
+  validationStatus    TransferValidationStatus @default(OK) @map("validation_status")
+  validationMessages  Json?                    @map("validation_messages")
+  resultJournalId     String?                  @map("result_journal_id")
+  rejectedReason      String?                  @map("rejected_reason")
+  createdAt           DateTime                 @default(now()) @map("created_at")
+
+  batch TransferBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId, status])
+  @@map("transfer_batch_items")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2379,7 +2487,6 @@ model PaymentProfile {
   name              String                  @db.VarChar(200)
   direction         PaymentProfileDirection
   paymentMethod     PaymentMethod           @map("payment_method")
-  /// Bank account ID for disbursement/receipt (string ref — no FK to allow flexible setup)
   bankAccountId     String?                 @map("bank_account_id")
   currency          String?                 @db.Char(3)
   fxHandling        FXHandling              @default(ORIGINAL) @map("fx_handling")
@@ -2397,9 +2504,11 @@ model PaymentProfile {
   updatedAt         DateTime                @updatedAt @map("updated_at")
 
   entity      Entity       @relation(fields: [entityId], references: [id])
+  bankAccount BankAccount? @relation(fields: [bankAccountId], references: [id])
   paymentRuns PaymentRun[]
 
   @@index([entityId, direction, isActive])
+  @@index([bankAccountId])
   @@map("payment_profiles")
 }
 
@@ -2533,4 +2642,208 @@ model IntercompanyJournal {
   @@index([sourceEntityId, status])
   @@index([mirrorEntityId, status])
   @@map("intercompany_journals")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Intercompany v2 — Entity Pairs, Account Mappings, Transactions, Reconciliation
+// ═══════════════════════════════════════════════════════════════════════════════
+
+enum ICTransactionStatus {
+  DRAFT
+  PENDING_APPROVAL
+  POSTED
+  REJECTED
+  REVERSED
+}
+
+model ICEntityPair {
+  id                   String   @id @default(uuid())
+  entityAId            String   @map("entity_a_id")
+  entityBId            String   @map("entity_b_id")
+  isActive             Boolean  @default(true) @map("is_active")
+  autoApproveThreshold Decimal? @map("auto_approve_threshold") @db.Decimal(18, 4)
+  description          String?  @db.VarChar(500)
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  entityA  Entity @relation("ICPairEntityA", fields: [entityAId], references: [id])
+  entityB  Entity @relation("ICPairEntityB", fields: [entityBId], references: [id])
+
+  accountMappings ICAccountMapping[]
+  transactions    ICTransaction[]
+
+  @@unique([entityAId, entityBId])
+  @@map("ic_entity_pairs")
+}
+
+model ICAccountMapping {
+  id              String   @id @default(uuid())
+  pairId          String   @map("pair_id")
+  name            String   @db.VarChar(100)
+  /// Account code in Entity A to debit
+  entityADebitCode  String  @map("entity_a_debit_code") @db.VarChar(15)
+  /// Account code in Entity A to credit
+  entityACreditCode String  @map("entity_a_credit_code") @db.VarChar(15)
+  /// Account code in Entity B to debit
+  entityBDebitCode  String  @map("entity_b_debit_code") @db.VarChar(15)
+  /// Account code in Entity B to credit
+  entityBCreditCode String  @map("entity_b_credit_code") @db.VarChar(15)
+  isActive          Boolean @default(true) @map("is_active")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  pair         ICEntityPair    @relation(fields: [pairId], references: [id])
+  transactions ICTransaction[]
+
+  @@map("ic_account_mappings")
+}
+
+model ICTransaction {
+  id                String              @id @default(uuid())
+  pairId            String              @map("pair_id")
+  mappingId         String?             @map("mapping_id")
+  /// Entity that initiated the transaction
+  initiatingEntityId String             @map("initiating_entity_id")
+  /// Counterparty entity
+  counterpartyEntityId String           @map("counterparty_entity_id")
+  status            ICTransactionStatus @default(DRAFT)
+  /// Transaction amount in the stated currency
+  amount            Decimal             @db.Decimal(18, 4)
+  currency          String              @db.VarChar(3)
+  /// FX rate from transaction currency to initiating entity functional currency
+  fxRateInitiator   Decimal             @default(1) @map("fx_rate_initiator") @db.Decimal(18, 8)
+  /// FX rate from transaction currency to counterparty functional currency
+  fxRateCounterparty Decimal            @default(1) @map("fx_rate_counterparty") @db.Decimal(18, 8)
+  /// Functional amount in initiating entity's currency
+  functionalAmountInitiator Decimal     @map("functional_amount_initiator") @db.Decimal(18, 4)
+  /// Functional amount in counterparty entity's currency
+  functionalAmountCounterparty Decimal  @map("functional_amount_counterparty") @db.Decimal(18, 4)
+  reference         String              @db.VarChar(60)
+  description       String?             @db.VarChar(500)
+  periodId          String              @map("period_id")
+  /// Journal posted in initiating entity
+  initiatorJournalId String?            @map("initiator_journal_id")
+  /// Journal posted in counterparty entity
+  counterpartyJournalId String?         @map("counterparty_journal_id")
+  /// If this is a reversal, the original transaction ID
+  reversalOfId      String?             @map("reversal_of_id")
+  createdById       String              @map("created_by")
+  approvedById      String?             @map("approved_by")
+  approvedAt        DateTime?           @map("approved_at")
+  rejectedById      String?             @map("rejected_by")
+  rejectedAt        DateTime?           @map("rejected_at")
+  rejectionReason   String?             @map("rejection_reason") @db.VarChar(500)
+  postedAt          DateTime?           @map("posted_at")
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+
+  pair               ICEntityPair     @relation(fields: [pairId], references: [id])
+  mapping            ICAccountMapping? @relation(fields: [mappingId], references: [id])
+  initiatingEntity   Entity           @relation("ICTxnInitiator", fields: [initiatingEntityId], references: [id])
+  counterpartyEntity Entity           @relation("ICTxnCounterparty", fields: [counterpartyEntityId], references: [id])
+  initiatorJournal   Journal?         @relation("ICTxnInitiatorJournal", fields: [initiatorJournalId], references: [id])
+  counterpartyJournal Journal?        @relation("ICTxnCounterpartyJournal", fields: [counterpartyJournalId], references: [id])
+  reversalOf         ICTransaction?   @relation("ICTxnReversal", fields: [reversalOfId], references: [id])
+  reversals          ICTransaction[]  @relation("ICTxnReversal")
+
+  @@index([pairId, status])
+  @@index([initiatingEntityId, status])
+  @@index([counterpartyEntityId, status])
+  @@map("ic_transactions")
+}
+
+model ICReconciliationSnapshot {
+  id              String   @id @default(uuid())
+  pairId          String   @map("pair_id")
+  periodId        String   @map("period_id")
+  /// Balance as seen by Entity A (positive = A owes B)
+  balanceEntityA  Decimal  @map("balance_entity_a") @db.Decimal(18, 4)
+  /// Balance as seen by Entity B (positive = B owes A)
+  balanceEntityB  Decimal  @map("balance_entity_b") @db.Decimal(18, 4)
+  /// Difference between the two views
+  difference      Decimal  @db.Decimal(18, 4)
+  currency        String   @db.VarChar(3)
+  status          String   @default("UNRECONCILED") @db.VarChar(20)
+  notes           String?  @db.VarChar(500)
+  createdById     String   @map("created_by")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@unique([pairId, periodId])
+  @@map("ic_reconciliation_snapshots")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Bank Accounts (master table for entity bank accounts)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model BankAccount {
+  id            String   @id @default(uuid())
+  entityId      String   @map("entity_id")
+  /// Reference to the GL cash/bank account in the chart of accounts
+  glAccountId   String?  @map("gl_account_id")
+  bankName      String   @map("bank_name") @db.VarChar(200)
+  accountName   String?  @map("account_name") @db.VarChar(200)
+  accountNumber String   @map("account_number") @db.VarChar(50)
+  currency      String   @db.Char(3)
+  swiftCode     String?  @map("swift_code") @db.VarChar(11)
+  iban          String?  @db.VarChar(34)
+  branchCode    String?  @map("branch_code") @db.VarChar(20)
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  entity      Entity     @relation(fields: [entityId], references: [id])
+  glAccount   Account?   @relation(fields: [glAccountId], references: [id])
+  apPayments  APPayment[]
+  arReceipts  ARReceipt[]
+  paymentProfiles PaymentProfile[]
+
+  @@unique([entityId, accountNumber])
+  @@index([entityId, isActive])
+  @@map("bank_accounts")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Tax Codes & Rates (VAT / WHT / Sales Tax compliance)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+enum TaxType {
+  VAT
+  WHT
+  SALES_TAX
+  EXCISE
+}
+
+model TaxCode {
+  id          String   @id @default(uuid())
+  entityId    String   @map("entity_id")
+  code        String   @db.VarChar(20)
+  description String?  @db.VarChar(200)
+  taxType     TaxType  @map("tax_type")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  entity         Entity          @relation(fields: [entityId], references: [id])
+  rates          TaxRate[]
+  apInvoiceLines APInvoiceLine[]
+
+  @@unique([entityId, code])
+  @@index([entityId, taxType, isActive])
+  @@map("tax_codes")
+}
+
+model TaxRate {
+  id            String    @id @default(uuid())
+  taxCodeId     String    @map("tax_code_id")
+  rate          Decimal   @db.Decimal(8, 4)
+  effectiveFrom DateTime  @map("effective_from") @db.Date
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+  isCurrent     Boolean   @default(true) @map("is_current")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  taxCode TaxCode @relation(fields: [taxCodeId], references: [id], onDelete: Cascade)
+
+  @@index([taxCodeId, isCurrent])
+  @@map("tax_rates")
 }
