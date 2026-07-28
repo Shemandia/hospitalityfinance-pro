@@ -8,12 +8,18 @@ import {
   createReportRun,
   getPeriodList,
   getReportDefinitions,
-  getReportRun,
+  getReportRun
 } from "../../../lib/gl-api";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
 import { Badge } from "../../../components/ui/badge";
 import { Button } from "../../../components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../../../components/ui/select";
 import { Separator } from "../../../components/ui/separator";
 import {
   BarChart2,
@@ -24,7 +30,7 @@ import {
   Loader2,
   CheckCircle2,
   XCircle,
-  Clock,
+  Clock
 } from "lucide-react";
 
 // ── Report cards ──────────────────────────────────────────────────────────────
@@ -32,38 +38,52 @@ import {
 const REPORT_CARDS = [
   {
     title: "USALI P&L",
-    description: "Departmental operating statement — Rooms, F&B, Spa, GOP, EBITDA. 11th Edition format.",
+    description:
+      "Departmental operating statement — Rooms, F&B, Spa, GOP, EBITDA. 11th Edition format.",
     href: "/reports/usali-pl",
     icon: BarChart2,
     accentClass: "bg-blue-600",
-    badge: "Operational",
+    badge: "Operational"
   },
   {
     title: "Balance Sheet",
-    description: "Statement of financial position — Assets, Liabilities, Equity with section drill-down.",
+    description:
+      "Statement of financial position — Assets, Liabilities, Equity with section drill-down.",
     href: "/reports/balance-sheet",
     icon: Scale,
     accentClass: "bg-emerald-600",
-    badge: "Financial",
+    badge: "Financial"
   },
   {
     title: "Cash Flow",
-    description: "Cash flow statement (indirect method) — Operating, Investing, Financing activities.",
+    description:
+      "Cash flow statement (indirect method) — Operating, Investing, Financing activities.",
     href: "/reports/cashflow",
     icon: Activity,
     accentClass: "bg-violet-600",
-    badge: "Financial",
-  },
+    badge: "Financial"
+  }
 ];
 
 // ── Run status badge ──────────────────────────────────────────────────────────
 
 function RunStatusBadge({ status }: { status: string }) {
-  const map: Record<string, { label: string; variant: "default" | "secondary" | "outline" | "destructive"; icon: React.ReactNode }> = {
+  const map: Record<
+    string,
+    {
+      label: string;
+      variant: "default" | "secondary" | "outline" | "destructive";
+      icon: React.ReactNode;
+    }
+  > = {
     QUEUED: { label: "Queued", variant: "secondary", icon: <Clock className="h-3 w-3" /> },
-    RUNNING: { label: "Running", variant: "secondary", icon: <Loader2 className="h-3 w-3 animate-spin" /> },
+    RUNNING: {
+      label: "Running",
+      variant: "secondary",
+      icon: <Loader2 className="h-3 w-3 animate-spin" />
+    },
     DONE: { label: "Done", variant: "default", icon: <CheckCircle2 className="h-3 w-3" /> },
-    FAILED: { label: "Failed", variant: "destructive", icon: <XCircle className="h-3 w-3" /> },
+    FAILED: { label: "Failed", variant: "destructive", icon: <XCircle className="h-3 w-3" /> }
   };
   const cfg = map[status] ?? { label: status, variant: "outline" as const, icon: null };
   return (
@@ -77,7 +97,12 @@ function RunStatusBadge({ status }: { status: string }) {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 type ReportDefinition = { id: string; name: string; type: string; isSystem: boolean };
-type ReportRun = { id: string; status: string; outputUrl?: string | null; errorMessage?: string | null };
+type ReportRun = {
+  id: string;
+  status: string;
+  outputUrl?: string | null;
+  errorMessage?: string | null;
+};
 
 export default function ReportsPage() {
   const apiContext = useApiContext();
@@ -92,7 +117,7 @@ export default function ReportsPage() {
       const res = await getReportDefinitions(apiContext);
       return (res.data as unknown as ReportDefinition[]) ?? [];
     },
-    enabled: Boolean(apiContext),
+    enabled: Boolean(apiContext)
   });
 
   const periodsQuery = useQuery({
@@ -102,7 +127,7 @@ export default function ReportsPage() {
       const res = await getPeriodList(apiContext);
       return res.data ?? [];
     },
-    enabled: Boolean(apiContext),
+    enabled: Boolean(apiContext)
   });
 
   const runMutation = useMutation({
@@ -110,11 +135,11 @@ export default function ReportsPage() {
       if (!apiContext) throw new Error("Missing API context.");
       const res = await createReportRun(apiContext, {
         definitionId,
-        parameters: { periodId },
+        parameters: { periodId }
       });
       return res.data as ReportRun;
     },
-    onSuccess: (run) => setLastRunId(run.id),
+    onSuccess: (run) => setLastRunId(run.id)
   });
 
   const runStatusQuery = useQuery({
@@ -128,7 +153,7 @@ export default function ReportsPage() {
     refetchInterval: (query) => {
       const status = (query.state.data as ReportRun | null)?.status;
       return status === "QUEUED" || status === "RUNNING" ? 3000 : false;
-    },
+    }
   });
 
   const canRun = definitionId !== "NONE" && periodId !== "NONE" && !runMutation.isPending;
@@ -137,7 +162,7 @@ export default function ReportsPage() {
     <div className="space-y-8">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-(--color-primary)">Reports</h1>
+        <h1 className="text-2xl font-bold text-[var(--color-primary)]">Reports</h1>
         <p className="text-sm text-muted-foreground mt-0.5">
           Financial statements and operational reports for your property.
         </p>
@@ -145,7 +170,9 @@ export default function ReportsPage() {
 
       {/* Quick-access report cards */}
       <div>
-        <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-3">Financial Statements</h2>
+        <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-3">
+          Financial Statements
+        </h2>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           {REPORT_CARDS.map(({ title, description, href, icon: Icon, accentClass, badge }) => (
             <Link key={href} href={href} className="block group">
@@ -155,15 +182,19 @@ export default function ReportsPage() {
                     <div className={`p-2.5 rounded-lg ${accentClass}`}>
                       <Icon className="h-4 w-4 text-white" />
                     </div>
-                    <Badge variant="outline" className="text-[10px]">{badge}</Badge>
+                    <Badge variant="outline" className="text-[10px]">
+                      {badge}
+                    </Badge>
                   </div>
                   <div className="flex-1">
-                    <h3 className="font-semibold text-slate-800 group-hover:text-(--color-primary) transition-colors">
+                    <h3 className="font-semibold text-slate-800 group-hover:text-[var(--color-primary)] transition-colors">
                       {title}
                     </h3>
-                    <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{description}</p>
+                    <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                      {description}
+                    </p>
                   </div>
-                  <div className="flex items-center gap-1 text-xs font-medium text-(--color-primary) opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="flex items-center gap-1 text-xs font-medium text-[var(--color-primary)] opacity-0 group-hover:opacity-100 transition-opacity">
                     Open report <ArrowRight className="h-3 w-3" />
                   </div>
                 </CardContent>
@@ -177,7 +208,9 @@ export default function ReportsPage() {
 
       {/* Custom / queued report runner */}
       <div>
-        <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-3">Custom Report Queue</h2>
+        <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-3">
+          Custom Report Queue
+        </h2>
         <Card className="max-w-xl">
           <CardHeader className="pb-2">
             <CardTitle className="text-base flex items-center gap-2">
@@ -202,7 +235,9 @@ export default function ReportsPage() {
                   {(definitionsQuery.data ?? []).map((d) => (
                     <SelectItem key={d.id} value={d.id}>
                       {d.name}
-                      <Badge variant="outline" className="ml-2 text-[10px]">{d.type}</Badge>
+                      <Badge variant="outline" className="ml-2 text-[10px]">
+                        {d.type}
+                      </Badge>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -222,18 +257,16 @@ export default function ReportsPage() {
                   {(periodsQuery.data ?? []).map((p) => (
                     <SelectItem key={p.id} value={p.id}>
                       {p.name}
-                      <Badge variant="outline" className="ml-2 text-[10px]">{p.status}</Badge>
+                      <Badge variant="outline" className="ml-2 text-[10px]">
+                        {p.status}
+                      </Badge>
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
-            <Button
-              onClick={() => runMutation.mutate()}
-              disabled={!canRun}
-              className="gap-1.5"
-            >
+            <Button onClick={() => runMutation.mutate()} disabled={!canRun} className="gap-1.5">
               {runMutation.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
               {runMutation.isPending ? "Queueing…" : "Run Report"}
             </Button>
@@ -246,7 +279,9 @@ export default function ReportsPage() {
             {runStatusQuery.data && (
               <div className="rounded-lg border border-slate-200 p-4 space-y-2 bg-slate-50">
                 <div className="flex items-center justify-between">
-                  <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Latest Run</p>
+                  <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                    Latest Run
+                  </p>
                   <RunStatusBadge status={runStatusQuery.data.status} />
                 </div>
                 <p className="text-xs text-slate-500 font-mono">{runStatusQuery.data.id}</p>

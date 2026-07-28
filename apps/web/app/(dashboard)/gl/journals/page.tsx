@@ -1,21 +1,36 @@
 "use client";
 
-import {
-  flexRender,
-  getCoreRowModel,
-  useReactTable,
-  type ColumnDef
-} from "@tanstack/react-table";
+import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useApiContext } from "../../../../components/use-api-context";
-import { approveGLJournal, getGLJournal, getGLJournals, postGLJournal, rejectGLJournal, reverseGLJournal } from "../../../../lib/gl-api";
+import {
+  approveGLJournal,
+  getGLJournal,
+  getGLJournals,
+  postGLJournal,
+  rejectGLJournal,
+  reverseGLJournal
+} from "../../../../lib/gl-api";
 import { Button } from "../../../../components/ui/button";
 import { Input } from "../../../../components/ui/input";
 import { Badge } from "../../../../components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../../components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../../../components/ui/table";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../../components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
+} from "../../../../components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../../../../components/ui/select";
 import { Separator } from "../../../../components/ui/separator";
 import { Download, CheckCircle, XCircle, X, RotateCcw, Send } from "lucide-react";
 import Link from "next/link";
@@ -41,18 +56,24 @@ type JournalLine = {
   description?: string | null;
 };
 
-const statusVariant: Record<string, "default" | "success" | "warning" | "destructive" | "secondary" | "info"> = {
+const statusVariant: Record<
+  string,
+  "default" | "success" | "warning" | "destructive" | "secondary" | "info"
+> = {
   POSTED: "success",
   DRAFT: "secondary",
   PENDING_APPROVAL: "warning",
   REVERSED: "destructive",
-  REJECTED: "destructive",
+  REJECTED: "destructive"
 };
 
 function fmt(v: string | number) {
   const n = Number(v);
   if (!n) return "—";
-  return new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(n);
 }
 
 export default function GLJournalsPage() {
@@ -67,7 +88,11 @@ export default function GLJournalsPage() {
     queryKey: ["journals", apiContext?.entityId, status, search],
     queryFn: async () => {
       if (!apiContext) return [];
-      const response = await getGLJournals(apiContext, { status: status || undefined, search: search || undefined, limit: 100 });
+      const response = await getGLJournals(apiContext, {
+        status: status || undefined,
+        search: search || undefined,
+        limit: 100
+      });
       return (response.data as unknown as JournalRow[]) ?? [];
     },
     enabled: Boolean(apiContext)
@@ -128,80 +153,113 @@ export default function GLJournalsPage() {
     }
   });
 
-  const columns = useMemo<ColumnDef<JournalRow>[]>(() => [
-    {
-      accessorKey: "reference",
-      header: "Reference",
-      cell: (ctx) => <span className="font-mono text-xs">{String(ctx.getValue() ?? "—")}</span>
-    },
-    {
-      accessorKey: "description",
-      header: "Description",
-      cell: (ctx) => <span className="text-xs text-muted-foreground truncate max-w-[160px] block">{String(ctx.getValue() ?? "—")}</span>
-    },
-    {
-      accessorKey: "status",
-      header: "Status",
-      cell: (ctx) => {
-        const s = String(ctx.getValue());
-        return <Badge variant={statusVariant[s] ?? "secondary"} className="text-xs">{s.replace("_", " ")}</Badge>;
+  const columns = useMemo<ColumnDef<JournalRow>[]>(
+    () => [
+      {
+        accessorKey: "reference",
+        header: "Reference",
+        cell: (ctx) => <span className="font-mono text-xs">{String(ctx.getValue() ?? "—")}</span>
+      },
+      {
+        accessorKey: "description",
+        header: "Description",
+        cell: (ctx) => (
+          <span className="text-xs text-muted-foreground truncate max-w-[160px] block">
+            {String(ctx.getValue() ?? "—")}
+          </span>
+        )
+      },
+      {
+        accessorKey: "status",
+        header: "Status",
+        cell: (ctx) => {
+          const s = String(ctx.getValue());
+          return (
+            <Badge variant={statusVariant[s] ?? "secondary"} className="text-xs">
+              {s.replace("_", " ")}
+            </Badge>
+          );
+        }
+      },
+      {
+        accessorKey: "source",
+        header: "Source",
+        cell: (ctx) => (
+          <Badge variant="info" className="text-xs">
+            {String(ctx.getValue() ?? "—")}
+          </Badge>
+        )
+      },
+      {
+        id: "amount",
+        header: "Amount",
+        cell: (ctx) => {
+          const lines = ctx.row.original.lines ?? [];
+          const total = lines.reduce((s, l) => s + Number(l.debit || 0), 0);
+          return <span className="font-mono text-xs tabular-nums">{total ? fmt(total) : "—"}</span>;
+        }
+      },
+      {
+        accessorKey: "createdAt",
+        header: "Created",
+        cell: (ctx) => (
+          <span className="text-xs text-muted-foreground">
+            {new Date(String(ctx.getValue())).toLocaleString()}
+          </span>
+        )
       }
-    },
-    {
-      accessorKey: "source",
-      header: "Source",
-      cell: (ctx) => <Badge variant="info" className="text-xs">{String(ctx.getValue() ?? "—")}</Badge>
-    },
-    {
-      id: "amount",
-      header: "Amount",
-      cell: (ctx) => {
-        const lines = ctx.row.original.lines ?? [];
-        const total = lines.reduce((s, l) => s + Number(l.debit || 0), 0);
-        return <span className="font-mono text-xs tabular-nums">{total ? fmt(total) : "—"}</span>;
-      }
-    },
-    {
-      accessorKey: "createdAt",
-      header: "Created",
-      cell: (ctx) => <span className="text-xs text-muted-foreground">{new Date(String(ctx.getValue())).toLocaleString()}</span>
-    }
-  ], []);
+    ],
+    []
+  );
 
-  const table = useReactTable({ data: journalsQuery.data ?? [], columns, getCoreRowModel: getCoreRowModel() });
+  const table = useReactTable({
+    data: journalsQuery.data ?? [],
+    columns,
+    getCoreRowModel: getCoreRowModel()
+  });
 
   function exportCsv(rows: JournalRow[]) {
     const headers = ["ID", "Reference", "Status", "Source", "Created At"];
-    const csvRows = rows.map(r => [r.id, r.reference ?? "", r.status, r.source, r.createdAt].map(f => `"${String(f).replace(/"/g, '""')}"`).join(","));
+    const csvRows = rows.map((r) =>
+      [r.id, r.reference ?? "", r.status, r.source, r.createdAt]
+        .map((f) => `"${String(f).replace(/"/g, '""')}"`)
+        .join(",")
+    );
     const csv = [headers.join(","), ...csvRows].join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
     const a = Object.assign(document.createElement("a"), { href: url, download: "journals.csv" });
-    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   }
 
   const detail = journalDetailQuery.data as any;
   const selectedStatus = detail?.status;
   const lines: JournalLine[] = detail?.lines ?? [];
 
-  const lineTotals = useMemo(() => ({
-    debit: lines.reduce((s, l) => s + Number(l.debit || 0), 0),
-    credit: lines.reduce((s, l) => s + Number(l.credit || 0), 0),
-  }), [lines]);
+  const lineTotals = useMemo(
+    () => ({
+      debit: lines.reduce((s, l) => s + Number(l.debit || 0), 0),
+      credit: lines.reduce((s, l) => s + Number(l.credit || 0), 0)
+    }),
+    [lines]
+  );
 
   return (
     <div className={`grid gap-4 ${selectedJournalId ? "grid-cols-[1fr_420px]" : "grid-cols-1"}`}>
       {/* ── List ── */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between pb-3">
-          <CardTitle className="text-(--color-primary)">Journal Entries</CardTitle>
+          <CardTitle className="text-[var(--color-primary)]">Journal Entries</CardTitle>
           <div className="flex items-center gap-2 flex-wrap">
             <Input
               placeholder="Search reference or description…"
               value={search}
-              onChange={e => setSearch(e.target.value)}
+              onChange={(e) => setSearch(e.target.value)}
               className="w-52"
             />
-            <Select value={status || "ALL"} onValueChange={v => setStatus(v === "ALL" ? "" : v)}>
+            <Select value={status || "ALL"} onValueChange={(v) => setStatus(v === "ALL" ? "" : v)}>
               <SelectTrigger className="w-44">
                 <SelectValue placeholder="All statuses" />
               </SelectTrigger>
@@ -224,11 +282,13 @@ export default function GLJournalsPage() {
         <CardContent className="p-0">
           <Table>
             <TableHeader>
-              {table.getHeaderGroups().map(group => (
+              {table.getHeaderGroups().map((group) => (
                 <TableRow key={group.id}>
-                  {group.headers.map(header => (
+                  {group.headers.map((header) => (
                     <TableHead key={header.id} className="text-xs">
-                      {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
+                      {header.isPlaceholder
+                        ? null
+                        : flexRender(header.column.columnDef.header, header.getContext())}
                     </TableHead>
                   ))}
                 </TableRow>
@@ -238,23 +298,39 @@ export default function GLJournalsPage() {
               {journalsQuery.isLoading ? (
                 <>
                   {Array.from({ length: 5 }).map((_, i) => (
-                    <TableRow key={i}><TableCell colSpan={6}><div className="h-8 w-full animate-pulse rounded bg-muted" /></TableCell></TableRow>
+                    <TableRow key={i}>
+                      <TableCell colSpan={6}>
+                        <div className="h-8 w-full animate-pulse rounded bg-muted" />
+                      </TableCell>
+                    </TableRow>
                   ))}
                 </>
-
               ) : journalsQuery.isError ? (
-                <TableRow><TableCell colSpan={6} className="text-center py-8 text-destructive text-sm">{(journalsQuery.error as Error).message}</TableCell></TableRow>
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center py-8 text-destructive text-sm">
+                    {(journalsQuery.error as Error).message}
+                  </TableCell>
+                </TableRow>
               ) : table.getRowModel().rows.length === 0 ? (
-                <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground text-sm">No journals found</TableCell></TableRow>
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground text-sm">
+                    No journals found
+                  </TableCell>
+                </TableRow>
               ) : (
-                table.getRowModel().rows.map(row => (
+                table.getRowModel().rows.map((row) => (
                   <TableRow
                     key={row.id}
-                    onClick={() => { setSelectedJournalId(row.original.id); setConfirmReverse(false); }}
-                    className={`cursor-pointer ${selectedJournalId === row.original.id ? "bg-(--color-primary)/5 border-l-2 border-l-(--color-primary)" : "hover:bg-muted/40"}`}
+                    onClick={() => {
+                      setSelectedJournalId(row.original.id);
+                      setConfirmReverse(false);
+                    }}
+                    className={`cursor-pointer ${selectedJournalId === row.original.id ? "bg-[var(--color-primary)]/5 border-l-2 border-l-[var(--color-primary)]" : "hover:bg-muted/40"}`}
                   >
-                    {row.getVisibleCells().map(cell => (
-                      <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
+                    {row.getVisibleCells().map((cell) => (
+                      <TableCell key={cell.id}>
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </TableCell>
                     ))}
                   </TableRow>
                 ))
@@ -289,9 +365,20 @@ export default function GLJournalsPage() {
                   {/* Meta grid */}
                   <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
                     <div className="text-muted-foreground">Status</div>
-                    <div><Badge variant={statusVariant[selectedStatus] ?? "secondary"} className="text-xs">{selectedStatus?.replace("_", " ")}</Badge></div>
+                    <div>
+                      <Badge
+                        variant={statusVariant[selectedStatus] ?? "secondary"}
+                        className="text-xs"
+                      >
+                        {selectedStatus?.replace("_", " ")}
+                      </Badge>
+                    </div>
                     <div className="text-muted-foreground">Source</div>
-                    <div><Badge variant="info" className="text-xs">{detail.source}</Badge></div>
+                    <div>
+                      <Badge variant="info" className="text-xs">
+                        {detail.source}
+                      </Badge>
+                    </div>
                     <div className="text-muted-foreground">Period</div>
                     <div className="font-medium">{detail.period?.name ?? "—"}</div>
                     <div className="text-muted-foreground">Currency</div>
@@ -308,47 +395,91 @@ export default function GLJournalsPage() {
 
                   {/* Lines */}
                   <div>
-                    <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide mb-2">Journal Lines</p>
+                    <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide mb-2">
+                      Journal Lines
+                    </p>
                     <div className="rounded-md border border-border overflow-hidden">
                       <table className="w-full text-xs">
                         <thead className="bg-muted/60">
                           <tr>
-                            <th className="px-2 py-1.5 text-left font-medium text-muted-foreground w-6">#</th>
-                            <th className="px-2 py-1.5 text-left font-medium text-muted-foreground">Account</th>
-                            <th className="px-2 py-1.5 text-right font-medium text-muted-foreground w-20">Debit</th>
-                            <th className="px-2 py-1.5 text-right font-medium text-muted-foreground w-20">Credit</th>
+                            <th className="px-2 py-1.5 text-left font-medium text-muted-foreground w-6">
+                              #
+                            </th>
+                            <th className="px-2 py-1.5 text-left font-medium text-muted-foreground">
+                              Account
+                            </th>
+                            <th className="px-2 py-1.5 text-right font-medium text-muted-foreground w-20">
+                              Debit
+                            </th>
+                            <th className="px-2 py-1.5 text-right font-medium text-muted-foreground w-20">
+                              Credit
+                            </th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border">
                           {lines.length === 0 ? (
-                            <tr><td colSpan={4} className="px-2 py-3 text-center text-muted-foreground">No lines</td></tr>
-                          ) : lines.map(line => (
-                            <tr key={line.id} className="hover:bg-muted/30">
-                              <td className="px-2 py-1.5 text-muted-foreground">{line.lineNumber}</td>
-                              <td className="px-2 py-1.5">
-                                <span className="font-mono text-muted-foreground">{line.account?.code ?? "—"}</span>
-                                <span className="ml-1 text-foreground">{line.account?.name ?? ""}</span>
-                                {line.description && <div className="text-muted-foreground/70 italic mt-0.5">{line.description}</div>}
-                              </td>
-                              <td className="px-2 py-1.5 text-right tabular-nums font-mono text-emerald-700">
-                                {Number(line.debit) > 0 ? fmt(line.debit) : ""}
-                              </td>
-                              <td className="px-2 py-1.5 text-right tabular-nums font-mono text-violet-700">
-                                {Number(line.credit) > 0 ? fmt(line.credit) : ""}
+                            <tr>
+                              <td
+                                colSpan={4}
+                                className="px-2 py-3 text-center text-muted-foreground"
+                              >
+                                No lines
                               </td>
                             </tr>
-                          ))}
+                          ) : (
+                            lines.map((line) => (
+                              <tr key={line.id} className="hover:bg-muted/30">
+                                <td className="px-2 py-1.5 text-muted-foreground">
+                                  {line.lineNumber}
+                                </td>
+                                <td className="px-2 py-1.5">
+                                  <span className="font-mono text-muted-foreground">
+                                    {line.account?.code ?? "—"}
+                                  </span>
+                                  <span className="ml-1 text-foreground">
+                                    {line.account?.name ?? ""}
+                                  </span>
+                                  {line.description && (
+                                    <div className="text-muted-foreground/70 italic mt-0.5">
+                                      {line.description}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="px-2 py-1.5 text-right tabular-nums font-mono text-emerald-700">
+                                  {Number(line.debit) > 0 ? fmt(line.debit) : ""}
+                                </td>
+                                <td className="px-2 py-1.5 text-right tabular-nums font-mono text-violet-700">
+                                  {Number(line.credit) > 0 ? fmt(line.credit) : ""}
+                                </td>
+                              </tr>
+                            ))
+                          )}
                         </tbody>
                         <tfoot className="bg-muted/40 border-t border-border">
                           <tr>
-                            <td colSpan={2} className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
+                            <td
+                              colSpan={2}
+                              className="px-2 py-1.5 text-xs font-semibold text-muted-foreground"
+                            >
                               {lines.length} lines ·{" "}
-                              <span className={Math.abs(lineTotals.debit - lineTotals.credit) < 0.001 ? "text-emerald-700" : "text-destructive"}>
-                                {Math.abs(lineTotals.debit - lineTotals.credit) < 0.001 ? "Balanced ✓" : "Unbalanced ✗"}
+                              <span
+                                className={
+                                  Math.abs(lineTotals.debit - lineTotals.credit) < 0.001
+                                    ? "text-emerald-700"
+                                    : "text-destructive"
+                                }
+                              >
+                                {Math.abs(lineTotals.debit - lineTotals.credit) < 0.001
+                                  ? "Balanced ✓"
+                                  : "Unbalanced ✗"}
                               </span>
                             </td>
-                            <td className="px-2 py-1.5 text-right tabular-nums font-mono font-semibold text-emerald-700">{fmt(lineTotals.debit)}</td>
-                            <td className="px-2 py-1.5 text-right tabular-nums font-mono font-semibold text-violet-700">{fmt(lineTotals.credit)}</td>
+                            <td className="px-2 py-1.5 text-right tabular-nums font-mono font-semibold text-emerald-700">
+                              {fmt(lineTotals.debit)}
+                            </td>
+                            <td className="px-2 py-1.5 text-right tabular-nums font-mono font-semibold text-violet-700">
+                              {fmt(lineTotals.credit)}
+                            </td>
                           </tr>
                         </tfoot>
                       </table>
@@ -360,12 +491,29 @@ export default function GLJournalsPage() {
                     <>
                       <Separator />
                       <div>
-                        <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide mb-2">Approval History</p>
+                        <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide mb-2">
+                          Approval History
+                        </p>
                         <ul className="space-y-1">
-                          {(detail.approvals as Array<{ id: string; status: string; approver?: { email?: string } }>).map(a => (
+                          {(
+                            detail.approvals as Array<{
+                              id: string;
+                              status: string;
+                              approver?: { email?: string };
+                            }>
+                          ).map((a) => (
                             <li key={a.id} className="flex items-center justify-between text-xs">
                               <span>{a.approver?.email ?? a.id}</span>
-                              <Badge variant={a.status === "APPROVED" ? "success" : a.status === "REJECTED" ? "destructive" : "secondary"} className="text-[10px]">
+                              <Badge
+                                variant={
+                                  a.status === "APPROVED"
+                                    ? "success"
+                                    : a.status === "REJECTED"
+                                      ? "destructive"
+                                      : "secondary"
+                                }
+                                className="text-[10px]"
+                              >
                                 {a.status}
                               </Badge>
                             </li>
@@ -390,7 +538,9 @@ export default function GLJournalsPage() {
                           {postMutation.isPending ? "Posting…" : "Post Journal"}
                         </Button>
                         {postMutation.isError && (
-                          <p className="text-xs text-destructive">{(postMutation.error as Error).message}</p>
+                          <p className="text-xs text-destructive">
+                            {(postMutation.error as Error).message}
+                          </p>
                         )}
                       </div>
                     </>
@@ -400,10 +550,21 @@ export default function GLJournalsPage() {
                     <>
                       <Separator />
                       <div className="flex gap-2">
-                        <Button size="sm" className="bg-emerald-700 hover:bg-emerald-800 text-white gap-1" disabled={approveMutation.isPending} onClick={() => approveMutation.mutate(selectedJournalId)}>
+                        <Button
+                          size="sm"
+                          className="bg-emerald-700 hover:bg-emerald-800 text-white gap-1"
+                          disabled={approveMutation.isPending}
+                          onClick={() => approveMutation.mutate(selectedJournalId)}
+                        >
                           <CheckCircle className="h-3.5 w-3.5" /> Approve
                         </Button>
-                        <Button size="sm" variant="destructive" className="gap-1" disabled={rejectMutation.isPending} onClick={() => rejectMutation.mutate(selectedJournalId)}>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          className="gap-1"
+                          disabled={rejectMutation.isPending}
+                          onClick={() => rejectMutation.mutate(selectedJournalId)}
+                        >
                           <XCircle className="h-3.5 w-3.5" /> Reject
                         </Button>
                       </div>
@@ -414,22 +575,41 @@ export default function GLJournalsPage() {
                     <>
                       <Separator />
                       {!confirmReverse ? (
-                        <Button size="sm" variant="outline" className="gap-1.5 text-amber-700 border-amber-300 hover:bg-amber-50" onClick={() => setConfirmReverse(true)}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="gap-1.5 text-amber-700 border-amber-300 hover:bg-amber-50"
+                          onClick={() => setConfirmReverse(true)}
+                        >
                           <RotateCcw className="h-3.5 w-3.5" /> Reverse Journal
                         </Button>
                       ) : (
                         <div className="space-y-2">
                           <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
-                            Creates a mirror journal with all debits/credits swapped and marks this as Reversed. Continue?
+                            Creates a mirror journal with all debits/credits swapped and marks this
+                            as Reversed. Continue?
                           </p>
                           {reverseMutation.isError && (
-                            <p className="text-xs text-destructive">{(reverseMutation.error as Error).message}</p>
+                            <p className="text-xs text-destructive">
+                              {(reverseMutation.error as Error).message}
+                            </p>
                           )}
                           <div className="flex gap-2">
-                            <Button size="sm" variant="destructive" disabled={reverseMutation.isPending} onClick={() => reverseMutation.mutate(selectedJournalId!)}>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              disabled={reverseMutation.isPending}
+                              onClick={() => reverseMutation.mutate(selectedJournalId!)}
+                            >
                               {reverseMutation.isPending ? "Reversing…" : "Confirm Reversal"}
                             </Button>
-                            <Button size="sm" variant="ghost" onClick={() => setConfirmReverse(false)}>Cancel</Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => setConfirmReverse(false)}
+                            >
+                              Cancel
+                            </Button>
                           </div>
                         </div>
                       )}

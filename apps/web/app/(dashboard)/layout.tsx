@@ -26,7 +26,7 @@ import {
   Users,
   Upload,
   FileUp,
-  Banknote,
+  Banknote
 } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { Separator } from "../../components/ui/separator";
@@ -34,9 +34,7 @@ import { Separator } from "../../components/ui/separator";
 const navGroups = [
   {
     label: "Overview",
-    items: [
-      { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-    ],
+    items: [{ href: "/dashboard", label: "Dashboard", icon: LayoutDashboard }]
   },
   {
     label: "General Ledger",
@@ -44,8 +42,8 @@ const navGroups = [
       { href: "/gl/accounts", label: "Chart of Accounts", icon: PieChart },
       { href: "/gl/accounts/import", label: "Import COA", icon: Upload },
       { href: "/gl/journals", label: "General Journal", icon: BookOpen },
-      { href: "/gl/trial-balance", label: "Trial Balance", icon: Scale },
-    ],
+      { href: "/gl/trial-balance", label: "Trial Balance", icon: Scale }
+    ]
   },
   {
     label: "Payables & Receivables",
@@ -54,8 +52,8 @@ const navGroups = [
       { href: "/ap/suppliers", label: "Suppliers", icon: Users },
       { href: "/ap/payment-runs", label: "Payment Runs", icon: Banknote },
       { href: "/ar", label: "Accounts Receivable", icon: FileText },
-      { href: "/ar/ageing", label: "AR Ageing", icon: Clock },
-    ],
+      { href: "/ar/ageing", label: "AR Ageing", icon: Clock }
+    ]
   },
   {
     label: "Finance",
@@ -66,14 +64,12 @@ const navGroups = [
       { href: "/reports", label: "Reports", icon: BarChart3 },
       { href: "/reports/usali-pl", label: "USALI P&L", icon: BarChart2 },
       { href: "/reports/balance-sheet", label: "Balance Sheet", icon: Scale },
-      { href: "/reports/cashflow", label: "Cash Flow", icon: Activity },
-    ],
+      { href: "/reports/cashflow", label: "Cash Flow", icon: Activity }
+    ]
   },
   {
     label: "Multi-Entity",
-    items: [
-      { href: "/consolidation", label: "Consolidation", icon: Layers },
-    ],
+    items: [{ href: "/consolidation", label: "Consolidation", icon: Layers }]
   },
   {
     label: "Admin",
@@ -82,9 +78,9 @@ const navGroups = [
       { href: "/audit", label: "Audit Log", icon: ClipboardList },
       { href: "/settings/integrations", label: "Integrations", icon: Plug },
       { href: "/settings/integrations/saf-import", label: "SAF Import", icon: FileUp },
-      { href: "/settings/integrations/transfer-desk", label: "Transfer Desk", icon: GitBranch },
-    ],
-  },
+      { href: "/settings/integrations/transfer-desk", label: "Transfer Desk", icon: GitBranch }
+    ]
+  }
 ];
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
@@ -93,13 +89,14 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   return (
     <div className="min-h-screen flex bg-surface">
       {/* Sidebar */}
-      <aside className="w-60 shrink-0 bg-(--color-primary) text-white flex flex-col">
+      <aside className="w-60 shrink-0 bg-[var(--color-primary)] text-white flex flex-col">
         {/* Brand */}
         <div className="px-5 py-4 flex items-center gap-2 border-b border-white/10">
-          <Building2 className="h-5 w-5 text-(--color-accent)" />
+          <Building2 className="h-5 w-5 text-[var(--color-accent)]" />
           <span className="font-semibold text-sm leading-tight">
-            HospitalityFinance<br />
-            <span className="text-(--color-accent) font-bold">Pro</span>
+            HospitalityFinance
+            <br />
+            <span className="text-[var(--color-accent)] font-bold">Pro</span>
           </span>
         </div>
 
@@ -131,7 +128,9 @@ export default async function DashboardLayout({ children }: { children: ReactNod
         <div className="px-4 py-3 border-t border-white/10">
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
-              <p className="text-xs font-medium text-white truncate">{session?.user?.email ?? "User"}</p>
+              <p className="text-xs font-medium text-white truncate">
+                {session?.user?.email ?? "User"}
+              </p>
               <p className="text-[10px] text-white/50 truncate">
                 {(session?.user as any)?.roles?.[0] ?? "Viewer"}
               </p>
@@ -163,9 +162,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
         </header>
 
         <main className="flex-1 p-4 sm:p-6 overflow-auto">
-          <ErrorBoundary>
-            {children}
-          </ErrorBoundary>
+          <ErrorBoundary>{children}</ErrorBoundary>
         </main>
       </div>
     </div>

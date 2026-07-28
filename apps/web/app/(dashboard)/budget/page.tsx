@@ -28,6 +28,7 @@ import {
   TableHeader,
   TableRow
 } from "../../../components/ui/table";
+import { Skeleton } from "../../../components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../../components/ui/tabs";
 import {
   Dialog,
@@ -36,6 +37,13 @@ import {
   DialogHeader,
   DialogTitle
 } from "../../../components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../../../components/ui/select";
 import { cn } from "../../../lib/utils";
 
 type BudgetDefinition = { id: string; name: string; year: number; isActive: boolean };
@@ -212,37 +220,39 @@ export default function BudgetPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {definitionsQ.isLoading ? (
-                    <TableRow>
-                      <TableCell colSpan={4} className="text-center py-6 text-muted-foreground">
-                        Loading…
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    (definitionsQ.data ?? []).map((def) => (
-                      <TableRow
-                        key={def.id}
-                        className={selectedDefId === def.id ? "bg-emerald-50" : ""}
-                      >
-                        <TableCell className="font-semibold">{def.name}</TableCell>
-                        <TableCell>{def.year}</TableCell>
-                        <TableCell>
-                          <Badge variant={def.isActive ? "success" : "warning"}>
-                            {def.isActive ? "Active" : "Inactive"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setSelectedDefId(def.id)}
-                          >
-                            View Lines
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
+                  {definitionsQ.isLoading
+                    ? Array.from({ length: 4 }).map((_, i) => (
+                        <TableRow key={i}>
+                          {Array.from({ length: 4 }).map((_, j) => (
+                            <TableCell key={j}>
+                              <Skeleton className="h-4 w-full" />
+                            </TableCell>
+                          ))}
+                        </TableRow>
+                      ))
+                    : (definitionsQ.data ?? []).map((def) => (
+                        <TableRow
+                          key={def.id}
+                          className={selectedDefId === def.id ? "bg-emerald-50" : ""}
+                        >
+                          <TableCell className="font-semibold">{def.name}</TableCell>
+                          <TableCell>{def.year}</TableCell>
+                          <TableCell>
+                            <Badge variant={def.isActive ? "success" : "warning"}>
+                              {def.isActive ? "Active" : "Inactive"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setSelectedDefId(def.id)}
+                            >
+                              View Lines
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
                 </TableBody>
               </Table>
             </TabsContent>
@@ -253,35 +263,33 @@ export default function BudgetPage() {
                   <div className="grid grid-cols-4 gap-3 mb-4 p-4 bg-muted/40 rounded-lg items-end">
                     <div className="space-y-1.5">
                       <Label>Account</Label>
-                      <select
-                        aria-label="Account"
-                        value={lineAccountId}
-                        onChange={(e) => setLineAccountId(e.target.value)}
-                        className="flex h-9 w-full rounded-md border border-border bg-white px-3 py-1 text-sm"
-                      >
-                        <option value="">Select account</option>
-                        {(accountsQ.data ?? []).map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {a.label}
-                          </option>
-                        ))}
-                      </select>
+                      <Select value={lineAccountId} onValueChange={setLineAccountId}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select account" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(accountsQ.data ?? []).map((a) => (
+                            <SelectItem key={a.id} value={a.id}>
+                              {a.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="space-y-1.5">
                       <Label>Month</Label>
-                      <select
-                        aria-label="Month"
-                        value={lineMonth}
-                        onChange={(e) => setLineMonth(e.target.value)}
-                        className="flex h-9 w-full rounded-md border border-border bg-white px-3 py-1 text-sm"
-                      >
-                        <option value="">Select month</option>
-                        {MONTHS.map((m, i) => (
-                          <option key={i + 1} value={String(i + 1)}>
-                            {m}
-                          </option>
-                        ))}
-                      </select>
+                      <Select value={lineMonth} onValueChange={setLineMonth}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select month" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {MONTHS.map((m, i) => (
+                            <SelectItem key={i + 1} value={String(i + 1)}>
+                              {m}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="space-y-1.5">
                       <Label>Amount</Label>
@@ -309,27 +317,29 @@ export default function BudgetPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {linesQ.isLoading ? (
-                        <TableRow>
-                          <TableCell colSpan={3} className="text-center py-6 text-muted-foreground">
-                            Loading…
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        (linesQ.data ?? []).map((line) => (
-                          <TableRow key={line.id}>
-                            <TableCell>
-                              {line.account
-                                ? `${line.account.code} – ${line.account.name}`
-                                : line.accountId.slice(0, 8)}
-                            </TableCell>
-                            <TableCell>{MONTHS[line.month - 1] ?? line.month}</TableCell>
-                            <TableCell className="text-right font-mono text-xs">
-                              {fmt(line.amount)}
-                            </TableCell>
-                          </TableRow>
-                        ))
-                      )}
+                      {linesQ.isLoading
+                        ? Array.from({ length: 5 }).map((_, i) => (
+                            <TableRow key={i}>
+                              {Array.from({ length: 3 }).map((_, j) => (
+                                <TableCell key={j}>
+                                  <Skeleton className="h-4 w-full" />
+                                </TableCell>
+                              ))}
+                            </TableRow>
+                          ))
+                        : (linesQ.data ?? []).map((line) => (
+                            <TableRow key={line.id}>
+                              <TableCell>
+                                {line.account
+                                  ? `${line.account.code} – ${line.account.name}`
+                                  : line.accountId.slice(0, 8)}
+                              </TableCell>
+                              <TableCell>{MONTHS[line.month - 1] ?? line.month}</TableCell>
+                              <TableCell className="text-right font-mono text-xs">
+                                {fmt(line.amount)}
+                              </TableCell>
+                            </TableRow>
+                          ))}
                     </TableBody>
                   </Table>
                 </>
@@ -341,19 +351,18 @@ export default function BudgetPage() {
                 <>
                   <div className="flex items-center gap-3 mb-4">
                     <Label>Period</Label>
-                    <select
-                      aria-label="Variance period"
-                      value={variancePeriodId}
-                      onChange={(e) => setVariancePeriodId(e.target.value)}
-                      className="flex h-9 w-48 rounded-md border border-border bg-white px-3 py-1 text-sm"
-                    >
-                      <option value="">Select period</option>
-                      {(periodsQ.data ?? []).map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
-                    </select>
+                    <Select value={variancePeriodId} onValueChange={setVariancePeriodId}>
+                      <SelectTrigger className="w-48">
+                        <SelectValue placeholder="Select period" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(periodsQ.data ?? []).map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   {variancePeriodId && (
                     <Table>
@@ -367,48 +376,47 @@ export default function BudgetPage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {varianceQ.isLoading ? (
-                          <TableRow>
-                            <TableCell
-                              colSpan={5}
-                              className="text-center py-6 text-muted-foreground"
-                            >
-                              Loading…
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          (varianceQ.data ?? []).map((line) => (
-                            <TableRow key={line.accountId}>
-                              <TableCell>
-                                {line.accountCode} – {line.accountName}
-                              </TableCell>
-                              <TableCell className="text-right font-mono text-xs">
-                                {fmt(line.budgetAmount)}
-                              </TableCell>
-                              <TableCell className="text-right font-mono text-xs">
-                                {fmt(line.actualAmount)}
-                              </TableCell>
-                              <TableCell
-                                className={cn(
-                                  "text-right font-mono text-xs font-semibold",
-                                  varianceClass(line.variance)
-                                )}
-                              >
-                                {fmt(line.variance)}
-                              </TableCell>
-                              <TableCell
-                                className={cn(
-                                  "text-right text-xs",
-                                  varianceClass(line.variancePct ?? "0")
-                                )}
-                              >
-                                {line.variancePct != null
-                                  ? `${parseFloat(line.variancePct).toFixed(1)}%`
-                                  : "-"}
-                              </TableCell>
-                            </TableRow>
-                          ))
-                        )}
+                        {varianceQ.isLoading
+                          ? Array.from({ length: 5 }).map((_, i) => (
+                              <TableRow key={i}>
+                                {Array.from({ length: 5 }).map((_, j) => (
+                                  <TableCell key={j}>
+                                    <Skeleton className="h-4 w-full" />
+                                  </TableCell>
+                                ))}
+                              </TableRow>
+                            ))
+                          : (varianceQ.data ?? []).map((line) => (
+                              <TableRow key={line.accountId}>
+                                <TableCell>
+                                  {line.accountCode} – {line.accountName}
+                                </TableCell>
+                                <TableCell className="text-right font-mono text-xs">
+                                  {fmt(line.budgetAmount)}
+                                </TableCell>
+                                <TableCell className="text-right font-mono text-xs">
+                                  {fmt(line.actualAmount)}
+                                </TableCell>
+                                <TableCell
+                                  className={cn(
+                                    "text-right font-mono text-xs font-semibold",
+                                    varianceClass(line.variance)
+                                  )}
+                                >
+                                  {fmt(line.variance)}
+                                </TableCell>
+                                <TableCell
+                                  className={cn(
+                                    "text-right text-xs",
+                                    varianceClass(line.variancePct ?? "0")
+                                  )}
+                                >
+                                  {line.variancePct != null
+                                    ? `${parseFloat(line.variancePct).toFixed(1)}%`
+                                    : "-"}
+                                </TableCell>
+                              </TableRow>
+                            ))}
                       </TableBody>
                     </Table>
                   )}

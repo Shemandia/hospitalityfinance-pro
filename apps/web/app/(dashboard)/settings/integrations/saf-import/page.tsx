@@ -59,7 +59,7 @@ function StepIndicator({ current }: { current: number }) {
           <div
             className={`h-7 w-7 sm:h-8 sm:w-8 rounded-full flex items-center justify-center text-xs sm:text-sm font-medium shrink-0 ${
               current === s.num
-                ? "bg-(--color-primary) text-white"
+                ? "bg-[var(--color-primary)] text-white"
                 : current > s.num
                   ? "bg-emerald-600 text-white"
                   : "bg-muted text-muted-foreground"
@@ -223,7 +223,7 @@ export default function SAFImportPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <div className="min-w-0">
-          <h1 className="text-lg sm:text-xl font-semibold text-(--color-primary) flex items-center gap-2">
+          <h1 className="text-lg sm:text-xl font-semibold text-[var(--color-primary)] flex items-center gap-2">
             <FileUp className="h-5 w-5 shrink-0" /> SAF File Import
           </h1>
           <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">

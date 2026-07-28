@@ -6,12 +6,16 @@ import { useApiContext } from "../../../../components/use-api-context";
 import { getPeriodList, getUSALIComparative } from "../../../../lib/gl-api";
 import type { USALIComparativeReport, USALIDepartmentComparative } from "../../../../lib/gl-api";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../../components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../../components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../../../../components/ui/select";
 import { Badge } from "../../../../components/ui/badge";
 import { Button } from "../../../../components/ui/button";
-import {
-  TrendingUp, TrendingDown, DollarSign, Download, BarChart2, Table2,
-} from "lucide-react";
+import { TrendingUp, TrendingDown, DollarSign, Download, BarChart2, Table2 } from "lucide-react";
 
 // ── Formatters ────────────────────────────────────────────────────────────────
 
@@ -43,7 +47,13 @@ function varColor(v: number) {
 // ── KPI Summary Card ──────────────────────────────────────────────────────────
 
 function KpiCard({
-  label, current, ytd, budget, varAmt, varPct, prior,
+  label,
+  current,
+  ytd,
+  budget,
+  varAmt,
+  varPct,
+  prior
 }: {
   label: string;
   current: string;
@@ -58,7 +68,9 @@ function KpiCard({
   return (
     <Card>
       <CardContent className="pt-4 pb-4 space-y-2">
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{label}</p>
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+          {label}
+        </p>
         <p className={`text-xl font-bold ${isPos ? "text-emerald-700" : "text-red-600"}`}>
           {fmt(current)}
         </p>
@@ -105,11 +117,21 @@ function DetailTable({ report }: { report: USALIComparativeReport }) {
       <table className="w-full text-sm">
         <thead>
           <tr className="bg-slate-100 border-b border-slate-200">
-            <th className="py-2.5 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide w-2/5">Department</th>
-            <th className="py-2.5 px-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wide">Revenue</th>
-            <th className="py-2.5 px-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wide">Expenses</th>
-            <th className="py-2.5 px-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wide">Dept Income</th>
-            <th className="py-2.5 px-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wide">Income %</th>
+            <th className="py-2.5 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide w-2/5">
+              Department
+            </th>
+            <th className="py-2.5 px-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wide">
+              Revenue
+            </th>
+            <th className="py-2.5 px-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wide">
+              Expenses
+            </th>
+            <th className="py-2.5 px-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wide">
+              Dept Income
+            </th>
+            <th className="py-2.5 px-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wide">
+              Income %
+            </th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
@@ -121,7 +143,11 @@ function DetailTable({ report }: { report: USALIComparativeReport }) {
                 <td className="py-2.5 px-4 text-slate-700">{d.name}</td>
                 <td className="py-2.5 px-4 text-right text-slate-700">{fmt(d.revenue)}</td>
                 <td className="py-2.5 px-4 text-right text-slate-700">{fmt(d.expenses)}</td>
-                <td className={`py-2.5 px-4 text-right font-medium ${inc < 0 ? "text-red-600" : "text-slate-800"}`}>{fmt(d.departmentalIncome)}</td>
+                <td
+                  className={`py-2.5 px-4 text-right font-medium ${inc < 0 ? "text-red-600" : "text-slate-800"}`}
+                >
+                  {fmt(d.departmentalIncome)}
+                </td>
                 <td className={`py-2.5 px-4 text-right ${pctColor(pct)}`}>{fmtPct(pct)}</td>
               </tr>
             );
@@ -129,32 +155,47 @@ function DetailTable({ report }: { report: USALIComparativeReport }) {
 
           {/* Total Operated */}
           <tr className="bg-slate-50 font-semibold border-t border-slate-200">
-            <td className="py-3 px-4 text-slate-800" colSpan={3}>Total Operated Departments</td>
-            <td className="py-3 px-4 text-right text-slate-800">{fmt(report.totalDepartmentalIncome)}</td>
+            <td className="py-3 px-4 text-slate-800" colSpan={3}>
+              Total Operated Departments
+            </td>
+            <td className="py-3 px-4 text-right text-slate-800">
+              {fmt(report.totalDepartmentalIncome)}
+            </td>
             <td className="py-3 px-4 text-right text-muted-foreground">
               {Number(report.totalRevenue) > 0
-                ? fmtPct((Number(report.totalDepartmentalIncome) / Number(report.totalRevenue)) * 100)
+                ? fmtPct(
+                    (Number(report.totalDepartmentalIncome) / Number(report.totalRevenue)) * 100
+                  )
                 : "—"}
             </td>
           </tr>
 
           {/* Undistributed header */}
           <tr>
-            <td colSpan={5} className="py-2 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wide bg-slate-50">
+            <td
+              colSpan={5}
+              className="py-2 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wide bg-slate-50"
+            >
               Undistributed Operating Expenses
             </td>
           </tr>
           <tr className="hover:bg-slate-50/60">
             <td className="py-2.5 px-4 pl-8 text-slate-700">Administrative &amp; General</td>
             <td className="py-2.5 px-4 text-right text-slate-400">—</td>
-            <td className="py-2.5 px-4 text-right text-slate-700">{fmt(report.undistributedExpenses)}</td>
-            <td className="py-2.5 px-4 text-right text-slate-700">({fmt(report.undistributedExpenses)})</td>
+            <td className="py-2.5 px-4 text-right text-slate-700">
+              {fmt(report.undistributedExpenses)}
+            </td>
+            <td className="py-2.5 px-4 text-right text-slate-700">
+              ({fmt(report.undistributedExpenses)})
+            </td>
             <td className="py-2.5 px-4 text-right text-slate-400">—</td>
           </tr>
 
           {/* GOP */}
-          <tr className="bg-(--color-primary)/5 font-bold text-(--color-primary)">
-            <td className="py-3 px-4 text-sm" colSpan={3}>Gross Operating Profit (GOP)</td>
+          <tr className="bg-[var(--color-primary)]/5 font-bold text-[var(--color-primary)]">
+            <td className="py-3 px-4 text-sm" colSpan={3}>
+              Gross Operating Profit (GOP)
+            </td>
             <td className="py-3 px-4 text-sm text-right">{fmt(report.grossOperatingProfit)}</td>
             <td className="py-3 px-4 text-sm text-right text-muted-foreground">{fmtPct(gopPct)}</td>
           </tr>
@@ -164,15 +205,21 @@ function DetailTable({ report }: { report: USALIComparativeReport }) {
             <td className="py-2.5 px-4 text-slate-700">Management Fees</td>
             <td className="py-2.5 px-4 text-right text-slate-400">—</td>
             <td className="py-2.5 px-4 text-right text-slate-700">{fmt(report.managementFees)}</td>
-            <td className="py-2.5 px-4 text-right text-slate-700">({fmt(report.managementFees)})</td>
+            <td className="py-2.5 px-4 text-right text-slate-700">
+              ({fmt(report.managementFees)})
+            </td>
             <td className="py-2.5 px-4 text-right text-slate-400">—</td>
           </tr>
 
           {/* EBITDA */}
-          <tr className="bg-(--color-primary)/5 font-bold text-(--color-primary)">
-            <td className="py-3 px-4 text-sm" colSpan={3}>EBITDA</td>
+          <tr className="bg-[var(--color-primary)]/5 font-bold text-[var(--color-primary)]">
+            <td className="py-3 px-4 text-sm" colSpan={3}>
+              EBITDA
+            </td>
             <td className="py-3 px-4 text-sm text-right">{fmt(report.ebitda)}</td>
-            <td className="py-3 px-4 text-sm text-right text-muted-foreground">{fmtPct(ebitdaPct)}</td>
+            <td className="py-3 px-4 text-sm text-right text-muted-foreground">
+              {fmtPct(ebitdaPct)}
+            </td>
           </tr>
         </tbody>
       </table>
@@ -182,28 +229,32 @@ function DetailTable({ report }: { report: USALIComparativeReport }) {
 
 // ── Comparative table (Dept Income only, all columns) ────────────────────────
 
-function ComparativeTable({
-  report,
-}: {
-  report: USALIComparativeReport;
-}) {
+function ComparativeTable({ report }: { report: USALIComparativeReport }) {
   type SummaryLine = {
     label: string;
-    current: string; currentPct?: string;
-    ytd?: string; ytdPct?: string;
+    current: string;
+    currentPct?: string;
+    ytd?: string;
+    ytdPct?: string;
     budget?: string;
-    varAmt?: string; varPct?: string;
-    prior?: string; priorPct?: string;
+    varAmt?: string;
+    varPct?: string;
+    prior?: string;
+    priorPct?: string;
     highlight?: boolean;
   };
 
   const deptLines: SummaryLine[] = report.departments.map((d: USALIDepartmentComparative) => ({
     label: d.name,
-    current: d.departmentalIncome, currentPct: d.incomePct,
-    ytd: d.ytdDeptIncome, ytdPct: d.ytdIncomePct,
+    current: d.departmentalIncome,
+    currentPct: d.incomePct,
+    ytd: d.ytdDeptIncome,
+    ytdPct: d.ytdIncomePct,
     budget: d.budgetDeptIncome,
-    varAmt: d.varianceAmount, varPct: d.variancePct,
-    prior: d.priorDeptIncome, priorPct: d.priorIncomePct,
+    varAmt: d.varianceAmount,
+    varPct: d.variancePct,
+    prior: d.priorDeptIncome,
+    priorPct: d.priorIncomePct
   }));
 
   const gopPct = Number(report.gopPct);
@@ -218,26 +269,34 @@ function ComparativeTable({
       current: report.totalRevenue,
       ytd: report.ytdTotalRevenue,
       budget: report.budgetTotalRevenue,
-      varAmt: report.revenueVariance, varPct: report.revenueVariancePct,
-      prior: report.priorTotalRevenue,
+      varAmt: report.revenueVariance,
+      varPct: report.revenueVariancePct,
+      prior: report.priorTotalRevenue
     },
     {
       label: "Gross Operating Profit (GOP)",
-      current: report.grossOperatingProfit, currentPct: report.gopPct,
-      ytd: report.ytdGOP, ytdPct: report.ytdGOPPct,
+      current: report.grossOperatingProfit,
+      currentPct: report.gopPct,
+      ytd: report.ytdGOP,
+      ytdPct: report.ytdGOPPct,
       budget: report.budgetGOP,
-      varAmt: report.gopVariance, varPct: report.gopVariancePct,
-      prior: report.priorGOP, priorPct: report.priorGOPPct,
-      highlight: true,
+      varAmt: report.gopVariance,
+      varPct: report.gopVariancePct,
+      prior: report.priorGOP,
+      priorPct: report.priorGOPPct,
+      highlight: true
     },
     {
       label: "EBITDA",
-      current: report.ebitda, currentPct: report.ebitdaPct,
-      ytd: report.ytdEBITDA, ytdPct: report.ytdEBITDAPct,
+      current: report.ebitda,
+      currentPct: report.ebitdaPct,
+      ytd: report.ytdEBITDA,
+      ytdPct: report.ytdEBITDAPct,
       budget: report.budgetEBITDA,
-      varAmt: report.ebitdaVariance, varPct: report.ebitdaVariancePct,
-      highlight: true,
-    },
+      varAmt: report.ebitdaVariance,
+      varPct: report.ebitdaVariancePct,
+      highlight: true
+    }
   ];
 
   const ColGroup = () => (
@@ -245,24 +304,51 @@ function ComparativeTable({
       <colgroup>
         <col className="w-[22%]" />
         {/* Current */}
-        <col className="w-[8%]" /><col className="w-[5%]" />
+        <col className="w-[8%]" />
+        <col className="w-[5%]" />
         {/* YTD */}
-        {report.hasYTD && <><col className="w-[8%]" /><col className="w-[5%]" /></>}
+        {report.hasYTD && (
+          <>
+            <col className="w-[8%]" />
+            <col className="w-[5%]" />
+          </>
+        )}
         {/* Budget + Variance */}
-        {report.hasBudget && <><col className="w-[8%]" /><col className="w-[7%]" /><col className="w-[5%]" /></>}
+        {report.hasBudget && (
+          <>
+            <col className="w-[8%]" />
+            <col className="w-[7%]" />
+            <col className="w-[5%]" />
+          </>
+        )}
         {/* Prior Year */}
-        {report.hasPriorYear && <><col className="w-[8%]" /><col className="w-[5%]" /></>}
+        {report.hasPriorYear && (
+          <>
+            <col className="w-[8%]" />
+            <col className="w-[5%]" />
+          </>
+        )}
       </colgroup>
     </>
   );
 
   const Th = ({ children, right }: { children: React.ReactNode; right?: boolean }) => (
-    <th className={`py-2 px-3 text-xs font-semibold text-slate-500 uppercase tracking-wide ${right ? "text-right" : "text-left"}`}>
+    <th
+      className={`py-2 px-3 text-xs font-semibold text-slate-500 uppercase tracking-wide ${right ? "text-right" : "text-left"}`}
+    >
       {children}
     </th>
   );
 
-  const Td = ({ children, right, className = "" }: { children: React.ReactNode; right?: boolean; className?: string }) => (
+  const Td = ({
+    children,
+    right,
+    className = ""
+  }: {
+    children: React.ReactNode;
+    right?: boolean;
+    className?: string;
+  }) => (
     <td className={`py-2.5 px-3 text-sm ${right ? "text-right" : ""} ${className}`}>{children}</td>
   );
 
@@ -274,21 +360,33 @@ function ComparativeTable({
           {/* Column group labels */}
           <tr className="bg-slate-50 border-b border-slate-200">
             <th className="py-1.5 px-3" scope="col" aria-label="Department" />
-            <th colSpan={2} className="py-1.5 px-3 text-center text-[10px] font-semibold text-(--color-primary) uppercase tracking-wider border-x border-slate-200">
+            <th
+              colSpan={2}
+              className="py-1.5 px-3 text-center text-[10px] font-semibold text-[var(--color-primary)] uppercase tracking-wider border-x border-slate-200"
+            >
               Current Period
             </th>
             {report.hasYTD && (
-              <th colSpan={2} className="py-1.5 px-3 text-center text-[10px] font-semibold text-blue-600 uppercase tracking-wider border-x border-slate-200">
+              <th
+                colSpan={2}
+                className="py-1.5 px-3 text-center text-[10px] font-semibold text-blue-600 uppercase tracking-wider border-x border-slate-200"
+              >
                 YTD
               </th>
             )}
             {report.hasBudget && (
-              <th colSpan={3} className="py-1.5 px-3 text-center text-[10px] font-semibold text-violet-600 uppercase tracking-wider border-x border-slate-200">
+              <th
+                colSpan={3}
+                className="py-1.5 px-3 text-center text-[10px] font-semibold text-violet-600 uppercase tracking-wider border-x border-slate-200"
+              >
                 vs Budget
               </th>
             )}
             {report.hasPriorYear && (
-              <th colSpan={2} className="py-1.5 px-3 text-center text-[10px] font-semibold text-slate-500 uppercase tracking-wider border-x border-slate-200">
+              <th
+                colSpan={2}
+                className="py-1.5 px-3 text-center text-[10px] font-semibold text-slate-500 uppercase tracking-wider border-x border-slate-200"
+              >
                 Prior Year
               </th>
             )}
@@ -297,9 +395,25 @@ function ComparativeTable({
             <Th>Department</Th>
             <Th right>Income</Th>
             <Th right>%</Th>
-            {report.hasYTD && <><Th right>Income</Th><Th right>%</Th></>}
-            {report.hasBudget && <><Th right>Budget</Th><Th right>Variance</Th><Th right>Var%</Th></>}
-            {report.hasPriorYear && <><Th right>Income</Th><Th right>%</Th></>}
+            {report.hasYTD && (
+              <>
+                <Th right>Income</Th>
+                <Th right>%</Th>
+              </>
+            )}
+            {report.hasBudget && (
+              <>
+                <Th right>Budget</Th>
+                <Th right>Variance</Th>
+                <Th right>Var%</Th>
+              </>
+            )}
+            {report.hasPriorYear && (
+              <>
+                <Th right>Income</Th>
+                <Th right>%</Th>
+              </>
+            )}
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
@@ -311,25 +425,46 @@ function ComparativeTable({
             return (
               <tr key={line.label} className="hover:bg-slate-50/60">
                 <Td>{line.label}</Td>
-                <Td right className={inc < 0 ? "text-red-600 font-medium" : "text-slate-800 font-medium"}>{fmt(line.current)}</Td>
-                <Td right className={pctColor(pct)}>{fmtPct(pct)}</Td>
+                <Td
+                  right
+                  className={inc < 0 ? "text-red-600 font-medium" : "text-slate-800 font-medium"}
+                >
+                  {fmt(line.current)}
+                </Td>
+                <Td right className={pctColor(pct)}>
+                  {fmtPct(pct)}
+                </Td>
                 {report.hasYTD && (
                   <>
-                    <Td right className="text-blue-700">{fmt(line.ytd ?? "0")}</Td>
-                    <Td right className={pctColor(Number(line.ytdPct ?? "0"))}>{fmtPct(line.ytdPct ?? "0")}</Td>
+                    <Td right className="text-blue-700">
+                      {fmt(line.ytd ?? "0")}
+                    </Td>
+                    <Td right className={pctColor(Number(line.ytdPct ?? "0"))}>
+                      {fmtPct(line.ytdPct ?? "0")}
+                    </Td>
                   </>
                 )}
                 {report.hasBudget && (
                   <>
-                    <Td right className="text-slate-500">{fmt(line.budget ?? "0")}</Td>
-                    <Td right className={varColor(vn)}>{fmtVar(line.varAmt ?? "0")}</Td>
-                    <Td right className={varColor(vn)}>{fmtVarPct(line.varPct ?? "0")}</Td>
+                    <Td right className="text-slate-500">
+                      {fmt(line.budget ?? "0")}
+                    </Td>
+                    <Td right className={varColor(vn)}>
+                      {fmtVar(line.varAmt ?? "0")}
+                    </Td>
+                    <Td right className={varColor(vn)}>
+                      {fmtVarPct(line.varPct ?? "0")}
+                    </Td>
                   </>
                 )}
                 {report.hasPriorYear && (
                   <>
-                    <Td right className="text-slate-400">{fmt(line.prior ?? "0")}</Td>
-                    <Td right className={pctColor(Number(line.priorPct ?? "0"))}>{fmtPct(line.priorPct ?? "0")}</Td>
+                    <Td right className="text-slate-400">
+                      {fmt(line.prior ?? "0")}
+                    </Td>
+                    <Td right className={pctColor(Number(line.priorPct ?? "0"))}>
+                      {fmtPct(line.priorPct ?? "0")}
+                    </Td>
                   </>
                 )}
               </tr>
@@ -344,34 +479,52 @@ function ComparativeTable({
             const priorPct = Number(line.priorPct ?? "0");
             const vn = Number(line.varAmt ?? "0");
             const rowCls = line.highlight
-              ? "bg-(--color-primary)/5 font-bold text-(--color-primary) border-t-2 border-(--color-primary)/20"
+              ? "bg-[var(--color-primary)]/5 font-bold text-[var(--color-primary)] border-t-2 border-[var(--color-primary)]/20"
               : "bg-slate-50 font-semibold border-t border-slate-200";
             return (
               <tr key={line.label} className={rowCls}>
                 <td className="py-3 px-3 text-sm">{line.label}</td>
-                <td className={`py-3 px-3 text-sm text-right ${inc < 0 ? "text-red-600" : ""}`}>{fmt(line.current)}</td>
-                <td className={`py-3 px-3 text-sm text-right ${line.currentPct !== undefined ? pctColor(pct) : "text-muted-foreground"}`}>
+                <td className={`py-3 px-3 text-sm text-right ${inc < 0 ? "text-red-600" : ""}`}>
+                  {fmt(line.current)}
+                </td>
+                <td
+                  className={`py-3 px-3 text-sm text-right ${line.currentPct !== undefined ? pctColor(pct) : "text-muted-foreground"}`}
+                >
                   {line.currentPct !== undefined ? fmtPct(pct) : "—"}
                 </td>
                 {report.hasYTD && (
                   <>
-                    <td className="py-3 px-3 text-sm text-right text-blue-700">{fmt(line.ytd ?? "0")}</td>
-                    <td className={`py-3 px-3 text-sm text-right ${line.ytdPct !== undefined ? pctColor(ytdPct) : "text-muted-foreground"}`}>
+                    <td className="py-3 px-3 text-sm text-right text-blue-700">
+                      {fmt(line.ytd ?? "0")}
+                    </td>
+                    <td
+                      className={`py-3 px-3 text-sm text-right ${line.ytdPct !== undefined ? pctColor(ytdPct) : "text-muted-foreground"}`}
+                    >
                       {line.ytdPct !== undefined ? fmtPct(ytdPct) : "—"}
                     </td>
                   </>
                 )}
                 {report.hasBudget && (
                   <>
-                    <td className="py-3 px-3 text-sm text-right text-slate-500">{fmt(line.budget ?? "0")}</td>
-                    <td className={`py-3 px-3 text-sm text-right ${varColor(vn)}`}>{fmtVar(line.varAmt ?? "0")}</td>
-                    <td className={`py-3 px-3 text-sm text-right ${varColor(vn)}`}>{fmtVarPct(line.varPct ?? "0")}</td>
+                    <td className="py-3 px-3 text-sm text-right text-slate-500">
+                      {fmt(line.budget ?? "0")}
+                    </td>
+                    <td className={`py-3 px-3 text-sm text-right ${varColor(vn)}`}>
+                      {fmtVar(line.varAmt ?? "0")}
+                    </td>
+                    <td className={`py-3 px-3 text-sm text-right ${varColor(vn)}`}>
+                      {fmtVarPct(line.varPct ?? "0")}
+                    </td>
                   </>
                 )}
                 {report.hasPriorYear && (
                   <>
-                    <td className="py-3 px-3 text-sm text-right text-slate-400">{fmt(line.prior ?? "0")}</td>
-                    <td className={`py-3 px-3 text-sm text-right ${line.priorPct !== undefined ? pctColor(priorPct) : "text-muted-foreground"}`}>
+                    <td className="py-3 px-3 text-sm text-right text-slate-400">
+                      {fmt(line.prior ?? "0")}
+                    </td>
+                    <td
+                      className={`py-3 px-3 text-sm text-right ${line.priorPct !== undefined ? pctColor(priorPct) : "text-muted-foreground"}`}
+                    >
                       {line.priorPct !== undefined ? fmtPct(priorPct) : "—"}
                     </td>
                   </>
@@ -389,10 +542,19 @@ function ComparativeTable({
 
 function exportCSV(report: USALIComparativeReport) {
   const header = [
-    "Department", "Revenue", "Expenses", "Dept Income", "Income%",
-    "YTD Revenue", "YTD Income", "YTD%",
-    "Budget Income", "Variance", "Var%",
-    "Prior Yr Income", "Prior Yr%",
+    "Department",
+    "Revenue",
+    "Expenses",
+    "Dept Income",
+    "Income%",
+    "YTD Revenue",
+    "YTD Income",
+    "YTD%",
+    "Budget Income",
+    "Variance",
+    "Var%",
+    "Prior Yr Income",
+    "Prior Yr%"
   ];
   const rows: string[][] = [
     ["USALI Summary Operating Statement — Comparative"],
@@ -400,17 +562,68 @@ function exportCSV(report: USALIComparativeReport) {
     [],
     header,
     ...report.departments.map((d: USALIDepartmentComparative) => [
-      d.name, d.revenue, d.expenses, d.departmentalIncome, d.incomePct,
-      d.ytdRevenue, d.ytdDeptIncome, d.ytdIncomePct,
-      d.budgetDeptIncome, d.varianceAmount, d.variancePct,
-      d.priorDeptIncome, d.priorIncomePct,
+      d.name,
+      d.revenue,
+      d.expenses,
+      d.departmentalIncome,
+      d.incomePct,
+      d.ytdRevenue,
+      d.ytdDeptIncome,
+      d.ytdIncomePct,
+      d.budgetDeptIncome,
+      d.varianceAmount,
+      d.variancePct,
+      d.priorDeptIncome,
+      d.priorIncomePct
     ]),
     [],
-    ["Total Revenue", report.totalRevenue, "", "", "", report.ytdTotalRevenue, "", "", report.budgetTotalRevenue, report.revenueVariance, report.revenueVariancePct, report.priorTotalRevenue, ""],
-    ["GOP", report.grossOperatingProfit, "", "", report.gopPct, report.ytdGOP, "", report.ytdGOPPct, report.budgetGOP, report.gopVariance, report.gopVariancePct, report.priorGOP, report.priorGOPPct],
-    ["EBITDA", report.ebitda, "", "", report.ebitdaPct, report.ytdEBITDA, "", report.ytdEBITDAPct, report.budgetEBITDA, report.ebitdaVariance, report.ebitdaVariancePct, "", ""],
+    [
+      "Total Revenue",
+      report.totalRevenue,
+      "",
+      "",
+      "",
+      report.ytdTotalRevenue,
+      "",
+      "",
+      report.budgetTotalRevenue,
+      report.revenueVariance,
+      report.revenueVariancePct,
+      report.priorTotalRevenue,
+      ""
+    ],
+    [
+      "GOP",
+      report.grossOperatingProfit,
+      "",
+      "",
+      report.gopPct,
+      report.ytdGOP,
+      "",
+      report.ytdGOPPct,
+      report.budgetGOP,
+      report.gopVariance,
+      report.gopVariancePct,
+      report.priorGOP,
+      report.priorGOPPct
+    ],
+    [
+      "EBITDA",
+      report.ebitda,
+      "",
+      "",
+      report.ebitdaPct,
+      report.ytdEBITDA,
+      "",
+      report.ytdEBITDAPct,
+      report.budgetEBITDA,
+      report.ebitdaVariance,
+      report.ebitdaVariancePct,
+      "",
+      ""
+    ]
   ];
-  const csv = rows.map((r) => r.map(v => `"${v}"`).join(",")).join("\n");
+  const csv = rows.map((r) => r.map((v) => `"${v}"`).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -434,7 +647,7 @@ export default function USALIPLPage() {
       const res = await getPeriodList(apiContext);
       return res.data ?? [];
     },
-    enabled: Boolean(apiContext),
+    enabled: Boolean(apiContext)
   });
 
   const activePeriodId = periodId === "NONE" ? undefined : periodId;
@@ -446,7 +659,7 @@ export default function USALIPLPage() {
       const res = await getUSALIComparative(apiContext, activePeriodId);
       return res.data as USALIComparativeReport;
     },
-    enabled: Boolean(apiContext && activePeriodId),
+    enabled: Boolean(apiContext && activePeriodId)
   });
 
   const report = reportQuery.data ?? null;
@@ -469,13 +682,20 @@ export default function USALIPLPage() {
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-(--color-primary)">USALI Summary Operating Statement</h1>
+          <h1 className="text-2xl font-bold text-[var(--color-primary)]">
+            USALI Summary Operating Statement
+          </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             Departmental P&amp;L — 11th Edition · Current Period / YTD / Budget / Prior Year
           </p>
         </div>
         {report && (
-          <Button variant="outline" size="sm" className="gap-1.5 shrink-0" onClick={() => exportCSV(report)}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 shrink-0"
+            onClick={() => exportCSV(report)}
+          >
             <Download className="h-3.5 w-3.5" />
             Export CSV
           </Button>
@@ -497,7 +717,9 @@ export default function USALIPLPage() {
               {(periodsQuery.data ?? []).map((p) => (
                 <SelectItem key={p.id} value={p.id}>
                   {p.name}
-                  <Badge variant="outline" className="ml-2 text-[10px]">{p.status}</Badge>
+                  <Badge variant="outline" className="ml-2 text-[10px]">
+                    {p.status}
+                  </Badge>
                 </SelectItem>
               ))}
             </SelectContent>
@@ -530,7 +752,9 @@ export default function USALIPLPage() {
         {report && availableColumns.length > 0 && (
           <div className="flex items-center gap-1.5 pb-0.5">
             {availableColumns.map((col) => (
-              <Badge key={col} variant="outline" className="text-[10px]">{col}</Badge>
+              <Badge key={col} variant="outline" className="text-[10px]">
+                {col}
+              </Badge>
             ))}
           </div>
         )}
@@ -580,17 +804,23 @@ export default function USALIPLPage() {
             />
             <Card>
               <CardContent className="pt-4 pb-4 space-y-2">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">GOP Margin</p>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  GOP Margin
+                </p>
                 <p className={`text-xl font-bold ${pctColor(gopPct)}`}>{fmtPct(gopPct)}</p>
                 <div className="grid grid-cols-2 gap-x-3 text-xs border-t border-slate-100 pt-2">
                   {report.hasYTD && (
                     <div>
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-0.5">YTD GOP%</p>
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-0.5">
+                        YTD GOP%
+                      </p>
                       <p className={`font-medium ${pctColor(ytdGOPPct)}`}>{fmtPct(ytdGOPPct)}</p>
                     </div>
                   )}
                   <div>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-0.5">EBITDA%</p>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-0.5">
+                      EBITDA%
+                    </p>
                     <p className={`font-medium ${pctColor(ebitdaPct)}`}>{fmtPct(ebitdaPct)}</p>
                   </div>
                 </div>
@@ -602,7 +832,9 @@ export default function USALIPLPage() {
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-base flex items-center gap-2">
-                {viewMode === "detail" ? "Departmental Performance — Current Period" : "Departmental Performance — Comparative"}
+                {viewMode === "detail"
+                  ? "Departmental Performance — Current Period"
+                  : "Departmental Performance — Comparative"}
                 {viewMode === "comparative" && !report.hasBudget && (
                   <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300">
                     No budget loaded — upload a budget to enable variance columns
@@ -611,7 +843,11 @@ export default function USALIPLPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
-              {viewMode === "detail" ? <DetailTable report={report} /> : <ComparativeTable report={report} />}
+              {viewMode === "detail" ? (
+                <DetailTable report={report} />
+              ) : (
+                <ComparativeTable report={report} />
+              )}
             </CardContent>
           </Card>
 
@@ -642,11 +878,14 @@ export default function USALIPLPage() {
             </Card>
             <Card>
               <CardContent className="pt-4 pb-4 flex items-center gap-3">
-                <div className={`p-2 rounded-lg ${Number(report.ebitda) >= 0 ? "bg-emerald-50" : "bg-red-50"}`}>
-                  {Number(report.ebitda) >= 0
-                    ? <TrendingUp className="h-4 w-4 text-emerald-600" />
-                    : <TrendingDown className="h-4 w-4 text-red-600" />
-                  }
+                <div
+                  className={`p-2 rounded-lg ${Number(report.ebitda) >= 0 ? "bg-emerald-50" : "bg-red-50"}`}
+                >
+                  {Number(report.ebitda) >= 0 ? (
+                    <TrendingUp className="h-4 w-4 text-emerald-600" />
+                  ) : (
+                    <TrendingDown className="h-4 w-4 text-red-600" />
+                  )}
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">EBITDA Margin</p>
