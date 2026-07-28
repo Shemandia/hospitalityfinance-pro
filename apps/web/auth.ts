@@ -16,16 +16,20 @@ function decodeJwtPayload(token: string): Record<string, unknown> {
     .padEnd(Math.ceil(parts[1].length / 4) * 4, "=");
 
   try {
-    return JSON.parse(Buffer.from(payload, "base64").toString("utf-8")) as Record<
-      string,
-      unknown
-    >;
+    return JSON.parse(Buffer.from(payload, "base64").toString("utf-8")) as Record<string, unknown>;
   } catch {
     return {};
   }
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  // AUTH_SECRET is the Auth.js v5 name; fall back to the legacy NEXTAUTH_SECRET
+  // name that is documented in .env.example. In dev, use a hard-coded fallback
+  // so the sandbox never throws MissingSecret when neither var is set.
+  secret:
+    process.env.AUTH_SECRET ??
+    process.env.NEXTAUTH_SECRET ??
+    (isDev ? "dev-only-insecure-secret-do-not-use-in-production" : undefined),
   providers: [
     ...(isDev
       ? [
@@ -64,7 +68,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async jwt({ token, account, user }) {
       // Credentials provider (dev mode) — account.type === "credentials", user carries custom fields
       if (account?.type === "credentials" && user) {
-        const u = user as typeof user & { accessToken?: string; roles?: string[]; entityIds?: string[] };
+        const u = user as typeof user & {
+          accessToken?: string;
+          roles?: string[];
+          entityIds?: string[];
+        };
         token.accessToken = u.accessToken ?? "dev-token";
         token.roles = u.roles ?? [];
         token.entityIds = u.entityIds ?? [];
