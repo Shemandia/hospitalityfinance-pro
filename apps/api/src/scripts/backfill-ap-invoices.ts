@@ -5,7 +5,7 @@
  * Usage: npx tsx src/scripts/backfill-ap-invoices.ts
  */
 
-import { PrismaClient, Prisma } from "@prisma/client";
+import { PrismaClient, Decimal } from "@prisma/client";
 
 const ENTITY_ID = "00000000-0000-0000-0000-000000000002";
 
@@ -56,7 +56,8 @@ async function main() {
 
       // Find supplier (C-prefix) credit lines
       const vendorCreditLines = journal.lines.filter(
-        (l) => l.account.code.match(/^C[A-Za-z]/) && parseFloat(l.credit.toString()) > 0
+        (l: (typeof journal.lines)[number]) =>
+          l.account.code.match(/^C[A-Za-z]/) && parseFloat(l.credit.toString()) > 0
       );
 
       if (vendorCreditLines.length === 0) {
@@ -67,7 +68,8 @@ async function main() {
 
       // Find expense (debit) lines
       const expenseDebitLines = journal.lines.filter(
-        (l) => !l.account.code.match(/^C[A-Za-z]/) && parseFloat(l.debit.toString()) > 0
+        (l: (typeof journal.lines)[number]) =>
+          !l.account.code.match(/^C[A-Za-z]/) && parseFloat(l.debit.toString()) > 0
       );
 
       // Process each vendor credit
@@ -115,13 +117,13 @@ async function main() {
         // Build invoice lines from expense debits
         const invoiceLines: Array<{
           description: string;
-          quantity: Prisma.Decimal;
-          unitPrice: Prisma.Decimal;
-          amount: Prisma.Decimal;
+          quantity: Decimal;
+          unitPrice: Decimal;
+          amount: Decimal;
           glAccountId?: string;
-        }> = expenseDebitLines.map((ed) => ({
+        }> = expenseDebitLines.map((ed: (typeof expenseDebitLines)[number]) => ({
           description: ed.description || `${ed.account.code} — ${invoiceNumber}`,
-          quantity: new Prisma.Decimal(1),
+          quantity: new Decimal(1),
           unitPrice: ed.debit,
           amount: ed.debit,
           glAccountId: ed.accountId,
@@ -131,7 +133,7 @@ async function main() {
         if (invoiceLines.length === 0) {
           invoiceLines.push({
             description: `SAF Import — ${invoiceNumber}`,
-            quantity: new Prisma.Decimal(1),
+            quantity: new Decimal(1),
             unitPrice: vendorLine.credit,
             amount: vendorLine.credit,
             glAccountId: undefined,
@@ -153,10 +155,10 @@ async function main() {
             dueDate,
             currency: journal.functionalCurrency || "TZS",
             grossAmount: netAmount,
-            taxAmount: new Prisma.Decimal(0),
+            taxAmount: new Decimal(0),
             netAmount,
             functionalAmount: netAmount,
-            fxRate: new Prisma.Decimal(1),
+            fxRate: new Decimal(1),
             status: "POSTED",
             glJournalId: journal.id,
             createdById: entityUser.userId,

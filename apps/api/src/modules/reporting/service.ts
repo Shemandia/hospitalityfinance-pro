@@ -1,4 +1,4 @@
-import { Prisma, type PrismaClient } from "@prisma/client";
+import { type InputJsonValue, type PrismaClient } from "@prisma/client";
 import { getReportQueue } from "./queue.js";
 import type { CreateReportRunInput } from "./types.js";
 
@@ -38,7 +38,7 @@ export class ReportingService {
     const run = await this.prisma.reportRun.create({
       data: {
         definitionId: definition.id,
-        parameters: input.parameters as Prisma.InputJsonValue,
+        parameters: input.parameters as InputJsonValue,
         status: "QUEUED"
       }
     });

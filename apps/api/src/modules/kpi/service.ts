@@ -1,4 +1,4 @@
-import { Prisma, type PrismaClient } from "@prisma/client";
+import { Prisma, Decimal, sql, join, type PrismaClient } from "@prisma/client";
 
 export class KPIServiceError extends Error {
   constructor(
@@ -181,7 +181,7 @@ export class KPIService {
     const availableRooms = availableRoomsRaw > 0 ? availableRoomsRaw : 100;
 
     // Account balances for revenue/cost accounts (using standard USALI chart codes)
-    type BalanceRow = { code: string; closing_balance: Prisma.Decimal };
+    type BalanceRow = { code: string; closing_balance: Decimal };
     const balances = await this.prisma.$queryRaw<BalanceRow[]>`
       SELECT a.code, apb.closing_balance
       FROM account_period_balances apb
@@ -190,10 +190,10 @@ export class KPIService {
         AND apb.period_id = ${req.periodId}
     `;
 
-    const getBalance = (codes: string[]): Prisma.Decimal =>
+    const getBalance = (codes: string[]): Decimal =>
       balances
         .filter((b) => codes.some((c) => b.code.startsWith(c)))
-        .reduce((sum, b) => sum.add(b.closing_balance), new Prisma.Decimal(0))
+        .reduce((sum, b) => sum.add(b.closing_balance), new Decimal(0))
         .abs();
 
     // Revenue accounts (30xxx–36xxx in actual COA)
@@ -246,19 +246,19 @@ export class KPIService {
 
     const gop = totalRevenue.sub(fbCost).sub(operatingExpenses);
 
-    const occupied = new Prisma.Decimal(occupiedRooms);
-    const available = new Prisma.Decimal(availableRooms);
+    const occupied = new Decimal(occupiedRooms);
+    const available = new Decimal(availableRooms);
     const occupancyPct = available.isZero()
-      ? new Prisma.Decimal(0)
+      ? new Decimal(0)
       : occupied.div(available).mul(100);
 
-    const adr = occupied.isZero() ? new Prisma.Decimal(0) : roomRevenue.div(occupied);
-    const revpar = available.isZero() ? new Prisma.Decimal(0) : roomRevenue.div(available);
-    const trevpar = available.isZero() ? new Prisma.Decimal(0) : totalRevenue.div(available);
+    const adr = occupied.isZero() ? new Decimal(0) : roomRevenue.div(occupied);
+    const revpar = available.isZero() ? new Decimal(0) : roomRevenue.div(available);
+    const trevpar = available.isZero() ? new Decimal(0) : totalRevenue.div(available);
 
-    const fbCostPct = fbRevenue.isZero() ? new Prisma.Decimal(0) : fbCost.div(fbRevenue).mul(100);
+    const fbCostPct = fbRevenue.isZero() ? new Decimal(0) : fbCost.div(fbRevenue).mul(100);
 
-    const gopPct = totalRevenue.isZero() ? new Prisma.Decimal(0) : gop.div(totalRevenue).mul(100);
+    const gopPct = totalRevenue.isZero() ? new Decimal(0) : gop.div(totalRevenue).mul(100);
 
     return {
       periodId: req.periodId,
@@ -294,7 +294,7 @@ export class KPIService {
       code: string;
       name: string;
       account_type: string;
-      closing_balance: Prisma.Decimal;
+      closing_balance: Decimal;
     };
     const rows = await this.prisma.$queryRaw<BSRow[]>`
       SELECT a.id, a.code, a.name, a.type as account_type, apb.closing_balance
@@ -326,7 +326,7 @@ export class KPIService {
           name: a.name,
           balance: a.closing_balance.toFixed(2)
         })),
-        total: accts.reduce((s, a) => s.add(a.closing_balance), new Prisma.Decimal(0)).toFixed(2)
+        total: accts.reduce((s, a) => s.add(a.closing_balance), new Decimal(0)).toFixed(2)
       }));
     };
 
@@ -337,7 +337,7 @@ export class KPIService {
     const sumSections = (sections: BalanceSheetSection[]) =>
       sections
         .flatMap((s) => s.accounts)
-        .reduce((sum, a) => sum.add(new Prisma.Decimal(a.balance)), new Prisma.Decimal(0));
+        .reduce((sum, a) => sum.add(new Decimal(a.balance)), new Decimal(0));
 
     const totalAssets = sumSections(assetSections);
     const totalLiabilities = sumSections(liabilitySections);
@@ -369,9 +369,9 @@ export class KPIService {
       code: string;
       name: string;
       account_type: string;
-      period_debits: Prisma.Decimal;
-      period_credits: Prisma.Decimal;
-      closing_balance: Prisma.Decimal;
+      period_debits: Decimal;
+      period_credits: Decimal;
+      closing_balance: Decimal;
     };
     const rows = await this.prisma.$queryRaw<CFRow[]>`
       SELECT a.code, a.name, a.type as account_type,
@@ -391,20 +391,20 @@ export class KPIService {
             ? r.period_credits.sub(r.period_debits)
             : r.period_debits.sub(r.period_credits);
         return sum.add(net);
-      }, new Prisma.Decimal(0));
+      }, new Decimal(0));
 
     // Changes in working capital (AR, AP, Inventory)
     const arChange = rows
       .filter((r) => r.code.startsWith("12"))
-      .reduce((s, r) => s.add(r.period_debits.sub(r.period_credits)), new Prisma.Decimal(0));
+      .reduce((s, r) => s.add(r.period_debits.sub(r.period_credits)), new Decimal(0));
 
     const apChange = rows
       .filter((r) => r.code.startsWith("20"))
-      .reduce((s, r) => s.add(r.period_credits.sub(r.period_debits)), new Prisma.Decimal(0));
+      .reduce((s, r) => s.add(r.period_credits.sub(r.period_debits)), new Decimal(0));
 
     const inventoryChange = rows
       .filter((r) => r.code.startsWith("13"))
-      .reduce((s, r) => s.add(r.period_debits.sub(r.period_credits)).neg(), new Prisma.Decimal(0));
+      .reduce((s, r) => s.add(r.period_debits.sub(r.period_credits)).neg(), new Decimal(0));
 
     const operatingTotal = netIncome.add(apChange).sub(arChange).add(inventoryChange);
 
@@ -414,22 +414,22 @@ export class KPIService {
         const code = parseInt(r.code);
         return code >= 1500 && code < 2000 && r.account_type === "Asset";
       })
-      .reduce((s, r) => s.add(r.period_debits.sub(r.period_credits)).neg(), new Prisma.Decimal(0));
+      .reduce((s, r) => s.add(r.period_debits.sub(r.period_credits)).neg(), new Decimal(0));
 
     // Financing: changes in long-term debt and equity contributions
     const debtChange = rows
       .filter((r) => r.code.startsWith("25") || r.code.startsWith("26"))
-      .reduce((s, r) => s.add(r.period_credits.sub(r.period_debits)), new Prisma.Decimal(0));
+      .reduce((s, r) => s.add(r.period_credits.sub(r.period_debits)), new Decimal(0));
 
     const equityChange = rows
       .filter((r) => r.code.startsWith("30") || r.code.startsWith("31"))
-      .reduce((s, r) => s.add(r.period_credits.sub(r.period_debits)), new Prisma.Decimal(0));
+      .reduce((s, r) => s.add(r.period_credits.sub(r.period_debits)), new Decimal(0));
 
     const financingTotal = debtChange.add(equityChange);
 
     // Opening cash (code 1000)
     const cashAccount = rows.find((r) => r.code === "1000");
-    const closingCash = cashAccount ? cashAccount.closing_balance : new Prisma.Decimal(0);
+    const closingCash = cashAccount ? cashAccount.closing_balance : new Decimal(0);
     const netChange = operatingTotal.add(capexChange).add(financingTotal);
     const openingCash = closingCash.sub(netChange);
 
@@ -475,8 +475,8 @@ export class KPIService {
     type USALIRow = {
       code: string;
       name: string;
-      period_debits: Prisma.Decimal;
-      period_credits: Prisma.Decimal;
+      period_debits: Decimal;
+      period_credits: Decimal;
       account_type: string;
     };
     const rows = await this.prisma.$queryRaw<USALIRow[]>`
@@ -488,8 +488,8 @@ export class KPIService {
       ORDER BY a.code
     `;
 
-    const deptRevenue = new Map<string, Prisma.Decimal>();
-    const deptExpense = new Map<string, Prisma.Decimal>();
+    const deptRevenue = new Map<string, Decimal>();
+    const deptExpense = new Map<string, Decimal>();
 
     for (const row of rows) {
       const mapped = mapAccountToDepartment(row.code);
@@ -504,12 +504,12 @@ export class KPIService {
       if (mapped.type === "revenue") {
         deptRevenue.set(
           mapped.dept,
-          (deptRevenue.get(mapped.dept) ?? new Prisma.Decimal(0)).add(amount)
+          (deptRevenue.get(mapped.dept) ?? new Decimal(0)).add(amount)
         );
       } else {
         deptExpense.set(
           mapped.dept,
-          (deptExpense.get(mapped.dept) ?? new Prisma.Decimal(0)).add(amount)
+          (deptExpense.get(mapped.dept) ?? new Decimal(0)).add(amount)
         );
       }
     }
@@ -531,10 +531,10 @@ export class KPIService {
     ];
 
     const departments: USALIDepartment[] = operatedDepts.map((name) => {
-      const rev = deptRevenue.get(name) ?? new Prisma.Decimal(0);
-      const exp = deptExpense.get(name) ?? new Prisma.Decimal(0);
+      const rev = deptRevenue.get(name) ?? new Decimal(0);
+      const exp = deptExpense.get(name) ?? new Decimal(0);
       const income = rev.sub(exp);
-      const incomePct = rev.isZero() ? new Prisma.Decimal(0) : income.div(rev).mul(100);
+      const incomePct = rev.isZero() ? new Decimal(0) : income.div(rev).mul(100);
       return {
         name,
         revenue: rev.toFixed(2),
@@ -545,24 +545,24 @@ export class KPIService {
     });
 
     const totalRevenue = operatedDepts.reduce(
-      (s, name) => s.add(deptRevenue.get(name) ?? new Prisma.Decimal(0)),
-      new Prisma.Decimal(0)
+      (s, name) => s.add(deptRevenue.get(name) ?? new Decimal(0)),
+      new Decimal(0)
     );
     const totalDeptExpenses = operatedDepts.reduce(
-      (s, name) => s.add(deptExpense.get(name) ?? new Prisma.Decimal(0)),
-      new Prisma.Decimal(0)
+      (s, name) => s.add(deptExpense.get(name) ?? new Decimal(0)),
+      new Decimal(0)
     );
     const totalDeptIncome = totalRevenue.sub(totalDeptExpenses);
 
     const undistExpenses = undistDepts.reduce(
-      (s, name) => s.add(deptExpense.get(name) ?? new Prisma.Decimal(0)),
-      new Prisma.Decimal(0)
+      (s, name) => s.add(deptExpense.get(name) ?? new Decimal(0)),
+      new Decimal(0)
     );
 
     const gop = totalDeptIncome.sub(undistExpenses);
 
     // Management fees — no specific code in this COA; placeholder
-    const mgmtFees = new Prisma.Decimal(0);
+    const mgmtFees = new Decimal(0);
 
     const ebitda = gop.sub(mgmtFees);
 
@@ -584,13 +584,13 @@ export class KPIService {
   private computeUSALIData(
     rows: Array<{
       code: string;
-      period_debits: Prisma.Decimal;
-      period_credits: Prisma.Decimal;
+      period_debits: Decimal;
+      period_credits: Decimal;
       account_type: string;
     }>
   ) {
-    const deptRevenue = new Map<string, Prisma.Decimal>();
-    const deptExpense = new Map<string, Prisma.Decimal>();
+    const deptRevenue = new Map<string, Decimal>();
+    const deptExpense = new Map<string, Decimal>();
 
     for (const row of rows) {
       const mapped = mapAccountToDepartment(row.code);
@@ -602,12 +602,12 @@ export class KPIService {
       if (mapped.type === "revenue") {
         deptRevenue.set(
           mapped.dept,
-          (deptRevenue.get(mapped.dept) ?? new Prisma.Decimal(0)).add(amount)
+          (deptRevenue.get(mapped.dept) ?? new Decimal(0)).add(amount)
         );
       } else {
         deptExpense.set(
           mapped.dept,
-          (deptExpense.get(mapped.dept) ?? new Prisma.Decimal(0)).add(amount)
+          (deptExpense.get(mapped.dept) ?? new Decimal(0)).add(amount)
         );
       }
     }
@@ -628,24 +628,24 @@ export class KPIService {
     ];
 
     const totalRevenue = operatedDepts.reduce(
-      (s, n) => s.add(deptRevenue.get(n) ?? new Prisma.Decimal(0)),
-      new Prisma.Decimal(0)
+      (s, n) => s.add(deptRevenue.get(n) ?? new Decimal(0)),
+      new Decimal(0)
     );
     const totalDeptExpenses = operatedDepts.reduce(
-      (s, n) => s.add(deptExpense.get(n) ?? new Prisma.Decimal(0)),
-      new Prisma.Decimal(0)
+      (s, n) => s.add(deptExpense.get(n) ?? new Decimal(0)),
+      new Decimal(0)
     );
     const totalDeptIncome = totalRevenue.sub(totalDeptExpenses);
     const undistExpenses = undistDepts.reduce(
-      (s, n) => s.add(deptExpense.get(n) ?? new Prisma.Decimal(0)),
-      new Prisma.Decimal(0)
+      (s, n) => s.add(deptExpense.get(n) ?? new Decimal(0)),
+      new Decimal(0)
     );
     const gop = totalDeptIncome.sub(undistExpenses);
-    const gopPct = totalRevenue.isZero() ? new Prisma.Decimal(0) : gop.div(totalRevenue).mul(100);
-    const mgmtFees = new Prisma.Decimal(0);
+    const gopPct = totalRevenue.isZero() ? new Decimal(0) : gop.div(totalRevenue).mul(100);
+    const mgmtFees = new Decimal(0);
     const ebitda = gop.sub(mgmtFees);
     const ebitdaPct = totalRevenue.isZero()
-      ? new Prisma.Decimal(0)
+      ? new Decimal(0)
       : ebitda.div(totalRevenue).mul(100);
 
     return {
@@ -676,7 +676,7 @@ export class KPIService {
       where: { entityId: req.entityId, year: period.year, month: { lte: period.month } },
       select: { id: true }
     });
-    const ytdPeriodIds = ytdPeriods.map((p) => p.id);
+    const ytdPeriodIds = ytdPeriods.map((p: { id: string }) => p.id);
 
     // Prior year: same month, year-1
     const priorPeriod = await this.prisma.period.findFirst({
@@ -691,8 +691,8 @@ export class KPIService {
     type USALIRow = {
       code: string;
       name: string;
-      period_debits: Prisma.Decimal;
-      period_credits: Prisma.Decimal;
+      period_debits: Decimal;
+      period_credits: Decimal;
       account_type: string;
     };
 
@@ -710,7 +710,7 @@ export class KPIService {
     const ytdRows: USALIRow[] =
       ytdPeriodIds.length > 0
         ? await this.prisma.$queryRaw<USALIRow[]>(
-            Prisma.sql`
+            sql`
             SELECT a.code, a.name,
                    SUM(apb.period_debits)  AS period_debits,
                    SUM(apb.period_credits) AS period_credits,
@@ -718,7 +718,7 @@ export class KPIService {
             FROM account_period_balances apb
             JOIN accounts a ON a.id = apb.account_id
             WHERE apb.entity_id = ${req.entityId}
-              AND apb.period_id IN (${Prisma.join(ytdPeriodIds)})
+              AND apb.period_id IN (${join(ytdPeriodIds)})
             GROUP BY a.code, a.name, a.type
             ORDER BY a.code
           `
@@ -742,11 +742,11 @@ export class KPIService {
       code: string;
       name: string;
       account_type: string;
-      budget_amount: Prisma.Decimal;
+      budget_amount: Decimal;
     };
     const rawBudgetRows: BudgetRaw[] = budgetDef
       ? await this.prisma.$queryRaw<BudgetRaw[]>(
-          Prisma.sql`
+          sql`
             SELECT a.code, a.name, a.type AS account_type, SUM(bl.amount) AS budget_amount
             FROM budget_lines bl
             JOIN accounts a ON a.id = bl.account_id
@@ -762,8 +762,8 @@ export class KPIService {
       code: r.code,
       name: r.name,
       account_type: r.account_type,
-      period_debits: r.account_type === "EXPENSE" ? r.budget_amount : new Prisma.Decimal(0),
-      period_credits: r.account_type === "REVENUE" ? r.budget_amount : new Prisma.Decimal(0)
+      period_debits: r.account_type === "EXPENSE" ? r.budget_amount : new Decimal(0),
+      period_credits: r.account_type === "REVENUE" ? r.budget_amount : new Decimal(0)
     }));
 
     const current = this.computeUSALIData(currentRows);
@@ -779,26 +779,26 @@ export class KPIService {
     ];
 
     const departments: USALIDepartmentComparative[] = operatedDepts.map((name) => {
-      const rev = current.deptRevenue.get(name) ?? new Prisma.Decimal(0);
-      const exp = current.deptExpense.get(name) ?? new Prisma.Decimal(0);
+      const rev = current.deptRevenue.get(name) ?? new Decimal(0);
+      const exp = current.deptExpense.get(name) ?? new Decimal(0);
       const inc = rev.sub(exp);
-      const pct = rev.isZero() ? new Prisma.Decimal(0) : inc.div(rev).mul(100);
+      const pct = rev.isZero() ? new Decimal(0) : inc.div(rev).mul(100);
 
-      const yRev = ytd.deptRevenue.get(name) ?? new Prisma.Decimal(0);
-      const yExp = ytd.deptExpense.get(name) ?? new Prisma.Decimal(0);
+      const yRev = ytd.deptRevenue.get(name) ?? new Decimal(0);
+      const yExp = ytd.deptExpense.get(name) ?? new Decimal(0);
       const yInc = yRev.sub(yExp);
-      const yPct = yRev.isZero() ? new Prisma.Decimal(0) : yInc.div(yRev).mul(100);
+      const yPct = yRev.isZero() ? new Decimal(0) : yInc.div(yRev).mul(100);
 
-      const pRev = prior.deptRevenue.get(name) ?? new Prisma.Decimal(0);
-      const pExp = prior.deptExpense.get(name) ?? new Prisma.Decimal(0);
+      const pRev = prior.deptRevenue.get(name) ?? new Decimal(0);
+      const pExp = prior.deptExpense.get(name) ?? new Decimal(0);
       const pInc = pRev.sub(pExp);
-      const pPct = pRev.isZero() ? new Prisma.Decimal(0) : pInc.div(pRev).mul(100);
+      const pPct = pRev.isZero() ? new Decimal(0) : pInc.div(pRev).mul(100);
 
-      const bRev = budget.deptRevenue.get(name) ?? new Prisma.Decimal(0);
-      const bExp = budget.deptExpense.get(name) ?? new Prisma.Decimal(0);
+      const bRev = budget.deptRevenue.get(name) ?? new Decimal(0);
+      const bExp = budget.deptExpense.get(name) ?? new Decimal(0);
       const bInc = bRev.sub(bExp);
       const varAmt = inc.sub(bInc);
-      const varPct = bInc.isZero() ? new Prisma.Decimal(0) : varAmt.div(bInc.abs()).mul(100);
+      const varPct = bInc.isZero() ? new Decimal(0) : varAmt.div(bInc.abs()).mul(100);
 
       return {
         name,
@@ -822,7 +822,7 @@ export class KPIService {
       };
     });
 
-    const varFn = (actual: Prisma.Decimal, bud: Prisma.Decimal) => ({
+    const varFn = (actual: Decimal, bud: Decimal) => ({
       amt: actual.sub(bud).toFixed(2),
       pct: bud.isZero() ? "0.00" : actual.sub(bud).div(bud.abs()).mul(100).toFixed(2)
     });
@@ -878,7 +878,7 @@ export class KPIService {
   // ── Currency exposure: AR + AP outstanding grouped by currency ───────────
 
   async getCurrencyExposure(entityId: string) {
-    type ARRow = { currency: string; outstanding: Prisma.Decimal };
+    type ARRow = { currency: string; outstanding: Decimal };
     const arRows = await this.prisma.$queryRaw<ARRow[]>`
       SELECT currency, SUM(amount - amount_paid) AS outstanding
       FROM ar_invoices
@@ -887,7 +887,7 @@ export class KPIService {
       GROUP BY currency
     `;
 
-    type APRow = { currency: string; outstanding: Prisma.Decimal };
+    type APRow = { currency: string; outstanding: Decimal };
     const apRows = await this.prisma.$queryRaw<APRow[]>`
       SELECT currency, SUM(gross_amount) AS outstanding
       FROM ap_invoices
@@ -897,12 +897,12 @@ export class KPIService {
     `;
 
     const currencies = new Set([
-      ...arRows.map((r) => r.currency),
-      ...apRows.map((r) => r.currency)
+      ...arRows.map((r: ARRow) => r.currency),
+      ...apRows.map((r: APRow) => r.currency)
     ]);
     return Array.from(currencies).map((currency) => {
-      const ar = arRows.find((r) => r.currency === currency)?.outstanding ?? new Prisma.Decimal(0);
-      const ap = apRows.find((r) => r.currency === currency)?.outstanding ?? new Prisma.Decimal(0);
+      const ar = arRows.find((r: ARRow) => r.currency === currency)?.outstanding ?? new Decimal(0);
+      const ap = apRows.find((r: APRow) => r.currency === currency)?.outstanding ?? new Decimal(0);
       return {
         currency,
         arOutstanding: ar.toFixed(2),
@@ -962,7 +962,7 @@ export class KPIService {
     if (stats.length === 0) return [];
 
     // Get total room revenue for the period, distribute evenly across days
-    type RevenueRow = { closing_balance: Prisma.Decimal };
+    type RevenueRow = { closing_balance: Decimal };
     const revRows = await this.prisma.$queryRaw<RevenueRow[]>`
       SELECT apb.closing_balance
       FROM account_period_balances apb
@@ -973,21 +973,21 @@ export class KPIService {
     `;
 
     const totalRoomRevenue = revRows
-      .reduce((s, r) => s.add(r.closing_balance), new Prisma.Decimal(0))
+      .reduce((s, r) => s.add(r.closing_balance), new Decimal(0))
       .abs();
 
-    const daysWithData = new Prisma.Decimal(stats.length);
+    const daysWithData = new Decimal(stats.length);
     const dailyRevenue = daysWithData.isZero()
-      ? new Prisma.Decimal(0)
+      ? new Decimal(0)
       : totalRoomRevenue.div(daysWithData);
 
-    return stats.map((s) => {
-      const available = new Prisma.Decimal(s.availableRooms);
-      const occupied = new Prisma.Decimal(s.occupiedRooms);
-      const revpar = available.isZero() ? new Prisma.Decimal(0) : dailyRevenue.div(available);
-      const adr = occupied.isZero() ? new Prisma.Decimal(0) : dailyRevenue.div(occupied);
+    return stats.map((s: { availableRooms: number; occupiedRooms: number; statDate: Date }) => {
+      const available = new Decimal(s.availableRooms);
+      const occupied = new Decimal(s.occupiedRooms);
+      const revpar = available.isZero() ? new Decimal(0) : dailyRevenue.div(available);
+      const adr = occupied.isZero() ? new Decimal(0) : dailyRevenue.div(occupied);
       const occupancyPct = available.isZero()
-        ? new Prisma.Decimal(0)
+        ? new Decimal(0)
         : occupied.div(available).mul(100);
       return {
         date: s.statDate.toISOString().split("T")[0],
