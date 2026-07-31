@@ -1,4 +1,4 @@
-import { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "./client.js";
 import { serializeForAudit } from "./auditSerialization.js";
 import { getRequestContext, runWithAuditDisabled } from "./requestContext.js";
 
@@ -75,7 +75,6 @@ export function registerAuditMiddleware(
       context.disableAudit ||
       !modelName ||
       modelName === "AuditEvent" ||
-      modelName === "Tenant" ||
       !AUDIT_MODELS.has(modelName) ||
       !AUDIT_ACTIONS.has(params.action) ||
       !entityId
@@ -84,20 +83,38 @@ export function registerAuditMiddleware(
     }
     const beforeState = await findPreviousState(client, params);
     const result = await next(params);
-    await runWithAuditDisabled(async () => {
-      await client.auditEvent.create({
-        data: {
-          entityId,
-          userId: context.userId,
-          eventType: params.action.toUpperCase(),
-          resourceType: modelName.toLowerCase(),
-          resourceId: resolveResourceId(result, params.args),
-          beforeState: serializeForAudit(beforeState) as Prisma.InputJsonValue,
-          afterState: serializeForAudit(result) as Prisma.InputJsonValue,
-          ipAddress: context.ipAddress,
-          userAgent: context.userAgent
-        }
-      });
+    // Fire-and-forget: audit must never block the primary operation.
+    // The audit_events table has FORCE ROW LEVEL SECURITY, and this
+    // client.auditEvent.create() runs on a pooled connection that may
+    // lack the app.current_entity_id session variable, causing RLS
+    // policy violations.  We set it explicitly in a raw transaction.
+    runWithAuditDisabled(async () => {
+      try {
+        await client.$transaction(async (tx) => {
+          await tx.$executeRaw`SELECT set_config('app.current_entity_id', ${entityId}, true)`;
+          await tx.auditEvent.create({
+            data: {
+              entityId,
+              userId: context.userId,
+              eventType: params.action.toUpperCase(),
+              resourceType: modelName.toLowerCase(),
+              resourceId: resolveResourceId(result, params.args),
+              beforeState: serializeForAudit(beforeState) as Prisma.InputJsonValue,
+              afterState: serializeForAudit(result) as Prisma.InputJsonValue,
+              ipAddress: context.ipAddress,
+              userAgent: context.userAgent
+            }
+          });
+        });
+      } catch (err) {
+        // Log audit failures but don't break business operations
+        console.error(
+          `[Audit] Failed to write audit event for ${modelName}.${params.action}:`,
+          err
+        );
+      }
+    }).catch((err) => {
+      console.error(`[Audit] Unhandled rejection in audit middleware:`, err);
     });
     return result;
   });

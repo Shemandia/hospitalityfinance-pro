@@ -1,4 +1,5 @@
-import { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "../../db/client.js";
+import { applyBalanceDelta } from "../../db/balance-writer.js";
 import type {
   ARAllocationInput,
   ARInvoiceCreateInput,
@@ -113,6 +114,11 @@ export class ARRepository {
         dueDate: input.dueDate,
         currency: input.currency.toUpperCase(),
         amount: new Prisma.Decimal(input.amount),
+        // Default net to the gross when no tax is supplied, preserving the
+        // invariant amount = netAmount + taxAmount for tax-free invoices.
+        netAmount: new Prisma.Decimal(input.netAmount ?? input.amount),
+        taxAmount: new Prisma.Decimal(input.taxAmount ?? 0),
+        taxCodeId: input.taxCodeId,
         functionalAmount: new Prisma.Decimal(input.functionalAmount),
         fxRate: new Prisma.Decimal(input.fxRate),
         notes: input.notes
@@ -222,6 +228,7 @@ export class ARRepository {
       customer_name: string;
       customer_code: string;
       currency: string;
+      bucket_current: Prisma.Decimal;
       bucket_0_30: Prisma.Decimal;
       bucket_31_60: Prisma.Decimal;
       bucket_61_90: Prisma.Decimal;
@@ -235,6 +242,8 @@ export class ARRepository {
         c.name         AS customer_name,
         c.code         AS customer_code,
         inv.currency,
+        COALESCE(SUM(CASE WHEN inv.due_date > ${asOfDate}::date
+                     THEN (inv.amount - inv.amount_paid) ELSE 0 END), 0)::numeric(18,4) AS bucket_current,
         COALESCE(SUM(CASE WHEN EXTRACT(DAY FROM (${asOfDate}::date - inv.due_date)) BETWEEN 0 AND 30
                      THEN (inv.amount - inv.amount_paid) ELSE 0 END), 0)::numeric(18,4) AS bucket_0_30,
         COALESCE(SUM(CASE WHEN EXTRACT(DAY FROM (${asOfDate}::date - inv.due_date)) BETWEEN 31 AND 60
@@ -248,7 +257,7 @@ export class ARRepository {
       JOIN customers c ON c.id = inv.customer_id
       WHERE inv.entity_id = ${entityId}
         AND inv.status IN ('POSTED', 'PARTIALLY_PAID', 'OVERDUE')
-        AND inv.due_date <= ${asOfDate}::date
+        AND (inv.amount - inv.amount_paid) > 0
       GROUP BY c.id, c.name, c.code, inv.currency
       ORDER BY total_outstanding DESC;
     `;
@@ -267,6 +276,85 @@ export class ARRepository {
   getFallbackARControlAccount(entityId: string) {
     return this.db.account.findFirst({
       where: { entityId, isControlAccount: true, type: "ASSET" }
+    });
+  }
+
+  getBankAccount(entityId: string, bankAccountId: string) {
+    return this.db.bankAccount.findFirst({
+      where: { entityId, id: bankAccountId }
+    });
+  }
+
+  getEntityFunctionalCurrency(entityId: string) {
+    return this.db.entity.findUnique({
+      where: { id: entityId },
+      select: { functionalCurrency: true }
+    });
+  }
+
+  getSpotFxRate(fromCurrency: string, toCurrency: string) {
+    return this.db.fXRate.findFirst({
+      where: { fromCurrency, toCurrency, rateType: "SPOT" },
+      orderBy: { effectiveDate: "desc" }
+    });
+  }
+
+  sumReceiptAllocations(receiptId: string) {
+    return this.db.aRAllocation.aggregate({
+      where: { receiptId },
+      _sum: { allocatedAmount: true }
+    });
+  }
+
+  setReceiptGlJournal(entityId: string, receiptId: string, glJournalId: string) {
+    return this.db.aRReceipt.updateMany({
+      where: { entityId, id: receiptId },
+      data: { glJournalId }
+    });
+  }
+
+  createPostedJournalForARReceipt(
+    entityId: string,
+    actorId: string,
+    receiptId: string,
+    periodId: string,
+    currency: string,
+    description: string,
+    lines: Array<{
+      accountId: string;
+      debit: Prisma.Decimal;
+      credit: Prisma.Decimal;
+      fxRate: Prisma.Decimal;
+      lineNumber: number;
+      description: string;
+    }>
+  ) {
+    return this.db.journal.create({
+      data: {
+        entityId,
+        periodId,
+        reference: `AR-RCPT-${receiptId.slice(0, 8)}`,
+        description,
+        source: "AR",
+        status: "POSTED",
+        functionalCurrency: currency,
+        createdById: actorId,
+        postedAt: new Date(),
+        lines: {
+          create: lines.map((line) => ({
+            accountId: line.accountId,
+            debit: line.debit,
+            credit: line.credit,
+            currency,
+            fxRate: line.fxRate,
+            debitFunctional: line.debit.mul(line.fxRate),
+            creditFunctional: line.credit.mul(line.fxRate),
+            description: line.description,
+            lineNumber: line.lineNumber
+          }))
+        }
+      },
+      include: { lines: { include: { account: { select: { type: true } } } } }
     });
   }
 
@@ -316,36 +404,30 @@ export class ARRepository {
     });
   }
 
-  updateAccountBalance(
+  /**
+   * Update one account's period balance.
+   *
+   * Delegates to the canonical signed writer, which derives the sign from the
+   * account's own normal_balance. `accountType` is ignored and optional — see
+   * db/balance-writer.ts.
+   */
+  async updateAccountBalance(
     entityId: string,
     accountId: string,
     periodId: string,
     debitFunctional: Prisma.Decimal,
     creditFunctional: Prisma.Decimal,
-    accountType: string
+    accountType?: string
   ) {
-    const isDebitNormal = ["ASSET", "EXPENSE", "CONTRA_REVENUE"].includes(accountType);
-    const balanceDelta = isDebitNormal
-      ? debitFunctional.sub(creditFunctional)
-      : creditFunctional.sub(debitFunctional);
-
-    return this.db.accountPeriodBalance.upsert({
-      where: { entityId_accountId_periodId: { entityId, accountId, periodId } },
-      create: {
-        entityId,
-        accountId,
-        periodId,
-        openingBalance: new Prisma.Decimal(0),
-        periodDebits: debitFunctional,
-        periodCredits: creditFunctional,
-        closingBalance: balanceDelta
-      },
-      update: {
-        periodDebits: { increment: debitFunctional },
-        periodCredits: { increment: creditFunctional },
-        closingBalance: { increment: balanceDelta }
-      }
-    });
+    void accountType;
+    await applyBalanceDelta(
+      this.db,
+      entityId,
+      periodId,
+      accountId,
+      debitFunctional,
+      creditFunctional
+    );
   }
 
   getOpenPeriodForDate(entityId: string, date: Date) {

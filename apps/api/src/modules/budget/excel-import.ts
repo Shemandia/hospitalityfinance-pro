@@ -1,5 +1,5 @@
 import * as XLSX from "xlsx";
-import { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "../../db/client.js";
 
 export type BudgetExcelRow = {
   rowNumber: number;
@@ -69,9 +69,13 @@ function parseMonth(value: unknown): number | null {
 
 function parseAmount(value: unknown): string | null {
   if (value == null || value === "") return null;
-  const n = Number(value);
-  if (isNaN(n)) return null;
-  return n.toFixed(4);
+  try {
+    // Use Prisma.Decimal to preserve precision for large values
+    const d = new Prisma.Decimal(String(value));
+    return d.toDecimalPlaces(4).toFixed(4);
+  } catch {
+    return null;
+  }
 }
 
 /**

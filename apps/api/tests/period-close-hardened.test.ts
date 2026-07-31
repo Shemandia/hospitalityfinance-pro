@@ -73,7 +73,52 @@ function makeMockPrisma() {
   lockIdCounter = 0;
   pcsIdCounter = 0;
 
+  const processLockMethods = {
+    findFirst: vi.fn().mockImplementation(({ where }: any) => {
+      return Promise.resolve(
+        locks.find(
+          (l) =>
+            l.entityId === where.entityId &&
+            l.processType === where.processType &&
+            l.ledger === where.ledger &&
+            l.isActive === where.isActive
+        ) ?? null
+      );
+    }),
+    create: vi.fn().mockImplementation(({ data }: any) => {
+      lockIdCounter++;
+      const lock: MockLock = {
+        id: `lock-${lockIdCounter}`,
+        entityId: data.entityId,
+        processType: data.processType,
+        ledger: data.ledger,
+        isActive: true,
+        expiresAt: data.expiresAt,
+        acquiredAt: new Date(),
+        releasedAt: null,
+        acquiredById: data.acquiredById,
+        workerId: data.workerId
+      };
+      locks.push(lock);
+      return Promise.resolve(lock);
+    }),
+    updateMany: vi.fn().mockImplementation(({ where, data }: any) => {
+      let count = 0;
+      for (const lock of locks) {
+        if (lock.isActive && where.expiresAt?.lt && lock.expiresAt < where.expiresAt.lt) {
+          if (!where.entityId || lock.entityId === where.entityId) {
+            Object.assign(lock, data);
+            count++;
+          }
+        }
+      }
+      return Promise.resolve({ count });
+    })
+  };
+
   const txProxy = {
+    $executeRawUnsafe: vi.fn().mockResolvedValue(undefined),
+    processLock: processLockMethods,
     $queryRaw: vi.fn().mockImplementation((strings: TemplateStringsArray, ...values: any[]) => {
       const query = strings.join("?");
       if (query.includes("SELECT id, status") && query.includes("periods")) {

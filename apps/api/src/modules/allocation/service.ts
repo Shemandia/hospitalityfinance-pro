@@ -1,18 +1,16 @@
-import type { PrismaClient } from "../../db/client.js";
+import { Prisma, type PrismaClient } from "../../db/client.js";
 import { publishEvent } from "../../shared/rabbitmq.js";
 import { ProcessLockService, ProcessLockError } from "../process-lock/service.js";
+import { GLRepository } from "../gl/repository.js";
+import { AuditService } from "../audit/service.js";
+import { ServiceError } from "../../shared/service-error.js";
+
+const D = (v: unknown) => new Prisma.Decimal(String(v));
+const ZERO = new Prisma.Decimal(0);
 
 // ── Error ────────────────────────────────────────────────────────────────────
 
-export class AllocationServiceError extends Error {
-  constructor(
-    public readonly code: string,
-    message: string,
-    public readonly statusCode = 400
-  ) {
-    super(message);
-  }
-}
+export class AllocationServiceError extends ServiceError {}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -37,10 +35,10 @@ export type AllocationResult = {
 type SourceRow = {
   accountId: string;
   accountCode: string;
-  openingBalance: number;
-  periodDebits: number;
-  periodCredits: number;
-  closingBalance: number;
+  openingBalance: Prisma.Decimal;
+  periodDebits: Prisma.Decimal;
+  periodCredits: Prisma.Decimal;
+  closingBalance: Prisma.Decimal;
 };
 
 type TargetRow = {
@@ -48,12 +46,12 @@ type TargetRow = {
   targetAccountCode: string;
   offsetAccountCode: string | null;
   basisType: string;
-  fixedPercentage: number | null;
-  fixedAmount: number | null;
+  fixedPercentage: Prisma.Decimal | null;
+  fixedAmount: Prisma.Decimal | null;
   ratioAccountCodeFrom: string | null;
   ratioAccountCodeTo: string | null;
   statisticalKey: string | null;
-  statisticalValue: number | null;
+  statisticalValue: Prisma.Decimal | null;
   analysisCodes: Record<string, string> | null;
   targetOrder: number;
 };
@@ -289,7 +287,7 @@ export class AllocationService {
     // 1. Calculate total source amount
     const sourceAmount = await this._calculateSourceAmount(entityId, definition.sources, periodId);
 
-    if (sourceAmount === 0) {
+    if (sourceAmount.isZero()) {
       return {
         definitionId: definition.id,
         definitionName: definition.name,
@@ -318,29 +316,29 @@ export class AllocationService {
     entityId: string,
     sources: any[],
     periodId: string
-  ): Promise<number> {
-    let total = 0;
+  ): Promise<Prisma.Decimal> {
+    let total = ZERO;
 
     for (const source of sources) {
       const rows = await this._getSourceBalances(entityId, source, periodId);
 
-      let sourceSum = 0;
+      let sourceSum = ZERO;
       for (const row of rows) {
-        sourceSum += this._extractBalance(row, source.balanceType ?? "MOVEMENTS");
+        sourceSum = sourceSum.add(this._extractBalance(row, source.balanceType ?? "MOVEMENTS"));
       }
 
       // Apply thresholds
-      const minThreshold = source.minimumThreshold ? Number(source.minimumThreshold) : null;
-      const maxThreshold = source.maximumThreshold ? Number(source.maximumThreshold) : null;
+      const minThreshold = source.minimumThreshold ? D(source.minimumThreshold) : null;
+      const maxThreshold = source.maximumThreshold ? D(source.maximumThreshold) : null;
 
-      if (minThreshold !== null && Math.abs(sourceSum) < minThreshold) {
+      if (minThreshold !== null && sourceSum.abs().lt(minThreshold)) {
         continue; // Skip this source — below minimum threshold
       }
-      if (maxThreshold !== null && Math.abs(sourceSum) > maxThreshold) {
-        sourceSum = sourceSum > 0 ? maxThreshold : -maxThreshold;
+      if (maxThreshold !== null && sourceSum.abs().gt(maxThreshold)) {
+        sourceSum = sourceSum.gt(ZERO) ? maxThreshold : maxThreshold.neg();
       }
 
-      total += sourceSum;
+      total = total.add(sourceSum);
     }
 
     return total;
@@ -385,14 +383,14 @@ export class AllocationService {
     return balances.map((b: any) => ({
       accountId: b.accountId,
       accountCode: accountCodeMap.get(b.accountId) ?? "",
-      openingBalance: Number(b.openingBalance),
-      periodDebits: Number(b.periodDebits),
-      periodCredits: Number(b.periodCredits),
-      closingBalance: Number(b.closingBalance)
+      openingBalance: D(b.openingBalance),
+      periodDebits: D(b.periodDebits),
+      periodCredits: D(b.periodCredits),
+      closingBalance: D(b.closingBalance)
     }));
   }
 
-  private _extractBalance(row: SourceRow, balanceType: string): number {
+  private _extractBalance(row: SourceRow, balanceType: string): Prisma.Decimal {
     switch (balanceType) {
       case "OPENING":
         return row.openingBalance;
@@ -400,7 +398,7 @@ export class AllocationService {
         return row.closingBalance;
       case "MOVEMENTS":
       default:
-        return row.periodDebits - row.periodCredits;
+        return row.periodDebits.sub(row.periodCredits);
     }
   }
 
@@ -412,13 +410,13 @@ export class AllocationService {
     entityId: string,
     definition: any,
     periodId: string,
-    sourceAmount: number
+    sourceAmount: Prisma.Decimal
   ): Promise<AllocationLineResult[]> {
     const targets: TargetRow[] = definition.targets.map((t: any) => ({
       ...t,
-      fixedPercentage: t.fixedPercentage ? Number(t.fixedPercentage) : null,
-      fixedAmount: t.fixedAmount ? Number(t.fixedAmount) : null,
-      statisticalValue: t.statisticalValue ? Number(t.statisticalValue) : null
+      fixedPercentage: t.fixedPercentage ? D(t.fixedPercentage) : null,
+      fixedAmount: t.fixedAmount ? D(t.fixedAmount) : null,
+      statisticalValue: t.statisticalValue ? D(t.statisticalValue) : null
     }));
 
     // Calculate ratios for ACCOUNT_BALANCE and STATISTICAL_KEY targets
@@ -426,56 +424,74 @@ export class AllocationService {
 
     const lines: AllocationLineResult[] = [];
     const isSplit = definition.allocationType === "SPLIT";
-    let allocatedTotal = 0;
+    let allocatedTotal = ZERO;
+
+    // First pass: round each target amount to 4dp and track the total
+    const roundedAmounts: Prisma.Decimal[] = [];
+    for (let i = 0; i < targets.length; i++) {
+      const amount = ratios[i].toDecimalPlaces(4);
+      roundedAmounts.push(amount);
+      allocatedTotal = allocatedTotal.add(amount);
+    }
+
+    // Remainder adjustment: apply penny difference to the last non-zero target
+    const hasFixedAmount = targets.some((t) => t.basisType === "FIXED_AMOUNT");
+    if (!hasFixedAmount) {
+      const remainder = sourceAmount.sub(allocatedTotal).toDecimalPlaces(4);
+      if (!remainder.isZero()) {
+        for (let i = roundedAmounts.length - 1; i >= 0; i--) {
+          if (!roundedAmounts[i].isZero()) {
+            roundedAmounts[i] = roundedAmounts[i].add(remainder).toDecimalPlaces(4);
+            break;
+          }
+        }
+      }
+    }
 
     for (let i = 0; i < targets.length; i++) {
       const target = targets[i];
-      let amount = ratios[i];
+      const amount = roundedAmounts[i];
 
-      // Round to 4 decimal places
-      amount = Math.round(amount * 10000) / 10000;
-      allocatedTotal += amount;
+      if (amount.isZero()) continue;
 
-      if (amount === 0) continue;
-
-      // Resolve target account ID
       const targetAccount = await this._resolveAccount(entityId, target.targetAccountCode);
       if (!targetAccount) continue;
+
+      const isPositive = amount.gt(ZERO);
+      const absAmount = amount.abs().toFixed(4);
 
       // Target line: debit if positive, credit if negative
       lines.push({
         accountId: targetAccount.id,
         accountCode: target.targetAccountCode,
-        debit: amount > 0 ? amount.toFixed(4) : "0",
-        credit: amount < 0 ? Math.abs(amount).toFixed(4) : "0",
+        debit: isPositive ? absAmount : "0",
+        credit: !isPositive ? absAmount : "0",
         description: `Allocation: ${definition.name}`,
         analysisCodes: target.analysisCodes ?? undefined
       });
 
       // Offset line (contra entry)
       if (isSplit) {
-        // SPLIT: reverse on source accounts (we use the first source account for simplicity)
         const sourceAccount = definition.sources[0];
         const sourceAcct = await this._resolveAccount(entityId, sourceAccount.accountCodeFrom);
         if (sourceAcct) {
           lines.push({
             accountId: sourceAcct.id,
             accountCode: sourceAccount.accountCodeFrom,
-            debit: amount < 0 ? Math.abs(amount).toFixed(4) : "0",
-            credit: amount > 0 ? amount.toFixed(4) : "0",
+            debit: !isPositive ? absAmount : "0",
+            credit: isPositive ? absAmount : "0",
             description: `Allocation reversal: ${definition.name}`
           });
         }
       } else {
-        // CHARGE: offset to the target's offset account
         if (target.offsetAccountCode) {
           const offsetAccount = await this._resolveAccount(entityId, target.offsetAccountCode);
           if (offsetAccount) {
             lines.push({
               accountId: offsetAccount.id,
               accountCode: target.offsetAccountCode,
-              debit: amount < 0 ? Math.abs(amount).toFixed(4) : "0",
-              credit: amount > 0 ? amount.toFixed(4) : "0",
+              debit: !isPositive ? absAmount : "0",
+              credit: isPositive ? absAmount : "0",
               description: `Allocation offset: ${definition.name}`
             });
           }
@@ -494,17 +510,17 @@ export class AllocationService {
     entityId: string,
     periodId: string,
     targets: TargetRow[],
-    sourceAmount: number
-  ): Promise<number[]> {
-    const amounts: number[] = new Array(targets.length).fill(0);
+    sourceAmount: Prisma.Decimal
+  ): Promise<Prisma.Decimal[]> {
+    const amounts: Prisma.Decimal[] = new Array(targets.length).fill(ZERO);
 
     // Pass 1: resolve ACCOUNT_BALANCE ratios
     const balanceTargets = targets.filter((t) => t.basisType === "ACCOUNT_BALANCE");
-    const balanceRatioTotals: number[] = [];
+    const balanceRatioTotals: Prisma.Decimal[] = [];
 
     for (const target of balanceTargets) {
       if (!target.ratioAccountCodeFrom || !target.ratioAccountCodeTo) {
-        balanceRatioTotals.push(0);
+        balanceRatioTotals.push(ZERO);
         continue;
       }
       const balances = await this._getSourceBalances(
@@ -515,43 +531,47 @@ export class AllocationService {
         },
         periodId
       );
-      let sum = 0;
+      let sum = ZERO;
       for (const b of balances) {
-        sum += this._extractBalance(b, "CLOSING");
+        sum = sum.add(this._extractBalance(b, "CLOSING"));
       }
-      balanceRatioTotals.push(Math.abs(sum));
+      balanceRatioTotals.push(sum.abs());
     }
 
-    const totalBalanceRatio = balanceRatioTotals.reduce((a, b) => a + b, 0);
+    const totalBalanceRatio = balanceRatioTotals.reduce((a, b) => a.add(b), ZERO);
 
     // Pass 2: resolve STATISTICAL_KEY ratios
     const statTargets = targets.filter((t) => t.basisType === "STATISTICAL_KEY");
-    const totalStatValue = statTargets.reduce((sum, t) => sum + (t.statisticalValue ?? 0), 0);
+    const totalStatValue = statTargets.reduce(
+      (sum, t) => sum.add(t.statisticalValue ?? ZERO),
+      ZERO
+    );
 
     // Pass 3: assign amounts
+    const HUNDRED = new Prisma.Decimal(100);
     for (let i = 0; i < targets.length; i++) {
       const target = targets[i];
 
       switch (target.basisType) {
         case "FIXED_PERCENTAGE":
-          amounts[i] = sourceAmount * ((target.fixedPercentage ?? 0) / 100);
+          amounts[i] = sourceAmount.mul(target.fixedPercentage ?? ZERO).div(HUNDRED);
           break;
 
         case "FIXED_AMOUNT":
-          amounts[i] = target.fixedAmount ?? 0;
+          amounts[i] = target.fixedAmount ?? ZERO;
           break;
 
         case "ACCOUNT_BALANCE": {
           const idx = balanceTargets.indexOf(target);
-          if (idx >= 0 && totalBalanceRatio > 0) {
-            amounts[i] = sourceAmount * (balanceRatioTotals[idx] / totalBalanceRatio);
+          if (idx >= 0 && totalBalanceRatio.gt(ZERO)) {
+            amounts[i] = sourceAmount.mul(balanceRatioTotals[idx]).div(totalBalanceRatio);
           }
           break;
         }
 
         case "STATISTICAL_KEY":
-          if (totalStatValue > 0) {
-            amounts[i] = sourceAmount * ((target.statisticalValue ?? 0) / totalStatValue);
+          if (totalStatValue.gt(ZERO)) {
+            amounts[i] = sourceAmount.mul(target.statisticalValue ?? ZERO).div(totalStatValue);
           }
           break;
       }
@@ -663,38 +683,24 @@ export class AllocationService {
               }))
             }
           },
-          include: { lines: true }
+          include: {
+            lines: {
+              include: { account: { select: { type: true } } }
+            }
+          }
         });
 
-        // Update account balances for each line
+        // Update account balances using the canonical GL method (SQL-level Decimal arithmetic)
+        const repo = new GLRepository(tx);
         for (const line of created.lines) {
-          const debit = Number(line.debitFunctional);
-          const credit = Number(line.creditFunctional);
-          const net = debit - credit;
-
-          await tx.accountPeriodBalance.upsert({
-            where: {
-              entityId_accountId_periodId: {
-                entityId,
-                accountId: line.accountId,
-                periodId: effectivePeriodId
-              }
-            },
-            create: {
-              entityId,
-              accountId: line.accountId,
-              periodId: effectivePeriodId,
-              openingBalance: 0,
-              periodDebits: debit,
-              periodCredits: credit,
-              closingBalance: net
-            },
-            update: {
-              periodDebits: { increment: debit },
-              periodCredits: { increment: credit },
-              closingBalance: { increment: net }
-            }
-          });
+          await repo.updateAccountBalance(
+            entityId,
+            line.accountId,
+            effectivePeriodId,
+            D(line.debitFunctional),
+            D(line.creditFunctional),
+            line.account.type
+          );
         }
 
         // Update PeriodCloseStatus.allocationsRun flag
@@ -721,6 +727,21 @@ export class AllocationService {
         periodId: effectivePeriodId,
         executedBy
       }).catch(() => {});
+
+      // Synchronous audit trail
+      const auditService = new AuditService(this.prisma);
+      await auditService.createEvent({
+        entityId,
+        userId: executedBy,
+        eventType: "ALLOCATION_EXECUTED",
+        resourceType: "ALLOCATION",
+        resourceId: definitionId,
+        afterState: {
+          journalId: journal.id,
+          periodId: effectivePeriodId,
+          lineCount: result.lines.length
+        }
+      });
 
       return result;
     } finally {

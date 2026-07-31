@@ -8,8 +8,11 @@ async function main() {
   }
 
   const sqlPath = join(process.cwd(), "src", "db", "sql", "entity-rls.sql");
-  const statementCount = await executeSqlFile(prisma, sqlPath);
-  console.log(`Entity RLS policies configured (${statementCount} statements).`);
+  const { total, executed, skipped } = await executeSqlFile(prisma, sqlPath);
+  console.log(`Entity RLS policies configured (${executed}/${total} statements).`);
+  if (skipped.length > 0) {
+    console.warn(`${skipped.length} statement(s) skipped as already-applied or not applicable.`);
+  }
 }
 
 main()

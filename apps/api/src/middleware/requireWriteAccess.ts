@@ -1,28 +1,14 @@
 /**
  * RBAC Middleware — Write Access Gate
  *
- * Blocks VIEWER-only users from non-GET requests.
- * This is the baseline access control layer.
- *
- * Role hierarchy (hospitality finance):
- *   VIEWER       → Read-only: dashboards, reports, trial balance
- *   CONTROLLER   → Post journals, approve invoices, close periods, run reports
- *   ADMIN        → Full module access, entity admin, imports, payment runs
- *   SUPERADMIN   → Cross-entity, system config, period reopen
- *
- * Usage: Add as preHandler on router to block viewers from all writes.
- * For stricter checks, use requireRole(["ADMIN"]) on individual endpoints.
+ * Blocks users who only have *_READ permissions from non-GET requests.
+ * Users with any write/post/approve/manage/config permission pass through.
  */
 
 import type { FastifyReply, FastifyRequest } from "fastify";
 
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
-/**
- * Blocks VIEWER users from any non-GET request.
- * Users with CONTROLLER, ADMIN, or SUPERADMIN roles pass through.
- * Users with no roles (unauthenticated edge case) are blocked.
- */
 export async function requireWriteAccess(
   request: FastifyRequest,
   reply: FastifyReply
@@ -30,20 +16,22 @@ export async function requireWriteAccess(
   // Allow all GET/HEAD/OPTIONS requests (read-only)
   if (!WRITE_METHODS.has(request.method)) return;
 
+  const userPermissions = (request.user?.permissions ?? []).map((p: string) => p.toUpperCase());
+
+  // User has at least one non-read permission → can write
+  const hasWritePerm = userPermissions.some((p: string) => !p.endsWith("_READ"));
+  if (hasWritePerm) return;
+
+  // Also allow if user has TENANT_ADMIN role (always has all permissions)
   const userRoles = (request.user?.roles ?? []).map((r: string) => r.toUpperCase());
+  if (userRoles.includes("TENANT_ADMIN")) return;
 
-  // Users with any write-capable role pass through
-  const writeRoles = ["CONTROLLER", "ADMIN", "SUPERADMIN"];
-  if (writeRoles.some((r) => userRoles.includes(r))) return;
-
-  // Block: user has no write-capable role (VIEWER or no role)
   return reply.code(403).send({
     data: null,
     errors: [
       {
-        code: "INSUFFICIENT_ROLE",
-        message:
-          "Your role does not permit write operations. Contact your administrator for CONTROLLER or ADMIN access."
+        code: "INSUFFICIENT_PERMISSIONS",
+        message: "Your permissions do not allow write operations. Contact your administrator."
       }
     ]
   });

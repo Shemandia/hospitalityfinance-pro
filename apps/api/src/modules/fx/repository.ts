@@ -1,4 +1,5 @@
-import { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "../../db/client.js";
+import { applyBalanceDelta } from "../../db/balance-writer.js";
 import type { CurrencyCreateInput, FXRateCreateInput, FXRateQuery } from "./types.js";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
@@ -99,6 +100,73 @@ export class FXRepository {
     });
   }
 
+  /**
+   * Resolve a revaluation rate, falling back the way the ledger revaluation
+   * engine does: requested type → the inverse of the reverse pair → SPOT.
+   *
+   * Revaluation used to query CLOSING only and skip any invoice without one.
+   * Nothing in the system writes CLOSING rates — the ECB import writes SPOT —
+   * so in practice every invoice was skipped and the whole revaluation posted
+   * nothing while reporting success.
+   *
+   * Returns null only when no usable rate exists in any form; callers must
+   * surface that rather than silently continuing.
+   */
+  async resolveRevaluationRate(
+    fromCurrency: string,
+    toCurrency: string,
+    preferredType: "SPOT" | "AVERAGE" | "BUDGET" | "CLOSING",
+    asOfDate: Date
+  ): Promise<Prisma.Decimal | null> {
+    const direct = await this.getLatestRate(fromCurrency, toCurrency, preferredType, asOfDate);
+    if (direct) return new Prisma.Decimal(direct.rate);
+
+    const reverse = await this.getLatestRate(toCurrency, fromCurrency, preferredType, asOfDate);
+    if (reverse) {
+      const rate = new Prisma.Decimal(reverse.rate);
+      if (!rate.isZero()) return new Prisma.Decimal(1).div(rate).toDecimalPlaces(8);
+    }
+
+    if (preferredType !== "SPOT") {
+      const spot = await this.getLatestRate(fromCurrency, toCurrency, "SPOT", asOfDate);
+      if (spot) return new Prisma.Decimal(spot.rate);
+
+      const spotReverse = await this.getLatestRate(toCurrency, fromCurrency, "SPOT", asOfDate);
+      if (spotReverse) {
+        const rate = new Prisma.Decimal(spotReverse.rate);
+        if (!rate.isZero()) return new Prisma.Decimal(1).div(rate).toDecimalPlaces(8);
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Outstanding gross balance per AP invoice: what the supplier is still owed.
+   *
+   * APInvoice has no amountPaid column — payments are recorded as
+   * ap_payment_allocations — so the outstanding amount has to be derived.
+   */
+  async getAPOutstandingByInvoice(entityId: string, invoiceIds: string[]) {
+    if (invoiceIds.length === 0) return new Map<string, Prisma.Decimal>();
+
+    const rows = await this.db.$queryRaw<Array<{ invoice_id: string; allocated: string }>>`
+      SELECT i.id AS invoice_id,
+             COALESCE(SUM(a.allocated_amount), 0)::text AS allocated
+      FROM ap_invoices i
+      LEFT JOIN ap_payment_allocations a ON a.invoice_id = i.id
+      WHERE i.entity_id = ${entityId}
+        AND i.id = ANY(${invoiceIds})
+      GROUP BY i.id
+    `;
+
+    const allocated = new Map<string, Prisma.Decimal>();
+    for (const row of rows) {
+      allocated.set(row.invoice_id, new Prisma.Decimal(row.allocated));
+    }
+    return allocated;
+  }
+
   // ── Revaluation helpers ─────────────────────────────────────────────────────
 
   getOpenAPInvoices(entityId: string) {
@@ -112,6 +180,9 @@ export class FXRepository {
         currency: true,
         functionalAmount: true,
         fxRate: true,
+        // Gross is what the supplier is owed and what AP control carries.
+        // netAmount is the pre-tax figure and would revalue the wrong base.
+        grossAmount: true,
         netAmount: true,
         periodId: true
       }
@@ -161,6 +232,14 @@ export class FXRepository {
     });
   }
 
+  /**
+   * @param referenceDate The closing-rate date, as YYYY-MM-DD. This MUST be the
+   *   same value findExistingRevaluationJournal is called with. It previously
+   *   stamped `new Date()` instead, so whenever the closing date differed from
+   *   the run date — re-running an April revaluation in May, the normal case —
+   *   the idempotency check looked for a reference that had never been written
+   *   and posted a second gain/loss journal on top of the first.
+   */
   createRevaluationJournal(
     entityId: string,
     actorId: string,
@@ -173,13 +252,14 @@ export class FXRepository {
       credit: Prisma.Decimal;
       lineNumber: number;
       description: string;
-    }>
+    }>,
+    referenceDate: string
   ) {
     return this.db.journal.create({
       data: {
         entityId,
         periodId,
-        reference: `FX-REVAL-${new Date().toISOString().slice(0, 10)}`,
+        reference: `FX-REVAL-${referenceDate}`,
         description,
         source: "FX_REVAL",
         status: "POSTED",
@@ -204,30 +284,33 @@ export class FXRepository {
     });
   }
 
-  updateAccountBalance(
+  /**
+   * Update one account's period balance.
+   *
+   * This used to hold its own unsigned writer, justified by a comment claiming
+   * "FX revaluation always uses debit-normal convention (gain/loss accounts)".
+   * That was wrong: fx/service.ts applies this to every line of the
+   * revaluation journal, which includes AP control, AR control and bank
+   * accounts. Revaluing a foreign payable therefore moved AP control the wrong
+   * way and the trial balance stopped tying.
+   *
+   * It now delegates to the canonical signed writer like every other module.
+   */
+  async updateAccountBalance(
     entityId: string,
     accountId: string,
     periodId: string,
     debitFunctional: Prisma.Decimal,
     creditFunctional: Prisma.Decimal
   ) {
-    return this.db.accountPeriodBalance.upsert({
-      where: { entityId_accountId_periodId: { entityId, accountId, periodId } },
-      create: {
-        entityId,
-        accountId,
-        periodId,
-        openingBalance: new Prisma.Decimal(0),
-        periodDebits: debitFunctional,
-        periodCredits: creditFunctional,
-        closingBalance: debitFunctional.sub(creditFunctional)
-      },
-      update: {
-        periodDebits: { increment: debitFunctional },
-        periodCredits: { increment: creditFunctional },
-        closingBalance: { increment: debitFunctional.sub(creditFunctional) }
-      }
-    });
+    await applyBalanceDelta(
+      this.db,
+      entityId,
+      periodId,
+      accountId,
+      debitFunctional,
+      creditFunctional
+    );
   }
 
   markAPInvoiceRevalued(entityId: string, invoiceId: string, newFunctionalAmount: Prisma.Decimal) {

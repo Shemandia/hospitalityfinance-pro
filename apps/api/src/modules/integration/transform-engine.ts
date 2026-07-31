@@ -29,7 +29,84 @@
  */
 
 import * as XLSX from "xlsx";
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "../../db/client.js";
+import { Prisma } from "../../db/client.js";
+
+// ── Decimal helpers ──────────────────────────────────────────────────────────
+
+/** Convert a string to Prisma.Decimal, returning 0 for invalid input. */
+function safeDecimal(v: string): Prisma.Decimal {
+  try {
+    return new Prisma.Decimal(v || "0");
+  } catch {
+    return new Prisma.Decimal(0);
+  }
+}
+
+/**
+ * Evaluate a simple arithmetic expression using Decimal precision.
+ * Supports +, -, *, / and parentheses. No eval/Function needed.
+ */
+function safeDecimalEval(expr: string): Prisma.Decimal {
+  // Tokenize: numbers (incl decimals) and operators
+  const tokens: string[] = [];
+  let i = 0;
+  const s = expr.replace(/\s/g, "");
+  while (i < s.length) {
+    if ("+-*/()".includes(s[i])) {
+      tokens.push(s[i]);
+      i++;
+    } else if (/[0-9.]/.test(s[i])) {
+      let num = "";
+      while (i < s.length && /[0-9.]/.test(s[i])) {
+        num += s[i];
+        i++;
+      }
+      tokens.push(num);
+    } else {
+      i++; // skip unknown chars
+    }
+  }
+
+  let pos = 0;
+
+  function parseExpr(): Prisma.Decimal {
+    let result = parseTerm();
+    while (pos < tokens.length && (tokens[pos] === "+" || tokens[pos] === "-")) {
+      const op = tokens[pos++];
+      const right = parseTerm();
+      result = op === "+" ? result.add(right) : result.sub(right);
+    }
+    return result;
+  }
+
+  function parseTerm(): Prisma.Decimal {
+    let result = parseFactor();
+    while (pos < tokens.length && (tokens[pos] === "*" || tokens[pos] === "/")) {
+      const op = tokens[pos++];
+      const right = parseFactor();
+      result = op === "*" ? result.mul(right) : right.equals(0) ? result : result.div(right);
+    }
+    return result;
+  }
+
+  function parseFactor(): Prisma.Decimal {
+    if (tokens[pos] === "(") {
+      pos++;
+      const result = parseExpr();
+      if (tokens[pos] === ")") pos++;
+      return result;
+    }
+    if (tokens[pos] === "-") {
+      pos++;
+      return parseFactor().neg();
+    }
+    const token = tokens[pos++] ?? "0";
+    return safeDecimal(token);
+  }
+
+  return parseExpr();
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -359,13 +436,18 @@ export function applyTransform(value: string, transform: FieldTransform, arg?: s
       return value.toLowerCase();
     case "TRIM":
       return value.trim();
-    case "ABS":
-      return String(Math.abs(Number(value) || 0));
-    case "NEGATE":
-      return String(-(Number(value) || 0));
+    case "ABS": {
+      const d = safeDecimal(value);
+      return d.abs().toString();
+    }
+    case "NEGATE": {
+      const d = safeDecimal(value);
+      return d.neg().toString();
+    }
     case "ROUND": {
       const decimals = parseInt(arg ?? "2", 10);
-      return (Number(value) || 0).toFixed(decimals);
+      const d = safeDecimal(value);
+      return d.toFixed(decimals);
     }
     case "SUBSTRING": {
       // arg: "start,length"
@@ -414,17 +496,20 @@ export function applyTransform(value: string, transform: FieldTransform, arg?: s
       return parseDateString(value, arg ?? "YYYY-MM-DD");
     }
     case "MULTIPLY": {
-      const factor = Number(arg ?? "1");
-      return String((Number(value) || 0) * factor);
+      const d = safeDecimal(value);
+      const factor = safeDecimal(arg ?? "1");
+      return d.mul(factor).toString();
     }
     case "DIVIDE": {
-      const divisor = Number(arg ?? "1");
-      if (divisor === 0) return value;
-      return String((Number(value) || 0) / divisor);
+      const d = safeDecimal(value);
+      const divisor = safeDecimal(arg ?? "1");
+      if (divisor.equals(0)) return value;
+      return d.div(divisor).toString();
     }
     case "ADD": {
-      const addend = Number(arg ?? "0");
-      return String((Number(value) || 0) + addend);
+      const d = safeDecimal(value);
+      const addend = safeDecimal(arg ?? "0");
+      return d.add(addend).toString();
     }
     case "CONCAT": {
       // arg is the suffix to append
@@ -604,9 +689,7 @@ export async function runTransformEngine(
           // Simple math: "{amount} * {fxRate}" or "{qty} * {price}"
           try {
             const expr = rule.sourceValue.replace(/\{(\w[\w.]*)\}/g, (_, col) => row[col] ?? "0");
-            // Safe eval: only allow numbers and basic math ops
-            const sanitized = expr.replace(/[^0-9+\-*/().]/g, "");
-            value = String(Function(`"use strict"; return (${sanitized})`)());
+            value = safeDecimalEval(expr).toString();
           } catch {
             value = rule.defaultValue ?? "0";
             errors.push({

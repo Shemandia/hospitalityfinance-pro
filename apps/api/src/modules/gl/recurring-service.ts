@@ -1,15 +1,8 @@
-import type { PrismaClient, JournalSource } from "@prisma/client";
-import { Prisma } from "@prisma/client";
+import type { PrismaClient, JournalSource } from "../../db/client.js";
+import { Prisma } from "../../db/client.js";
+import { ServiceError } from "../../shared/service-error.js";
 
-export class RecurringJournalError extends Error {
-  constructor(
-    public readonly code: string,
-    message: string,
-    public readonly statusCode = 400
-  ) {
-    super(message);
-  }
-}
+export class RecurringJournalError extends ServiceError {}
 
 type CreateRecurringInput = {
   name: string;
@@ -228,7 +221,7 @@ export class RecurringJournalService {
               INSERT INTO account_period_balances
                 (id, entity_id, account_id, period_id, opening_balance, period_debits, period_credits, closing_balance, created_at, updated_at)
               VALUES (
-                gen_random_uuid(), ${entityId}::uuid, ${line.accountId}::uuid, ${periodId}::uuid,
+                gen_random_uuid()::text, ${entityId}, ${line.accountId}, ${periodId},
                 0, ${line.debitFunctional}::decimal(18,4), ${line.creditFunctional}::decimal(18,4),
                 ${sign} * (${line.debitFunctional}::decimal(18,4) - ${line.creditFunctional}::decimal(18,4)),
                 NOW(), NOW()

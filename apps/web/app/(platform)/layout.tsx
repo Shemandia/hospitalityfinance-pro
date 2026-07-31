@@ -1,6 +1,15 @@
 import { Home } from "lucide-react";
+import { cookies } from "next/headers";
+import { PlatformSidebar } from "../../components/platform-sidebar";
 
-export default function PlatformLayout({ children }: { children: React.ReactNode }) {
+const SESSION_COOKIE = "hfp_platform_key";
+
+export default async function PlatformLayout({ children }: { children: React.ReactNode }) {
+  // Sidebar only renders for signed-in operators. The httpOnly session cookie
+  // is the same one every platform proxy route requires, so this stays in
+  // sync with the page-level login gates.
+  const authenticated = (await cookies()).has(SESSION_COOKIE);
+
   return (
     <div className="flex h-screen flex-col bg-[#f8fafc]">
       <header className="flex-shrink-0 border-b border-slate-200 bg-white px-8 py-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
@@ -19,7 +28,10 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
           </span>
         </div>
       </header>
-      <div className="flex-1 overflow-y-auto">{children}</div>
+      <div className="flex flex-1 overflow-hidden">
+        {authenticated && <PlatformSidebar />}
+        <main className="flex-1 overflow-y-auto">{children}</main>
+      </div>
     </div>
   );
 }

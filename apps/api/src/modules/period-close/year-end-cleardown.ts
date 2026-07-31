@@ -3,6 +3,7 @@ import { Prisma } from "../../db/client.js";
 import { ProcessLockService } from "../process-lock/service.js";
 import { AuditService } from "../audit/service.js";
 import { GLRepository } from "../gl/repository.js";
+import { carryForwardOpeningBalances, findFollowingPeriodId } from "../period/carry-forward.js";
 import type {
   RunYearEndCleardownInput,
   YearEndCleardownLineResult,
@@ -13,6 +14,14 @@ import type {
 
 const D = (v: unknown): Prisma.Decimal => new Prisma.Decimal(String(v ?? 0));
 const ZERO = new Prisma.Decimal(0);
+
+/**
+ * P&L type codes used for accounts created before AccountTypeDefinition
+ * existed (accountTypeDefId = null). Accounts that reference a type definition
+ * are selected by its category = INCOME instead, which also picks up custom
+ * income types.
+ */
+const LEGACY_PL_TYPE_CODES = ["REVENUE", "EXPENSE", "CONTRA_REVENUE"];
 
 // ── Errors ───────────────────────────────────────────────────────────────────
 
@@ -132,12 +141,32 @@ async function executeCleardown(
     );
   }
 
-  // Query all P&L accounts (REVENUE + EXPENSE)
+  // Query all P&L accounts.
+  //
+  // Selection is by AccountTypeDefinition.category = INCOME rather than a
+  // hardcoded type list. The previous filter was `type IN (REVENUE, EXPENSE)`,
+  // which silently excluded:
+  //   - CONTRA_REVENUE (discounts, allowances, rebates) — a debit-normal P&L
+  //     type this very module already handles when it builds journal lines
+  //     (see DEBIT_NORMAL_TYPES below), so the module contradicted itself;
+  //   - any custom INCOME-category type an entity defines, since Account.type
+  //     is a free-form code referencing AccountTypeDefinition.
+  // An unswept P&L account keeps its balance into the next fiscal year forever
+  // and understates the profit transferred to retained earnings.
+  //
+  // STATISTICAL accounts are correctly excluded: they are memo accounts
+  // carrying statValue, not money, and must never reach retained earnings.
+  //
+  // Accounts predating the type-definition table have accountTypeDefId = null;
+  // they fall back to the well-known P&L type codes.
   const plAccounts = await (prisma as any).account.findMany({
     where: {
       entityId,
       isActive: true,
-      type: { in: ["REVENUE", "EXPENSE"] }
+      OR: [
+        { accountTypeDef: { category: "INCOME" } },
+        { accountTypeDefId: null, type: { in: LEGACY_PL_TYPE_CODES } }
+      ]
     },
     orderBy: { code: "asc" }
   });
@@ -145,6 +174,12 @@ async function executeCleardown(
   if (plAccounts.length === 0) {
     return makeEmptyResult(period, retainedEarningsCode);
   }
+
+  // A guard used to live here rejecting accounts whose declared normalBalance
+  // disagreed with the balance writer's hardcoded type-code list. The writer
+  // now derives the sign from accounts.normal_balance itself, so the two can no
+  // longer disagree and the guard is obsolete. Custom INCOME types are swept
+  // correctly rather than refused.
 
   // Get closing balances for all P&L accounts in this period
   const accountIds = plAccounts.map((a: any) => a.id);
@@ -173,7 +208,13 @@ async function executeCleardown(
 
     const cleardownAmountD = closingBalanceD.neg();
 
-    if (account.type === "REVENUE") {
+    // Bucket by the account's own normal balance rather than by type code.
+    // Closing balances are stored normal-balance-positive, so a credit-normal
+    // income account is revenue and a debit-normal one reduces profit —
+    // whether it is EXPENSE, CONTRA_REVENUE, or a custom INCOME type. Keying
+    // off the type string would misclassify any custom type and get the net
+    // profit wrong; normal balance is always right.
+    if (account.normalBalance === "CREDIT") {
       totalRevenueD = totalRevenueD.add(closingBalanceD);
     } else {
       totalExpenseD = totalExpenseD.add(closingBalanceD);
@@ -204,17 +245,16 @@ async function executeCleardown(
     description: string;
   }> = [];
 
-  const DEBIT_NORMAL_TYPES = new Set(["ASSET", "EXPENSE", "CONTRA_REVENUE"]);
-
   for (const line of lines) {
     const account = plAccounts.find((a: any) => a.code === line.accountCode);
     if (!account) continue;
 
     const balD = D(line.closingBalance);
-    // account_period_balances stores normal-balance-positive closing balances
-    // (GLRepository.updateAccountBalance). Zero a debit-normal account by
-    // crediting its balance; zero a credit-normal account by debiting it.
-    const isDebitNormal = DEBIT_NORMAL_TYPES.has(account.type);
+    // account_period_balances stores normal-balance-positive closing balances.
+    // Zero a debit-normal account by crediting its balance; zero a credit-normal
+    // account by debiting it. Sign comes from the account's own normal balance,
+    // matching db/balance-writer.ts, so custom types resolve correctly too.
+    const isDebitNormal = account.normalBalance === "DEBIT";
     const postAsCredit = isDebitNormal ? balD.gt(ZERO) : balD.lt(ZERO);
 
     if (postAsCredit) {
@@ -273,7 +313,10 @@ async function executeCleardown(
         functionalCurrency: funcCurrency,
         createdById: actorId,
         lines: {
-          create: journalLines.map((jl) => ({
+          // lineNumber is required on JournalLine and has no database default,
+          // so omitting it made every cleardown fail Prisma validation before
+          // a single row was written — year-end could never complete.
+          create: journalLines.map((jl, index) => ({
             accountId: jl.accountId,
             debit: jl.debit,
             credit: jl.credit,
@@ -281,7 +324,8 @@ async function executeCleardown(
             fxRate: 1,
             debitFunctional: jl.debit,
             creditFunctional: jl.credit,
-            description: jl.description
+            description: jl.description,
+            lineNumber: index + 1
           }))
         }
       }
@@ -302,6 +346,23 @@ async function executeCleardown(
 
     // Update PeriodCloseStatus inside the same transaction
     await updatePeriodCloseStatusTx(tx, entityId, input.periodId);
+
+    // Re-roll this period's now-swept closing balances into the next period.
+    //
+    // The intended order is: soft-close → period-end processes (including this
+    // cleardown) → hard-close, and hard-close is what normally carries balances
+    // forward. But nothing stops cleardown running *after* a hard close — this
+    // module posts its journal directly rather than through the period-guarded
+    // posting path. In that case the next period already received the
+    // pre-cleardown P&L balances, and would open the new fiscal year carrying
+    // last year's profit.
+    //
+    // Re-running the carry-forward here makes the outcome identical either way.
+    // It is idempotent, so it is harmless in the normal ordering.
+    const followingPeriodId = await findFollowingPeriodId(tx, entityId, input.periodId);
+    if (followingPeriodId) {
+      await carryForwardOpeningBalances(tx, entityId, followingPeriodId);
+    }
 
     return created;
   });

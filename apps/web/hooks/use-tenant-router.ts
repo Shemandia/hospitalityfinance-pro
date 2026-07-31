@@ -4,47 +4,54 @@ import { usePathname, useRouter, useParams } from "next/navigation";
 import { useCallback } from "react";
 
 /**
- * Returns the tenant slug for the current request.
+ * Returns the tenant code for the current request.
  *
- * Reads from `useParams().tenant` first (the canonical source inside a
- * `[tenant]` route segment). Falls back to parsing the first segment of
- * `usePathname()` so callers still work in client components that mount
- * before the params hook has resolved.
+ * Reads from `useParams().code` first (the canonical source inside a
+ * `t/[code]` route segment). Falls back to `useParams().tenant` for legacy
+ * routes, then to parsing the pathname.
  */
 export function useTenantSlugSafe(): string | null {
   const params = useParams();
-  const fromParams = params?.tenant;
-  if (typeof fromParams === "string" && fromParams.length > 0) return fromParams;
 
+  // New route: /t/[code]/...
+  const fromCode = params?.code;
+  if (typeof fromCode === "string" && fromCode.length > 0) return fromCode;
+
+  // Legacy fallback
+  const fromTenant = params?.tenant;
+  if (typeof fromTenant === "string" && fromTenant.length > 0) return fromTenant;
+
+  // Pathname fallback: extract from /t/{code}/...
   const pathname = usePathname();
   if (!pathname) return null;
-  const first = pathname.split("/")[1] ?? "";
-  // Skip platform/admin routes that aren't tenant-scoped
-  if (!first || first === "platform" || first === "tenant-not-found") return null;
-  return first;
+  const match = pathname.match(/^\/t\/([a-z0-9]{8})(\/|$)/);
+  if (match) return match[1];
+
+  return null;
 }
 
 /**
- * Prepends the tenant slug to a path. If the path is already tenant-prefixed
- * or absolute (http…) or has no tenant context, it is returned unchanged.
+ * Prepends the tenant code to a path using the /t/{code} pattern.
+ * If the path is already tenant-prefixed, absolute (http...), or has no
+ * tenant context, it is returned unchanged.
  */
 export function useTenantHref(): (path: string) => string {
-  const tenant = useTenantSlugSafe();
+  const code = useTenantSlugSafe();
   return useCallback(
     (path: string) => {
       if (!path.startsWith("/")) return path;
       if (path.startsWith("http")) return path;
-      if (!tenant) return path;
-      // Already prefixed (e.g. caller passed `/${tenant}/foo`)
-      if (path === `/${tenant}` || path.startsWith(`/${tenant}/`)) return path;
-      return `/${tenant}${path}`;
+      if (!code) return path;
+      // Already prefixed with new pattern
+      if (path === `/t/${code}` || path.startsWith(`/t/${code}/`)) return path;
+      return `/t/${code}${path}`;
     },
-    [tenant]
+    [code]
   );
 }
 
 /**
- * Wraps `useRouter()` so push/replace automatically include the tenant slug
+ * Wraps `useRouter()` so push/replace automatically include the tenant code
  * for tenant-relative paths.
  */
 export function useTenantRouter() {

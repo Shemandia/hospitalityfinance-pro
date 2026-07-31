@@ -1,16 +1,11 @@
-import type { PrismaClient } from "../../db/client.js";
+import { Prisma, type PrismaClient } from "../../db/client.js";
+import { GLRepository } from "../gl/repository.js";
+
+import { ServiceError } from "../../shared/service-error.js";
 
 // ── Error ────────────────────────────────────────────────────────────────────
 
-export class AuthorizationServiceError extends Error {
-  constructor(
-    public readonly code: string,
-    message: string,
-    public readonly statusCode = 400
-  ) {
-    super(message);
-  }
-}
+export class AuthorizationServiceError extends ServiceError {}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -1067,7 +1062,7 @@ export class AuthorizationService {
       if (filters?.dateFrom && journal.createdAt < new Date(filters.dateFrom)) continue;
       if (filters?.dateTo && journal.createdAt > new Date(filters.dateTo)) continue;
 
-      const stage = stageMap.get(auth.stageId);
+      const stage: any = stageMap.get(auth.stageId);
       queueItems.push({
         journalId: journal.id,
         reference: journal.reference,
@@ -1174,40 +1169,27 @@ export class AuthorizationService {
   private async _postJournalInternal(entityId: string, journalId: string, approvedById: string) {
     const journal = await (this.prisma as any).journal.findFirst({
       where: { id: journalId },
-      include: { lines: true }
+      include: {
+        lines: {
+          include: { account: { select: { type: true } } }
+        }
+      }
     });
     if (!journal) return;
 
     await this.prisma.$transaction(async (tx: any) => {
-      // Update account balances for each line
-      for (const line of journal.lines) {
-        const debit = Number(line.debitFunctional);
-        const credit = Number(line.creditFunctional);
-        const net = debit - credit;
+      const repo = new GLRepository(tx);
 
-        await tx.accountPeriodBalance.upsert({
-          where: {
-            entityId_accountId_periodId: {
-              entityId,
-              accountId: line.accountId,
-              periodId: journal.periodId
-            }
-          },
-          create: {
-            entityId,
-            accountId: line.accountId,
-            periodId: journal.periodId,
-            openingBalance: 0,
-            periodDebits: debit,
-            periodCredits: credit,
-            closingBalance: net
-          },
-          update: {
-            periodDebits: { increment: debit },
-            periodCredits: { increment: credit },
-            closingBalance: { increment: net }
-          }
-        });
+      // Update account balances using the canonical GL method (SQL-level Decimal arithmetic)
+      for (const line of journal.lines) {
+        await repo.updateAccountBalance(
+          entityId,
+          line.accountId,
+          journal.periodId,
+          new Prisma.Decimal(line.debitFunctional),
+          new Prisma.Decimal(line.creditFunctional),
+          line.account.type
+        );
       }
 
       // Set journal to POSTED

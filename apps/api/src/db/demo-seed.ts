@@ -1,4 +1,4 @@
-import { PrismaClient, Prisma } from "@prisma/client";
+import { PrismaClient, Prisma } from "./client.js";
 const prisma = new PrismaClient();
 
 const ENTITY = "00000000-0000-0000-0000-000000000002";

@@ -1,3 +1,4 @@
+import { makeBalanceWriterStub } from "./helpers/balance-writer-stub.js";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 // ── Mock dependencies ──────────────────────────────────────────────────────
@@ -94,7 +95,49 @@ function makeMockPrisma() {
     return `${prefix}-${idCounter}`;
   }
 
+  function toNum(value: unknown): number {
+    if (value && typeof (value as { toNumber?: unknown }).toNumber === "function") {
+      return (value as { toNumber: () => number }).toNumber();
+    }
+    return Number(value);
+  }
+
+  function applyBalanceSql(values: unknown[]) {
+    const [entityId, accountId, periodId, debitFunctional, creditFunctional, signValue] = values;
+    const debit = toNum(debitFunctional);
+    const credit = toNum(creditFunctional);
+    const sign = Number(signValue);
+    let balance = balances.find(
+      (b) => b.entityId === entityId && b.accountId === accountId && b.periodId === periodId
+    );
+    if (!balance) {
+      balance = {
+        id: nextId("bal"),
+        entityId: String(entityId),
+        accountId: String(accountId),
+        periodId: String(periodId),
+        openingBalance: 0,
+        periodDebits: 0,
+        periodCredits: 0,
+        closingBalance: 0
+      };
+      balances.push(balance);
+    }
+    balance.periodDebits += debit;
+    balance.periodCredits += credit;
+    balance.closingBalance =
+      balance.openingBalance + sign * balance.periodDebits - sign * balance.periodCredits;
+  }
+
   const prisma = {
+    $executeRaw: vi
+      .fn()
+      .mockImplementation(async (_strings: TemplateStringsArray, ...values: unknown[]) => {
+        applyBalanceSql(values);
+        return 1;
+      }),
+    $executeRawUnsafe: vi.fn().mockResolvedValue(undefined),
+    $queryRawUnsafe: vi.fn(makeBalanceWriterStub()),
     $transaction: vi.fn().mockImplementation(async (fn: any) => fn(prisma)),
     allocationDefinition: {
       findFirst: vi.fn().mockImplementation(({ where }: any) => {
@@ -220,6 +263,11 @@ function makeMockPrisma() {
         return Promise.resolve(newBal);
       })
     },
+    auditEvent: {
+      create: vi
+        .fn()
+        .mockImplementation(({ data }: any) => Promise.resolve({ id: nextId("audit"), ...data }))
+    },
     ledgerSetup: {
       findFirst: vi.fn().mockImplementation(({ where }: any) => {
         return Promise.resolve(
@@ -259,7 +307,14 @@ function makeMockPrisma() {
         const lines = (data.lines?.create ?? []).map((l: any, i: number) => ({
           id: nextId("jl"),
           journalId,
-          ...l
+          ...l,
+          ...(include?.lines?.include?.account
+            ? {
+                account: {
+                  type: accounts.find((a) => a.id === l.accountId)?.type
+                }
+              }
+            : {})
         }));
         const journal = { id: journalId, ...data, lines };
         journals.push(journal);
@@ -1141,8 +1196,9 @@ describe("AllocationService — executeAllocation", () => {
   it("updates account balances after execution", async () => {
     await service.executeAllocation("entity-1", "def-exec", "user-1");
 
-    // upsert should have been called for each journal line
-    expect(prisma.accountPeriodBalance.upsert).toHaveBeenCalled();
+    // Balances now go through the canonical signed writer, which issues a
+    // single parameterised INSERT via $queryRawUnsafe.
+    expect(prisma.$queryRawUnsafe).toHaveBeenCalled();
   });
 
   it("releases process lock after execution", async () => {

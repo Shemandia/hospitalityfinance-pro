@@ -10,6 +10,7 @@ export type ApiContext = {
   accessToken: string;
   entityId: string;
   tenantSlug?: string;
+  tenantCode?: string;
 };
 
 // ── Core domain types ────────────────────────────────────────────────────────
@@ -90,11 +91,15 @@ async function request<T>(
 ): Promise<Envelope<T>> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${context.accessToken}`,
+      ...(context.accessToken && context.accessToken !== "cookie"
+        ? { Authorization: `Bearer ${context.accessToken}` }
+        : {}),
       ...(context.entityId ? { "X-Entity-ID": context.entityId } : {}),
       ...(context.tenantSlug ? { "X-Tenant-Slug": context.tenantSlug } : {}),
+      ...(context.tenantCode ? { "X-Tenant-Code": context.tenantCode } : {}),
       ...(init?.headers ?? {})
     }
   });
@@ -211,6 +216,7 @@ export type EntitySummaryItem = {
 
 export type EntityPayload = {
   name: string;
+  code?: string | null;
   type: "GROUP" | "PROPERTY";
   parentId?: string | null;
   functionalCurrency?: string;
@@ -288,6 +294,13 @@ export async function createPeriod(
   return request<Period>(context, "/api/v1/periods", {
     method: "POST",
     body: JSON.stringify(payload)
+  });
+}
+
+export async function softClosePeriod(context: ApiContext, id: string) {
+  return request<Period>(context, `/api/v1/periods/${id}/soft-close`, {
+    method: "POST",
+    body: "{}"
   });
 }
 
@@ -530,6 +543,17 @@ export async function getARCustomers(context: ApiContext) {
 export async function createARCustomer(context: ApiContext, payload: Record<string, unknown>) {
   return request<Record<string, unknown>>(context, "/api/v1/ar/customers", {
     method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateARCustomer(
+  context: ApiContext,
+  id: string,
+  payload: Record<string, unknown>
+) {
+  return request<Record<string, unknown>>(context, `/api/v1/ar/customers/${id}`, {
+    method: "PUT",
     body: JSON.stringify(payload)
   });
 }
@@ -1035,6 +1059,19 @@ export function postAPInvoice(context: ApiContext, id: string) {
   return request<APInvoice>(context, `/api/v1/ap/invoices/${id}/post`, {
     method: "POST",
     body: "{}"
+  });
+}
+
+export function updateAPInvoice(context: ApiContext, id: string, payload: Record<string, unknown>) {
+  return request<APInvoice>(context, `/api/v1/ap/invoices/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function deleteAPInvoice(context: ApiContext, id: string) {
+  return request<void>(context, `/api/v1/ap/invoices/${id}`, {
+    method: "DELETE"
   });
 }
 
@@ -1959,7 +1996,7 @@ export async function getAdminEntityUsers(context: ApiContext) {
 
 export async function inviteEntityUser(
   context: ApiContext,
-  payload: { email: string; name: string; role: string }
+  payload: { email: string; name: string; roleId?: string; entityIds?: string[] }
 ) {
   return request<Record<string, unknown>>(context, "/api/v1/admin/users/invite", {
     method: "POST",
@@ -1997,7 +2034,7 @@ export async function getEntityTree(context: ApiContext) {
 
 export async function assignUserScope(
   context: ApiContext,
-  payload: { userId: string; entityId: string; role: string; cascade: boolean }
+  payload: { userId: string; entityId: string; role?: string; cascade: boolean }
 ) {
   return request<Record<string, unknown>>(context, "/api/v1/admin/users/assign-scope", {
     method: "POST",
@@ -3608,5 +3645,239 @@ export async function rejectICJournal(context: ApiContext, id: string, reason?: 
   return request<ICJournalSummary>(context, `/api/v1/intercompany/journals/${id}/reject`, {
     method: "POST",
     body: JSON.stringify({ reason })
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Intercompany v2
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export type ICEntityPairSummary2 = {
+  id: string;
+  entityAId: string;
+  entityBId: string;
+  entityAName?: string;
+  entityBName?: string;
+  isActive: boolean;
+  autoApproveThreshold: string | null;
+  description: string | null;
+  mappingCount: number;
+};
+
+export type ICAccountMappingSummary2 = {
+  id: string;
+  pairId: string;
+  name: string;
+  entityADebitCode: string;
+  entityACreditCode: string;
+  entityBDebitCode: string;
+  entityBCreditCode: string;
+  isActive: boolean;
+};
+
+export type ICTransactionSummary2 = {
+  id: string;
+  pairId: string;
+  mappingId: string | null;
+  initiatingEntityId: string;
+  counterpartyEntityId: string;
+  status: string;
+  amount: string;
+  currency: string;
+  fxRateInitiator: string;
+  fxRateCounterparty: string;
+  functionalAmountInitiator: string;
+  functionalAmountCounterparty: string;
+  reference: string;
+  description: string | null;
+  periodId: string;
+  initiatorJournalId: string | null;
+  counterpartyJournalId: string | null;
+  reversalOfId: string | null;
+  createdById: string;
+  approvedById: string | null;
+  approvedAt: string | null;
+  rejectedById: string | null;
+  rejectedAt: string | null;
+  rejectionReason: string | null;
+  postedAt: string | null;
+  createdAt: string;
+};
+
+export type ICReconciliationPairBalance = {
+  pairId: string;
+  entityAId: string;
+  entityBId: string;
+  entityAName?: string;
+  entityBName?: string;
+  balanceEntityA: string;
+  balanceEntityB: string;
+  difference: string;
+  currency: string;
+  status: "RECONCILED" | "UNRECONCILED";
+  transactionCount: number;
+};
+
+export type ICReconciliationResult = {
+  pairs: ICReconciliationPairBalance[];
+  totalUnreconciled: number;
+};
+
+// Entity Pairs
+export async function getICEntityPairs(context: ApiContext) {
+  return request<ICEntityPairSummary2[]>(context, "/api/v1/intercompany/v2/pairs");
+}
+
+export async function getICEntityPair(context: ApiContext, id: string) {
+  return request<ICEntityPairSummary2>(context, `/api/v1/intercompany/v2/pairs/${id}`);
+}
+
+export async function createICEntityPair(context: ApiContext, payload: Record<string, unknown>) {
+  return request<ICEntityPairSummary2>(context, "/api/v1/intercompany/v2/pairs", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateICEntityPair(
+  context: ApiContext,
+  id: string,
+  payload: Record<string, unknown>
+) {
+  return request<ICEntityPairSummary2>(context, `/api/v1/intercompany/v2/pairs/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function deleteICEntityPair(context: ApiContext, id: string) {
+  return request<null>(context, `/api/v1/intercompany/v2/pairs/${id}`, { method: "DELETE" });
+}
+
+// Account Mappings
+export async function getICAccountMappings(context: ApiContext, pairId: string) {
+  return request<ICAccountMappingSummary2[]>(
+    context,
+    `/api/v1/intercompany/v2/pairs/${pairId}/mappings`
+  );
+}
+
+export async function createICAccountMapping(
+  context: ApiContext,
+  payload: Record<string, unknown>
+) {
+  return request<ICAccountMappingSummary2>(context, "/api/v1/intercompany/v2/mappings", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateICAccountMapping(
+  context: ApiContext,
+  id: string,
+  payload: Record<string, unknown>
+) {
+  return request<ICAccountMappingSummary2>(context, `/api/v1/intercompany/v2/mappings/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function deleteICAccountMapping(context: ApiContext, id: string) {
+  return request<null>(context, `/api/v1/intercompany/v2/mappings/${id}`, { method: "DELETE" });
+}
+
+// Transactions
+export async function getICTransactions(
+  context: ApiContext,
+  query?: { pairId?: string; status?: string }
+) {
+  const params = new URLSearchParams();
+  if (query?.pairId) params.set("pairId", query.pairId);
+  if (query?.status) params.set("status", query.status);
+  const qs = params.toString();
+  return request<ICTransactionSummary2[]>(
+    context,
+    `/api/v1/intercompany/v2/transactions${qs ? `?${qs}` : ""}`
+  );
+}
+
+export async function getICTransaction(context: ApiContext, id: string) {
+  return request<ICTransactionSummary2>(context, `/api/v1/intercompany/v2/transactions/${id}`);
+}
+
+export async function createICTransaction(context: ApiContext, payload: Record<string, unknown>) {
+  return request<ICTransactionSummary2>(context, "/api/v1/intercompany/v2/transactions", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function approveICTransaction(context: ApiContext, id: string) {
+  return request<ICTransactionSummary2>(
+    context,
+    `/api/v1/intercompany/v2/transactions/${id}/approve`,
+    {
+      method: "POST",
+      body: "{}"
+    }
+  );
+}
+
+export async function rejectICTransaction(context: ApiContext, id: string, reason?: string) {
+  return request<ICTransactionSummary2>(
+    context,
+    `/api/v1/intercompany/v2/transactions/${id}/reject`,
+    {
+      method: "POST",
+      body: JSON.stringify({ reason })
+    }
+  );
+}
+
+export async function reverseICTransaction(context: ApiContext, id: string, reason?: string) {
+  return request<ICTransactionSummary2>(
+    context,
+    `/api/v1/intercompany/v2/transactions/${id}/reverse`,
+    {
+      method: "POST",
+      body: JSON.stringify({ reason })
+    }
+  );
+}
+
+// Reconciliation
+export async function getICReconciliation(context: ApiContext) {
+  return request<ICReconciliationResult>(context, "/api/v1/intercompany/v2/reconciliation");
+}
+
+export async function createICReconciliationSnapshot(
+  context: ApiContext,
+  payload: { pairId: string; periodId: string; notes?: string }
+) {
+  return request<unknown>(context, "/api/v1/intercompany/v2/reconciliation/snapshot", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+// ── Sessions ───────────────────────────────────────────────────────────────
+
+export type UserSession = {
+  id: string;
+  userId: string;
+  ipAddress: string | null;
+  userAgent: string | null;
+  createdAt: string;
+  expiresAt: string;
+};
+
+export async function listSessions(context: ApiContext) {
+  return request<UserSession[]>(context, "/auth/sessions");
+}
+
+export async function revokeSession(context: ApiContext, sessionId: string) {
+  return request<void>(context, `/auth/sessions/${sessionId}`, {
+    method: "DELETE"
   });
 }

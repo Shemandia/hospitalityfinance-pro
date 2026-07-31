@@ -19,10 +19,17 @@ async function upsertFormat(
   data: {
     name: string;
     description?: string;
-    formatType: "FLAT_FILE" | "XML" | "JSON" | "EXCEL" | "FIXED_WIDTH";
+    classification:
+      | "DELIMITED"
+      | "SINGLE_FIXED"
+      | "MULTIPLE_FIXED"
+      | "OTHER_FLAT"
+      | "USER_XML"
+      | "SIMPLE_XML";
     fsdXml: object;
   }
 ) {
+  const fsdXmlStr = JSON.stringify(data.fsdXml);
   const existing = await (prisma as any).transferFormat.findFirst({
     where: { name: data.name }
   });
@@ -31,8 +38,8 @@ async function upsertFormat(
       where: { id: existing.id },
       data: {
         description: data.description,
-        formatType: data.formatType,
-        fsdXml: data.fsdXml,
+        classification: data.classification,
+        fsdXml: fsdXmlStr,
         isSystem: true
       }
     });
@@ -41,8 +48,8 @@ async function upsertFormat(
     data: {
       name: data.name,
       description: data.description,
-      formatType: data.formatType,
-      fsdXml: data.fsdXml,
+      classification: data.classification,
+      fsdXml: fsdXmlStr,
       isSystem: true
     }
   });
@@ -86,7 +93,7 @@ async function upsertProfile(
   data: {
     name: string;
     description?: string;
-    profileType: "IMPORT" | "EXPORT" | "PROCESS" | "TRANSFER";
+    profileType: "IMPORT" | "EXPORT" | "PROCESS" | "INTERNAL_TRANSFER" | "EXTERNAL_TRANSFER";
     sourceComponent?: string;
     targetComponent?: string;
     sourceFormatId?: string;
@@ -160,27 +167,37 @@ const OPERA_EZZCL_FSD = operaFsdBase("EZZCL_CityLedger", [
   { name: "description", type: "string", required: false, maxLength: 100 }
 ]);
 
-const OPERA_EZZMS_FSD = operaFsdBase("EZZMS_Miscellaneous", [
-  { name: "businessDate", type: "date", required: true, maxLength: 10 },
-  { name: "transactionType", type: "string", required: true, maxLength: 20 },
+// EZZDS and EZZMS are the Opera night-audit *statistics* exports — non-financial
+// memo data that posts to STATISTICAL (Z-prefix) accounts only. They share the
+// pipe-delimited SAF column layout with EZZRV/EZZCL, but journal type is
+// FIDST (daily stats) / FIDMS (market segment stats), the D/C indicator is
+// ignored, and the 18-digit ÷1000 amount is stored as a quantity in stat_value
+// with debit=0 / credit=0. The Transfer Desk import pipeline routes these to
+// the SAF parser (apps/api/src/modules/integration/connectors/saf/*), which
+// auto-detects the file type and bypasses the debit/credit balance check.
+
+const OPERA_EZZDS_FSD = operaFsdBase("EZZDS_DailyStatistics", [
   { name: "accountCode", type: "string", required: true, maxLength: 20 },
-  { name: "debit", type: "integer", required: true, maxLength: 15 },
-  { name: "credit", type: "integer", required: true, maxLength: 15 },
+  { name: "period", type: "string", required: true, maxLength: 7 },
+  { name: "businessDate", type: "date", required: true, maxLength: 8 },
+  { name: "journalType", type: "string", required: true, maxLength: 5 },
+  { name: "statCode", type: "string", required: false, maxLength: 10 },
+  { name: "description", type: "string", required: false, maxLength: 100 },
+  { name: "amount", type: "integer", required: true, maxLength: 18 },
   { name: "currencyCode", type: "string", required: true, maxLength: 3 },
-  { name: "reference", type: "string", required: false, maxLength: 50 },
-  { name: "description", type: "string", required: false, maxLength: 100 }
+  { name: "businessUnit", type: "string", required: true, maxLength: 5 }
 ]);
 
-const OPERA_EZZDS_FSD = operaFsdBase("EZZDS_Deposits", [
-  { name: "businessDate", type: "date", required: true, maxLength: 10 },
-  { name: "guestName", type: "string", required: false, maxLength: 80 },
-  { name: "reservationId", type: "string", required: true, maxLength: 20 },
+const OPERA_EZZMS_FSD = operaFsdBase("EZZMS_MarketSegmentStatistics", [
   { name: "accountCode", type: "string", required: true, maxLength: 20 },
-  { name: "debit", type: "integer", required: true, maxLength: 15 },
-  { name: "credit", type: "integer", required: true, maxLength: 15 },
+  { name: "period", type: "string", required: true, maxLength: 7 },
+  { name: "businessDate", type: "date", required: true, maxLength: 8 },
+  { name: "journalType", type: "string", required: true, maxLength: 5 },
+  { name: "segmentCode", type: "string", required: false, maxLength: 10 },
+  { name: "description", type: "string", required: false, maxLength: 100 },
+  { name: "amount", type: "integer", required: true, maxLength: 18 },
   { name: "currencyCode", type: "string", required: true, maxLength: 3 },
-  { name: "reference", type: "string", required: false, maxLength: 50 },
-  { name: "description", type: "string", required: false, maxLength: 100 }
+  { name: "businessUnit", type: "string", required: true, maxLength: 5 }
 ]);
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -227,12 +244,46 @@ const OPERA_EZZCL_TML = operaTmlRules([
   { target: "dimension2", path: "folioNumber" }
 ]);
 
-const OPERA_EZZMS_TML = operaTmlRules([{ target: "dimension1", path: "transactionType" }]);
+/**
+ * Statistics TML — daily stats / market segment stats.
+ *
+ * Unlike the financial Opera TML (which routes amount to debit/credit), stats
+ * lines are memo postings: the ÷1000 amount lands in stat_value and debit/credit
+ * are forced to zero. The SAF import service performs the same routing at run
+ * time by inspecting the account's type; this transformation exists so the
+ * Transfer Desk shows the correct field mapping in the UI and so generic FSD
+ * consumers that don't read the account catalogue still produce valid output.
+ */
+function operaStatsTmlRules(segmentField: { target: string; path: string }) {
+  return {
+    rules: [
+      { type: "map", target: "accountCode", sources: [{ path: "accountCode" }] },
+      { type: "literal", target: "debit", value: "0" },
+      { type: "literal", target: "credit", value: "0" },
+      {
+        type: "transform",
+        target: "statValue",
+        function: {
+          name: "divideBy1000",
+          params: [{ value: "amount", fromSource: true, type: "number" }]
+        }
+      },
+      { type: "map", target: "currency", sources: [{ path: "currencyCode" }] },
+      { type: "map", target: "description", sources: [{ path: "description" }] },
+      { type: "map", target: "transactionDate", sources: [{ path: "businessDate" }] },
+      { type: "map", target: "period", sources: [{ path: "period" }] },
+      { type: "map", target: "journalType", sources: [{ path: "journalType" }] },
+      {
+        type: "map",
+        target: "dimension1",
+        sources: [{ path: segmentField.path }]
+      }
+    ]
+  };
+}
 
-const OPERA_EZZDS_TML = operaTmlRules([
-  { target: "dimension1", path: "guestName" },
-  { target: "dimension2", path: "reservationId" }
-]);
+const OPERA_EZZDS_TML = operaStatsTmlRules({ target: "dimension1", path: "statCode" });
+const OPERA_EZZMS_TML = operaStatsTmlRules({ target: "dimension1", path: "segmentCode" });
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Seed: Opera PMS
@@ -243,26 +294,28 @@ async function seedOperaProfiles(prisma: PrismaClient): Promise<void> {
   const fmtEzzrv = await upsertFormat(prisma, {
     name: "Opera EZZRV (Revenue)",
     description: "Oracle Opera Cloud night-audit revenue file (pipe-delimited, ÷1000)",
-    formatType: "FLAT_FILE",
+    classification: "DELIMITED",
     fsdXml: OPERA_EZZRV_FSD
   });
   const fmtEzzcl = await upsertFormat(prisma, {
     name: "Opera EZZCL (City Ledger)",
     description: "Oracle Opera Cloud city-ledger / AR transactions (pipe-delimited, ÷1000)",
-    formatType: "FLAT_FILE",
+    classification: "DELIMITED",
     fsdXml: OPERA_EZZCL_FSD
   });
-  const fmtEzzms = await upsertFormat(prisma, {
-    name: "Opera EZZMS (Miscellaneous)",
-    description: "Oracle Opera Cloud miscellaneous charges and adjustments (pipe-delimited, ÷1000)",
-    formatType: "FLAT_FILE",
-    fsdXml: OPERA_EZZMS_FSD
-  });
   const fmtEzzds = await upsertFormat(prisma, {
-    name: "Opera EZZDS (Deposits)",
-    description: "Oracle Opera Cloud guest deposit transactions (pipe-delimited, ÷1000)",
-    formatType: "FLAT_FILE",
+    name: "Opera EZZDS (Daily Statistics)",
+    description:
+      "Oracle Opera Cloud night-audit daily statistics (FIDST, pipe-delimited, ÷1000). Memo postings — statistical accounts only, no GL impact.",
+    classification: "DELIMITED",
     fsdXml: OPERA_EZZDS_FSD
+  });
+  const fmtEzzms = await upsertFormat(prisma, {
+    name: "Opera EZZMS (Market Segment Statistics)",
+    description:
+      "Oracle Opera Cloud night-audit market segment statistics (FIDMS, pipe-delimited, ÷1000). Memo postings — statistical accounts only, no GL impact.",
+    classification: "DELIMITED",
+    fsdXml: OPERA_EZZMS_FSD
   });
 
   // ── Transformations ──
@@ -276,15 +329,17 @@ async function seedOperaProfiles(prisma: PrismaClient): Promise<void> {
     description: "Maps Opera city-ledger fields to GL journal lines with ÷1000 amount conversion",
     rulesJson: OPERA_EZZCL_TML
   });
-  const tmlEzzms = await upsertTransformation(prisma, {
-    name: "Opera EZZMS → GL Journal",
-    description: "Maps Opera miscellaneous fields to GL journal lines with ÷1000 amount conversion",
-    rulesJson: OPERA_EZZMS_TML
-  });
   const tmlEzzds = await upsertTransformation(prisma, {
-    name: "Opera EZZDS → GL Journal",
-    description: "Maps Opera deposit fields to GL journal lines with ÷1000 amount conversion",
+    name: "Opera EZZDS → Statistics Journal",
+    description:
+      "Maps Opera daily statistics (FIDST) to statistical journal lines: debit=0, credit=0, amount→stat_value (÷1000).",
     rulesJson: OPERA_EZZDS_TML
+  });
+  const tmlEzzms = await upsertTransformation(prisma, {
+    name: "Opera EZZMS → Statistics Journal",
+    description:
+      "Maps Opera market segment statistics (FIDMS) to statistical journal lines: debit=0, credit=0, amount→stat_value (÷1000).",
+    rulesJson: OPERA_EZZMS_TML
   });
 
   // ── Profiles ──
@@ -319,35 +374,54 @@ async function seedOperaProfiles(prisma: PrismaClient): Promise<void> {
     }
   });
 
-  await upsertProfile(prisma, {
-    name: "Opera PMS Miscellaneous",
-    description: "Miscellaneous charges and adjustments from Opera Cloud (EZZMS file)",
-    profileType: "IMPORT",
-    sourceComponent: "OPERA_CLOUD",
-    targetComponent: "GL_JOURNAL",
-    sourceFormatId: fmtEzzms.id,
-    transformationId: tmlEzzms.id,
-    targetParams: {
-      ...operaTargetParams,
-      defaultDescription: "Opera miscellaneous import"
-    }
-  });
+  const statsTargetParams = {
+    fieldMap: { accountCode: "accountId" },
+    groupBy: "businessDate",
+    targetAccountType: "STATISTICAL",
+    balanceCheck: false,
+    drCrHandling: "IGNORE",
+    amountRule: "DIVIDE_1000"
+  };
 
   await upsertProfile(prisma, {
-    name: "Opera PMS Deposits",
-    description: "Guest deposit transactions from Opera Cloud (EZZDS file)",
+    name: "Opera PMS Daily Statistics",
+    description:
+      "Daily non-financial statistics from Opera Cloud (EZZDS file, journal type FIDST). " +
+      "Posts to STATISTICAL accounts only; debit/credit balance check is bypassed.",
     profileType: "IMPORT",
     sourceComponent: "OPERA_CLOUD",
     targetComponent: "GL_JOURNAL",
     sourceFormatId: fmtEzzds.id,
     transformationId: tmlEzzds.id,
     targetParams: {
-      ...operaTargetParams,
-      defaultDescription: "Opera deposits import"
+      ...statsTargetParams,
+      journalTypeFilter: "FIDST",
+      duplicateDetection: ["accountCode", "businessDate", "period"],
+      defaultDescription: "Opera daily statistics import"
     }
   });
 
-  console.log("Seeded 4 Opera PMS system profiles (EZZRV, EZZCL, EZZMS, EZZDS).");
+  await upsertProfile(prisma, {
+    name: "Opera PMS Market Segment Statistics",
+    description:
+      "Market segment statistics from Opera Cloud (EZZMS file, journal type FIDMS). " +
+      "Posts to STATISTICAL accounts only; debit/credit balance check is bypassed.",
+    profileType: "IMPORT",
+    sourceComponent: "OPERA_CLOUD",
+    targetComponent: "GL_JOURNAL",
+    sourceFormatId: fmtEzzms.id,
+    transformationId: tmlEzzms.id,
+    targetParams: {
+      ...statsTargetParams,
+      journalTypeFilter: "FIDMS",
+      duplicateDetection: ["accountCode", "businessDate", "period", "segmentCode"],
+      defaultDescription: "Opera market segment statistics import"
+    }
+  });
+
+  console.log(
+    "Seeded 4 Opera PMS system profiles (EZZRV, EZZCL financial; EZZDS, EZZMS statistical)."
+  );
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -430,21 +504,21 @@ async function seedJanaProfiles(prisma: PrismaClient): Promise<void> {
     name: "Jana SAF (Purchasing Vouchers)",
     description:
       "Sky Jana MMS purchasing voucher SAF export (semicolon-delimited, whole-integer TZS)",
-    formatType: "FLAT_FILE",
+    classification: "DELIMITED",
     fsdXml: JANA_SAF_FSD
   });
   const fmtMovements = await upsertFormat(prisma, {
     name: "Jana SAF (Internal Movements)",
     description:
       "Sky Jana MMS inter-store transfer SAF export (semicolon-delimited, ÷1000 implied decimals)",
-    formatType: "FLAT_FILE",
+    classification: "DELIMITED",
     fsdXml: JANA_SAF_FSD
   });
   const fmtInventory = await upsertFormat(prisma, {
     name: "Jana SAF (Inventory Differences)",
     description:
       "Sky Jana MMS inventory difference SAF export (semicolon-delimited, ÷1000 implied decimals)",
-    formatType: "FLAT_FILE",
+    classification: "DELIMITED",
     fsdXml: JANA_SAF_FSD
   });
 
@@ -594,7 +668,7 @@ const BANK_MT940_TML = {
     { type: "map", target: "dimension2", sources: [{ path: "bankReference" }] },
     {
       type: "conditional",
-      condition: { field: "debitCredit", operator: "eq", value: "D" },
+      condition: { field: "debitCredit", operator: "==", value: "D" },
       then: [
         { type: "map", target: "debit", sources: [{ path: "amount" }] },
         { type: "set", target: "credit", value: 0 }
@@ -616,7 +690,7 @@ async function seedSimphonyProfiles(prisma: PrismaClient): Promise<void> {
     name: "Simphony POS Revenue Export",
     description:
       "Oracle Simphony POS Report Builder export (semicolon-delimited, 9-field, real decimals)",
-    formatType: "FLAT_FILE",
+    classification: "DELIMITED",
     fsdXml: SIMPHONY_POS_FSD
   });
 
@@ -652,7 +726,7 @@ async function seedBankStatementProfiles(prisma: PrismaClient): Promise<void> {
   const fmt = await upsertFormat(prisma, {
     name: "Bank Statement MT940",
     description: "SWIFT MT940 bank statement (CSV pre-parsed, comma-delimited)",
-    formatType: "FLAT_FILE",
+    classification: "DELIMITED",
     fsdXml: BANK_MT940_FSD
   });
 

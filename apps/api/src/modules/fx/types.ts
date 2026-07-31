@@ -14,7 +14,7 @@ export const fxRateCreateSchema = z.object({
   rateType: z.enum(["SPOT", "AVERAGE", "BUDGET", "CLOSING"]),
   rate: z.string().regex(/^\d+(\.\d{1,8})?$/, "Expected a positive decimal string."),
   effectiveDate: z.coerce.date(),
-  source: z.enum(["ECB", "OANDA", "MANUAL"]).default("MANUAL")
+  source: z.enum(["ECB", "OANDA", "MANUAL", "OPEN_ER_API"]).default("MANUAL")
 });
 
 export const fxRateQuerySchema = z.object({

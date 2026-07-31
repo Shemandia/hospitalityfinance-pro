@@ -5,7 +5,7 @@
  * Usage: npx tsx src/scripts/backfill-ap-invoices.ts
  */
 
-import { PrismaClient, Prisma } from "@prisma/client";
+import { PrismaClient, Prisma } from "../db/client.js";
 
 const ENTITY_ID = "00000000-0000-0000-0000-000000000002";
 

@@ -66,7 +66,18 @@ describe("PeriodService.reopenPeriod", () => {
         deleteMany: async () => ({ count: 0 }),
         delete: async () => ({})
       },
-      $transaction: async (callback: (tx: typeof txStub) => Promise<unknown>) => callback(txStub)
+      $transaction: async (callback: (tx: any) => Promise<unknown>) => {
+        const tx = {
+          ...txStub,
+          processLock: {
+            updateMany: async () => ({ count: 0 }),
+            findFirst: async () => null,
+            create: async () => ({ id: "lock-1" })
+          },
+          $executeRawUnsafe: async () => undefined
+        };
+        return callback(tx);
+      }
     } as unknown as ConstructorParameters<typeof PeriodService>[0];
 
     const service = new PeriodService(prismaStub as never);

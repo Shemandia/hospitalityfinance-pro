@@ -4,19 +4,26 @@
 
 ### Required
 
-| Variable       | Description                  | Example                                     |
-| -------------- | ---------------------------- | ------------------------------------------- |
-| `DATABASE_URL` | PostgreSQL connection string | `postgresql://user:pass@localhost:5432/hfp` |
-| `NODE_ENV`     | Environment mode             | `development` / `production`                |
-| `PORT`         | API server port              | `4000`                                      |
+| Variable          | Description                                                 | Example                                     |
+| ----------------- | ----------------------------------------------------------- | ------------------------------------------- |
+| `DATABASE_URL`    | PostgreSQL connection string                                | `postgresql://user:pass@localhost:5432/hfp` |
+| `NODE_ENV`        | Environment mode                                            | `development` / `production`                |
+| `PORT`            | API server port                                             | `4000`                                      |
+| `ALLOWED_ORIGINS` | Comma-separated browser origins allowed by CORS/CSRF checks | `https://app.example.com`                   |
+| `APP_BASE_URL`    | Frontend base URL for emails and links                      | `https://app.example.com`                   |
 
-### Authentication (Keycloak)
+### Authentication (Native JWT)
 
-| Variable             | Description       | Example                                                                 |
-| -------------------- | ----------------- | ----------------------------------------------------------------------- |
-| `KEYCLOAK_ISSUER`    | OIDC issuer URL   | `https://keycloak.example.com/realms/hfp`                               |
-| `KEYCLOAK_JWKS_URI`  | JWKS endpoint     | `https://keycloak.example.com/realms/hfp/protocol/openid-connect/certs` |
-| `KEYCLOAK_CLIENT_ID` | Client ID for API | `hfp-api`                                                               |
+| Variable                   | Description                                 | Example                    |
+| -------------------------- | ------------------------------------------- | -------------------------- |
+| `JWT_SECRET`               | HS256 signing secret, 32+ random bytes      | `openssl-random-hex-value` |
+| `JWT_ACCESS_EXPIRY`        | Access token lifetime in seconds            | `900`                      |
+| `JWT_REFRESH_EXPIRY`       | Refresh token/session lifetime in seconds   | `604800`                   |
+| `BCRYPT_SALT_ROUNDS`       | Password hashing cost                       | `12`                       |
+| `MAX_FAILED_ATTEMPTS`      | Failed login attempts before lockout        | `5`                        |
+| `LOCKOUT_DURATION_MINUTES` | Account lockout duration                    | `15`                       |
+| `COOKIE_SECURE`            | Require HTTPS cookies in production         | `true`                     |
+| `COOKIE_DOMAIN`            | Cookie domain when needed across subdomains | `hotel.com`                |
 
 ### Redis (BullMQ queues)
 
@@ -45,10 +52,18 @@
 
 ### File Storage
 
-| Variable        | Description                      | Example       |
-| --------------- | -------------------------------- | ------------- |
-| `AWS_S3_BUCKET` | S3 bucket for reports (optional) | `hfp-reports` |
-| `AWS_REGION`    | AWS region                       | `eu-west-1`   |
+| Variable                | Description                                                                      | Example        |
+| ----------------------- | -------------------------------------------------------------------------------- | -------------- |
+| `STORAGE_BACKEND`       | Storage backend for Transfer Desk/payment files                                  | `local` / `s3` |
+| `TD_LOCAL_UPLOADS_PATH` | Local private storage root; never use web public roots such as `apps/web/public` | `./uploads`    |
+| `TD_S3_BUCKET`          | S3 bucket for Transfer Desk/payment files                                        | `hfp-files`    |
+| `AWS_S3_BUCKET`         | S3 bucket for reports (optional)                                                 | `hfp-reports`  |
+| `AWS_REGION`            | AWS region                                                                       | `eu-west-1`    |
+
+Payment run bank files are stored as StorageBackend object keys, not filesystem
+paths. Legacy payment runs whose `bank_file_path` contains a raw local path must
+be regenerated or migrated to the namespaced storage-key format; raw path
+downloads are intentionally rejected.
 
 ### Sky Jana SFTP
 
@@ -66,26 +81,36 @@
 | -------------- | ----------------------------------- | ----------------------- |
 | `APP_BASE_URL` | Frontend base URL (for email links) | `https://app.hotel.com` |
 
+### Optional RabbitMQ
+
+| Variable                   | Description                     | Example                             |
+| -------------------------- | ------------------------------- | ----------------------------------- |
+| `RABBITMQ_URL`             | AMQP URL for optional event bus | `amqp://guest:guest@localhost:5672` |
+| `RABBITMQ_EVENTS_EXCHANGE` | Exchange for application events | `hfp.events`                        |
+
 ---
 
 ## Web (`apps/web/.env.local`)
 
-| Variable                   | Description               | Example                                   |
-| -------------------------- | ------------------------- | ----------------------------------------- |
-| `NEXTAUTH_URL`             | NextAuth callback URL     | `http://localhost:3001`                   |
-| `NEXTAUTH_SECRET`          | Session encryption secret | `random-32-char-string`                   |
-| `NEXT_PUBLIC_API_BASE_URL` | API base URL              | `http://localhost:4000`                   |
-| `KEYCLOAK_CLIENT_ID`       | Keycloak OIDC client      | `hfp-web`                                 |
-| `KEYCLOAK_CLIENT_SECRET`   | Keycloak OIDC secret      | `secret`                                  |
-| `KEYCLOAK_ISSUER`          | OIDC issuer               | `https://keycloak.example.com/realms/hfp` |
+| Variable                   | Description                  | Example                   |
+| -------------------------- | ---------------------------- | ------------------------- |
+| `API_BASE_URL`             | Server-side API base URL     | `http://localhost:4500`   |
+| `NEXT_PUBLIC_API_BASE_URL` | Browser-visible API base URL | `http://localhost:4500`   |
+| `NEXT_PUBLIC_APP_URL`      | Public web application URL   | `https://app.example.com` |
+
+---
+
+## Non-Docker Deployment
+
+Use `docs/NON-DOCKER-SETUP.md` for direct Node.js, PostgreSQL, Redis, PM2, and optional RabbitMQ deployment. Docker is optional and not required for development or production.
 
 ---
 
 ## Dev Mode
 
-When `NODE_ENV !== 'production'`, the API accepts:
+When `NODE_ENV !== 'production'` and `ENABLE_DEV_AUTH=true`, the API accepts:
 
-- Bearer token: `dev-token`
+- Bearer token: `dev-<uuid>`
 - Header: `X-Entity-ID: 00000000-0000-0000-0000-000000000002`
-- Roles are hardcoded to `["admin", "superadmin"]`
-- No Keycloak required
+- Roles and permissions are hardcoded for local development only
+- No external identity provider required

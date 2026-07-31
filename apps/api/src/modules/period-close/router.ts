@@ -3,8 +3,8 @@ import { ZodError } from "zod";
 import { prisma } from "../../db/prisma.js";
 import type { PrismaClient } from "../../db/client.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
-import { requireWriteAccess } from "../../middleware/requireWriteAccess.js";
 import { requireRole } from "../../middleware/requireRole.js";
+import { requirePermission } from "../../middleware/requirePermission.js";
 import { runYearEndCleardown, YearEndCleardownError } from "./year-end-cleardown.js";
 import {
   createYearEndConfigSchema,
@@ -33,7 +33,6 @@ export async function registerPeriodCloseRouter(app: FastifyInstance): Promise<v
   app.register(
     async (router) => {
       router.addHook("preHandler", requireAuth);
-      router.addHook("preHandler", requireWriteAccess);
 
       // ── Year-End Config ──────────────────────────────────────────────────
 
@@ -54,53 +53,57 @@ export async function registerPeriodCloseRouter(app: FastifyInstance): Promise<v
         }
       });
 
-      router.post("/year-end-config", async (request, reply) => {
-        try {
-          const entityId = request.entityId;
-          if (!entityId)
-            return reply.code(400).send({
-              data: null,
-              errors: [{ code: "MISSING_ENTITY", message: "X-Entity-ID required." }]
-            });
-          const payload = createYearEndConfigSchema.parse(request.body);
-          // Upsert
-          const existing = await (prisma as unknown as PrismaClient as any).yearEndConfig.findFirst(
-            { where: { entityId } }
-          );
-          let data;
-          if (existing) {
-            data = await (prisma as unknown as PrismaClient as any).yearEndConfig.update({
-              where: { id: existing.id },
-              data: {
-                retainedEarningsCode: payload.retainedEarningsCode,
-                journalTypeCode: payload.journalTypeCode ?? null,
-                fiscalYearStartMonth: payload.fiscalYearStartMonth,
-                description: payload.description ?? null
-              }
-            });
-          } else {
-            data = await (prisma as unknown as PrismaClient as any).yearEndConfig.create({
-              data: {
-                entityId,
-                retainedEarningsCode: payload.retainedEarningsCode,
-                journalTypeCode: payload.journalTypeCode ?? null,
-                fiscalYearStartMonth: payload.fiscalYearStartMonth,
-                description: payload.description ?? null
-              }
-            });
+      router.post(
+        "/year-end-config",
+        { preHandler: [requirePermission("PERIOD_MANAGE")] },
+        async (request, reply) => {
+          try {
+            const entityId = request.entityId;
+            if (!entityId)
+              return reply.code(400).send({
+                data: null,
+                errors: [{ code: "MISSING_ENTITY", message: "X-Entity-ID required." }]
+              });
+            const payload = createYearEndConfigSchema.parse(request.body);
+            // Upsert
+            const existing = await (
+              prisma as unknown as PrismaClient as any
+            ).yearEndConfig.findFirst({ where: { entityId } });
+            let data;
+            if (existing) {
+              data = await (prisma as unknown as PrismaClient as any).yearEndConfig.update({
+                where: { id: existing.id },
+                data: {
+                  retainedEarningsCode: payload.retainedEarningsCode,
+                  journalTypeCode: payload.journalTypeCode ?? null,
+                  fiscalYearStartMonth: payload.fiscalYearStartMonth,
+                  description: payload.description ?? null
+                }
+              });
+            } else {
+              data = await (prisma as unknown as PrismaClient as any).yearEndConfig.create({
+                data: {
+                  entityId,
+                  retainedEarningsCode: payload.retainedEarningsCode,
+                  journalTypeCode: payload.journalTypeCode ?? null,
+                  fiscalYearStartMonth: payload.fiscalYearStartMonth,
+                  description: payload.description ?? null
+                }
+              });
+            }
+            return reply.code(201).send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
           }
-          return reply.code(201).send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
         }
-      });
+      );
 
       // ── Year-End Cleardown Execution ─────────────────────────────────────
 
       router.post(
         "/year-end-cleardown",
         {
-          preHandler: [requireRole(["ADMIN", "SUPERADMIN"])],
+          preHandler: [requirePermission("PERIOD_MANAGE")],
           config: { rateLimit: { max: 3, timeWindow: "1 minute" } }
         },
         async (request, reply) => {

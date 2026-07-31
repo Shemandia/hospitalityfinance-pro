@@ -1,3 +1,4 @@
+import { makeBalanceWriterStub } from "./helpers/balance-writer-stub.js";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { Prisma } from "../src/db/client.js";
 
@@ -127,6 +128,7 @@ function makeMockPrisma() {
 
   const prisma = {
     $executeRawUnsafe: vi.fn().mockResolvedValue(undefined),
+    $queryRawUnsafe: vi.fn(makeBalanceWriterStub()),
     $transaction: vi.fn().mockImplementation(async (fn: any) => fn(prisma)),
     assetCategory: {
       findFirst: vi.fn().mockImplementation(({ where }: any) => {
@@ -853,7 +855,7 @@ describe("Depreciation Execution", () => {
     expect(journals).toHaveLength(0);
   });
 
-  it("updates account period balances via upsert", async () => {
+  it("updates account period balances through the canonical signed writer", async () => {
     seedAsset({ grossValue: 60000, finalValue: 0, usefulLifeMonths: 60 });
     seedAccounts();
     seedPeriod("OPEN");
@@ -861,7 +863,18 @@ describe("Depreciation Execution", () => {
     seedPCS();
 
     await service.runDepreciation(ENTITY_ID, PERIOD_ID, USER_ID);
-    expect(balances.length).toBeGreaterThanOrEqual(2);
+
+    // Balances no longer go through accountPeriodBalance.upsert — that path
+    // wrote `debit - credit` unsigned and drove accumulated depreciation, a
+    // credit-normal contra-asset, negative. They now go through the canonical
+    // writer, which signs by the account's own normal balance.
+    //
+    // Params are (sql, entityId, periodId, then accountId/debit/credit triples).
+    const calls = prisma.$queryRawUnsafe.mock.calls as unknown[][];
+    expect(calls.length).toBeGreaterThanOrEqual(1);
+    const accountIds = calls.flatMap((call) => call.slice(3).filter((_, index) => index % 3 === 0));
+    // Depreciation posts DR P&L and CR balance-sheet, so at least two accounts move.
+    expect(new Set(accountIds).size).toBeGreaterThanOrEqual(2);
   });
 
   it("rejects when period not found", async () => {

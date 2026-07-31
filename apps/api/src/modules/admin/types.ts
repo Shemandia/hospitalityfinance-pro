@@ -32,23 +32,21 @@ export const userRoleAssignSchema = z.object({
   entityId: z.string().uuid().optional()
 });
 
-// ── Entity User update ──────────────────────────────────────────────────────
+// ── Entity User (property assignment — no role, just link) ──────────────────
 
-export const entityUserUpdateSchema = z.object({
-  role: z.enum(["VIEWER", "CONTROLLER", "ADMIN", "SUPERADMIN"])
-});
+export const entityUserUpdateSchema = z.object({});
 
 export const entityUserCreateSchema = z.object({
-  userId: z.string().uuid(),
-  role: z.enum(["VIEWER", "CONTROLLER", "ADMIN", "SUPERADMIN"]).default("VIEWER")
+  userId: z.string().uuid()
 });
 
-// ── User create (for entity admin) ──────────────────────────────────────────
+// ── User create (for tenant admin) ──────────────────────────────────────────
 
 export const userCreateSchema = z.object({
   email: z.string().email(),
   name: z.string().min(1).max(200),
-  role: z.enum(["VIEWER", "CONTROLLER", "ADMIN", "SUPERADMIN"]).default("VIEWER")
+  roleId: z.string().uuid().optional(), // Assign a role from the roles table
+  entityIds: z.array(z.string().uuid()).optional() // Assign to specific properties
 });
 
 export type RoleCreateInput = z.infer<typeof roleCreateSchema>;

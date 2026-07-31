@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "../../../../db/client.js";
 import type { OhipRevenueTransaction } from "./opera-cloud-client.js";
 
 export type MappedTransaction = OhipRevenueTransaction & {

@@ -1,19 +1,13 @@
-import { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "../../db/client.js";
 import type {
   BudgetDefinitionCreateInput,
   BudgetLinesBulkInput,
   BudgetVarianceQuery
 } from "./types.js";
 
-export class BudgetServiceError extends Error {
-  constructor(
-    public readonly code: string,
-    message: string,
-    public readonly statusCode = 400
-  ) {
-    super(message);
-  }
-}
+import { ServiceError } from "../../shared/service-error.js";
+
+export class BudgetServiceError extends ServiceError {}
 
 export class BudgetService {
   constructor(private readonly prisma: PrismaClient) {}
@@ -128,33 +122,30 @@ export class BudgetService {
 
     const rows = await this.prisma.$queryRaw<VarianceRow[]>`
       SELECT
-        a.id                                                        AS account_id,
-        a.code                                                      AS account_code,
-        a.name                                                      AS account_name,
-        a.usali_category,
-        a.usali_department,
+        mv."accountId"                                              AS account_id,
+        mv.account_code,
+        mv.account_name,
+        mv.usali_category,
+        mv.usali_department,
         COALESCE(bl.amount, 0)::numeric(18,4)                      AS budget_amount,
-        COALESCE(apb.closing_balance, 0)::numeric(18,4)            AS actual_amount,
-        (COALESCE(apb.closing_balance, 0) - COALESCE(bl.amount, 0))::numeric(18,4) AS variance,
+        COALESCE(mv.closing_balance, 0)::numeric(18,4)             AS actual_amount,
+        (COALESCE(mv.closing_balance, 0) - COALESCE(bl.amount, 0))::numeric(18,4) AS variance,
         CASE WHEN COALESCE(bl.amount, 0) = 0 THEN NULL
              ELSE ROUND(
-               ((COALESCE(apb.closing_balance, 0) - COALESCE(bl.amount, 0)) / ABS(bl.amount)) * 100,
+               ((COALESCE(mv.closing_balance, 0) - COALESCE(bl.amount, 0)) / ABS(bl.amount)) * 100,
                4
              )
         END AS variance_pct
-      FROM accounts a
+      FROM mv_period_account_balances mv
       LEFT JOIN budget_lines bl
-        ON bl.account_id = a.id
+        ON bl.account_id = mv."accountId"
        AND bl.budget_definition_id = ${query.budgetDefinitionId}
        AND bl.month = ${period.month}
-      LEFT JOIN account_period_balances apb
-        ON apb.account_id = a.id
-       AND apb.entity_id = ${entityId}
-       AND apb.period_id = ${query.periodId}
-      WHERE a.entity_id = ${entityId}
-        AND a.is_active = true
-        AND (bl.amount IS NOT NULL OR apb.closing_balance IS NOT NULL)
-      ORDER BY a.code ASC;
+      WHERE mv."entityId" = ${entityId}
+        AND mv."periodId" = ${query.periodId}
+        AND mv.is_active = true
+        AND (bl.amount IS NOT NULL OR mv.closing_balance IS NOT NULL)
+      ORDER BY mv.account_code ASC;
     `;
 
     return {

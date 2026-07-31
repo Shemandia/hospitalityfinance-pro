@@ -11,7 +11,8 @@
  * Normal balance values: DEBIT, CREDIT (auto-inferred from type if omitted)
  */
 
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient } from "../../db/client.js";
+import { withEntityRLS } from "../../db/tenantContext.js";
 import * as XLSX from "xlsx";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -59,7 +60,7 @@ export type COAImportResult = {
   errors: COAImportError[];
 };
 
-type AccountType = "ASSET" | "LIABILITY" | "EQUITY" | "REVENUE" | "EXPENSE";
+type AccountType = "ASSET" | "LIABILITY" | "EQUITY" | "REVENUE" | "EXPENSE" | "STATISTICAL";
 
 // ── CSV parsing ───────────────────────────────────────────────────────────────
 
@@ -266,7 +267,14 @@ function parseFile(input: FileInput): { headers: string[]; rows: Record<string, 
 
 // ── Row validation ────────────────────────────────────────────────────────────
 
-const VALID_TYPES: AccountType[] = ["ASSET", "LIABILITY", "EQUITY", "REVENUE", "EXPENSE"];
+const VALID_TYPES: AccountType[] = [
+  "ASSET",
+  "LIABILITY",
+  "EQUITY",
+  "REVENUE",
+  "EXPENSE",
+  "STATISTICAL"
+];
 
 /** Map common accounting type aliases to canonical types */
 const TYPE_ALIASES: Record<string, AccountType> = {
@@ -313,7 +321,15 @@ const TYPE_ALIASES: Record<string, AccountType> = {
   OVERHEAD: "EXPENSE",
   OVERHEADS: "EXPENSE",
   PAYROLL: "EXPENSE",
-  "LABOUR COST": "EXPENSE"
+  "LABOUR COST": "EXPENSE",
+  // Statistical / Memo accounts (Opera Cloud, PMS stats)
+  STATISTICAL: "STATISTICAL",
+  STATISTICS: "STATISTICAL",
+  STAT: "STATISTICAL",
+  STATS: "STATISTICAL",
+  MEMO: "STATISTICAL",
+  "MEMO ACCOUNT": "STATISTICAL",
+  "STATISTICAL ACCOUNT": "STATISTICAL"
 };
 
 function resolveAccountType(raw: string): AccountType | null {
@@ -327,7 +343,8 @@ const TYPE_DEFAULT_BALANCE: Record<AccountType, "DEBIT" | "CREDIT"> = {
   LIABILITY: "CREDIT",
   EQUITY: "CREDIT",
   REVENUE: "CREDIT",
-  EXPENSE: "DEBIT"
+  EXPENSE: "DEBIT",
+  STATISTICAL: "DEBIT"
 };
 
 function parseBool(val: string): boolean {
@@ -563,6 +580,14 @@ const DEFAULT_OPTS: COAExecuteOptions = {
   skipErrors: true
 };
 
+/**
+ * Sentinel used to abort the import transaction. When `skipErrors` is false we
+ * must roll back the whole import (F22) — throwing out of the transaction callback
+ * makes Prisma roll back, whereas the previous `return result` committed the
+ * partial work that had run before the bad row.
+ */
+class COAImportAbort extends Error {}
+
 export async function executeCOAImport(
   prisma: PrismaClient,
   entityId: string,
@@ -574,127 +599,201 @@ export async function executeCOAImport(
 
   const result: COAImportResult = { created: 0, updated: 0, skipped: 0, errors: [] };
 
-  // Load existing accounts
-  const existingAccounts = await prisma.account.findMany({
-    where: { entityId },
-    select: { id: true, code: true, isActive: true }
-  });
-  const existingByCode = new Map(existingAccounts.map((a) => [a.code, a]));
+  // Set RLS entity context for the entire import transaction.
+  // F22: on a non-skipErrors abort we throw COAImportAbort so the transaction
+  // rolls back; we then reset the create/update counts (nothing persisted) and
+  // return the accumulated errors to the caller.
+  try {
+    await withEntityRLS(
+      prisma,
+      entityId,
+      async (tx) => {
+        // Load existing accounts
+        const existingAccounts = await tx.account.findMany({
+          where: { entityId },
+          select: { id: true, code: true, isActive: true }
+        });
+        const existingByCode = new Map(existingAccounts.map((a: any) => [a.code, a]));
 
-  // First pass: create/update accounts WITHOUT parent links (to avoid ordering issues)
-  const pendingParents: Array<{ code: string; parentCode: string }> = [];
+        // Parse and validate all rows first
+        type ParsedRow = NonNullable<ReturnType<typeof parseRow>["row"]>;
+        const toCreate: ParsedRow[] = [];
+        const toUpdate: Array<{ id: string; row: ParsedRow; reactivate: boolean }> = [];
+        const pendingParents: Array<{ code: string; parentCode: string }> = [];
 
-  for (let i = 0; i < rawRows.length; i++) {
-    const rowNum = i + 2;
-    const { row, errors } = parseRow(rawRows[i], rowNum);
+        for (let i = 0; i < rawRows.length; i++) {
+          const rowNum = i + 2;
+          const { row, errors } = parseRow(rawRows[i], rowNum);
 
-    if (!row) {
-      result.errors.push(...errors);
-      result.skipped++;
-      continue;
-    }
-
-    if (errors.length > 0) {
-      if (opts.skipErrors) {
-        result.errors.push(...errors);
-        result.skipped++;
-        continue;
-      } else {
-        result.errors.push(...errors);
-        return result; // Abort
-      }
-    }
-
-    const existing = existingByCode.get(row.code);
-
-    try {
-      if (!existing) {
-        // Create new account (parent linked in second pass)
-        const created = await prisma.account.create({
-          data: {
-            entityId,
-            code: row.code,
-            name: row.name,
-            type: row.type,
-            normalBalance: row.normalBalance,
-            allowPosting: row.allowPosting,
-            isControlAccount: row.isControlAccount,
-            level: row.level,
-            usaliCategory: row.usaliCategory || undefined,
-            usaliDepartment: row.usaliDepartment || undefined
+          if (!row) {
+            result.errors.push(...errors);
+            result.skipped++;
+            continue;
           }
-        });
-        existingByCode.set(row.code, { id: created.id, code: created.code, isActive: true });
-        result.created++;
-      } else if (existing.isActive && opts.updateExisting) {
-        await prisma.account.update({
-          where: { id: existing.id },
-          data: {
-            name: row.name,
-            type: row.type,
-            normalBalance: row.normalBalance,
-            allowPosting: row.allowPosting,
-            isControlAccount: row.isControlAccount,
-            level: row.level,
-            usaliCategory: row.usaliCategory || undefined,
-            usaliDepartment: row.usaliDepartment || undefined
+
+          if (errors.length > 0) {
+            if (opts.skipErrors) {
+              result.errors.push(...errors);
+              result.skipped++;
+              continue;
+            } else {
+              result.errors.push(...errors);
+              throw new COAImportAbort(); // F22: roll back the whole import
+            }
           }
-        });
-        result.updated++;
-      } else if (!existing.isActive && opts.reactivateInactive) {
-        await prisma.account.update({
-          where: { id: existing.id },
-          data: {
-            name: row.name,
-            type: row.type,
-            normalBalance: row.normalBalance,
-            allowPosting: row.allowPosting,
-            isControlAccount: row.isControlAccount,
-            level: row.level,
-            isActive: true,
-            usaliCategory: row.usaliCategory || undefined,
-            usaliDepartment: row.usaliDepartment || undefined
+
+          const existing = existingByCode.get(row.code);
+
+          if (!existing) {
+            toCreate.push(row);
+          } else if (existing.isActive && opts.updateExisting) {
+            toUpdate.push({ id: existing.id, row, reactivate: false });
+          } else if (!existing.isActive && opts.reactivateInactive) {
+            toUpdate.push({ id: existing.id, row, reactivate: true });
+          } else {
+            result.skipped++;
           }
-        });
-        result.updated++;
-      } else {
-        result.skipped++;
-      }
 
-      // Queue parent assignment for second pass
-      if (row.parentCode) {
-        pendingParents.push({ code: row.code, parentCode: row.parentCode });
-      }
-    } catch (err) {
-      result.errors.push({
-        row: rowNum,
-        column: "code",
-        message: `DB error: ${err instanceof Error ? err.message : String(err)}`
-      });
-      if (!opts.skipErrors) return result;
-      result.skipped++;
+          if (row.parentCode) {
+            pendingParents.push({ code: row.code, parentCode: row.parentCode });
+          }
+        }
+
+        // ── Batch CREATE in chunks of 100 using createMany ──────────────────────
+        const BATCH_SIZE = 100;
+        for (let i = 0; i < toCreate.length; i += BATCH_SIZE) {
+          const chunk = toCreate.slice(i, i + BATCH_SIZE);
+          try {
+            await tx.account.createMany({
+              data: chunk.map((row) => ({
+                entityId,
+                code: row.code,
+                name: row.name,
+                type: row.type,
+                normalBalance: row.normalBalance,
+                allowPosting: row.allowPosting,
+                isControlAccount: row.isControlAccount,
+                level: row.level,
+                usaliCategory: row.usaliCategory || undefined,
+                usaliDepartment: row.usaliDepartment || undefined
+              }))
+            });
+            result.created += chunk.length;
+          } catch (err) {
+            // If batch fails, fall back to individual creates to identify the bad row
+            for (const row of chunk) {
+              try {
+                await tx.account.create({
+                  data: {
+                    entityId,
+                    code: row.code,
+                    name: row.name,
+                    type: row.type,
+                    normalBalance: row.normalBalance,
+                    allowPosting: row.allowPosting,
+                    isControlAccount: row.isControlAccount,
+                    level: row.level,
+                    usaliCategory: row.usaliCategory || undefined,
+                    usaliDepartment: row.usaliDepartment || undefined
+                  }
+                });
+                result.created++;
+              } catch (rowErr) {
+                result.errors.push({
+                  row: 0,
+                  column: "code",
+                  message: `DB error on ${row.code}: ${rowErr instanceof Error ? rowErr.message : String(rowErr)}`
+                });
+                if (!opts.skipErrors) throw new COAImportAbort();
+                result.skipped++;
+              }
+            }
+          }
+        }
+
+        // Reload accounts after bulk create so we have IDs for parent linking
+        if (toCreate.length > 0 || toUpdate.length > 0) {
+          const refreshed = await tx.account.findMany({
+            where: { entityId },
+            select: { id: true, code: true, isActive: true }
+          });
+          existingByCode.clear();
+          for (const a of refreshed) {
+            existingByCode.set(a.code, a);
+          }
+        }
+
+        // ── Batch UPDATE (must be individual — Prisma updateMany can't vary data) ──
+        for (const { id, row, reactivate } of toUpdate) {
+          try {
+            await tx.account.update({
+              where: { id },
+              data: {
+                name: row.name,
+                type: row.type,
+                normalBalance: row.normalBalance,
+                allowPosting: row.allowPosting,
+                isControlAccount: row.isControlAccount,
+                level: row.level,
+                ...(reactivate ? { isActive: true } : {}),
+                usaliCategory: row.usaliCategory || undefined,
+                usaliDepartment: row.usaliDepartment || undefined
+              }
+            });
+            result.updated++;
+          } catch (err) {
+            result.errors.push({
+              row: 0,
+              column: "code",
+              message: `DB error on ${row.code}: ${err instanceof Error ? err.message : String(err)}`
+            });
+            if (!opts.skipErrors) throw new COAImportAbort();
+            result.skipped++;
+          }
+        }
+
+        // ── Second pass: link parents in batches ────────────────────────────────
+        for (let i = 0; i < pendingParents.length; i += BATCH_SIZE) {
+          const chunk = pendingParents.slice(i, i + BATCH_SIZE);
+          for (const { code, parentCode } of chunk) {
+            const account = existingByCode.get(code);
+            const parent = existingByCode.get(parentCode);
+            if (account && parent) {
+              try {
+                await tx.account.update({
+                  where: { id: account.id },
+                  data: { parentId: parent.id }
+                });
+              } catch (err) {
+                result.errors.push({
+                  row: 0,
+                  column: "parentCode",
+                  message: `Failed to link ${code} → ${parentCode}: ${err instanceof Error ? err.message : String(err)}`
+                });
+              }
+            } else {
+              // F23: don't silently leave the child unlinked — surface it so the
+              // hierarchy gap is visible (e.g. parent code missing from file and DB).
+              result.errors.push({
+                row: 0,
+                column: "parentCode",
+                message: `Parent "${parentCode}" for account "${code}" not found — account left unlinked.`
+              });
+            }
+          }
+        }
+      },
+      { timeout: 300000 }
+    ); // 5-minute timeout for large imports
+  } catch (err) {
+    if (err instanceof COAImportAbort) {
+      // Transaction rolled back — nothing persisted. Keep the accumulated errors
+      // but reset counts that implied DB writes.
+      result.created = 0;
+      result.updated = 0;
+      return result;
     }
-  }
-
-  // Second pass: link parents
-  for (const { code, parentCode } of pendingParents) {
-    const account = existingByCode.get(code);
-    const parent = existingByCode.get(parentCode);
-
-    if (account && parent) {
-      try {
-        await prisma.account.update({
-          where: { id: account.id },
-          data: { parentId: parent.id }
-        });
-      } catch (err) {
-        result.errors.push({
-          row: 0,
-          column: "parentCode",
-          message: `Failed to link ${code} → ${parentCode}: ${err instanceof Error ? err.message : String(err)}`
-        });
-      }
-    }
+    throw err;
   }
 
   return result;

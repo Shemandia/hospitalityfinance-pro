@@ -8,6 +8,7 @@ import { requireAuth } from "./middleware/requireAuth.js";
 import { logSerializers } from "./shared/log-redactor.js";
 import { registerGLRouter } from "./modules/gl/router.js";
 import { registerPeriodRouter } from "./modules/period/router.js";
+import { registerPeriodCloseRouter } from "./modules/period-close/router.js";
 import { registerAuditRouter } from "./modules/audit/router.js";
 import { registerReportingRouter } from "./modules/reporting/router.js";
 import { registerAPRouter } from "./modules/ap/router.js";
@@ -183,6 +184,7 @@ export async function createApp(): Promise<FastifyInstance> {
 
   await registerGLRouter(app);
   await registerPeriodRouter(app);
+  await registerPeriodCloseRouter(app);
   await registerAuditRouter(app);
   await registerReportingRouter(app);
   await registerAPRouter(app);

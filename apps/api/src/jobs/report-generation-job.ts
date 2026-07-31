@@ -12,7 +12,7 @@
  */
 
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { Prisma, type PrismaClient as PrismaClientType } from "@prisma/client";
+import { Prisma, type PrismaClient as PrismaClientType } from "../db/client.js";
 import { Document, Page, renderToBuffer, StyleSheet, Text, View } from "@react-pdf/renderer";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -241,18 +241,17 @@ async function generateTrialBalancePdf(
 
   const rows = await prisma.$queryRaw<TBRow[]>`
     SELECT
-      a.code,
-      a.name,
-      a.type AS account_type,
-      COALESCE(apb.period_debits, 0)::numeric(18,4) AS debit,
-      COALESCE(apb.period_credits, 0)::numeric(18,4) AS credit,
-      COALESCE(apb.closing_balance, 0)::numeric(18,4) AS closing_balance
-    FROM accounts a
-    LEFT JOIN account_period_balances apb
-      ON apb.account_id = a.id AND apb.period_id = ${periodId} AND apb.entity_id = ${entityId}
-    WHERE a.entity_id = ${entityId} AND a.is_active = true
-      AND (apb.closing_balance IS NOT NULL OR apb.period_debits IS NOT NULL)
-    ORDER BY a.code ASC;
+      account_code AS code,
+      account_name AS name,
+      account_type,
+      COALESCE(period_debits, 0)::numeric(18,4) AS debit,
+      COALESCE(period_credits, 0)::numeric(18,4) AS credit,
+      COALESCE(closing_balance, 0)::numeric(18,4) AS closing_balance
+    FROM mv_period_account_balances
+    WHERE "entityId" = ${entityId}
+      AND "periodId" = ${periodId}
+      AND is_active = true
+    ORDER BY account_code ASC;
   `;
 
   const styles = StyleSheet.create({
@@ -384,14 +383,13 @@ async function generateCustomPdf(
 
   const rows = await prisma.$queryRaw<CustomRow[]>`
     SELECT
-      COALESCE(a.usali_department, 'Unassigned') AS department,
-      COALESCE(a.usali_category, 'Unassigned') AS category,
-      COALESCE(SUM(apb.closing_balance), 0)::numeric(18,4) AS amount
-    FROM account_period_balances apb
-    JOIN accounts a ON a.id = apb.account_id
-    WHERE apb.entity_id = ${entityId}
-      AND apb.period_id = ${periodId}
-    GROUP BY COALESCE(a.usali_department, 'Unassigned'), COALESCE(a.usali_category, 'Unassigned')
+      COALESCE(usali_department, 'Unassigned') AS department,
+      COALESCE(usali_category, 'Unassigned') AS category,
+      COALESCE(SUM(closing_balance), 0)::numeric(18,4) AS amount
+    FROM mv_period_account_balances
+    WHERE "entityId" = ${entityId}
+      AND "periodId" = ${periodId}
+    GROUP BY COALESCE(usali_department, 'Unassigned'), COALESCE(usali_category, 'Unassigned')
     ORDER BY department ASC, category ASC;
   `;
 

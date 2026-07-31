@@ -18,10 +18,11 @@
  *       CR  2440  Health Insurance Payable            4,200
  */
 
-import { Prisma, type PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "../../../../db/client.js";
 import * as XLSX from "xlsx";
 import type { PayrollBatch, PayrollImportResult, PayrollRun } from "./payroll-types.js";
 
+import { applyBalanceDelta } from "../../../../db/balance-writer.js";
 export class PayrollServiceError extends Error {
   constructor(
     public readonly code: string,
@@ -262,29 +263,16 @@ async function processPayrollRun(
   // Update balances if auto-posted
   if (autoPost) {
     for (const line of journal.lines) {
-      await prisma.accountPeriodBalance.upsert({
-        where: {
-          entityId_accountId_periodId: {
-            entityId,
-            accountId: line.accountId,
-            periodId: period.id
-          }
-        },
-        create: {
-          entityId,
-          accountId: line.accountId,
-          periodId: period.id,
-          openingBalance: new Prisma.Decimal(0),
-          periodDebits: line.debitFunctional,
-          periodCredits: line.creditFunctional,
-          closingBalance: line.debitFunctional.sub(line.creditFunctional)
-        },
-        update: {
-          periodDebits: { increment: line.debitFunctional },
-          periodCredits: { increment: line.creditFunctional },
-          closingBalance: { increment: line.debitFunctional.sub(line.creditFunctional) }
-        }
-      });
+      // Canonical signed writer — this used to write `debit - credit`
+      // unsigned, moving every credit-normal account the wrong way.
+      await applyBalanceDelta(
+        prisma,
+        entityId,
+        period.id,
+        line.accountId,
+        line.debitFunctional,
+        line.creditFunctional
+      );
     }
   }
 

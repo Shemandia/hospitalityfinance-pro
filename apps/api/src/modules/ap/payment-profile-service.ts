@@ -1,4 +1,7 @@
-import type { PrismaClient } from "../../db/client.js";
+import { Prisma, type PrismaClient } from "../../db/client.js";
+
+const D = (v: unknown): Prisma.Decimal => new Prisma.Decimal(String(v ?? 0));
+const ZERO = new Prisma.Decimal(0);
 import type {
   CreatePaymentProfileInput,
   UpdatePaymentProfileInput,
@@ -6,17 +9,11 @@ import type {
   RunCollectionInput
 } from "./payment-profile-types.js";
 
+import { ServiceError } from "../../shared/service-error.js";
+
 // ── Errors ───────────────────────────────────────────────────────────────────
 
-export class PaymentProfileServiceError extends Error {
-  constructor(
-    public readonly code: string,
-    message: string,
-    public readonly statusCode = 400
-  ) {
-    super(message);
-  }
-}
+export class PaymentProfileServiceError extends ServiceError {}
 
 // ── Service ──────────────────────────────────────────────────────────────────
 
@@ -220,17 +217,17 @@ export class PaymentProfileService {
       invoiceId: string;
       customerId: string;
       customerName: string;
-      outstanding: number;
+      outstanding: Prisma.Decimal;
       currency: string;
     }> = [];
 
     for (const inv of invoices) {
-      const outstanding = Number(inv.amount) - Number(inv.amountPaid);
-      if (outstanding <= 0) continue;
+      const outstanding = D(inv.amount).sub(D(inv.amountPaid));
+      if (outstanding.lte(ZERO)) continue;
 
       // Apply amount filters
-      if (criteria.amountMin !== undefined && outstanding < criteria.amountMin) continue;
-      if (criteria.amountMax !== undefined && outstanding > criteria.amountMax) continue;
+      if (criteria.amountMin !== undefined && outstanding.lt(D(criteria.amountMin))) continue;
+      if (criteria.amountMax !== undefined && outstanding.gt(D(criteria.amountMax))) continue;
 
       lines.push({
         invoiceId: inv.id,
@@ -245,13 +242,13 @@ export class PaymentProfileService {
       return { collectedCount: 0, totalAmount: 0, journalId: null };
     }
 
-    const totalAmount = lines.reduce((sum, l) => sum + l.outstanding, 0);
+    const totalAmount = lines.reduce((sum, l) => sum.add(l.outstanding), ZERO);
 
     // Check total payment limit
-    if (profile.totalPaymentLimit && totalAmount > Number(profile.totalPaymentLimit)) {
+    if (profile.totalPaymentLimit && totalAmount.gt(D(profile.totalPaymentLimit))) {
       throw new PaymentProfileServiceError(
         "COLLECTION_LIMIT_EXCEEDED",
-        `Total collection ${totalAmount.toFixed(2)} exceeds profile limit ${Number(profile.totalPaymentLimit).toFixed(2)}.`,
+        `Total collection ${totalAmount.toFixed(2)} exceeds profile limit ${D(profile.totalPaymentLimit).toFixed(2)}.`,
         422
       );
     }
@@ -288,12 +285,12 @@ export class PaymentProfileService {
 
     const journalLines: Array<{
       accountId: string;
-      debit: number;
-      credit: number;
+      debit: Prisma.Decimal;
+      credit: Prisma.Decimal;
       currency: string;
       fxRate: number;
-      debitFunctional: number;
-      creditFunctional: number;
+      debitFunctional: Prisma.Decimal;
+      creditFunctional: Prisma.Decimal;
       description: string;
     }> = [];
 
@@ -301,30 +298,30 @@ export class PaymentProfileService {
     journalLines.push({
       accountId: bankAccount.id,
       debit: totalAmount,
-      credit: 0,
+      credit: ZERO,
       currency: funcCurrency,
       fxRate: 1,
       debitFunctional: totalAmount,
-      creditFunctional: 0,
+      creditFunctional: ZERO,
       description: `Collection run — ${lines.length} invoices`
     });
 
     // CR AR Control per customer (grouped)
-    const byCustomer = new Map<string, { name: string; total: number }>();
+    const byCustomer = new Map<string, { name: string; total: Prisma.Decimal }>();
     for (const line of lines) {
-      const existing = byCustomer.get(line.customerId) ?? { name: line.customerName, total: 0 };
-      existing.total += line.outstanding;
+      const existing = byCustomer.get(line.customerId) ?? { name: line.customerName, total: ZERO };
+      existing.total = existing.total.add(line.outstanding);
       byCustomer.set(line.customerId, existing);
     }
 
     for (const [customerId, data] of byCustomer) {
       journalLines.push({
         accountId: arAccount.id,
-        debit: 0,
+        debit: ZERO,
         credit: data.total,
         currency: funcCurrency,
         fxRate: 1,
-        debitFunctional: 0,
+        debitFunctional: ZERO,
         creditFunctional: data.total,
         description: `Collection from ${data.name}`
       });
@@ -361,7 +358,7 @@ export class PaymentProfileService {
       await (this.prisma as any).aRInvoice.update({
         where: { id: line.invoiceId },
         data: {
-          amountPaid: { increment: line.outstanding },
+          amountPaid: { increment: line.outstanding.toNumber() },
           status: "PAID"
         }
       });
@@ -369,7 +366,7 @@ export class PaymentProfileService {
 
     return {
       collectedCount: lines.length,
-      totalAmount,
+      totalAmount: totalAmount.toNumber(),
       journalId: journal.id
     };
   }

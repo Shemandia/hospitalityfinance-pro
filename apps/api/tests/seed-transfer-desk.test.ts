@@ -15,7 +15,7 @@ import { describe, it, expect } from "vitest";
 // ── Opera PMS FSD validation ────────────────────────────────────────────────
 
 describe("Opera PMS seed data", () => {
-  const operaFsdBase = (recordName: string, fields: object[]) => ({
+  const operaFsdBase = (recordName: string, fields: Record<string, unknown>[]) => ({
     version: "1.0",
     classification: "DELIMITED",
     fieldSep: "|",
@@ -59,7 +59,12 @@ describe("Opera PMS seed data", () => {
   });
 
   it("all 4 Opera file types produce valid FSD schemas", () => {
-    const types = ["EZZRV_Revenue", "EZZCL_CityLedger", "EZZMS_Miscellaneous", "EZZDS_Deposits"];
+    const types = [
+      "EZZRV_Revenue",
+      "EZZCL_CityLedger",
+      "EZZDS_DailyStatistics",
+      "EZZMS_MarketSegmentStatistics"
+    ];
     for (const name of types) {
       const fsd = operaFsdBase(
         name,

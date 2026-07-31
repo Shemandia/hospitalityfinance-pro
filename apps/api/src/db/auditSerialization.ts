@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma } from "./client.js";
 
 function normalizeValue(value: unknown): unknown {
   if (value instanceof Prisma.Decimal) {

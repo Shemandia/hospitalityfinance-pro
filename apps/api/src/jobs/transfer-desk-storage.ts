@@ -20,21 +20,85 @@ export interface StorageBackend {
   write(key: string, content: string): Promise<void>;
 }
 
+export function assertSafeStorageKey(key: string): string {
+  if (typeof key !== "string" || key.trim().length === 0) {
+    throw new Error("Storage key is required.");
+  }
+
+  if (
+    key.includes("\\") ||
+    key.startsWith("/") ||
+    key.startsWith("./") ||
+    /^[a-zA-Z]:/.test(key) ||
+    /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(key)
+  ) {
+    throw new Error("Storage key must be a relative object key.");
+  }
+
+  const normalized = path.posix.normalize(key);
+  const segments = normalized.split("/");
+  if (
+    normalized === "." ||
+    normalized.startsWith("../") ||
+    segments.includes("..") ||
+    segments.includes("")
+  ) {
+    throw new Error("Storage key contains unsafe path segments.");
+  }
+
+  return normalized;
+}
+
 // ── Local filesystem (dev) ───────────────────────────────────────────────────
 
 export class LocalStorageBackend implements StorageBackend {
-  constructor(private readonly basePath: string) {}
+  private readonly rootPath: string;
+
+  constructor(private readonly basePath: string) {
+    this.rootPath = assertStorageRootIsPrivate(basePath);
+  }
 
   async read(key: string): Promise<string> {
-    const fullPath = path.resolve(this.basePath, key);
+    const fullPath = this.resolveKey(key);
     return fs.readFile(fullPath, "utf-8");
   }
 
   async write(key: string, content: string): Promise<void> {
-    const fullPath = path.resolve(this.basePath, key);
+    const fullPath = this.resolveKey(key);
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
     await fs.writeFile(fullPath, content, "utf-8");
   }
+
+  private resolveKey(key: string): string {
+    const safeKey = assertSafeStorageKey(key);
+    const fullPath = path.resolve(this.rootPath, safeKey);
+    const relative = path.relative(this.rootPath, fullPath);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) {
+      throw new Error("Storage key resolves outside the storage root.");
+    }
+    return fullPath;
+  }
+}
+
+export function assertStorageRootIsPrivate(basePath: string): string {
+  const root = path.resolve(basePath);
+  const cwd = process.cwd();
+  const publicRoots = [
+    path.resolve(cwd, "apps/web/public"),
+    path.resolve(cwd, "apps/api/public"),
+    path.resolve(cwd, "public")
+  ];
+
+  for (const publicRoot of publicRoots) {
+    const relative = path.relative(publicRoot, root);
+    if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
+      throw new Error(
+        `TD_LOCAL_UPLOADS_PATH must not point inside a public web root: ${publicRoot}`
+      );
+    }
+  }
+
+  return root;
 }
 
 // ── S3 (prod) ────────────────────────────────────────────────────────────────
@@ -51,15 +115,17 @@ export class S3StorageBackend implements StorageBackend {
   }
 
   async read(key: string): Promise<string> {
-    const res = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+    const safeKey = assertSafeStorageKey(key);
+    const res = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: safeKey }));
     return (await res.Body?.transformToString("utf-8")) ?? "";
   }
 
   async write(key: string, content: string): Promise<void> {
+    const safeKey = assertSafeStorageKey(key);
     await this.client.send(
       new PutObjectCommand({
         Bucket: this.bucket,
-        Key: key,
+        Key: safeKey,
         Body: content,
         ContentType: "text/plain; charset=utf-8"
       })

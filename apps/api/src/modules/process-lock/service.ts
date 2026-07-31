@@ -2,15 +2,9 @@ import type { PrismaClient } from "../../db/client.js";
 
 const DEFAULT_TIMEOUT_MINUTES = 30;
 
-export class ProcessLockError extends Error {
-  constructor(
-    public readonly code: string,
-    message: string,
-    public readonly statusCode = 400
-  ) {
-    super(message);
-  }
-}
+import { ServiceError } from "../../shared/service-error.js";
+
+export class ProcessLockError extends ServiceError {}
 
 export class ProcessLockService {
   constructor(private readonly prisma: PrismaClient) {}
@@ -18,8 +12,10 @@ export class ProcessLockService {
   /**
    * Acquire an exclusive lock for a process type within an entity/ledger.
    *
-   * If an active, non-expired lock already exists for the same (entityId, processType, ledger),
-   * the call fails immediately with LOCK_HELD.
+   * Uses pg_advisory_xact_lock inside a serialized transaction to prevent
+   * the race condition where two concurrent callers both see "no active lock"
+   * and both create one. The advisory lock serializes the check-then-create
+   * into an atomic operation.
    *
    * Expired locks are automatically released before attempting acquisition.
    */
@@ -40,42 +36,58 @@ export class ProcessLockService {
       timeoutMinutes = DEFAULT_TIMEOUT_MINUTES
     } = params;
 
-    // Release any expired locks first
-    await this.releaseExpiredLocks(entityId);
+    return (this.prisma as any).$transaction(async (tx: any) => {
+      // Take an advisory lock keyed on (entityId, processType, ledger).
+      // hashtext() produces a stable int4 from a string; the advisory lock
+      // is automatically released when this transaction ends.
+      const lockKey = `process_lock:${entityId}:${processType}:${ledger}`;
+      await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(hashtext($1))`, lockKey);
 
-    // Check for an active lock
-    const existing = await (this.prisma as any).processLock.findFirst({
-      where: {
-        entityId,
-        processType,
-        ledger,
-        isActive: true
+      // Release any expired locks (now serialized — no race)
+      const now = new Date();
+      await tx.processLock.updateMany({
+        where: {
+          entityId,
+          isActive: true,
+          expiresAt: { lt: now }
+        },
+        data: { isActive: false, releasedAt: now }
+      });
+
+      // Check for an active lock
+      const existing = await tx.processLock.findFirst({
+        where: {
+          entityId,
+          processType,
+          ledger,
+          isActive: true
+        }
+      });
+
+      if (existing) {
+        throw new ProcessLockError(
+          "LOCK_HELD",
+          `Process '${processType}' is already locked for entity ${entityId} ledger ${ledger}. ` +
+            `Held since ${existing.acquiredAt.toISOString()}` +
+            (existing.acquiredById ? ` by user ${existing.acquiredById}` : "") +
+            `. Expires at ${existing.expiresAt.toISOString()}.`,
+          409
+        );
       }
-    });
 
-    if (existing) {
-      throw new ProcessLockError(
-        "LOCK_HELD",
-        `Process '${processType}' is already locked for entity ${entityId} ledger ${ledger}. ` +
-          `Held since ${existing.acquiredAt.toISOString()}` +
-          (existing.acquiredById ? ` by user ${existing.acquiredById}` : "") +
-          `. Expires at ${existing.expiresAt.toISOString()}.`,
-        409
-      );
-    }
+      const expiresAt = new Date(Date.now() + timeoutMinutes * 60 * 1000);
 
-    const expiresAt = new Date(Date.now() + timeoutMinutes * 60 * 1000);
-
-    return (this.prisma as any).processLock.create({
-      data: {
-        entityId,
-        processType,
-        ledger,
-        acquiredById: userId ?? null,
-        workerId: workerId ?? null,
-        expiresAt,
-        isActive: true
-      }
+      return tx.processLock.create({
+        data: {
+          entityId,
+          processType,
+          ledger,
+          acquiredById: userId ?? null,
+          workerId: workerId ?? null,
+          expiresAt,
+          isActive: true
+        }
+      });
     });
   }
 

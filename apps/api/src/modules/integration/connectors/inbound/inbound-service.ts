@@ -9,7 +9,7 @@
  * All operations are idempotent via batchRef + sourceSystem deduplication.
  */
 
-import { Prisma, type PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "../../../../db/client.js";
 import type {
   InboundInvoiceBatch,
   InboundJournalBatch,
@@ -284,7 +284,23 @@ export async function importJournalBatch(
       }
 
       // Resolve account codes → IDs
-      const journalLines = [];
+      const journalLines: Array<{
+        accountId: string;
+        debit: Prisma.Decimal;
+        credit: Prisma.Decimal;
+        currency: string;
+        fxRate: Prisma.Decimal;
+        debitFunctional: Prisma.Decimal;
+        creditFunctional: Prisma.Decimal;
+        description?: string;
+        dimension1?: string;
+        dimension2?: string;
+        dimension3?: string;
+        dimension4?: string;
+        dimension5?: string;
+        dimension6?: string;
+        lineNumber: number;
+      }> = [];
       let hasError = false;
       for (let li = 0; li < jnl.lines.length; li++) {
         const line = jnl.lines[li];
@@ -353,6 +369,21 @@ export async function importJournalBatch(
         continue;
       }
 
+      // F4: an inbound journal batch must be self-balancing — the source system
+      // is asserting a complete journal. If debits != credits it is a data error
+      // at the source, so reject the journal (do not post) rather than silently
+      // creating an unbalanced entry.
+      const totalDebit = journalLines.reduce((s, l) => s.add(l.debit), new Prisma.Decimal(0));
+      const totalCredit = journalLines.reduce((s, l) => s.add(l.credit), new Prisma.Decimal(0));
+      if (totalDebit.sub(totalCredit).abs().greaterThan(new Prisma.Decimal("0.0001"))) {
+        result.errors.push({
+          index: i,
+          message: `Journal "${jnl.reference}" is unbalanced (debits ${totalDebit.toFixed(2)} != credits ${totalCredit.toFixed(2)}); not posted.`
+        });
+        result.skipped++;
+        continue;
+      }
+
       const journalData: Record<string, unknown> = {
         entityId,
         periodId: period.id,
@@ -367,58 +398,54 @@ export async function importJournalBatch(
         lines: { create: journalLines }
       };
 
-      const created = await (prisma.journal as any).create({
-        data: journalData,
-        select: { id: true }
-      });
+      // Wrap journal creation and balance updates in a transaction for atomicity
+      const created = await prisma.$transaction(async (tx) => {
+        const journal = await (tx.journal as any).create({
+          data: journalData,
+          select: { id: true }
+        });
 
-      // Update account balances if auto-posted
-      if (batch.autoPost) {
-        for (const line of journalLines) {
-          const acct = await prisma.account.findFirst({
-            where: { id: line.accountId },
-            select: { type: true }
-          });
-          if (!acct) continue;
-          const isDebitNormal = ["ASSET", "EXPENSE"].includes(acct.type);
-          const existing = await prisma.accountPeriodBalance.findUnique({
-            where: {
-              entityId_accountId_periodId: {
-                entityId,
-                accountId: line.accountId,
-                periodId: period.id
-              }
-            }
-          });
+        // Update account balances atomically if auto-posted
+        if (batch.autoPost) {
+          for (const line of journalLines) {
+            const acct = await tx.account.findFirst({
+              where: { id: line.accountId },
+              select: { type: true }
+            });
+            if (!acct) continue;
+            const isDebitNormal = ["ASSET", "EXPENSE"].includes(acct.type);
+            const sign = isDebitNormal ? 1 : -1;
 
-          if (!existing) {
-            const closing = isDebitNormal
-              ? line.debitFunctional.sub(line.creditFunctional)
-              : line.creditFunctional.sub(line.debitFunctional);
-            await prisma.accountPeriodBalance.create({
-              data: {
-                entityId,
-                accountId: line.accountId,
-                periodId: period.id,
-                openingBalance: new Prisma.Decimal(0),
-                periodDebits: line.debitFunctional,
-                periodCredits: line.creditFunctional,
-                closingBalance: closing
-              }
-            });
-          } else {
-            const pd2 = new Prisma.Decimal(existing.periodDebits).add(line.debitFunctional);
-            const pc2 = new Prisma.Decimal(existing.periodCredits).add(line.creditFunctional);
-            const closing = isDebitNormal
-              ? new Prisma.Decimal(existing.openingBalance).add(pd2).sub(pc2)
-              : new Prisma.Decimal(existing.openingBalance).sub(pd2).add(pc2);
-            await prisma.accountPeriodBalance.update({
-              where: { id: existing.id },
-              data: { periodDebits: pd2, periodCredits: pc2, closingBalance: closing }
-            });
+            // Atomic upsert using INSERT ON CONFLICT — prevents race conditions
+            await tx.$executeRaw`
+              INSERT INTO account_period_balances
+                (id, entity_id, account_id, period_id, opening_balance, period_debits, period_credits, closing_balance, created_at, updated_at)
+              VALUES (
+                gen_random_uuid()::text,
+                ${entityId},
+                ${line.accountId},
+                ${period.id},
+                0,
+                ${line.debitFunctional}::decimal,
+                ${line.creditFunctional}::decimal,
+                ${sign} * (${line.debitFunctional}::decimal - ${line.creditFunctional}::decimal),
+                NOW(), NOW()
+              )
+              ON CONFLICT (entity_id, account_id, period_id) DO UPDATE SET
+                period_debits   = account_period_balances.period_debits   + EXCLUDED.period_debits,
+                period_credits  = account_period_balances.period_credits  + EXCLUDED.period_credits,
+                closing_balance = account_period_balances.opening_balance
+                  + ${sign} * (
+                    (account_period_balances.period_debits + EXCLUDED.period_debits)
+                    - (account_period_balances.period_credits + EXCLUDED.period_credits)
+                  ),
+                updated_at = NOW()
+            `;
           }
         }
-      }
+
+        return journal;
+      });
 
       result.created++;
       result.createdIds.push(created.id);

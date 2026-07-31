@@ -8,3 +8,5 @@
 export * from "./types.js";
 export * from "./errors.js";
 export { validateProfileSchema } from "./schema-validator.js";
+export { validateRows } from "./validator.js";
+export type { ProfileFsdValidationResult } from "./validator.js";

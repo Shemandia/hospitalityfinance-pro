@@ -1,7 +1,7 @@
 /**
  * Transfer Desk — per-tenant BullMQ queue.
  *
- * Per spec TD-BL-027 the queue name pattern is `transfer:{tenant-slug}` —
+ * Per spec TD-BL-027 the queue name pattern is `transfer-{tenant-slug}` —
  * one queue per tenant. This gives us:
  *   - Per-tenant concurrency limits (Starter=1, Pro=3, Enterprise=10)
  *   - Easier monitoring per tenant
@@ -66,7 +66,7 @@ const queues = new Map<string, Queue<TransferDeskJobData>>();
 
 /** Returns the BullMQ queue name for a given tenant. */
 export function getTransferDeskQueueName(tenantSlug: string): string {
-  return `transfer:${tenantSlug}`;
+  return `transfer-${tenantSlug}`;
 }
 
 /**

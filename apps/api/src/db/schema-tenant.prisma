@@ -105,6 +105,10 @@ enum JournalStatus {
 
 enum TransferBatchStatus {
   PENDING_REVIEW
+  /// Commit is in progress. Set before any item is posted and cleared only
+  /// once every item has been processed, so a commit interrupted mid-way can
+  /// be resumed rather than leaving items stranded in a COMMITTED batch.
+  COMMITTING
   COMMITTED
   DISCARDED
 }
@@ -597,6 +601,8 @@ model Account {
   bankStatements        BankStatement[]
   recurringJournalLines RecurringJournalLine[]
   bankAccounts          BankAccount[]
+  taxCodesAsInput       TaxCode[]              @relation("TaxCodeInputAccount")
+  taxCodesAsOutput      TaxCode[]              @relation("TaxCodeOutputAccount")
 
   @@unique([entityId, code])
   @@index([entityId, parentId])
@@ -1122,7 +1128,15 @@ model ARInvoice {
   invoiceDate      DateTime        @map("invoice_date")
   dueDate          DateTime        @map("due_date")
   currency         String          @db.Char(3)
+  /// Gross invoice total — what the customer owes, tax included.
+  /// Invariant: amount = netAmount + taxAmount.
   amount           Decimal         @db.Decimal(18, 4)
+  /// Revenue portion, excluding output tax. Backfilled to `amount` for
+  /// invoices created before tax was tracked, where taxAmount is 0.
+  netAmount        Decimal         @default(0) @map("net_amount") @db.Decimal(18, 4)
+  /// Output tax portion, credited to the tax code's outputTaxAccount on post.
+  taxAmount        Decimal         @default(0) @map("tax_amount") @db.Decimal(18, 4)
+  taxCodeId        String?         @map("tax_code_id")
   functionalAmount Decimal         @map("functional_amount") @db.Decimal(18, 4)
   fxRate           Decimal         @map("fx_rate") @db.Decimal(14, 8)
   amountPaid       Decimal         @default(0) @map("amount_paid") @db.Decimal(18, 4)
@@ -1133,6 +1147,7 @@ model ARInvoice {
   updatedAt        DateTime        @updatedAt @map("updated_at")
   entity           Entity          @relation(fields: [entityId], references: [id])
   customer         Customer        @relation(fields: [customerId], references: [id])
+  taxCode          TaxCode?        @relation(fields: [taxCodeId], references: [id])
   allocations      ARAllocation[]
 
   @@unique([entityId, customerId, invoiceNumber])
@@ -1956,6 +1971,12 @@ model TransferBatch {
   rejectedItems   Int                 @default(0) @map("rejected_items")
   committedItems  Int                 @default(0) @map("committed_items")
   errorItems      Int                 @default(0) @map("error_items")
+  /// SHA-256 of the mapped source records that produced this batch.
+  /// Import idempotency: re-uploading the same file after a timeout used to
+  /// stage a second batch and post the revenue twice. The unique constraint
+  /// below makes that impossible. Nullable for batches staged before this
+  /// existed — Postgres treats NULLs as distinct, so they never collide.
+  sourceHash      String?             @map("source_hash")
   createdById     String              @map("created_by")
   createdAt       DateTime            @default(now()) @map("created_at")
   reviewedById    String?             @map("reviewed_by")
@@ -1963,6 +1984,7 @@ model TransferBatch {
 
   items TransferBatchItem[]
 
+  @@unique([entityId, profileId, sourceHash])
   @@index([entityId, status])
   @@index([profileId])
   @@map("transfer_batches")
@@ -2821,12 +2843,24 @@ model TaxCode {
   description String?  @db.VarChar(200)
   taxType     TaxType  @map("tax_type")
   isActive    Boolean  @default(true) @map("is_active")
+  /// GL account debited for input (recoverable) tax when an AP invoice is
+  /// posted. Normally a receivable-from-revenue-authority asset account.
+  /// Required before an AP invoice carrying tax under this code can post —
+  /// there is no safe default, so posting fails loudly rather than silently
+  /// dropping the tax the way it used to.
+  inputTaxAccountId  String? @map("input_tax_account_id")
+  /// GL account credited for output tax when an AR invoice is posted.
+  /// Normally a payable-to-revenue-authority liability account.
+  outputTaxAccountId String? @map("output_tax_account_id")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  entity         Entity          @relation(fields: [entityId], references: [id])
-  rates          TaxRate[]
-  apInvoiceLines APInvoiceLine[]
+  entity           Entity          @relation(fields: [entityId], references: [id])
+  rates            TaxRate[]
+  apInvoiceLines   APInvoiceLine[]
+  arInvoices       ARInvoice[]
+  inputTaxAccount  Account?        @relation("TaxCodeInputAccount", fields: [inputTaxAccountId], references: [id])
+  outputTaxAccount Account?        @relation("TaxCodeOutputAccount", fields: [outputTaxAccountId], references: [id])
 
   @@unique([entityId, code])
   @@index([entityId, taxType, isActive])

@@ -14,7 +14,7 @@
  * }
  */
 
-import { Prisma } from "@prisma/client";
+import { Prisma } from "../db/client.js";
 import { prisma } from "../db/prisma.js";
 import { getReportQueue } from "../modules/reporting/queue.js";
 

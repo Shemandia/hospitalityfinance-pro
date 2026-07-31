@@ -15,12 +15,12 @@
  *   tax-cat-id            -> 2300 (Tax Payable)
  */
 
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "../../../../db/client.js";
 
 export type MewsCategoryLine = {
   accountingCategoryId: string;
   categoryName: string;
-  amount: number;
+  amount: string;
   type: string;
 };
 

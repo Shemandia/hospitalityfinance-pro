@@ -1,6 +1,6 @@
 import { prisma } from "../db/prisma.js";
 import { ARService } from "../modules/ar/service.js";
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "../db/client.js";
 
 const arService = new ARService(prisma as unknown as PrismaClient);
 

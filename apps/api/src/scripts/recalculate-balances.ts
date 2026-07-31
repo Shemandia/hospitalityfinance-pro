@@ -11,7 +11,7 @@
  * Usage: npx tsx src/scripts/recalculate-balances.ts
  */
 
-import { PrismaClient, Prisma } from "@prisma/client";
+import { PrismaClient, Prisma } from "../db/client.js";
 
 const ENTITY_ID = "00000000-0000-0000-0000-000000000002";
 
@@ -58,15 +58,18 @@ async function main() {
       period_id: string;
       total_debit: Prisma.Decimal;
       total_credit: Prisma.Decimal;
+      normal_balance: string;
     }> = await prisma.$queryRaw`
       SELECT jl.account_id, j.period_id,
              COALESCE(SUM(jl.debit_functional), 0) AS total_debit,
-             COALESCE(SUM(jl.credit_functional), 0) AS total_credit
+             COALESCE(SUM(jl.credit_functional), 0) AS total_credit,
+             a.normal_balance
       FROM journal_lines jl
       JOIN journals j ON jl.journal_id = j.id
+      JOIN accounts a ON a.id = jl.account_id
       WHERE j.entity_id = ${ENTITY_ID}
         AND j.status = 'POSTED'
-      GROUP BY jl.account_id, j.period_id
+      GROUP BY jl.account_id, j.period_id, a.normal_balance
     `;
 
     console.log(`  Found ${balanceRows.length} account-period combinations`);
@@ -75,7 +78,12 @@ async function main() {
     for (const row of balanceRows) {
       const periodDebits = new Prisma.Decimal(row.total_debit);
       const periodCredits = new Prisma.Decimal(row.total_credit);
-      const closingBalance = periodDebits.sub(periodCredits);
+      // Normal-balance-positive, matching db/balance-writer.ts. This used to
+      // compute debits − credits unsigned, so running the script flipped every
+      // credit-normal account and corrupted the trial balance it was meant to
+      // repair.
+      const sign = row.normal_balance === "DEBIT" ? 1 : -1;
+      const closingBalance = periodDebits.sub(periodCredits).mul(sign);
 
       await prisma.accountPeriodBalance.create({
         data: {

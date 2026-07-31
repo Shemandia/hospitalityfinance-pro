@@ -26,6 +26,23 @@ function mapError(reply: FastifyReply, error: unknown) {
 
 const rejectSchema = z.object({ reason: z.string().max(500).optional() });
 
+/**
+ * Every batch operation is scoped to the caller's entity. Without a resolved
+ * entity there is nothing to scope to, and treating that as "match anything"
+ * is precisely the cross-property exposure this guard exists to prevent — so
+ * refuse rather than fall back.
+ */
+function requireEntityId(request: { entityId?: string }): string {
+  if (!request.entityId) {
+    throw new BatchReviewError(
+      "ENTITY_CONTEXT_REQUIRED",
+      "No entity context on the request; transfer batch operations are entity-scoped.",
+      400
+    );
+  }
+  return request.entityId;
+}
+
 export async function registerTransferDeskBatchRouter(app: FastifyInstance): Promise<void> {
   app.register(
     async (router) => {
@@ -54,7 +71,7 @@ export async function registerTransferDeskBatchRouter(app: FastifyInstance): Pro
         "/transfer-desk/batches/:id",
         async (request, reply) => {
           try {
-            const data = await service.getBatch(request.params.id);
+            const data = await service.getBatch(requireEntityId(request), request.params.id);
             return reply.send({ data, errors: [] });
           } catch (error) {
             return mapError(reply, error);
@@ -71,6 +88,7 @@ export async function registerTransferDeskBatchRouter(app: FastifyInstance): Pro
             const { reason } = rejectSchema.parse(request.body ?? {});
             const userId = String((request.user as any)?.sub ?? "system");
             const data = await service.rejectItem(
+              requireEntityId(request),
               request.params.id,
               request.params.itemId,
               userId,
@@ -89,7 +107,11 @@ export async function registerTransferDeskBatchRouter(app: FastifyInstance): Pro
         "/transfer-desk/batches/:id/items/:itemId/restore",
         async (request, reply) => {
           try {
-            const data = await service.restoreItem(request.params.id, request.params.itemId);
+            const data = await service.restoreItem(
+              requireEntityId(request),
+              request.params.id,
+              request.params.itemId
+            );
             return reply.send({ data, errors: [] });
           } catch (error) {
             return mapError(reply, error);
@@ -104,7 +126,11 @@ export async function registerTransferDeskBatchRouter(app: FastifyInstance): Pro
         async (request, reply) => {
           try {
             const userId = String((request.user as any)?.sub ?? "system");
-            const data = await service.commitBatch(request.params.id, userId);
+            const data = await service.commitBatch(
+              requireEntityId(request),
+              request.params.id,
+              userId
+            );
             return reply.send({ data, errors: [] });
           } catch (error) {
             return mapError(reply, error);
@@ -119,7 +145,11 @@ export async function registerTransferDeskBatchRouter(app: FastifyInstance): Pro
         async (request, reply) => {
           try {
             const userId = String((request.user as any)?.sub ?? "system");
-            const data = await service.discardBatch(request.params.id, userId);
+            const data = await service.discardBatch(
+              requireEntityId(request),
+              request.params.id,
+              userId
+            );
             return reply.send({ data, errors: [] });
           } catch (error) {
             return mapError(reply, error);

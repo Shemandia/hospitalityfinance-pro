@@ -40,3 +40,18 @@ export { parse, write } from "./api.js";
 
 // Profile-level types, errors, and schema validator (wizard-facing)
 export * from "./profile/index.js";
+
+// Profile-level parsers (wizard-facing)
+export { parseCsv } from "./parsers/csv.js";
+export { parseFixed } from "./parsers/fixed.js";
+export { parseXlsx } from "./parsers/xlsx.js";
+export { parseXmlSsml } from "./parsers/xml-ssml.js";
+
+// Profile-level serialisers
+export { serialiseCsv } from "./serialisers/csv.js";
+
+// Format auto-detection
+export { detectFormat } from "./detector.js";
+
+// Unified engine class (§10 public API)
+export { FsdEngine } from "./engine.js";

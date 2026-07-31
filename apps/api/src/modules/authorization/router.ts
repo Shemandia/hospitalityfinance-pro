@@ -1,10 +1,8 @@
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "../../db/client.js";
-import { ZodError } from "zod";
 import { prisma } from "../../db/prisma.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
-import { requireRole } from "../../middleware/requireRole.js";
-import { requireWriteAccess } from "../../middleware/requireWriteAccess.js";
+import { requirePermission } from "../../middleware/requirePermission.js";
 import {
   stageCreateSchema,
   stageUpdateSchema,
@@ -24,46 +22,9 @@ import {
   queueFilterSchema
 } from "./types.js";
 import { AuthorizationService, AuthorizationServiceError } from "./service.js";
+import { mapError, requireEntityId } from "../../shared/router-utils.js";
 
 const authorizationService = new AuthorizationService(prisma as unknown as PrismaClient);
-
-function mapError(reply: FastifyReply, error: unknown) {
-  if (error instanceof ZodError) {
-    return reply.code(400).send({
-      data: null,
-      errors: [
-        {
-          code: "VALIDATION_ERROR",
-          message: error.issues.map((issue) => issue.message).join("; ")
-        }
-      ]
-    });
-  }
-
-  if (error instanceof AuthorizationServiceError) {
-    return reply.code(error.statusCode).send({
-      data: null,
-      errors: [{ code: error.code, message: error.message }]
-    });
-  }
-
-  const message = error instanceof Error ? error.message : "Unknown error";
-  return reply.code(500).send({
-    data: null,
-    errors: [{ code: "INTERNAL_SERVER_ERROR", message }]
-  });
-}
-
-function requireEntityId(entityId: string | undefined): string {
-  if (!entityId) {
-    throw new AuthorizationServiceError(
-      "AUTH_ENTITY_CONTEXT_REQUIRED",
-      "X-Entity-ID header is required.",
-      400
-    );
-  }
-  return entityId;
-}
 
 function requireUserId(sub: unknown): string {
   if (typeof sub !== "string" || sub.length === 0) {
@@ -80,7 +41,6 @@ export async function registerAuthorizationRouter(app: FastifyInstance): Promise
   app.register(
     async (router) => {
       router.addHook("preHandler", requireAuth);
-      router.addHook("preHandler", requireWriteAccess);
 
       // ── Stages ────────────────────────────────────────────────────────
 
@@ -97,7 +57,7 @@ export async function registerAuthorizationRouter(app: FastifyInstance): Promise
 
       router.post(
         "/authorization/stages",
-        { preHandler: [requireRole(["ADMIN", "SUPERADMIN"])] },
+        { preHandler: [requirePermission("ADMIN_SETTINGS")] },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
@@ -112,7 +72,7 @@ export async function registerAuthorizationRouter(app: FastifyInstance): Promise
 
       router.put<{ Params: { id: string } }>(
         "/authorization/stages/:id",
-        { preHandler: [requireRole(["ADMIN", "SUPERADMIN"])] },
+        { preHandler: [requirePermission("ADMIN_SETTINGS")] },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
@@ -131,7 +91,7 @@ export async function registerAuthorizationRouter(app: FastifyInstance): Promise
 
       router.delete<{ Params: { id: string } }>(
         "/authorization/stages/:id",
-        { preHandler: [requireRole(["ADMIN", "SUPERADMIN"])] },
+        { preHandler: [requirePermission("ADMIN_SETTINGS")] },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
@@ -157,7 +117,7 @@ export async function registerAuthorizationRouter(app: FastifyInstance): Promise
 
       router.post(
         "/authorization/teams",
-        { preHandler: [requireRole(["ADMIN", "SUPERADMIN"])] },
+        { preHandler: [requirePermission("ADMIN_SETTINGS")] },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
@@ -172,7 +132,7 @@ export async function registerAuthorizationRouter(app: FastifyInstance): Promise
 
       router.put<{ Params: { id: string } }>(
         "/authorization/teams/:id",
-        { preHandler: [requireRole(["ADMIN", "SUPERADMIN"])] },
+        { preHandler: [requirePermission("ADMIN_SETTINGS")] },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
@@ -191,7 +151,7 @@ export async function registerAuthorizationRouter(app: FastifyInstance): Promise
 
       router.delete<{ Params: { id: string } }>(
         "/authorization/teams/:id",
-        { preHandler: [requireRole(["ADMIN", "SUPERADMIN"])] },
+        { preHandler: [requirePermission("ADMIN_SETTINGS")] },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
@@ -217,7 +177,7 @@ export async function registerAuthorizationRouter(app: FastifyInstance): Promise
 
       router.post(
         "/authorization/delegations",
-        { preHandler: [requireRole(["ADMIN", "SUPERADMIN"])] },
+        { preHandler: [requirePermission("ADMIN_SETTINGS")] },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
@@ -232,7 +192,7 @@ export async function registerAuthorizationRouter(app: FastifyInstance): Promise
 
       router.delete<{ Params: { id: string } }>(
         "/authorization/delegations/:id",
-        { preHandler: [requireRole(["ADMIN", "SUPERADMIN"])] },
+        { preHandler: [requirePermission("ADMIN_SETTINGS")] },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
@@ -258,7 +218,7 @@ export async function registerAuthorizationRouter(app: FastifyInstance): Promise
 
       router.post(
         "/authorization/rejection-codes",
-        { preHandler: [requireRole(["ADMIN", "SUPERADMIN"])] },
+        { preHandler: [requirePermission("ADMIN_SETTINGS")] },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
@@ -289,6 +249,7 @@ export async function registerAuthorizationRouter(app: FastifyInstance): Promise
 
       router.post<{ Params: { journalId: string } }>(
         "/authorization/approve/:journalId",
+        { preHandler: [requirePermission("GL_APPROVE")] },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
@@ -309,6 +270,7 @@ export async function registerAuthorizationRouter(app: FastifyInstance): Promise
 
       router.post<{ Params: { journalId: string } }>(
         "/authorization/reject/:journalId",
+        { preHandler: [requirePermission("GL_APPROVE")] },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
@@ -330,6 +292,7 @@ export async function registerAuthorizationRouter(app: FastifyInstance): Promise
 
       router.post<{ Params: { journalId: string } }>(
         "/authorization/return/:journalId",
+        { preHandler: [requirePermission("GL_APPROVE")] },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
@@ -350,7 +313,7 @@ export async function registerAuthorizationRouter(app: FastifyInstance): Promise
 
       router.post<{ Params: { journalId: string } }>(
         "/authorization/void/:journalId",
-        { preHandler: [requireRole(["ADMIN", "SUPERADMIN"])] },
+        { preHandler: [requirePermission("ADMIN_SETTINGS")] },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
@@ -371,6 +334,7 @@ export async function registerAuthorizationRouter(app: FastifyInstance): Promise
 
       router.post<{ Params: { journalId: string } }>(
         "/authorization/resubmit/:journalId",
+        { preHandler: [requirePermission("GL_WRITE")] },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
@@ -389,40 +353,48 @@ export async function registerAuthorizationRouter(app: FastifyInstance): Promise
 
       // ── Bulk Actions ──────────────────────────────────────────────────
 
-      router.post("/authorization/bulk-approve", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const userId = requireUserId(request.user?.sub);
-          const { journalIds, comments } = bulkApproveSchema.parse(request.body);
-          const data = await authorizationService.bulkApprove(
-            entityId,
-            journalIds,
-            userId,
-            comments
-          );
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.post(
+        "/authorization/bulk-approve",
+        { preHandler: [requirePermission("GL_APPROVE")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const userId = requireUserId(request.user?.sub);
+            const { journalIds, comments } = bulkApproveSchema.parse(request.body);
+            const data = await authorizationService.bulkApprove(
+              entityId,
+              journalIds,
+              userId,
+              comments
+            );
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.post("/authorization/bulk-reject", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const userId = requireUserId(request.user?.sub);
-          const { journalIds, rejectionCodeId, comments } = bulkRejectSchema.parse(request.body);
-          const data = await authorizationService.bulkReject(
-            entityId,
-            journalIds,
-            userId,
-            rejectionCodeId,
-            comments
-          );
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.post(
+        "/authorization/bulk-reject",
+        { preHandler: [requirePermission("GL_APPROVE")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const userId = requireUserId(request.user?.sub);
+            const { journalIds, rejectionCodeId, comments } = bulkRejectSchema.parse(request.body);
+            const data = await authorizationService.bulkReject(
+              entityId,
+              journalIds,
+              userId,
+              rejectionCodeId,
+              comments
+            );
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       // ── Authorization Sets ────────────────────────────────────────────
 
@@ -436,20 +408,25 @@ export async function registerAuthorizationRouter(app: FastifyInstance): Promise
         }
       });
 
-      router.post("/authorization/sets", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const userId = requireUserId(request.user?.sub);
-          const payload = setCreateSchema.parse(request.body);
-          const data = await authorizationService.createSet(entityId, userId, payload);
-          return reply.code(201).send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.post(
+        "/authorization/sets",
+        { preHandler: [requirePermission("GL_APPROVE")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const userId = requireUserId(request.user?.sub);
+            const payload = setCreateSchema.parse(request.body);
+            const data = await authorizationService.createSet(entityId, userId, payload);
+            return reply.code(201).send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.post<{ Params: { id: string } }>(
         "/authorization/sets/:id/add",
+        { preHandler: [requirePermission("GL_APPROVE")] },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
@@ -468,6 +445,7 @@ export async function registerAuthorizationRouter(app: FastifyInstance): Promise
 
       router.post<{ Params: { id: string } }>(
         "/authorization/sets/:id/approve",
+        { preHandler: [requirePermission("GL_APPROVE")] },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
@@ -488,6 +466,7 @@ export async function registerAuthorizationRouter(app: FastifyInstance): Promise
 
       router.post<{ Params: { id: string } }>(
         "/authorization/sets/:id/reject",
+        { preHandler: [requirePermission("GL_APPROVE")] },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);

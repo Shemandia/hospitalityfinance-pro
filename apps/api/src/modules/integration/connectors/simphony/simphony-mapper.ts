@@ -13,7 +13,7 @@
  *   TIPS       → 2310 (Tips Payable)
  */
 
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "../../../../db/client.js";
 import type { SimphonyTransactionLine } from "./simphony-client.js";
 
 export type MappedPOSLine = SimphonyTransactionLine & {

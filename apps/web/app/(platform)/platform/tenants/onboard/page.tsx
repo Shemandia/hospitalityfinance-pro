@@ -2,10 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { WizardLayout, WizardStepContent } from "../../../../../components/wizard-layout";
+import { PlatformLoginGate } from "../../../../../components/platform-login-gate";
 import { COUNTRIES } from "../../../../../lib/countries";
 import { Check, Loader2, AlertTriangle, ExternalLink, FileText } from "lucide-react";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4500";
 
 const STEPS = [
   { id: 1, name: "Tenant Details" },
@@ -14,6 +13,15 @@ const STEPS = [
 ];
 
 const MODULES = ["GL", "AP", "AR", "TRANSFER_DESK", "REPORTING", "FIXED_ASSETS"];
+
+const MODULE_LABELS: Record<string, string> = {
+  GL: "General Ledger",
+  AP: "Accounts Payable",
+  AR: "Accounts Receivable",
+  TRANSFER_DESK: "Transfer Desk",
+  REPORTING: "Reporting",
+  FIXED_ASSETS: "Fixed Assets"
+};
 
 type TenantData = {
   name: string;
@@ -56,85 +64,30 @@ const inputClass =
 const labelClass =
   "block text-[11px] font-extrabold text-slate-400 uppercase tracking-[0.05em] mb-1.5";
 
-// ── Platform Key Gate ───────────────────────────────────────────────────────
+// ── Platform Sign-In Gate ───────────────────────────────────────────────────
 
 export default function OnboardPage() {
-  const [platformKey, setPlatformKey] = useState<string | null>(null);
-  const [keyInput, setKeyInput] = useState("");
-  const [keyError, setKeyError] = useState("");
-  const [checking, setChecking] = useState(true);
+  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
 
   useEffect(() => {
-    const stored = sessionStorage.getItem("hfp-platform-key");
-    if (stored) setPlatformKey(stored);
-    setChecking(false);
+    fetch("/api/platform/auth")
+      .then((r) => r.json())
+      .then((json) => setAuthenticated(json.authenticated === true))
+      .catch(() => setAuthenticated(false));
   }, []);
 
-  const handleKeySubmit = async () => {
-    setKeyError("");
-    try {
-      const res = await fetch(`${API_BASE}/api/v1/platform/tenants`, {
-        headers: { "X-Platform-Key": keyInput }
-      });
-      if (res.ok) {
-        sessionStorage.setItem("hfp-platform-key", keyInput);
-        setPlatformKey(keyInput);
-      } else {
-        setKeyError("Invalid platform key. Check with your administrator.");
-      }
-    } catch {
-      setKeyError("Cannot reach API server.");
-    }
-  };
+  if (authenticated === null) return null;
 
-  if (checking) return null;
-
-  if (!platformKey) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#f8fafc]">
-        <div className="w-full max-w-sm">
-          <div className="bg-white border border-slate-200 rounded-3xl shadow-[0_10px_30px_rgba(0,0,0,0.03)] overflow-hidden">
-            <div className="p-8 space-y-5">
-              <div>
-                <h2 className="text-[32px] font-extrabold text-slate-900 tracking-[-0.02em] leading-tight">
-                  Platform Authentication
-                </h2>
-                <p className="mt-2 text-base text-slate-500">
-                  Enter your platform API key to access tenant management.
-                </p>
-              </div>
-              <div>
-                <label className={labelClass}>Platform API Key</label>
-                <input
-                  type="password"
-                  value={keyInput}
-                  onChange={(e) => setKeyInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleKeySubmit()}
-                  className={inputClass}
-                  placeholder="Enter your platform key"
-                />
-              </div>
-              {keyError && <p className="text-sm text-red-500">{keyError}</p>}
-              <button
-                onClick={handleKeySubmit}
-                disabled={!keyInput}
-                className="w-full rounded-xl bg-slate-900 px-6 py-3 text-sm font-bold text-white shadow-[0_4px_12px_rgba(15,23,42,0.2)] hover:bg-slate-800 transition-all disabled:opacity-50"
-              >
-                Authenticate
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+  if (!authenticated) {
+    return <PlatformLoginGate onAuthenticated={() => setAuthenticated(true)} />;
   }
 
-  return <OnboardWizard platformKey={platformKey} />;
+  return <OnboardWizard />;
 }
 
 // ── Onboard Wizard ──────────────────────────────────────────────────────────
 
-function OnboardWizard({ platformKey }: { platformKey: string }) {
+function OnboardWizard() {
   const [currentStep, setCurrentStep] = useState(1);
   const [completedSteps, setCompletedSteps] = useState<number[]>([]);
   const [slugEdited, setSlugEdited] = useState(false);
@@ -214,11 +167,10 @@ function OnboardWizard({ platformKey }: { platformKey: string }) {
     ]);
 
     try {
-      const response = await fetch(`${API_BASE}/api/v1/platform/tenants/provision`, {
+      const response = await fetch("/api/platform/provision", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          "X-Platform-Key": platformKey
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           tenant: {
@@ -246,9 +198,12 @@ function OnboardWizard({ platformKey }: { platformKey: string }) {
         const errorBody = await response.json().catch(() => null);
         const msg =
           errorBody?.errors?.map((e: any) => e.message).join("; ") ??
+          errorBody?.message ??
+          errorBody?.error ??
           `Server error: ${response.status}`;
+        // Keep provisioning=true — the failed state (error + retry button) is
+        // rendered on the provisioning screen; resetting it hid the error.
         setProvisionError(msg);
-        setProvisioning(false);
         return;
       }
 
@@ -764,7 +719,9 @@ function OnboardWizard({ platformKey }: { platformKey: string }) {
                           }}
                           className="accent-emerald-500"
                         />
-                        <span className="font-medium">{mod.replace(/_/g, " ")}</span>
+                        <span className="font-medium">
+                          {MODULE_LABELS[mod] ?? mod.replace(/_/g, " ")}
+                        </span>
                       </label>
                     );
                   })}
@@ -901,7 +858,9 @@ function OnboardWizard({ platformKey }: { platformKey: string }) {
                     <dt className="text-[11px] font-extrabold text-slate-400 uppercase tracking-[0.05em] mb-1">
                       Modules
                     </dt>
-                    <dd className="text-slate-700">{entitlements.enabledModules.join(", ")}</dd>
+                    <dd className="text-slate-700">
+                      {entitlements.enabledModules.map((m) => MODULE_LABELS[m] ?? m).join(", ")}
+                    </dd>
                   </div>
                 </dl>
               </div>

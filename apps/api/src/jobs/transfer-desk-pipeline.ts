@@ -14,6 +14,7 @@
  *   7. Optionally saves payloads to storage
  */
 
+import { createHash } from "node:crypto";
 import { parse, write, type FsdSchema, type FsdRecordValue } from "@hfp/fsd-engine";
 import {
   executeTransformation,
@@ -84,6 +85,10 @@ export type PipelineDb = {
   transferBatch: {
     create: (args: { data: Record<string, unknown> }) => Promise<{ id: string }>;
     update: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<unknown>;
+    /** Used to detect a source file that has already been staged. */
+    findFirst: (args: {
+      where: Record<string, unknown>;
+    }) => Promise<{ id: string; status: string } | null>;
   };
   transferBatchItem: {
     createMany: (args: { data: Record<string, unknown>[] }) => Promise<unknown>;
@@ -111,6 +116,26 @@ export type ProfileWithRelations = {
     functionsJson: unknown;
   } | null;
 };
+
+/**
+ * Deterministic fingerprint of the parsed source records, used to detect a
+ * file that has already been imported.
+ *
+ * Keys are sorted so that two parses of the same file hash identically
+ * regardless of property order, which JSON.stringify does not otherwise
+ * guarantee across engine versions or object construction paths.
+ */
+export function hashSourceRecords(records: FsdRecordValue[]): string {
+  const canonical = JSON.stringify(records, (_key, value) => {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b))
+      );
+    }
+    return value;
+  });
+  return createHash("sha256").update(canonical).digest("hex");
+}
 
 export type PipelineResult = {
   recordsTotal: number;
@@ -476,19 +501,64 @@ async function stageHeldBatch(
   const heldItems = items.filter((i) => i.status === "HELD").length;
   const errorItems = items.filter((i) => i.status === "ERROR").length;
 
-  const batch = await ctx.db.transferBatch.create({
-    data: {
-      entityId,
-      profileId: profile.id,
-      executionId,
-      targetComponent: "GL_JOURNAL",
-      status: "PENDING_REVIEW",
-      totalItems: items.length,
-      heldItems,
-      errorItems,
-      createdById
-    } as any
+  // ── Import idempotency ───────────────────────────────────────────────────
+  // Re-uploading the same source file — after a timeout, a retry, or simple
+  // operator error — used to stage a second batch, which committed a second
+  // set of GL journals and posted the night's revenue twice. Fingerprint the
+  // mapped records and refuse to stage the same content twice for the same
+  // entity and profile.
+  const sourceHash = hashSourceRecords(sourceRecords);
+
+  const duplicate = await ctx.db.transferBatch.findFirst({
+    where: { entityId, profileId: profile.id, sourceHash }
   });
+  if (duplicate) {
+    return {
+      recordsTotal: sourceRecords.length,
+      recordsSucceeded: 0,
+      recordsFailed: 0,
+      status: "DUPLICATE",
+      errorMessage:
+        `This file has already been imported for this profile (batch ${duplicate.id}, ` +
+        `status ${duplicate.status}). No new batch was staged and nothing was posted.`
+    };
+  }
+
+  let batch;
+  try {
+    batch = await ctx.db.transferBatch.create({
+      data: {
+        entityId,
+        profileId: profile.id,
+        executionId,
+        targetComponent: "GL_JOURNAL",
+        status: "PENDING_REVIEW",
+        totalItems: items.length,
+        heldItems,
+        errorItems,
+        sourceHash,
+        createdById
+      } as any
+    });
+  } catch (err: any) {
+    // Unique violation: a concurrent upload of the same file won the race.
+    // Return its batch rather than failing the import.
+    if (err?.code === "P2002") {
+      const existing = await ctx.db.transferBatch.findFirst({
+        where: { entityId, profileId: profile.id, sourceHash }
+      });
+      if (existing) {
+        return {
+          recordsTotal: sourceRecords.length,
+          recordsSucceeded: 0,
+          recordsFailed: 0,
+          status: "DUPLICATE",
+          errorMessage: `This file is already being imported for this profile (batch ${existing.id}).`
+        };
+      }
+    }
+    throw err;
+  }
 
   await ctx.db.transferBatchItem.createMany({
     data: items.map((item) => ({

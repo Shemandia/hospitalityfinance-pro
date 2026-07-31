@@ -36,6 +36,7 @@ enum NormalBalance {
 
 enum PeriodStatus {
   OPEN
+  SOFT_CLOSE
   CLOSED
   LOCKED
 }
@@ -157,6 +158,7 @@ enum FXRateSource {
   ECB
   OANDA
   MANUAL
+  OPEN_ER_API
 }
 
 enum LicenseType {
@@ -632,6 +634,10 @@ model JournalLine {
   accountId        String            @map("account_id")
   debit            Decimal           @db.Decimal(18, 4)
   credit           Decimal           @db.Decimal(18, 4)
+  /// Statistical value for STATISTICAL-type account postings (memo accounts).
+  /// Financial postings leave this NULL. For stats imports: debit=0, credit=0,
+  /// statValue holds the parsed quantity (÷1000 from SAF).
+  statValue        Decimal?          @map("stat_value") @db.Decimal(18, 3)
   currency         String            @db.Char(3)
   fxRate           Decimal           @default(1) @map("fx_rate") @db.Decimal(14, 8)
   debitFunctional  Decimal           @default(0) @map("debit_functional") @db.Decimal(18, 4)

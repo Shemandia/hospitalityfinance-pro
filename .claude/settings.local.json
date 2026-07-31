@@ -112,7 +112,12 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:4000/api/v1/gl/approval-rules -H \"Authorization: Bearer dev-token\" -H \"X-Entity-ID: 00000000-0000-0000-0000-000000000002\")",
       "Bash(taskkill //PID 32748 //F)",
       "Bash(cat:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(where psql:*)",
+      "Read(//c/Program Files/PostgreSQL/**)",
+      "Read(//c/Program Files \\(x86\\)/**)",
+      "Bash(npx tsx:*)",
+      "Bash(powershell -c \"Stop-Process -Id 660 -Force\")"
     ]
   }
 }

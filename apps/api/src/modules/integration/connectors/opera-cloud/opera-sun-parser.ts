@@ -87,12 +87,12 @@ export function extractOperaRevenueGroups(result: SAFParseResult): OperaRevenueG
   for (const [jt, lines] of groups) {
     const debits = lines.filter((l) => l.dcMarker === "D");
     const credits = lines.filter((l) => l.dcMarker === "C");
-    const totalDebits = debits.reduce((s, l) => s + l.amount, 0);
-    const totalCredits = credits.reduce((s, l) => s + l.amount, 0);
+    const totalDebits = debits.reduce((s, l) => s + Number(l.amount), 0);
+    const totalCredits = credits.reduce((s, l) => s + Number(l.amount), 0);
 
     const debitLines: OperaRevenueLine[] = debits.map((l, i) => ({
       accountCode: l.accountCode,
-      amount: l.amount,
+      amount: Number(l.amount),
       description: l.description,
       transactionReference: l.transactionReference,
       lineNumber: i + 1
@@ -100,7 +100,7 @@ export function extractOperaRevenueGroups(result: SAFParseResult): OperaRevenueG
 
     const creditLines: OperaRevenueLine[] = credits.map((l, i) => ({
       accountCode: l.accountCode,
-      amount: l.amount,
+      amount: Number(l.amount),
       description: l.description,
       transactionReference: l.transactionReference,
       lineNumber: i + 1

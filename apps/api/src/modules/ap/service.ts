@@ -1,7 +1,15 @@
-import { Prisma, PrismaClient } from "@prisma/client";
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { setEntityDbContext } from "../../db/tenantContext.js";
+import { Prisma, PrismaClient } from "../../db/client.js";
+import { setEntityDbContext, clearEntityDbContext } from "../../db/tenantContext.js";
+import { getRequestContext } from "../../db/requestContext.js";
+import { getStorageBackend } from "../../jobs/transfer-desk-storage.js";
+import { ServiceError } from "../../shared/service-error.js";
+import {
+  resolveCurrencyDecimals,
+  decimalsFor,
+  formatAmountPlain,
+  formatAmountSwift
+} from "../../shared/currency-decimals.js";
+import { resolveTaxAccountId } from "../tax/tax-posting.js";
 import { APRepository } from "./repository.js";
 import type {
   APInvoiceCreateInput,
@@ -36,19 +44,127 @@ type GroupProposal = {
 
 type PaymentFileEntry = {
   supplierName: string;
+  supplierCode: string;
   currency: string;
   amount: Prisma.Decimal;
   reference: string;
+  /** Supplier bank details, parsed from Supplier.bankDetails JSON */
+  supplierBankAccount: string;
+  supplierBankName: string;
+  supplierBankSwift: string;
+  remittanceInfo: string;
 };
 
-export class APServiceError extends Error {
-  constructor(
-    public readonly code: string,
-    message: string,
-    public readonly statusCode = 400
-  ) {
-    super(message);
+/**
+ * Parse the Supplier.bankDetails JSON column. Tolerates missing or partial
+ * data — banks won't reject CSVs with empty cells, they just need the columns
+ * present so the file matches the upload template.
+ */
+function readSupplierBankDetails(bankDetails: unknown): {
+  accountNumber: string;
+  bankName: string;
+  swift: string;
+} {
+  if (!bankDetails || typeof bankDetails !== "object") {
+    return { accountNumber: "", bankName: "", swift: "" };
   }
+  const b = bankDetails as Record<string, unknown>;
+  const pick = (...keys: string[]): string => {
+    for (const k of keys) {
+      const v = b[k];
+      if (typeof v === "string" && v.length > 0) return v;
+    }
+    return "";
+  };
+  return {
+    accountNumber: pick("accountNumber", "account_number", "account", "iban"),
+    bankName: pick("bankName", "bank_name", "bank"),
+    swift: pick("swift", "swiftCode", "swift_code", "bic")
+  };
+}
+
+export class APServiceError extends ServiceError {}
+
+const PAYMENT_FILE_EXTENSIONS = new Set(["csv", "xml", "mt103"]);
+const STORAGE_SEGMENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+function normalizeStorageSegment(value: string, label: string): string {
+  if (!STORAGE_SEGMENT_PATTERN.test(value)) {
+    throw new APServiceError(
+      "AP_PAYMENT_FILE_INVALID_STORAGE_KEY",
+      `Invalid ${label} for payment file storage.`,
+      422
+    );
+  }
+  return value;
+}
+
+function normalizePaymentFileExtension(extension: string): string {
+  const normalized = extension.trim().toLowerCase();
+  if (!PAYMENT_FILE_EXTENSIONS.has(normalized)) {
+    throw new APServiceError(
+      "AP_PAYMENT_FILE_INVALID_EXTENSION",
+      "Unsupported payment file extension.",
+      422
+    );
+  }
+  return normalized;
+}
+
+export function buildPaymentFileStorageKey(input: {
+  tenantSlug: string;
+  entityId: string;
+  paymentRunId: string;
+  extension: string;
+}): string {
+  const tenantSlug = normalizeStorageSegment(input.tenantSlug, "tenant slug");
+  const entityId = normalizeStorageSegment(input.entityId, "entity id");
+  const paymentRunId = normalizeStorageSegment(input.paymentRunId, "payment run id");
+  const extension = normalizePaymentFileExtension(input.extension);
+  return `payment-runs/${tenantSlug}/entities/${entityId}/runs/${paymentRunId}/bank-file.${extension}`;
+}
+
+export function validatePaymentFileStorageKey(
+  storageKey: string,
+  expected: { tenantSlug: string; entityId: string; paymentRunId: string }
+): string {
+  if (
+    storageKey.includes("\\") ||
+    storageKey.includes("..") ||
+    storageKey.startsWith("/") ||
+    storageKey.startsWith("./") ||
+    /^[a-zA-Z]:/.test(storageKey) ||
+    /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(storageKey)
+  ) {
+    throw new APServiceError(
+      "AP_PAYMENT_FILE_INVALID_STORAGE_KEY",
+      "Payment file storage key is not safe.",
+      403
+    );
+  }
+
+  const extension = storageKey.split(".").pop() ?? "";
+  const expectedKey = buildPaymentFileStorageKey({ ...expected, extension });
+  if (storageKey !== expectedKey) {
+    throw new APServiceError(
+      "AP_PAYMENT_FILE_INVALID_STORAGE_KEY",
+      "Payment file storage key does not match the requested payment run.",
+      403
+    );
+  }
+  return storageKey;
+}
+
+export function sanitizePaymentFileDownloadName(paymentRunId: string, extension: string): string {
+  const safeRunId = paymentRunId.replace(/[^A-Za-z0-9._-]/g, "").slice(0, 80) || "payment-run";
+  return `payment-run-${safeRunId}.${normalizePaymentFileExtension(extension)}`;
+}
+
+export function paymentFileContentType(storageKey: string): string {
+  const extension = normalizePaymentFileExtension(storageKey.split(".").pop() ?? "");
+  if (extension === "xml") return "application/xml";
+  if (extension === "mt103") return "text/plain";
+  return "text/csv";
 }
 
 export class APService {
@@ -75,29 +191,49 @@ export class APService {
       .replace(/'/g, "&apos;");
   }
 
-  private formatSwiftAmount(amount: Prisma.Decimal): string {
-    return amount.toDecimalPlaces(2).toFixed(2).replace(".", ",");
-  }
-
+  /**
+   * @param currencyDecimals Decimal places per currency, from the `currencies`
+   *   registry. Every format previously hardcoded 2, so a zero-decimal currency
+   *   such as TZS was written with phantom cents.
+   */
   private buildPaymentFile(
     paymentRun: PaymentRunDetail,
-    entries: PaymentFileEntry[]
+    entries: PaymentFileEntry[],
+    currencyDecimals: Map<string, number>
   ): { extension: string; content: string } {
+    const plain = (entry: PaymentFileEntry) =>
+      formatAmountPlain(entry.amount, decimalsFor(currencyDecimals, entry.currency));
     if (paymentRun.bankFileFormat === "CSV") {
-      const header = "supplier,currency,amount,reference";
+      // Tanzanian-bank standard upload columns (Exim, CRDB, NMB use the same shape).
+      const header = [
+        "Payment Reference",
+        "Supplier Name",
+        "Supplier Bank Account",
+        "Bank Name",
+        "SWIFT/BIC",
+        "Amount",
+        "Currency",
+        "Remittance Info"
+      ].join(",");
+      const escape = (field: string | number) => `"${String(field).replace(/"/g, '""')}"`;
       const rows = entries.map((entry) =>
         [
+          entry.reference,
           entry.supplierName,
+          entry.supplierBankAccount,
+          entry.supplierBankName,
+          entry.supplierBankSwift,
+          plain(entry),
           entry.currency,
-          entry.amount.toDecimalPlaces(2).toFixed(2),
-          entry.reference
+          entry.remittanceInfo
         ]
-          .map((field) => `"${String(field).replace(/"/g, '""')}"`)
+          .map(escape)
           .join(",")
       );
       return {
         extension: "csv",
-        content: [header, ...rows].join("\n")
+        // CRLF for Windows-friendly bank portals
+        content: [header, ...rows].join("\r\n") + "\r\n"
       };
     }
 
@@ -109,7 +245,10 @@ export class APService {
           "{4:",
           `:20:${entry.reference}`,
           ":23B:CRED",
-          `:32A:${valueDate}${entry.currency}${this.formatSwiftAmount(entry.amount)}`,
+          `:32A:${valueDate}${entry.currency}${formatAmountSwift(
+            entry.amount,
+            decimalsFor(currencyDecimals, entry.currency)
+          )}`,
           ":50K:/HFP-PAYMENTS",
           "HospitalityFinance Pro",
           `:59:/${entry.reference}`,
@@ -128,6 +267,13 @@ export class APService {
     const now = new Date();
     const executionDate = now.toISOString().slice(0, 10);
     const controlSum = entries.reduce((sum, entry) => sum.add(entry.amount), new Prisma.Decimal(0));
+    // A pain.001 message carries one currency in practice; if entries somehow
+    // span several, use the widest precision so the control sum cannot be
+    // truncated below the transactions it totals.
+    const controlSumDecimals = entries.reduce(
+      (max, entry) => Math.max(max, decimalsFor(currencyDecimals, entry.currency)),
+      0
+    );
     const messageId = `PR-${paymentRun.id.slice(0, 8)}-${now.getTime()}`;
 
     const transactions = entries
@@ -140,9 +286,7 @@ export class APService {
             <EndToEndId>${this.escapeXml(entry.reference)}</EndToEndId>
           </PmtId>
           <Amt>
-            <InstdAmt Ccy="${this.escapeXml(entry.currency)}">${entry.amount
-              .toDecimalPlaces(2)
-              .toFixed(2)}</InstdAmt>
+            <InstdAmt Ccy="${this.escapeXml(entry.currency)}">${plain(entry)}</InstdAmt>
           </Amt>
           <Cdtr>
             <Nm>${this.escapeXml(entry.supplierName.slice(0, 70))}</Nm>
@@ -161,7 +305,7 @@ export class APService {
       <MsgId>${this.escapeXml(messageId)}</MsgId>
       <CreDtTm>${now.toISOString()}</CreDtTm>
       <NbOfTxs>${entries.length}</NbOfTxs>
-      <CtrlSum>${controlSum.toDecimalPlaces(2).toFixed(2)}</CtrlSum>
+      <CtrlSum>${formatAmountPlain(controlSum, controlSumDecimals)}</CtrlSum>
       <InitgPty>
         <Nm>HospitalityFinance Pro</Nm>
       </InitgPty>
@@ -397,129 +541,173 @@ ${transactions
   async postInvoice(entityId: string, invoiceId: string, actorSubject: string) {
     const actorId = await this.resolveJournalActorId(entityId, actorSubject);
 
-    return this.prisma.$transaction(async (transaction) => {
-      await setEntityDbContext(transaction, entityId);
-      const repository = this.repository(transaction);
+    try {
+      return await this.prisma.$transaction(async (transaction) => {
+        await setEntityDbContext(transaction, entityId);
+        const repository = this.repository(transaction);
 
-      // Lock the invoice row to prevent concurrent post/approve/cancel
-      const [locked] = await transaction.$queryRaw<Array<{ id: string; status: string }>>`
+        // Lock the invoice row to prevent concurrent post/approve/cancel
+        const [locked] = await transaction.$queryRaw<Array<{ id: string; status: string }>>`
         SELECT id, status FROM ap_invoices
-        WHERE id = ${invoiceId}::uuid AND entity_id = ${entityId}::uuid
+        WHERE id = ${invoiceId} AND entity_id = ${entityId}
         FOR UPDATE
       `;
-      if (!locked) {
-        throw new APServiceError("AP_INVOICE_NOT_FOUND", "Invoice not found.", 404);
-      }
+        if (!locked) {
+          throw new APServiceError("AP_INVOICE_NOT_FOUND", "Invoice not found.", 404);
+        }
 
-      if (locked.status !== "APPROVED") {
-        throw new APServiceError(
-          "AP_INVOICE_NOT_APPROVED",
-          "Only approved invoices can be posted.",
-          409
-        );
-      }
-
-      // Now safe to read full invoice with relations (row is locked)
-      const invoice = await repository.getInvoice(entityId, invoiceId);
-
-      if (invoice.period.status !== "OPEN") {
-        throw new APServiceError(
-          "AP_PERIOD_CLOSED",
-          `Period ${invoice.period.name} is not open.`,
-          422
-        );
-      }
-
-      const apControl =
-        (await repository.getAccountByCode(entityId, "2000")) ??
-        (await repository.getFallbackAPControlAccount(entityId));
-      if (!apControl) {
-        throw new APServiceError(
-          "AP_CONTROL_ACCOUNT_NOT_FOUND",
-          "Accounts payable control account not configured.",
-          422
-        );
-      }
-
-      let lineNumber = 1;
-      const journalLines: Array<{
-        accountId: string;
-        debit: Prisma.Decimal;
-        credit: Prisma.Decimal;
-        fxRate: Prisma.Decimal;
-        lineNumber: number;
-        description: string;
-      }> = [];
-
-      const totalDebit = invoice.lines.reduce((sum, line) => {
-        if (!line.glAccountId) {
+        if (locked.status !== "APPROVED") {
           throw new APServiceError(
-            "AP_LINE_ACCOUNT_REQUIRED",
-            `Invoice line ${line.id} missing GL account mapping.`,
+            "AP_INVOICE_NOT_APPROVED",
+            "Only approved invoices can be posted.",
+            409
+          );
+        }
+
+        // Now safe to read full invoice with relations (row is locked)
+        const invoice = await repository.getInvoice(entityId, invoiceId);
+        if (!invoice) {
+          throw new APServiceError("AP_INVOICE_NOT_FOUND", "Invoice not found after lock.", 404);
+        }
+
+        if (invoice.period.status !== "OPEN") {
+          throw new APServiceError(
+            "AP_PERIOD_CLOSED",
+            `Period ${invoice.period.name} is not open.`,
             422
           );
         }
 
-        const amount = new Prisma.Decimal(line.amount);
+        const apControl =
+          (await repository.getAccountByCode(entityId, "2000")) ??
+          (await repository.getFallbackAPControlAccount(entityId));
+        if (!apControl) {
+          throw new APServiceError(
+            "AP_CONTROL_ACCOUNT_NOT_FOUND",
+            "Accounts payable control account not configured.",
+            422
+          );
+        }
+
+        let lineNumber = 1;
+        const journalLines: Array<{
+          accountId: string;
+          debit: Prisma.Decimal;
+          credit: Prisma.Decimal;
+          fxRate: Prisma.Decimal;
+          lineNumber: number;
+          description: string;
+        }> = [];
+
+        // Expense/asset lines. These sum to netAmount — createInvoice enforces
+        // that the line total equals netAmount, and that gross = net + tax.
+        const netDebit = invoice.lines.reduce((sum, line) => {
+          if (!line.glAccountId) {
+            throw new APServiceError(
+              "AP_LINE_ACCOUNT_REQUIRED",
+              `Invoice line ${line.id} missing GL account mapping.`,
+              422
+            );
+          }
+
+          const amount = new Prisma.Decimal(line.amount);
+          journalLines.push({
+            accountId: line.glAccountId,
+            debit: amount,
+            credit: new Prisma.Decimal(0),
+            fxRate: new Prisma.Decimal(invoice.fxRate),
+            lineNumber: lineNumber++,
+            description: line.description
+          });
+
+          return sum.add(amount);
+        }, new Prisma.Decimal(0));
+
+        // Input tax. Previously invoice.taxAmount was simply discarded, so the
+        // AP liability was understated by the tax and the supplier was later
+        // underpaid by the same amount.
+        const taxAmount = new Prisma.Decimal(invoice.taxAmount ?? 0);
+        if (!taxAmount.isZero()) {
+          const inputTaxAccountId = await resolveTaxAccountId(
+            transaction,
+            entityId,
+            invoice.lines.map((line) => line.taxCodeId),
+            "INPUT"
+          );
+
+          journalLines.push({
+            accountId: inputTaxAccountId,
+            debit: taxAmount,
+            credit: new Prisma.Decimal(0),
+            fxRate: new Prisma.Decimal(invoice.fxRate),
+            lineNumber: lineNumber++,
+            description: `Input tax for invoice ${invoice.invoiceNumber}`
+          });
+        }
+
+        const totalDebit = netDebit.add(taxAmount);
+
+        // The supplier is owed the gross amount, not the net.
+        const grossAmount = new Prisma.Decimal(invoice.grossAmount);
+        if (!grossAmount.toDecimalPlaces(4).equals(totalDebit.toDecimalPlaces(4))) {
+          throw new APServiceError(
+            "AP_INVOICE_TOTALS_INCONSISTENT",
+            `Invoice gross amount ${grossAmount.toFixed(4)} does not equal lines + tax ` +
+              `${totalDebit.toFixed(4)}.`,
+            422
+          );
+        }
+
         journalLines.push({
-          accountId: line.glAccountId,
-          debit: amount,
-          credit: new Prisma.Decimal(0),
+          accountId: apControl.id,
+          debit: new Prisma.Decimal(0),
+          credit: grossAmount,
           fxRate: new Prisma.Decimal(invoice.fxRate),
           lineNumber: lineNumber++,
-          description: line.description
+          description: `AP control for invoice ${invoice.invoiceNumber}`
         });
 
-        return sum.add(amount);
-      }, new Prisma.Decimal(0));
-
-      journalLines.push({
-        accountId: apControl.id,
-        debit: new Prisma.Decimal(0),
-        credit: totalDebit,
-        fxRate: new Prisma.Decimal(invoice.fxRate),
-        lineNumber: lineNumber++,
-        description: `AP control for invoice ${invoice.invoiceNumber}`
-      });
-
-      const totalCredit = journalLines.reduce(
-        (sum, line) => sum.add(line.credit),
-        new Prisma.Decimal(0)
-      );
-      if (!totalDebit.toDecimalPlaces(4).equals(totalCredit.toDecimalPlaces(4))) {
-        throw new APServiceError(
-          "AP_POSTING_UNBALANCED",
-          "Generated AP posting journal is unbalanced.",
-          422
+        const totalCredit = journalLines.reduce(
+          (sum, line) => sum.add(line.credit),
+          new Prisma.Decimal(0)
         );
-      }
+        if (!totalDebit.toDecimalPlaces(4).equals(totalCredit.toDecimalPlaces(4))) {
+          throw new APServiceError(
+            "AP_POSTING_UNBALANCED",
+            "Generated AP posting journal is unbalanced.",
+            422
+          );
+        }
 
-      const journal = await repository.createPostedJournalForInvoice(
-        entityId,
-        actorId,
-        invoice.id,
-        invoice.periodId,
-        invoice.currency,
-        `AP invoice ${invoice.invoiceNumber} posting`,
-        journalLines
-      );
-
-      for (const line of journal.lines) {
-        await repository.updateAccountBalance(
+        const journal = await repository.createPostedJournalForInvoice(
           entityId,
-          line.accountId,
+          actorId,
+          invoice.id,
           invoice.periodId,
-          line.debitFunctional,
-          line.creditFunctional,
-          line.account.type
+          invoice.currency,
+          `AP invoice ${invoice.invoiceNumber} posting`,
+          journalLines
         );
-      }
 
-      await repository.linkInvoiceJournal(entityId, invoice.id, journal.id);
-      await repository.setInvoiceStatus(entityId, invoice.id, "POSTED", actorId);
+        for (const line of journal.lines) {
+          await repository.updateAccountBalance(
+            entityId,
+            line.accountId,
+            invoice.periodId,
+            line.debitFunctional,
+            line.creditFunctional,
+            line.account.type
+          );
+        }
 
-      return repository.getInvoice(entityId, invoice.id);
-    });
+        await repository.linkInvoiceJournal(entityId, invoice.id, journal.id);
+        await repository.setInvoiceStatus(entityId, invoice.id, "POSTED", actorId);
+
+        return repository.getInvoice(entityId, invoice.id);
+      });
+    } finally {
+      clearEntityDbContext();
+    }
   }
 
   async proposePaymentRun(entityId: string, actorSubject: string, input: PaymentRunProposalInput) {
@@ -566,7 +754,11 @@ ${transactions
     const grouped = new Map<string, GroupProposal>();
     for (const invoice of invoices) {
       const key = `${invoice.supplierId}::${invoice.currency}`;
-      const amount = new Prisma.Decimal(invoice.netAmount);
+      // Pay the gross amount. This previously used netAmount, so every
+      // tax-bearing invoice underpaid the supplier by exactly the tax — the
+      // AP control account was left permanently short and the remittance did
+      // not match the supplier's own invoice total.
+      const amount = new Prisma.Decimal(invoice.grossAmount);
       const isCreditNote = amount.lessThan(0);
 
       let group = grouped.get(key);
@@ -650,6 +842,57 @@ ${transactions
     return paymentRun;
   }
 
+  async getPaymentRunBankFile(
+    entityId: string,
+    paymentRunId: string
+  ): Promise<{
+    content: string;
+    filename: string;
+    contentType: string;
+    storageKey: string;
+  }> {
+    const tenantSlug = getRequestContext().tenantSlug;
+    if (!tenantSlug) {
+      throw new APServiceError(
+        "AP_PAYMENT_FILE_TENANT_CONTEXT_REQUIRED",
+        "Tenant context is required to download payment files.",
+        500
+      );
+    }
+
+    const paymentRun = await this.getPaymentRun(entityId, paymentRunId);
+    if (!paymentRun.bankFilePath) {
+      throw new APServiceError(
+        "AP_PAYMENT_FILE_NOT_FOUND",
+        "No bank file is available for this payment run.",
+        404
+      );
+    }
+
+    const storageKey = validatePaymentFileStorageKey(paymentRun.bankFilePath, {
+      tenantSlug,
+      entityId,
+      paymentRunId: paymentRun.id
+    });
+
+    try {
+      const content = await getStorageBackend().read(storageKey);
+      const extension = storageKey.split(".").pop() ?? "csv";
+      return {
+        content,
+        filename: sanitizePaymentFileDownloadName(paymentRun.id, extension),
+        contentType: paymentFileContentType(storageKey),
+        storageKey
+      };
+    } catch {
+      throw new APServiceError(
+        "AP_PAYMENT_FILE_MISSING",
+        "Payment file object is missing from storage.",
+        404
+      );
+    }
+  }
+
   async deletePaymentRun(entityId: string, paymentRunId: string) {
     const paymentRun = await this.getPaymentRun(entityId, paymentRunId);
     if (paymentRun.status !== "PROPOSED") {
@@ -729,214 +972,254 @@ ${transactions
     }
 
     const referencePrefix = this.normalizeReferencePrefix(input.referencePrefix);
-    const entries = currentRun.items
+    const entries: PaymentFileEntry[] = currentRun.items
       .filter((item) => new Prisma.Decimal(item.payableAmount).greaterThan(0))
-      .map((item, index) => ({
-        supplierName: item.supplier.name,
-        currency: item.currency,
-        amount: new Prisma.Decimal(item.payableAmount).toDecimalPlaces(2),
-        reference: `${referencePrefix}-${currentRun.id.slice(0, 8)}-${String(index + 1).padStart(3, "0")}`
-      }));
+      .map((item, index) => {
+        const bank = readSupplierBankDetails(
+          (item.supplier as { bankDetails?: unknown }).bankDetails
+        );
+        return {
+          supplierName: item.supplier.name,
+          supplierCode: item.supplier.code,
+          currency: item.currency,
+          amount: new Prisma.Decimal(item.payableAmount).toDecimalPlaces(2),
+          reference: `${referencePrefix}-${currentRun.id.slice(0, 8)}-${String(index + 1).padStart(3, "0")}`,
+          supplierBankAccount: bank.accountNumber,
+          supplierBankName: bank.bankName,
+          supplierBankSwift: bank.swift,
+          remittanceInfo: `Payment for ${item.supplier.name} (${item.invoiceCount} invoices)`
+        };
+      });
 
-    const file = this.buildPaymentFile(currentRun, entries);
-    const outputDir = join(process.cwd(), process.env.PAYMENT_RUN_OUTPUT_DIR ?? "payment-runs");
-    const bankFilePath = join(outputDir, `${currentRun.id}.${file.extension}`);
+    const currencyDecimals = await resolveCurrencyDecimals(
+      this.prisma,
+      entries.map((entry) => entry.currency)
+    );
+    const file = this.buildPaymentFile(currentRun, entries, currencyDecimals);
+    const storage = getStorageBackend();
+    const tenantSlug = getRequestContext().tenantSlug;
+    if (!tenantSlug) {
+      throw new APServiceError(
+        "AP_PAYMENT_FILE_TENANT_CONTEXT_REQUIRED",
+        "Tenant context is required to store payment files.",
+        500
+      );
+    }
+    const bankFileKey = buildPaymentFileStorageKey({
+      tenantSlug,
+      entityId,
+      paymentRunId: currentRun.id,
+      extension: file.extension
+    });
 
-    return this.prisma.$transaction(async (transaction) => {
-      await setEntityDbContext(transaction, entityId);
-      const txRepository = this.repository(transaction);
+    try {
+      return await this.prisma.$transaction(async (transaction) => {
+        await setEntityDbContext(transaction, entityId);
+        const txRepository = this.repository(transaction);
 
-      // Lock the payment run row to prevent double-confirmation
-      const [lockedRun] = await transaction.$queryRaw<Array<{ id: string; status: string }>>`
+        // Lock the payment run row to prevent double-confirmation
+        const [lockedRun] = await transaction.$queryRaw<Array<{ id: string; status: string }>>`
         SELECT id, status FROM payment_runs
-        WHERE id = ${paymentRunId}::uuid AND entity_id = ${entityId}::uuid
+        WHERE id = ${paymentRunId} AND entity_id = ${entityId}
         FOR UPDATE
       `;
-      if (!lockedRun) {
-        throw new APServiceError("AP_PAYMENT_RUN_NOT_FOUND", "Payment run not found.", 404);
-      }
-      if (lockedRun.status !== "APPROVED") {
-        throw new APServiceError(
-          "AP_PAYMENT_RUN_CONFIRM_INVALID_STATUS",
-          `Payment run status ${lockedRun.status} cannot be confirmed.`,
-          409
-        );
-      }
-
-      // Safe to read full payment run with relations now (row is locked)
-      const paymentRun = await txRepository.getPaymentRun(entityId, paymentRunId);
-
-      const confirmed = await txRepository.updatePaymentRunStatus(
-        entityId,
-        paymentRunId,
-        "CONFIRMED",
-        confirmerId,
-        "confirmedById"
-      );
-      if (confirmed.count === 0) {
-        throw new APServiceError("AP_PAYMENT_RUN_NOT_FOUND", "Payment run not found.", 404);
-      }
-
-      await mkdir(outputDir, { recursive: true });
-      await writeFile(bankFilePath, file.content, "utf8");
-      await txRepository.setPaymentRunFilePath(entityId, paymentRunId, bankFilePath);
-
-      const invoiceGroups = new Map<
-        string,
-        Array<{
-          invoiceId: string;
-          allocatedAmount: Prisma.Decimal;
-        }>
-      >();
-
-      for (const runInvoice of paymentRun.invoices) {
-        const invoice = runInvoice.invoice;
-        const key = `${invoice.supplierId}::${invoice.currency}`;
-        const list = invoiceGroups.get(key) ?? [];
-        list.push({
-          invoiceId: invoice.id,
-          allocatedAmount: new Prisma.Decimal(runInvoice.allocatedAmount)
-        });
-        invoiceGroups.set(key, list);
-      }
-
-      const paymentDate = new Date();
-      const openPaymentPeriod = await txRepository.getOpenPeriodForDate(entityId, paymentDate);
-      if (!openPaymentPeriod) {
-        throw new APServiceError(
-          "AP_PAYMENT_PERIOD_NOT_OPEN",
-          "No open period exists for the payment date.",
-          422
-        );
-      }
-
-      // Fetch entity's functional currency for FX rate lookups
-      const entity = await transaction.entity.findFirst({
-        where: { id: entityId },
-        select: { functionalCurrency: true }
-      });
-      const functionalCurrency = entity?.functionalCurrency ?? "USD";
-
-      const paidInvoiceIds = new Set<string>();
-      let sequence = 1;
-
-      for (const item of paymentRun.items) {
-        const payableAmount = new Prisma.Decimal(item.payableAmount);
-        if (payableAmount.lessThanOrEqualTo(0)) {
-          continue;
+        if (!lockedRun) {
+          throw new APServiceError("AP_PAYMENT_RUN_NOT_FOUND", "Payment run not found.", 404);
+        }
+        if (lockedRun.status !== "APPROVED") {
+          throw new APServiceError(
+            "AP_PAYMENT_RUN_CONFIRM_INVALID_STATUS",
+            `Payment run status ${lockedRun.status} cannot be confirmed.`,
+            409
+          );
         }
 
-        const key = `${item.supplierId}::${item.currency}`;
-        const allocations = invoiceGroups.get(key) ?? [];
-        if (allocations.length === 0) {
+        // Safe to read full payment run with relations now (row is locked)
+        const paymentRun = await txRepository.getPaymentRun(entityId, paymentRunId);
+        if (!paymentRun) {
           throw new APServiceError(
-            "AP_PAYMENT_RUN_ALLOCATION_MISSING",
-            `No invoice allocations found for supplier ${item.supplierId}.`,
+            "AP_PAYMENT_RUN_NOT_FOUND",
+            "Payment run not found after lock.",
+            404
+          );
+        }
+
+        const confirmed = await txRepository.updatePaymentRunStatus(
+          entityId,
+          paymentRunId,
+          "CONFIRMED",
+          confirmerId,
+          "confirmedById"
+        );
+        if (confirmed.count === 0) {
+          throw new APServiceError("AP_PAYMENT_RUN_NOT_FOUND", "Payment run not found.", 404);
+        }
+
+        await storage.write(bankFileKey, file.content);
+        await txRepository.setPaymentRunFilePath(entityId, paymentRunId, bankFileKey);
+
+        const invoiceGroups = new Map<
+          string,
+          Array<{
+            invoiceId: string;
+            allocatedAmount: Prisma.Decimal;
+          }>
+        >();
+
+        for (const runInvoice of paymentRun.invoices) {
+          const invoice = runInvoice.invoice;
+          const key = `${invoice.supplierId}::${invoice.currency}`;
+          const list = invoiceGroups.get(key) ?? [];
+          list.push({
+            invoiceId: invoice.id,
+            allocatedAmount: new Prisma.Decimal(runInvoice.allocatedAmount)
+          });
+          invoiceGroups.set(key, list);
+        }
+
+        const paymentDate = new Date();
+        const openPaymentPeriod = await txRepository.getOpenPeriodForDate(entityId, paymentDate);
+        if (!openPaymentPeriod) {
+          throw new APServiceError(
+            "AP_PAYMENT_PERIOD_NOT_OPEN",
+            "No open period exists for the payment date.",
             422
           );
         }
 
-        const reference = `${referencePrefix}-${paymentRun.id.slice(0, 8)}-${String(sequence).padStart(3, "0")}`;
-        sequence += 1;
+        // Fetch entity's functional currency for FX rate lookups
+        const entity = await transaction.entity.findFirst({
+          where: { id: entityId },
+          select: { functionalCurrency: true }
+        });
+        const functionalCurrency = entity?.functionalCurrency ?? "USD";
 
-        // Look up spot FX rate if payment currency differs from functional currency
-        let paymentFxRate = new Prisma.Decimal(1);
-        if (item.currency !== functionalCurrency) {
-          const spotRate = await transaction.fXRate.findFirst({
-            where: {
-              fromCurrency: item.currency,
-              toCurrency: functionalCurrency,
-              rateType: "SPOT"
-            },
-            orderBy: { effectiveDate: "desc" }
+        const paidInvoiceIds = new Set<string>();
+        let sequence = 1;
+
+        for (const item of paymentRun.items) {
+          const payableAmount = new Prisma.Decimal(item.payableAmount);
+          if (payableAmount.lessThanOrEqualTo(0)) {
+            continue;
+          }
+
+          const key = `${item.supplierId}::${item.currency}`;
+          const allocations = invoiceGroups.get(key) ?? [];
+          if (allocations.length === 0) {
+            throw new APServiceError(
+              "AP_PAYMENT_RUN_ALLOCATION_MISSING",
+              `No invoice allocations found for supplier ${item.supplierId}.`,
+              422
+            );
+          }
+
+          const reference = `${referencePrefix}-${paymentRun.id.slice(0, 8)}-${String(sequence).padStart(3, "0")}`;
+          sequence += 1;
+
+          // Look up spot FX rate if payment currency differs from functional currency
+          let paymentFxRate = new Prisma.Decimal(1);
+          if (item.currency !== functionalCurrency) {
+            const spotRate = await transaction.fXRate.findFirst({
+              where: {
+                fromCurrency: item.currency,
+                toCurrency: functionalCurrency,
+                rateType: "SPOT"
+              },
+              orderBy: { effectiveDate: "desc" }
+            });
+            if (spotRate) {
+              paymentFxRate = spotRate.rate;
+            }
+          }
+
+          // Use the supplier's own GL account (e.g. CBORA001) if it exists,
+          // otherwise fall back to the generic AP control account (2000).
+          // SAF imports credit vendor accounts directly, so payment must debit the same account.
+          const supplierGLAccount = await txRepository.getAccountByCode(
+            entityId,
+            item.supplier.code
+          );
+          const debitAccountId = supplierGLAccount?.id ?? apControl.id;
+
+          const journal = await txRepository.createPostedJournalForPayment(
+            entityId,
+            confirmerId,
+            reference,
+            openPaymentPeriod.id,
+            item.currency,
+            `AP payment run ${paymentRun.id} - ${item.supplier.name}`,
+            [
+              {
+                accountId: debitAccountId,
+                debit: payableAmount,
+                credit: new Prisma.Decimal(0),
+                fxRate: paymentFxRate,
+                lineNumber: 1,
+                description: `Clear AP for ${item.supplier.name}`
+              },
+              {
+                accountId: bankAccount.id,
+                debit: new Prisma.Decimal(0),
+                credit: payableAmount,
+                fxRate: paymentFxRate,
+                lineNumber: 2,
+                description: `Disburse cash for ${item.supplier.name}`
+              }
+            ]
+          );
+
+          for (const line of journal.lines) {
+            await txRepository.updateAccountBalance(
+              entityId,
+              line.accountId,
+              openPaymentPeriod.id,
+              line.debitFunctional,
+              line.creditFunctional,
+              line.account.type
+            );
+          }
+
+          const payment = await txRepository.createPaymentRecord({
+            entityId,
+            supplierId: item.supplierId,
+            paymentRunId: paymentRun.id,
+            paymentDate,
+            currency: item.currency,
+            amount: payableAmount,
+            paymentMethod: input.paymentMethod,
+            bankAccountId: bankAccount.id,
+            reference,
+            glJournalId: journal.id,
+            status: "PROCESSED"
           });
-          if (spotRate) {
-            paymentFxRate = spotRate.rate;
+
+          const paymentAllocations = allocations.map((allocation) => ({
+            invoiceId: allocation.invoiceId,
+            allocatedAmount: allocation.allocatedAmount
+          }));
+          await txRepository.createPaymentAllocations(payment.id, paymentAllocations);
+          for (const allocation of paymentAllocations) {
+            paidInvoiceIds.add(allocation.invoiceId);
           }
         }
 
-        // Use the supplier's own GL account (e.g. CBORA001) if it exists,
-        // otherwise fall back to the generic AP control account (2000).
-        // SAF imports credit vendor accounts directly, so payment must debit the same account.
-        const supplierGLAccount = await txRepository.getAccountByCode(entityId, item.supplier.code);
-        const debitAccountId = supplierGLAccount?.id ?? apControl.id;
-
-        const journal = await txRepository.createPostedJournalForPayment(
+        await txRepository.setInvoicesPaid(entityId, Array.from(paidInvoiceIds));
+        await txRepository.updatePaymentRunStatus(
           entityId,
+          paymentRun.id,
+          "PROCESSED",
           confirmerId,
-          reference,
-          openPaymentPeriod.id,
-          item.currency,
-          `AP payment run ${paymentRun.id} - ${item.supplier.name}`,
-          [
-            {
-              accountId: debitAccountId,
-              debit: payableAmount,
-              credit: new Prisma.Decimal(0),
-              fxRate: paymentFxRate,
-              lineNumber: 1,
-              description: `Clear AP for ${item.supplier.name}`
-            },
-            {
-              accountId: bankAccount.id,
-              debit: new Prisma.Decimal(0),
-              credit: payableAmount,
-              fxRate: paymentFxRate,
-              lineNumber: 2,
-              description: `Disburse cash for ${item.supplier.name}`
-            }
-          ]
+          "confirmedById"
         );
 
-        for (const line of journal.lines) {
-          await txRepository.updateAccountBalance(
-            entityId,
-            line.accountId,
-            openPaymentPeriod.id,
-            line.debitFunctional,
-            line.creditFunctional,
-            line.account.type
-          );
+        const finalRun = await txRepository.getPaymentRun(entityId, paymentRun.id);
+        if (!finalRun) {
+          throw new APServiceError("AP_PAYMENT_RUN_NOT_FOUND", "Payment run not found.", 404);
         }
-
-        const payment = await txRepository.createPaymentRecord({
-          entityId,
-          supplierId: item.supplierId,
-          paymentRunId: paymentRun.id,
-          paymentDate,
-          currency: item.currency,
-          amount: payableAmount,
-          paymentMethod: input.paymentMethod,
-          bankAccountId: bankAccount.id,
-          reference,
-          glJournalId: journal.id,
-          status: "PROCESSED"
-        });
-
-        const paymentAllocations = allocations.map((allocation) => ({
-          invoiceId: allocation.invoiceId,
-          allocatedAmount: allocation.allocatedAmount
-        }));
-        await txRepository.createPaymentAllocations(payment.id, paymentAllocations);
-        for (const allocation of paymentAllocations) {
-          paidInvoiceIds.add(allocation.invoiceId);
-        }
-      }
-
-      await txRepository.setInvoicesPaid(entityId, Array.from(paidInvoiceIds));
-      await txRepository.updatePaymentRunStatus(
-        entityId,
-        paymentRun.id,
-        "PROCESSED",
-        confirmerId,
-        "confirmedById"
-      );
-
-      const finalRun = await txRepository.getPaymentRun(entityId, paymentRun.id);
-      if (!finalRun) {
-        throw new APServiceError("AP_PAYMENT_RUN_NOT_FOUND", "Payment run not found.", 404);
-      }
-      return finalRun;
-    });
+        return finalRun;
+      });
+    } finally {
+      clearEntityDbContext();
+    }
   }
 }

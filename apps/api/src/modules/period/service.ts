@@ -2,17 +2,12 @@ import type { PrismaClient } from "../../db/client.js";
 import { publishEvent } from "../../shared/rabbitmq.js";
 import { enqueueMVRefresh } from "../../jobs/mv-refresh-job.js";
 import { ProcessLockService, ProcessLockError } from "../process-lock/service.js";
+import { carryForwardOpeningBalances, findFollowingPeriodId } from "./carry-forward.js";
 import type { PeriodListQuery, PeriodCreateInput } from "./types.js";
 
-export class PeriodServiceError extends Error {
-  constructor(
-    public readonly code: string,
-    message: string,
-    public readonly statusCode = 400
-  ) {
-    super(message);
-  }
-}
+import { ServiceError } from "../../shared/service-error.js";
+
+export class PeriodServiceError extends ServiceError {}
 
 export class PeriodService {
   private readonly lockService: ProcessLockService;
@@ -34,15 +29,25 @@ export class PeriodService {
       );
     }
 
-    return this.prisma.period.create({
-      data: {
-        entityId,
-        year: input.year,
-        month: input.month,
-        name: input.name,
-        status: "OPEN",
-        openedAt: new Date()
-      }
+    return this.prisma.$transaction(async (tx) => {
+      const period = await tx.period.create({
+        data: {
+          entityId,
+          year: input.year,
+          month: input.month,
+          name: input.name,
+          status: "OPEN",
+          openedAt: new Date()
+        }
+      });
+
+      // Seed opening balances from the preceding period so the new period does
+      // not start life showing every account at zero. Re-run authoritatively
+      // when the preceding period is closed, since its closing balances can
+      // still change until then.
+      await carryForwardOpeningBalances(tx, entityId, period.id);
+
+      return period;
     });
   }
 
@@ -295,10 +300,30 @@ export class PeriodService {
           });
         }
 
-        return tx.period.update({
+        const closed = await tx.period.update({
           where: { id: periodId },
           data: { status: "CLOSED", closedAt: new Date() }
         });
+
+        // Roll this period's closing balances into the next one. This is the
+        // authoritative carry-forward: only now are these closing balances
+        // final. Without it, each period's closing balance is nothing but that
+        // period's own movement, and the balance sheet is structurally wrong.
+        //
+        // Deliberately keyed on the next period by (year, month) rather than on
+        // the `nextPeriod` lookup above — that one finds the earliest OPEN
+        // period for the current-period pointer, which is not necessarily the
+        // period immediately following this one.
+        //
+        // Inside the transaction so a failure here rolls back the close too:
+        // a period recorded as CLOSED without its balances carried forward is
+        // the exact silent corruption this fix exists to prevent.
+        const followingPeriodId = await findFollowingPeriodId(tx, entityId, periodId);
+        if (followingPeriodId) {
+          await carryForwardOpeningBalances(tx, entityId, followingPeriodId);
+        }
+
+        return closed;
       });
 
       // Post-transaction side effects

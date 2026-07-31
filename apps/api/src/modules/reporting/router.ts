@@ -1,9 +1,8 @@
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "../../db/client.js";
-import { ZodError } from "zod";
 import { prisma } from "../../db/prisma.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
-import { requireWriteAccess } from "../../middleware/requireWriteAccess.js";
+import { requirePermission } from "../../middleware/requirePermission.js";
 import {
   createReportRunSchema,
   createReportDefinitionSchema,
@@ -11,45 +10,15 @@ import {
 } from "./types.js";
 import { executeReportSchema, drillDownSchema, reportTemplateSchema } from "./report-types.js";
 import { executeReport, SYSTEM_DEFINITIONS } from "./report-engine.js";
-import { ReportingService, ReportingServiceError } from "./service.js";
+import { ReportingService } from "./service.js";
+import { mapError, requireEntityId } from "../../shared/router-utils.js";
 
 const reportingService = new ReportingService(prisma as unknown as PrismaClient);
-
-function mapError(reply: FastifyReply, error: unknown) {
-  if (error instanceof ZodError) {
-    return reply.code(400).send({
-      data: null,
-      errors: [
-        { code: "VALIDATION_ERROR", message: error.issues.map((issue) => issue.message).join("; ") }
-      ]
-    });
-  }
-  if (error instanceof ReportingServiceError) {
-    return reply.code(error.statusCode).send({
-      data: null,
-      errors: [{ code: error.code, message: error.message }]
-    });
-  }
-  const message = error instanceof Error ? error.message : "Unknown error";
-  return reply.code(500).send({ data: null, errors: [{ code: "INTERNAL_SERVER_ERROR", message }] });
-}
-
-function requireEntityId(entityId: string | undefined): string {
-  if (!entityId) {
-    throw new ReportingServiceError(
-      "REPORT_ENTITY_CONTEXT_REQUIRED",
-      "X-Entity-ID header is required.",
-      400
-    );
-  }
-  return entityId;
-}
 
 export async function registerReportingRouter(app: FastifyInstance): Promise<void> {
   app.register(
     async (router) => {
       router.addHook("preHandler", requireAuth);
-      router.addHook("preHandler", requireWriteAccess);
 
       // ── Report Definitions CRUD ─────────────────────────────────────────
 
@@ -81,65 +50,74 @@ export async function registerReportingRouter(app: FastifyInstance): Promise<voi
         }
       });
 
-      router.post("/reports/definitions", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const payload = createReportDefinitionSchema.parse(request.body);
-          const data = await (prisma as unknown as PrismaClient).reportDefinition.create({
-            data: {
-              entityId,
-              name: payload.name,
-              type: payload.type as any,
-              template: payload.template as any,
-              isSystem: payload.isSystem
-            }
-          });
-          return reply.code(201).send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
-        }
-      });
-
-      router.put<{ Params: { id: string } }>("/reports/definitions/:id", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const payload = updateReportDefinitionSchema.parse(request.body);
-          const existing = await (prisma as unknown as PrismaClient).reportDefinition.findFirst({
-            where: { entityId, id: request.params.id }
-          });
-          if (!existing)
-            return reply.code(404).send({
-              data: null,
-              errors: [{ code: "NOT_FOUND", message: "Report definition not found." }]
+      router.post(
+        "/reports/definitions",
+        { preHandler: [requirePermission("REPORT_WRITE")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const payload = createReportDefinitionSchema.parse(request.body);
+            const data = await (prisma as unknown as PrismaClient).reportDefinition.create({
+              data: {
+                entityId,
+                name: payload.name,
+                type: payload.type as any,
+                template: payload.template as any,
+                isSystem: payload.isSystem
+              }
             });
-          if (existing.isSystem)
-            return reply.code(403).send({
-              data: null,
-              errors: [
-                {
-                  code: "SYSTEM_REPORT",
-                  message: "System report definitions cannot be modified."
-                }
-              ]
-            });
-
-          const updateData: Record<string, unknown> = {};
-          if (payload.name !== undefined) updateData.name = payload.name;
-          if (payload.type !== undefined) updateData.type = payload.type;
-          if (payload.template !== undefined) updateData.template = payload.template;
-
-          const data = await (prisma as unknown as PrismaClient).reportDefinition.update({
-            where: { id: request.params.id },
-            data: updateData
-          });
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+            return reply.code(201).send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
+
+      router.put<{ Params: { id: string } }>(
+        "/reports/definitions/:id",
+        { preHandler: [requirePermission("REPORT_WRITE")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const payload = updateReportDefinitionSchema.parse(request.body);
+            const existing = await (prisma as unknown as PrismaClient).reportDefinition.findFirst({
+              where: { entityId, id: request.params.id }
+            });
+            if (!existing)
+              return reply.code(404).send({
+                data: null,
+                errors: [{ code: "NOT_FOUND", message: "Report definition not found." }]
+              });
+            if (existing.isSystem)
+              return reply.code(403).send({
+                data: null,
+                errors: [
+                  {
+                    code: "SYSTEM_REPORT",
+                    message: "System report definitions cannot be modified."
+                  }
+                ]
+              });
+
+            const updateData: Record<string, unknown> = {};
+            if (payload.name !== undefined) updateData.name = payload.name;
+            if (payload.type !== undefined) updateData.type = payload.type;
+            if (payload.template !== undefined) updateData.template = payload.template;
+
+            const data = await (prisma as unknown as PrismaClient).reportDefinition.update({
+              where: { id: request.params.id },
+              data: updateData
+            });
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
+        }
+      );
 
       router.delete<{ Params: { id: string } }>(
         "/reports/definitions/:id",
+        { preHandler: [requirePermission("REPORT_WRITE")] },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
@@ -179,6 +157,7 @@ export async function registerReportingRouter(app: FastifyInstance): Promise<voi
 
       router.post<{ Params: { id: string } }>(
         "/reports/definitions/:id/schedule",
+        { preHandler: [requirePermission("REPORT_WRITE")] },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
@@ -251,6 +230,7 @@ export async function registerReportingRouter(app: FastifyInstance): Promise<voi
 
       router.delete<{ Params: { id: string } }>(
         "/reports/definitions/:id/schedule",
+        { preHandler: [requirePermission("REPORT_WRITE")] },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
@@ -291,7 +271,10 @@ export async function registerReportingRouter(app: FastifyInstance): Promise<voi
 
       router.post(
         "/reports/runs",
-        { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } },
+        {
+          preHandler: [requirePermission("REPORT_WRITE")],
+          config: { rateLimit: { max: 20, timeWindow: "1 minute" } }
+        },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
@@ -347,6 +330,7 @@ export async function registerReportingRouter(app: FastifyInstance): Promise<voi
 
       router.get<{ Params: { id: string } }>(
         "/reports/runs/:id/download",
+        { preHandler: [requirePermission("REPORT_EXPORT")] },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
@@ -450,7 +434,10 @@ export async function registerReportingRouter(app: FastifyInstance): Promise<voi
 
       router.post(
         "/reports/execute",
-        { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
+        {
+          preHandler: [requirePermission("REPORT_WRITE")],
+          config: { rateLimit: { max: 10, timeWindow: "1 minute" } }
+        },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
@@ -495,58 +482,63 @@ export async function registerReportingRouter(app: FastifyInstance): Promise<voi
 
       // ── Drill-Down ────────────────────────────────────────────────────────
 
-      router.post("/reports/drill-down", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const input = drillDownSchema.parse(request.body);
+      router.post(
+        "/reports/drill-down",
+        { preHandler: [requirePermission("REPORT_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const input = drillDownSchema.parse(request.body);
 
-          const lines = await (prisma as unknown as PrismaClient).journalLine.findMany({
-            where: {
-              journal: { entityId, periodId: input.periodId },
-              account: {
-                code: { gte: input.accountCodeFrom, lte: input.accountCodeTo },
-                ...(input.accountTypes?.length ? { type: { in: input.accountTypes as any } } : {})
-              }
-            },
-            include: {
-              account: { select: { code: true, name: true } },
-              journal: {
-                select: {
-                  reference: true,
-                  date: true,
-                  description: true,
-                  source: true,
-                  journalType: { select: { name: true } }
+            const lines = await (prisma as unknown as PrismaClient).journalLine.findMany({
+              where: {
+                journal: { entityId, periodId: input.periodId },
+                account: {
+                  code: { gte: input.accountCodeFrom, lte: input.accountCodeTo },
+                  ...(input.accountTypes?.length ? { type: { in: input.accountTypes as any } } : {})
                 }
-              }
-            },
-            orderBy: [{ journal: { date: "desc" } }, { account: { code: "asc" } }],
-            take: 500
-          });
+              },
+              include: {
+                account: { select: { code: true, name: true } },
+                journal: {
+                  select: {
+                    reference: true,
+                    createdAt: true,
+                    description: true,
+                    source: true,
+                    journalType: { select: { name: true } }
+                  }
+                }
+              },
+              orderBy: [{ journal: { createdAt: "desc" } }, { account: { code: "asc" } }],
+              take: 500
+            });
 
-          const rows = lines.map((line: any) => ({
-            date: line.journal.date,
-            reference: line.journal.reference,
-            description: line.journal.description || line.description,
-            source: line.journal.source,
-            journalType: line.journal.journalType?.name,
-            accountCode: line.account.code,
-            accountName: line.account.name,
-            debit: Number(line.debit),
-            credit: Number(line.credit),
-            amount: Number(line.debit) - Number(line.credit)
-          }));
+            const rows = lines.map((line: any) => ({
+              date: line.journal.createdAt,
+              reference: line.journal.reference,
+              description: line.journal.description || line.description,
+              source: line.journal.source,
+              journalType: line.journal.journalType?.name,
+              accountCode: line.account.code,
+              accountName: line.account.name,
+              debit: Number(line.debit),
+              credit: Number(line.credit),
+              amount: Number(line.debit) - Number(line.credit)
+            }));
 
-          return reply.send({ data: { rows, total: rows.length }, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+            return reply.send({ data: { rows, total: rows.length }, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       // ── Clone Definition ──────────────────────────────────────────────────
 
       router.post<{ Params: { id: string } }>(
         "/reports/definitions/:id/clone",
+        { preHandler: [requirePermission("REPORT_WRITE")] },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
@@ -585,46 +577,50 @@ export async function registerReportingRouter(app: FastifyInstance): Promise<voi
 
       // ── Seed System Definitions ───────────────────────────────────────────
 
-      router.post("/reports/seed-system", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
+      router.post(
+        "/reports/seed-system",
+        { preHandler: [requirePermission("REPORT_WRITE")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
 
-          const existing = await (prisma as unknown as PrismaClient).reportDefinition.findMany({
-            where: { entityId, isSystem: true },
-            select: { name: true }
-          });
-          const existingNames = new Set(existing.map((d: any) => d.name));
+            const existing = await (prisma as unknown as PrismaClient).reportDefinition.findMany({
+              where: { entityId, isSystem: true },
+              select: { name: true }
+            });
+            const existingNames = new Set(existing.map((d: any) => d.name));
 
-          const toCreate = SYSTEM_DEFINITIONS.filter((def) => !existingNames.has(def.name));
+            const toCreate = SYSTEM_DEFINITIONS.filter((def) => !existingNames.has(def.name));
 
-          if (toCreate.length === 0) {
-            return reply.send({
-              data: { created: 0, message: "All system definitions already exist." },
+            if (toCreate.length === 0) {
+              return reply.send({
+                data: { created: 0, message: "All system definitions already exist." },
+                errors: []
+              });
+            }
+
+            await (prisma as unknown as PrismaClient).reportDefinition.createMany({
+              data: toCreate.map((def) => ({
+                entityId,
+                name: def.name,
+                type: def.type as any,
+                template: def.template as any,
+                isSystem: true
+              }))
+            });
+
+            return reply.code(201).send({
+              data: {
+                created: toCreate.length,
+                definitions: toCreate.map((d) => d.name)
+              },
               errors: []
             });
+          } catch (error) {
+            return mapError(reply, error);
           }
-
-          await (prisma as unknown as PrismaClient).reportDefinition.createMany({
-            data: toCreate.map((def) => ({
-              entityId,
-              name: def.name,
-              type: def.type as any,
-              template: def.template as any,
-              isSystem: true
-            }))
-          });
-
-          return reply.code(201).send({
-            data: {
-              created: toCreate.length,
-              definitions: toCreate.map((d) => d.name)
-            },
-            errors: []
-          });
-        } catch (error) {
-          return mapError(reply, error);
         }
-      });
+      );
     },
     { prefix: "/api/v1" }
   );

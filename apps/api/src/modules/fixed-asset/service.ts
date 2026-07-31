@@ -6,6 +6,7 @@ import { AuditService } from "../audit/service.js";
 
 import { ServiceError } from "../../shared/service-error.js";
 
+import { applyBalanceDeltas } from "../../db/balance-writer.js";
 // ── Error ────────────────────────────────────────────────────────────────────
 
 export class FixedAssetServiceError extends ServiceError {}
@@ -489,36 +490,25 @@ export class FixedAssetService {
           include: { lines: true }
         });
 
-        // Update account balances
-        for (const jl of created.lines) {
-          const debit = D(jl.debitFunctional);
-          const credit = D(jl.creditFunctional);
-          const net = debit.sub(credit);
-
-          await tx.accountPeriodBalance.upsert({
-            where: {
-              entityId_accountId_periodId: {
-                entityId,
-                accountId: jl.accountId,
-                periodId
-              }
-            },
-            create: {
-              entityId,
+        // Update account balances through the canonical signed writer.
+        //
+        // This previously computed `debit - credit` unsigned and incremented
+        // the closing balance by it. Accumulated depreciation is a credit-normal
+        // contra-asset, so every depreciation run drove its balance negative
+        // instead of building it up, and the trial balance drifted by twice the
+        // depreciation charge.
+        await applyBalanceDeltas(
+          tx,
+          entityId,
+          periodId,
+          created.lines.map(
+            (jl: { accountId: string; debitFunctional: unknown; creditFunctional: unknown }) => ({
               accountId: jl.accountId,
-              periodId,
-              openingBalance: ZERO,
-              periodDebits: debit,
-              periodCredits: credit,
-              closingBalance: net
-            },
-            update: {
-              periodDebits: { increment: debit },
-              periodCredits: { increment: credit },
-              closingBalance: { increment: net }
-            }
-          });
-        }
+              debitFunctional: D(jl.debitFunctional),
+              creditFunctional: D(jl.creditFunctional)
+            })
+          )
+        );
 
         // Update each asset's accumulatedDepreciation and netValue
         for (const line of result.lines) {

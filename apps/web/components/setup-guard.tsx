@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useSession } from "next-auth/react";
+import { useSession } from "./auth-provider";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { useTenantSlug } from "../hooks/use-tenant-slug";
@@ -28,15 +28,15 @@ export function SetupGuard({ children }: { children: React.ReactNode }) {
     }
 
     fetch(`${API_BASE}/api/v1/setup/progress`, {
+      credentials: "include",
       headers: {
-        Authorization: `Bearer ${token}`,
         "X-Tenant-Slug": slug
       }
     })
       .then((r) => r.json())
       .then((json) => {
         if (json.data && !json.data.isCompleted) {
-          router.replace(`/${slug}/setup?step=${json.data.currentStep}`);
+          router.replace(`/t/${slug}/setup?step=${json.data.currentStep}`);
         } else {
           setChecked(true);
         }

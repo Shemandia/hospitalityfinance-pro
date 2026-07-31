@@ -1,0 +1,1475 @@
+openapi: 3.1.0
+info:
+  title: HospitalityFinance Pro API
+  version: 1.0.0
+  description: |
+    Enterprise financial management platform for hotels, resorts, and hospitality operators.
+    Provides General Ledger, Accounts Payable/Receivable, Multi-Currency Management,
+    USALI-compliant reporting, PMS/POS integrations, and multi-entity consolidation.
+  contact:
+    name: HospitalityFinance Pro Support
+    email: support@hospitalityfinancepro.com
+  license:
+    name: Proprietary
+servers:
+  - url: http://localhost:4000
+    description: Development
+  - url: https://api.hospitalityfinancepro.com
+    description: Production
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Auth
+    description: Authentication and user info
+  - name: Entities
+    description: Multi-entity management and licensing
+  - name: GL
+    description: General Ledger — accounts, journals, trial balance
+  - name: Periods
+    description: Accounting period management
+  - name: AP
+    description: Accounts Payable — suppliers, invoices, payment runs
+  - name: AR
+    description: Accounts Receivable — customers, invoices, receipts, ageing
+  - name: FX
+    description: Multi-currency — rates, conversion, revaluation
+  - name: Budget
+    description: Budget definitions, lines, and variance reporting
+  - name: Consolidation
+    description: Multi-entity financial consolidation
+  - name: KPI
+    description: Key Performance Indicators — RevPAR, USALI, dashboards
+  - name: Reporting
+    description: Report definitions, runs, scheduling, and PDF generation
+  - name: Integration
+    description: PMS/POS connectors, bank feeds, transfer desk
+  - name: Admin
+    description: Roles, permissions, user management, scope assignment
+  - name: Audit
+    description: Audit trail
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Native HFP JWT access token. Browser clients normally authenticate with httpOnly cookies set by /auth/login; API clients may send the same access token as a Bearer token. In local development with ENABLE_DEV_AUTH=true, dev tokens use the form dev-<uuid>.
+
+  parameters:
+    EntityIdHeader:
+      name: X-Entity-ID
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Current entity context (hotel/property/group UUID)
+    PathId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+          example: VALIDATION_ERROR
+        message:
+          type: string
+          example: "Field 'name' is required."
+
+    ApiResponse:
+      type: object
+      properties:
+        data:
+          nullable: true
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/Error"
+
+    Entity:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        code:
+          type: string
+          nullable: true
+        type:
+          type: string
+          enum: [CORPORATE, GROUP, CLUSTER, PROPERTY]
+        parentId:
+          type: string
+          format: uuid
+          nullable: true
+        functionalCurrency:
+          type: string
+          example: USD
+        reportingCurrency:
+          type: string
+          example: USD
+        timezone:
+          type: string
+          example: UTC
+        countryCode:
+          type: string
+          example: AE
+        isActive:
+          type: boolean
+        maxProperties:
+          type: integer
+
+    Account:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          example: "1001"
+        name:
+          type: string
+          example: Cash and Cash Equivalents
+        accountType:
+          type: string
+          enum: [ASSET, LIABILITY, EQUITY, REVENUE, EXPENSE]
+        normalBalance:
+          type: string
+          enum: [DEBIT, CREDIT]
+        usaliCategory:
+          type: string
+          nullable: true
+        usaliDepartment:
+          type: string
+          nullable: true
+        isActive:
+          type: boolean
+        level:
+          type: integer
+        allowPosting:
+          type: boolean
+
+    JournalLine:
+      type: object
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        debit:
+          type: string
+          example: "1500.0000"
+        credit:
+          type: string
+          example: "0.0000"
+        currency:
+          type: string
+          example: USD
+        fxRate:
+          type: string
+          example: "1.00000000"
+        description:
+          type: string
+          nullable: true
+        dimension1:
+          type: string
+          nullable: true
+
+    Journal:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        entityId:
+          type: string
+          format: uuid
+        periodId:
+          type: string
+          format: uuid
+        reference:
+          type: string
+        description:
+          type: string
+        source:
+          type: string
+          enum: [MANUAL, PMS, POS, PAYROLL, FX_REVAL, AP, AR]
+        status:
+          type: string
+          enum: [DRAFT, PENDING_APPROVAL, POSTED, REVERSED]
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/JournalLine"
+        createdAt:
+          type: string
+          format: date-time
+
+    Period:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        entityId:
+          type: string
+          format: uuid
+        year:
+          type: integer
+        month:
+          type: integer
+        name:
+          type: string
+        status:
+          type: string
+          enum: [OPEN, CLOSED, LOCKED]
+        openedAt:
+          type: string
+          format: date-time
+        closedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    Supplier:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        currency:
+          type: string
+        paymentTermsDays:
+          type: integer
+        isActive:
+          type: boolean
+
+    APInvoice:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        invoiceNumber:
+          type: string
+        supplierId:
+          type: string
+          format: uuid
+        invoiceDate:
+          type: string
+          format: date
+        dueDate:
+          type: string
+          format: date
+        grossAmount:
+          type: string
+          example: "10000.0000"
+        status:
+          type: string
+          enum: [DRAFT, SUBMITTED, APPROVED, POSTED, PARTIALLY_PAID, PAID, CANCELLED]
+
+    Customer:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [CORPORATE, OTA, TRAVEL_AGENT, INDIVIDUAL]
+        creditLimit:
+          type: string
+          nullable: true
+        isActive:
+          type: boolean
+
+    ARInvoice:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        invoiceNumber:
+          type: string
+        customerId:
+          type: string
+          format: uuid
+        amount:
+          type: string
+        amountPaid:
+          type: string
+        status:
+          type: string
+          enum: [DRAFT, POSTED, PARTIALLY_PAID, PAID, OVERDUE, CANCELLED]
+
+    FXRate:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        fromCurrency:
+          type: string
+        toCurrency:
+          type: string
+        rate:
+          type: string
+        rateType:
+          type: string
+          enum: [SPOT, AVERAGE, BUDGET, CLOSING]
+        effectiveDate:
+          type: string
+          format: date
+        source:
+          type: string
+          enum: [ECB, OANDA, MANUAL]
+
+    BudgetDefinition:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        year:
+          type: integer
+        status:
+          type: string
+
+    ConsolidationRun:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        parentEntityId:
+          type: string
+          format: uuid
+        reportingCurrency:
+          type: string
+        periodId:
+          type: string
+          format: uuid
+        status:
+          type: string
+        runAt:
+          type: string
+          format: date-time
+
+    ReportDefinition:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        type:
+          type: string
+          enum: [USALI_PL, TRIAL_BALANCE, BALANCE_SHEET, CASHFLOW, CUSTOM]
+        isSystem:
+          type: boolean
+
+    ReportRun:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        definitionId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [QUEUED, RUNNING, COMPLETE, FAILED]
+        outputUrl:
+          type: string
+          nullable: true
+        runAt:
+          type: string
+          format: date-time
+
+    RevPAR:
+      type: object
+      properties:
+        periodId:
+          type: string
+          format: uuid
+        periodName:
+          type: string
+        occupancyPct:
+          type: number
+        adr:
+          type: string
+        revpar:
+          type: string
+        trevpar:
+          type: string
+        totalRevenue:
+          type: string
+        gopAmount:
+          type: string
+        gopPct:
+          type: string
+
+    HealthCheck:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, down]
+        version:
+          type: string
+        uptime:
+          type: number
+        checks:
+          type: object
+          properties:
+            database:
+              type: string
+              enum: [ok, down]
+            redis:
+              type: string
+              enum: [ok, down]
+
+paths:
+  # ── Health ─────────────────────────────────────────────────────────────────
+  /health:
+    get:
+      tags: [Auth]
+      summary: Health check
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthCheck"
+
+  /ready:
+    get:
+      tags: [Auth]
+      summary: Readiness probe
+      security: []
+      responses:
+        "200":
+          description: Service is ready to accept traffic
+        "503":
+          description: Service is not ready
+
+  /api/v1/version:
+    get:
+      tags: [Auth]
+      summary: Build and version info
+      security: []
+      responses:
+        "200":
+          description: Version information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    type: string
+                  buildDate:
+                    type: string
+                  nodeVersion:
+                    type: string
+
+  # ── Auth ───────────────────────────────────────────────────────────────────
+  /api/v1/me:
+    get:
+      tags: [Auth]
+      summary: Current user info
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          user:
+                            type: object
+                          entityId:
+                            type: string
+                          chainId:
+                            type: string
+
+  # ── Entities ───────────────────────────────────────────────────────────────
+  /api/v1/entities:
+    get:
+      tags: [Entities]
+      summary: List entities accessible to current user
+      responses:
+        "200":
+          description: Entity list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Entity"
+    post:
+      tags: [Entities]
+      summary: Create entity (ADMIN/SUPERADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, type, countryCode]
+              properties:
+                name:
+                  type: string
+                code:
+                  type: string
+                type:
+                  type: string
+                  enum: [GROUP, PROPERTY]
+                parentId:
+                  type: string
+                  format: uuid
+                functionalCurrency:
+                  type: string
+                  default: USD
+                reportingCurrency:
+                  type: string
+                  default: USD
+                timezone:
+                  type: string
+                  default: UTC
+                countryCode:
+                  type: string
+                maxProperties:
+                  type: integer
+      responses:
+        "201":
+          description: Entity created
+
+  /api/v1/entities/{id}:
+    get:
+      tags: [Entities]
+      summary: Get entity details
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Entity details
+    put:
+      tags: [Entities]
+      summary: Update entity (ADMIN/SUPERADMIN)
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Entity updated
+    delete:
+      tags: [Entities]
+      summary: Delete entity (ADMIN/SUPERADMIN)
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "204":
+          description: Entity deleted
+
+  # ── GL Accounts ────────────────────────────────────────────────────────────
+  /api/v1/gl/accounts:
+    get:
+      tags: [GL]
+      summary: List chart of accounts
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      responses:
+        "200":
+          description: Account list
+    post:
+      tags: [GL]
+      summary: Create GL account
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, name, type, normalBalance]
+              properties:
+                code:
+                  type: string
+                name:
+                  type: string
+                type:
+                  type: string
+                  enum: [ASSET, LIABILITY, EQUITY, REVENUE, EXPENSE]
+                normalBalance:
+                  type: string
+                  enum: [DEBIT, CREDIT]
+                usaliCategory:
+                  type: string
+                usaliDepartment:
+                  type: string
+                allowPosting:
+                  type: boolean
+                  default: true
+                level:
+                  type: integer
+                  default: 1
+      responses:
+        "201":
+          description: Account created
+
+  /api/v1/gl/accounts/{id}:
+    get:
+      tags: [GL]
+      summary: Get GL account
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Account details
+    put:
+      tags: [GL]
+      summary: Update GL account
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Account updated
+    delete:
+      tags: [GL]
+      summary: Delete GL account
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Account deleted
+
+  # ── GL Journals ────────────────────────────────────────────────────────────
+  /api/v1/gl/journals:
+    get:
+      tags: [GL]
+      summary: List journals (cursor-paginated)
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [DRAFT, PENDING_APPROVAL, POSTED, REVERSED]
+        - name: source
+          in: query
+          schema:
+            type: string
+        - name: periodId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Journal list with cursor
+    post:
+      tags: [GL]
+      summary: Create journal entry
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [periodId, description, lines]
+              properties:
+                periodId:
+                  type: string
+                  format: uuid
+                reference:
+                  type: string
+                description:
+                  type: string
+                journalTypeId:
+                  type: string
+                  format: uuid
+                source:
+                  type: string
+                  enum: [MANUAL, PMS, POS, PAYROLL, FX_REVAL, AP, AR]
+                  default: MANUAL
+                lines:
+                  type: array
+                  minItems: 2
+                  items:
+                    $ref: "#/components/schemas/JournalLine"
+      responses:
+        "201":
+          description: Journal created
+
+  /api/v1/gl/journals/{id}:
+    get:
+      tags: [GL]
+      summary: Get journal with lines
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Journal details
+
+  /api/v1/gl/journals/{id}/post:
+    post:
+      tags: [GL]
+      summary: Post journal (updates account balances)
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Journal posted
+
+  /api/v1/gl/journals/{id}/approve:
+    post:
+      tags: [GL]
+      summary: Approve journal
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Journal approved
+
+  /api/v1/gl/journals/{id}/reject:
+    post:
+      tags: [GL]
+      summary: Reject journal
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Journal rejected
+
+  /api/v1/gl/journals/{id}/reverse:
+    post:
+      tags: [GL]
+      summary: Reverse posted journal
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Reversal journal created
+
+  /api/v1/gl/trial-balance:
+    get:
+      tags: [GL]
+      summary: Trial balance report
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+        - name: period_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: comparative_period_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: show_zero_balances
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Trial balance data
+
+  # ── Periods ────────────────────────────────────────────────────────────────
+  /api/v1/periods:
+    get:
+      tags: [Periods]
+      summary: List accounting periods
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+        - name: year
+          in: query
+          schema:
+            type: integer
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [OPEN, CLOSED, LOCKED]
+      responses:
+        "200":
+          description: Period list
+    post:
+      tags: [Periods]
+      summary: Create accounting period
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [year, month, name]
+              properties:
+                year:
+                  type: integer
+                month:
+                  type: integer
+                  minimum: 1
+                  maximum: 12
+                name:
+                  type: string
+      responses:
+        "201":
+          description: Period created
+
+  /api/v1/periods/{id}/close:
+    post:
+      tags: [Periods]
+      summary: Close an open period
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Period closed
+
+  /api/v1/periods/{id}/lock:
+    post:
+      tags: [Periods]
+      summary: Lock a closed period
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Period locked
+
+  /api/v1/periods/{id}/reopen:
+    post:
+      tags: [Periods]
+      summary: Reopen a locked period (SUPERADMIN only)
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Period reopened
+
+  # ── AP ─────────────────────────────────────────────────────────────────────
+  /api/v1/ap/suppliers:
+    get:
+      tags: [AP]
+      summary: List suppliers
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      responses:
+        "200":
+          description: Supplier list
+    post:
+      tags: [AP]
+      summary: Create supplier
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      responses:
+        "201":
+          description: Supplier created
+
+  /api/v1/ap/invoices:
+    get:
+      tags: [AP]
+      summary: List AP invoices
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      responses:
+        "200":
+          description: Invoice list
+    post:
+      tags: [AP]
+      summary: Create AP invoice
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      responses:
+        "201":
+          description: Invoice created
+
+  /api/v1/ap/payment-runs/proposal:
+    post:
+      tags: [AP]
+      summary: Create payment run proposal
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      responses:
+        "201":
+          description: Payment run proposed
+
+  /api/v1/ap/payment-runs/{id}/confirm:
+    post:
+      tags: [AP]
+      summary: Confirm payment run (ADMIN only, rate limited 10/min)
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Payment confirmed
+
+  # ── AR ─────────────────────────────────────────────────────────────────────
+  /api/v1/ar/customers:
+    get:
+      tags: [AR]
+      summary: List customers
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      responses:
+        "200":
+          description: Customer list
+    post:
+      tags: [AR]
+      summary: Create customer
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      responses:
+        "201":
+          description: Customer created
+
+  /api/v1/ar/invoices:
+    get:
+      tags: [AR]
+      summary: List AR invoices
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      responses:
+        "200":
+          description: Invoice list
+    post:
+      tags: [AR]
+      summary: Create AR invoice
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      responses:
+        "201":
+          description: Invoice created
+
+  /api/v1/ar/ageing:
+    get:
+      tags: [AR]
+      summary: AR ageing report
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+        - name: asAtDate
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Ageing buckets by customer
+
+  # ── FX ─────────────────────────────────────────────────────────────────────
+  /api/v1/fx/currencies:
+    get:
+      tags: [FX]
+      summary: List currencies
+      responses:
+        "200":
+          description: Currency list
+    post:
+      tags: [FX]
+      summary: Create/upsert currency
+      responses:
+        "201":
+          description: Currency created
+
+  /api/v1/fx/rates:
+    get:
+      tags: [FX]
+      summary: List FX rates
+      responses:
+        "200":
+          description: Rate list
+    post:
+      tags: [FX]
+      summary: Create/upsert FX rate
+      responses:
+        "201":
+          description: Rate created
+
+  /api/v1/fx/convert:
+    get:
+      tags: [FX]
+      summary: Convert amount between currencies
+      parameters:
+        - name: baseCurrency
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: targetCurrency
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: amount
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Conversion result
+
+  /api/v1/fx/ecb-import:
+    post:
+      tags: [FX]
+      summary: Import ECB exchange rates (rate limited 5/min)
+      responses:
+        "200":
+          description: Import result
+
+  /api/v1/fx/revaluation:
+    post:
+      tags: [FX]
+      summary: Run FX revaluation (rate limited 5/min)
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      responses:
+        "200":
+          description: Revaluation result
+
+  # ── Budget ─────────────────────────────────────────────────────────────────
+  /api/v1/budget/definitions:
+    get:
+      tags: [Budget]
+      summary: List budget definitions
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      responses:
+        "200":
+          description: Budget definition list
+    post:
+      tags: [Budget]
+      summary: Create budget definition
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      responses:
+        "201":
+          description: Budget definition created
+
+  /api/v1/budget/variance:
+    get:
+      tags: [Budget]
+      summary: Budget vs actual variance report
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+        - name: definitionId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: periodId
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Variance report
+
+  # ── Consolidation ──────────────────────────────────────────────────────────
+  /api/v1/consolidation/run:
+    post:
+      tags: [Consolidation]
+      summary: Run multi-entity consolidation (ADMIN only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [parentEntityId, childEntityIds, reportingCurrency, periodId]
+              properties:
+                parentEntityId:
+                  type: string
+                  format: uuid
+                childEntityIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                reportingCurrency:
+                  type: string
+                periodId:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: Consolidation result
+
+  # ── KPI ────────────────────────────────────────────────────────────────────
+  /api/v1/kpi/revpar:
+    get:
+      tags: [KPI]
+      summary: RevPAR and hospitality KPIs
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+        - name: periodId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: RevPAR metrics
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/RevPAR"
+
+  /api/v1/kpi/balance-sheet:
+    get:
+      tags: [KPI]
+      summary: Balance sheet report
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+        - name: periodId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Balance sheet data
+
+  /api/v1/kpi/cash-flow:
+    get:
+      tags: [KPI]
+      summary: Cash flow statement
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+        - name: periodId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Cash flow data
+
+  /api/v1/kpi/usali-comparative:
+    get:
+      tags: [KPI]
+      summary: USALI P&L with comparatives (MTD, YTD, prior year, budget)
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+        - name: periodId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: USALI comparative report
+
+  /api/v1/kpi/dashboard:
+    get:
+      tags: [KPI]
+      summary: KPI dashboard (all metrics combined)
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+        - name: periodId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Dashboard data
+
+  # ── Reporting ──────────────────────────────────────────────────────────────
+  /api/v1/reports/definitions:
+    get:
+      tags: [Reporting]
+      summary: List report definitions
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      responses:
+        "200":
+          description: Report definitions
+    post:
+      tags: [Reporting]
+      summary: Create report definition
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      responses:
+        "201":
+          description: Report definition created
+
+  /api/v1/reports/runs:
+    post:
+      tags: [Reporting]
+      summary: Generate report (async, rate limited 20/min)
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [definitionId]
+              properties:
+                definitionId:
+                  type: string
+                  format: uuid
+                parameters:
+                  type: object
+                  properties:
+                    periodId:
+                      type: string
+                      format: uuid
+                    notifyEmail:
+                      type: string
+                      format: email
+      responses:
+        "202":
+          description: Report run queued
+
+  /api/v1/reports/runs/{id}:
+    get:
+      tags: [Reporting]
+      summary: Get report run status
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Report run status
+
+  /api/v1/reports/runs/{id}/download:
+    get:
+      tags: [Reporting]
+      summary: Download generated report PDF
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: PDF file
+          content:
+            application/pdf: {}
+
+  # ── Integration ────────────────────────────────────────────────────────────
+  /api/v1/bank/import:
+    post:
+      tags: [Integration]
+      summary: Import bank statement (MT940/OFX)
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      responses:
+        "201":
+          description: Statement imported
+
+  /api/v1/bank/statements/{statementId}/auto-match:
+    post:
+      tags: [Integration]
+      summary: Auto-match bank transactions to GL
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      responses:
+        "200":
+          description: Auto-match results
+
+  /api/v1/opera-cloud/import:
+    post:
+      tags: [Integration]
+      summary: Import Opera Cloud PMS revenue
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      responses:
+        "201":
+          description: Import result
+
+  /api/v1/interfaces:
+    get:
+      tags: [Integration]
+      summary: List transfer desk interface definitions
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      responses:
+        "200":
+          description: Interface definitions
+    post:
+      tags: [Integration]
+      summary: Create transfer desk interface
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      responses:
+        "201":
+          description: Interface created
+
+  /api/v1/interfaces/{id}/execute:
+    post:
+      tags: [Integration]
+      summary: Execute data transform and create GL journals
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Transform result
+
+  # ── Admin ──────────────────────────────────────────────────────────────────
+  /api/v1/admin/roles:
+    get:
+      tags: [Admin]
+      summary: List roles (ADMIN/SUPERADMIN)
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      responses:
+        "200":
+          description: Role list
+    post:
+      tags: [Admin]
+      summary: Create role
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      responses:
+        "201":
+          description: Role created
+
+  /api/v1/admin/users:
+    get:
+      tags: [Admin]
+      summary: List entity users
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      responses:
+        "200":
+          description: User list
+
+  /api/v1/admin/users/invite:
+    post:
+      tags: [Admin]
+      summary: Invite user (create + assign to entity)
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      responses:
+        "201":
+          description: User invited
+
+  /api/v1/admin/users/assign-scope:
+    post:
+      tags: [Admin]
+      summary: Assign user to entity scope (SUPERADMIN)
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      responses:
+        "201":
+          description: Scope assigned
+
+  /api/v1/admin/entity-tree:
+    get:
+      tags: [Admin]
+      summary: Full entity hierarchy tree
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+      responses:
+        "200":
+          description: Entity tree
+
+  # ── Audit ──────────────────────────────────────────────────────────────────
+  /api/v1/audit:
+    get:
+      tags: [Audit]
+      summary: List audit events
+      parameters:
+        - $ref: "#/components/parameters/EntityIdHeader"
+        - name: action
+          in: query
+          schema:
+            type: string
+        - name: userId
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Audit event list

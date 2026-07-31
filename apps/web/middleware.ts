@@ -1,100 +1,86 @@
-import { NextResponse } from "next/server";
-import { auth } from "./auth";
+import { NextResponse, type NextRequest } from "next/server";
 
-/** Tenant slug regex — must match the provisioning validation */
-const TENANT_SLUG_RE = /^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$/;
+const TENANT_CODE_RE = /^[a-z0-9]{8}$/;
+const isDev = process.env.NODE_ENV === "development";
+const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4500";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4500";
-const PLATFORM_KEY = process.env.HFP_PLATFORM_KEY;
+function withCSP(response: NextResponse): NextResponse {
+  const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
 
-/** In-memory cache: slug -> { valid: boolean, expiresAt: number } */
-const tenantCache = new Map<string, { valid: boolean; expiresAt: number }>();
-const CACHE_TTL_MS = 60_000; // 60 seconds
+  const csp = [
+    "default-src 'self'",
+    isDev
+      ? `script-src 'self' 'unsafe-inline' 'unsafe-eval'`
+      : `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
+    "style-src 'self' 'unsafe-inline'",
+    `connect-src 'self' ${apiBaseUrl}${isDev ? " ws://localhost:3001" : ""}`,
+    "img-src 'self' data: blob:",
+    "font-src 'self'",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'"
+  ].join("; ");
 
-async function isTenantValid(slug: string): Promise<boolean> {
-  // Check cache first
-  const cached = tenantCache.get(slug);
-  if (cached && Date.now() < cached.expiresAt) {
-    return cached.valid;
-  }
+  response.headers.set("Content-Security-Policy", csp);
+  response.headers.set("x-nonce", nonce);
 
-  if (!PLATFORM_KEY) {
-    // Without platform key, can't validate — allow through
-    return true;
-  }
-
-  try {
-    const res = await fetch(`${API_BASE}/api/v1/platform/tenants/${slug}`, {
-      headers: { "X-Platform-Key": PLATFORM_KEY }
-    });
-
-    const valid = res.ok;
-    tenantCache.set(slug, { valid, expiresAt: Date.now() + CACHE_TTL_MS });
-    return valid;
-  } catch {
-    // If API unreachable, allow through — downstream checks will handle it
-    return true;
-  }
+  return response;
 }
 
-export default auth(async (request) => {
+export function middleware(request: NextRequest) {
   const { pathname, origin } = request.nextUrl;
 
-  // Let asset, auth API, and tenant API routes pass through
+  // Allow static assets, API routes, and special pages
   if (
     pathname.startsWith("/_next") ||
     pathname === "/favicon.ico" ||
     pathname.startsWith("/images") ||
-    pathname.startsWith("/api/auth") ||
-    pathname.startsWith("/api/tenants")
+    pathname.startsWith("/api/")
   ) {
-    return NextResponse.next();
-  }
-
-  // Platform admin routes — no tenant prefix needed
-  if (pathname.startsWith("/platform")) {
-    return NextResponse.next();
+    return withCSP(NextResponse.next());
   }
 
   // Root page and static app routes
   if (pathname === "/" || pathname === "/tenant-not-found") {
-    return NextResponse.next();
+    return withCSP(NextResponse.next());
   }
 
-  // Extract tenant slug from first path segment: /essque-hotels/dashboard -> essque-hotels
-  const segments = pathname.split("/").filter(Boolean);
-  const tenantSlug = segments[0];
-
-  // If first segment doesn't look like a tenant slug, pass through (will 404 naturally)
-  if (!tenantSlug || !TENANT_SLUG_RE.test(tenantSlug)) {
-    return NextResponse.next();
+  // Platform admin routes
+  if (pathname.startsWith("/platform")) {
+    return withCSP(NextResponse.next());
   }
 
-  // Validate tenant exists in registry before any auth redirect
-  const valid = await isTenantValid(tenantSlug);
-  if (!valid) {
-    return NextResponse.redirect(new URL("/tenant-not-found", origin));
+  // Extract tenant code from /t/{code}/... pattern
+  const match = pathname.match(/^\/t\/([a-z0-9]{8})(\/|$)/);
+  if (!match) {
+    return withCSP(NextResponse.next());
   }
 
-  // Determine the sub-path after the tenant slug
-  const subPath = "/" + segments.slice(1).join("/");
-  const isLoginPage = subPath === "/login";
+  const tenantCode = match[1];
+  const subPath = pathname.slice(`/t/${tenantCode}`.length) || "/";
 
-  // Unauthenticated users can only access the login page
-  if (!request.auth && !isLoginPage) {
-    const loginUrl = new URL(`/${tenantSlug}/login`, origin);
+  // Public tenant routes (no auth needed)
+  const publicPaths = ["/login", "/forgot-password", "/reset-password", "/change-password"];
+  if (publicPaths.some((p) => subPath === p || subPath.startsWith(p + "?"))) {
+    return withCSP(NextResponse.next());
+  }
+
+  // Check for access token cookie
+  const accessToken = request.cookies.get("hfp_access_token");
+  if (!accessToken) {
+    const loginUrl = new URL(`/t/${tenantCode}/login`, origin);
     loginUrl.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(loginUrl);
   }
 
   // Authenticated users on login page -> redirect to dashboard
-  if (request.auth && isLoginPage) {
-    return NextResponse.redirect(new URL(`/${tenantSlug}/dashboard`, origin));
+  if (subPath === "/login") {
+    return NextResponse.redirect(new URL(`/t/${tenantCode}/dashboard`, origin));
   }
 
-  return NextResponse.next();
-});
+  return withCSP(NextResponse.next());
+}
 
 export const config = {
-  matcher: ["/((?!api/auth|_next/static|_next/image|favicon.ico).*)"]
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"]
 };

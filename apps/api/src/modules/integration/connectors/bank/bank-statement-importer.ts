@@ -1,4 +1,4 @@
-import { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "../../../../db/client.js";
 
 // ── MT940 Parser ─────────────────────────────────────────────────────────────
 // Parses SWIFT MT940 bank statement format (colon-tag based)

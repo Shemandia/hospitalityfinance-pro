@@ -70,24 +70,40 @@ export function fmtDateTime(d: string | null | undefined): string {
 }
 
 /** Currencies that use 0 decimal places (e.g. JPY, KRW, TZS, VND). */
-function isZeroDecimalCurrency(code: string): boolean {
-  const zero = new Set([
-    "BIF",
-    "CLP",
-    "DJF",
-    "GNF",
-    "ISK",
-    "JPY",
-    "KMF",
-    "KRW",
-    "PYG",
-    "RWF",
-    "UGX",
-    "VND",
-    "VUV",
-    "XAF",
-    "XOF",
-    "XPF"
-  ]);
-  return zero.has(code.toUpperCase());
+/**
+ * Currencies rendered without fractional digits.
+ *
+ * The authoritative source is `currencies.decimal_places` in the tenant
+ * database (see apps/api/src/shared/currency-decimals.ts, which the payment
+ * file formats read). This list mirrors it for client-side rendering, where a
+ * per-render database lookup is not practical. Pass an explicit `decimals`
+ * argument to fmtCurrency wherever the registry value is already to hand.
+ *
+ * TZS is included by local convention rather than by ISO 4217, which still
+ * lists it with 2 decimals: the senti subunit is defunct and Tanzanian banks
+ * transact in whole shillings. Omitting it rendered phantom cents on every
+ * screen for the hotels' own currency.
+ */
+export const ZERO_DECIMAL_CURRENCIES = new Set([
+  "BIF",
+  "CLP",
+  "DJF",
+  "GNF",
+  "ISK",
+  "JPY",
+  "KMF",
+  "KRW",
+  "PYG",
+  "RWF",
+  "TZS",
+  "UGX",
+  "VND",
+  "VUV",
+  "XAF",
+  "XOF",
+  "XPF"
+]);
+
+export function isZeroDecimalCurrency(code: string): boolean {
+  return ZERO_DECIMAL_CURRENCIES.has(code.toUpperCase());
 }

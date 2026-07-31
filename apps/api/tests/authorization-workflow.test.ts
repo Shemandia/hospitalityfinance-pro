@@ -1,3 +1,4 @@
+import { makeBalanceWriterStub } from "./helpers/balance-writer-stub.js";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 // ── Mock dependencies ──────────────────────────────────────────────────────
@@ -53,7 +54,75 @@ function makeMockPrisma() {
   balances = [];
   idCounter = 0;
 
+  function toNum(value: unknown): number {
+    if (value && typeof (value as { toNumber?: unknown }).toNumber === "function") {
+      return (value as { toNumber: () => number }).toNumber();
+    }
+    return Number(value);
+  }
+
+  function applyBalanceSql(values: unknown[]) {
+    const [entityId, accountId, periodId, debitFunctional, creditFunctional, signValue] = values;
+    const debit = toNum(debitFunctional);
+    const credit = toNum(creditFunctional);
+    const sign = Number(signValue);
+    let balance = balances.find(
+      (b: any) => b.entityId === entityId && b.accountId === accountId && b.periodId === periodId
+    );
+    if (!balance) {
+      balance = {
+        id: nextId("bal"),
+        entityId,
+        accountId,
+        periodId,
+        openingBalance: 0,
+        periodDebits: 0,
+        periodCredits: 0,
+        closingBalance: 0
+      };
+      balances.push(balance);
+    }
+    balance.periodDebits += debit;
+    balance.periodCredits += credit;
+    balance.closingBalance =
+      balance.openingBalance + sign * balance.periodDebits - sign * balance.periodCredits;
+  }
+
+  /**
+   * Simulate the canonical balance writer (db/balance-writer.ts).
+   *
+   * It issues one parameterised INSERT via $queryRawUnsafe with
+   * ($1 entityId, $2 periodId, then accountId/debit/credit triples) and signs
+   * each account by its own normal_balance. Driving the same in-memory ledger
+   * keeps these tests asserting real balance arithmetic rather than just that
+   * some query was issued.
+   */
+  function applyBalanceWriterSql(params: unknown[]): Array<{ account_id: string }> {
+    const [entityId, periodId] = params;
+    const written: Array<{ account_id: string }> = [];
+    for (let i = 2; i < params.length; i += 3) {
+      const accountId = String(params[i]);
+      // Mirrors this file's account fixture: acct-1 is an ASSET (debit-normal),
+      // everything else a LIABILITY (credit-normal).
+      const sign = accountId === "acct-1" ? 1 : -1;
+      applyBalanceSql([entityId, accountId, periodId, params[i + 1], params[i + 2], sign]);
+      written.push({ account_id: accountId });
+    }
+    return written;
+  }
+
   const prisma: any = {
+    $executeRaw: vi
+      .fn()
+      .mockImplementation(async (_strings: TemplateStringsArray, ...values: unknown[]) => {
+        applyBalanceSql(values);
+        return 1;
+      }),
+    $queryRawUnsafe: vi
+      .fn()
+      .mockImplementation(async (_sql: string, ...params: unknown[]) =>
+        applyBalanceWriterSql(params)
+      ),
     $transaction: vi.fn().mockImplementation(async (fn: any) => fn(prisma)),
 
     authorizationStage: {
@@ -267,7 +336,18 @@ function makeMockPrisma() {
         if (!j) return Promise.resolve(null);
         const copy = { ...j };
         if (include?.lines) {
-          copy.lines = journalLines.filter((l) => l.journalId === j.id);
+          copy.lines = journalLines
+            .filter((l) => l.journalId === j.id)
+            .map((line) => ({
+              ...line,
+              ...(include.lines?.include?.account
+                ? {
+                    account: {
+                      type: line.accountId === "acct-1" ? "ASSET" : "LIABILITY"
+                    }
+                  }
+                : {})
+            }));
         }
         return Promise.resolve(copy);
       }),

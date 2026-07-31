@@ -10,6 +10,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ZodError } from "zod";
 import { registryPrisma } from "../../db/prisma.js";
+import { generateTenantCode } from "../../db/generateTenantCode.js";
 import { invalidateTenantCache, listTenants } from "../../db/tenantRegistry.js";
 import { evictTenant } from "../../db/tenantPool.js";
 import { provisionTenantSchema } from "./types.js";
@@ -123,10 +124,12 @@ export async function registerTenantRouter(app: FastifyInstance): Promise<void> 
           });
         }
 
+        const tenantCode = await generateTenantCode(body.slug);
         const tenant = await registryPrisma.tenant.create({
           data: {
             name: body.name,
             slug: body.slug,
+            tenantCode,
             databaseUrl: body.databaseUrl,
             adminEmail: body.adminEmail,
             domain: body.domain ?? null,

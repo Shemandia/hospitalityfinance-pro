@@ -14,7 +14,7 @@
  *   DR  Discounts (4290)            — total discount (contra-revenue)
  */
 
-import { Prisma, type PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "../../../../db/client.js";
 import {
   type OperaCloudCredentials,
   getOperaCloudCredentials
@@ -23,6 +23,7 @@ import { SimphonyClient } from "./simphony-client.js";
 import { mapSimphonyToGL } from "./simphony-mapper.js";
 import { sendEmail } from "../../../../shared/email.js";
 
+import { applyBalanceDelta } from "../../../../db/balance-writer.js";
 type ImportInput = {
   entityId: string;
   locationId: string;
@@ -51,6 +52,20 @@ export async function runSimphonyImport(
   prisma: PrismaClient,
   input: ImportInput
 ): Promise<ImportResult> {
+  // C1: Micros Simphony POS revenue is consolidated INSIDE Opera and already
+  // arrives in the Opera night-audit .SUN (EZZRV) revenue file. Running this
+  // standalone connector alongside the Opera import would DOUBLE-COUNT F&B
+  // revenue. It is intentionally disabled for this deployment. If a property is
+  // ever configured to post POS separately from Opera, set this flag to false.
+  // (Typed as boolean so the rest of the function is not flagged as unreachable.)
+  const SIMPHONY_CONNECTOR_DISABLED: boolean = true;
+  if (SIMPHONY_CONNECTOR_DISABLED) {
+    throw new Error(
+      "Simphony POS connector is disabled: POS revenue posts through Opera " +
+        "(EZZRV night-audit file). Enabling this would double-count F&B revenue."
+    );
+  }
+
   const creds: OperaCloudCredentials = getOperaCloudCredentials();
 
   // ── Idempotency check ─────────────────────────────────────────────────────
@@ -334,29 +349,16 @@ export async function runSimphonyImport(
 
       // ── Update account balances ─────────────────────────────────────
       for (const line of lines) {
-        await prisma.accountPeriodBalance.upsert({
-          where: {
-            entityId_accountId_periodId: {
-              entityId: input.entityId,
-              accountId: line.accountId,
-              periodId: period.id
-            }
-          },
-          create: {
-            entityId: input.entityId,
-            accountId: line.accountId,
-            periodId: period.id,
-            openingBalance: new Prisma.Decimal(0),
-            periodDebits: line.debitFunctional,
-            periodCredits: line.creditFunctional,
-            closingBalance: line.debitFunctional.sub(line.creditFunctional)
-          },
-          update: {
-            periodDebits: { increment: line.debitFunctional },
-            periodCredits: { increment: line.creditFunctional },
-            closingBalance: { increment: line.debitFunctional.sub(line.creditFunctional) }
-          }
-        });
+        // Canonical signed writer — this used to write `debit - credit`
+        // unsigned, moving every credit-normal account the wrong way.
+        await applyBalanceDelta(
+          prisma,
+          input.entityId,
+          period.id,
+          line.accountId,
+          line.debitFunctional,
+          line.creditFunctional
+        );
       }
     }
 

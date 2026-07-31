@@ -68,7 +68,11 @@ export const AP_TARGET_FIELDS: TargetFieldOption[] = [
   { value: "netAmount" as TargetField, label: "Net Amount", group: "Invoice Header" },
   { value: "lineDescription", label: "Line Description", group: "Invoice Line" },
   { value: "lineAmount" as TargetField, label: "Line Amount", group: "Invoice Line" },
-  { value: "lineGLAccountCode" as TargetField, label: "Line GL Account", group: "Invoice Line" },
+  {
+    value: "lineGLAccountCode" as TargetField,
+    label: "Line Ledger Account",
+    group: "Invoice Line"
+  },
   { value: "externalPoRef" as TargetField, label: "PO Reference", group: "Invoice Header" }
 ];
 

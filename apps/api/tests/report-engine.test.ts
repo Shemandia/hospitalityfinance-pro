@@ -87,7 +87,10 @@ const accounts = [
   }
 ];
 
-// Balances for current period
+// Balances for current period.
+// Stored in the GL write-path convention (GLRepository.updateAccountBalance):
+// positive magnitudes for BOTH normal sides — a credit-normal account in its
+// normal credit position stores a POSITIVE closing balance (RPT-C1).
 const periodBalances = [
   {
     id: "bal-1",
@@ -98,7 +101,7 @@ const periodBalances = [
     periodDebits: 5000,
     periodCredits: 2000,
     closingBalance: 13000,
-    account: { code: "1000" }
+    account: { code: "1000", type: "ASSET", normalBalance: "DEBIT" }
   },
   {
     id: "bal-2",
@@ -109,29 +112,29 @@ const periodBalances = [
     periodDebits: 1000,
     periodCredits: 500,
     closingBalance: 3500,
-    account: { code: "1200" }
+    account: { code: "1200", type: "ASSET", normalBalance: "DEBIT" }
   },
   {
     id: "bal-3",
     entityId: ENTITY_ID,
     accountId: "acc-3",
     periodId: PERIOD_ID,
-    openingBalance: -5000,
+    openingBalance: 5000,
     periodDebits: 1000,
     periodCredits: 3000,
-    closingBalance: -7000,
-    account: { code: "2000" }
+    closingBalance: 7000,
+    account: { code: "2000", type: "LIABILITY", normalBalance: "CREDIT" }
   },
   {
     id: "bal-4",
     entityId: ENTITY_ID,
     accountId: "acc-4",
     periodId: PERIOD_ID,
-    openingBalance: -20000,
+    openingBalance: 20000,
     periodDebits: 0,
     periodCredits: 0,
-    closingBalance: -20000,
-    account: { code: "3000" }
+    closingBalance: 20000,
+    account: { code: "3000", type: "EQUITY", normalBalance: "CREDIT" }
   },
   {
     id: "bal-5",
@@ -141,8 +144,8 @@ const periodBalances = [
     openingBalance: 0,
     periodDebits: 0,
     periodCredits: 50000,
-    closingBalance: -50000,
-    account: { code: "4000" }
+    closingBalance: 50000,
+    account: { code: "4000", type: "REVENUE", normalBalance: "CREDIT" }
   },
   {
     id: "bal-6",
@@ -153,7 +156,7 @@ const periodBalances = [
     periodDebits: 30000,
     periodCredits: 0,
     closingBalance: 30000,
-    account: { code: "5000" }
+    account: { code: "5000", type: "EXPENSE", normalBalance: "DEBIT" }
   },
   {
     id: "bal-7",
@@ -164,12 +167,12 @@ const periodBalances = [
     periodDebits: 200,
     periodCredits: 100,
     closingBalance: 600,
-    account: { code: "1100" }
+    account: { code: "1100", type: "ASSET", normalBalance: "DEBIT" }
   }
   // acc-zero has no balance row = zero balances
 ];
 
-// Comparative period balances
+// Comparative period balances (same stored positive-magnitude convention)
 const compBalances = [
   {
     id: "cbal-1",
@@ -180,7 +183,7 @@ const compBalances = [
     periodDebits: 4000,
     periodCredits: 2000,
     closingBalance: 10000,
-    account: { code: "1000" }
+    account: { code: "1000", type: "ASSET", normalBalance: "DEBIT" }
   },
   {
     id: "cbal-5",
@@ -190,8 +193,8 @@ const compBalances = [
     openingBalance: 0,
     periodDebits: 0,
     periodCredits: 40000,
-    closingBalance: -40000,
-    account: { code: "4000" }
+    closingBalance: 40000,
+    account: { code: "4000", type: "REVENUE", normalBalance: "CREDIT" }
   }
 ];
 
@@ -506,9 +509,9 @@ describe("Report Engine", () => {
       expect(result.columns).toHaveLength(6);
       const revenueRow = result.rows.find((r) => r.label.includes("4000"));
       expect(revenueRow).toBeDefined();
-      // Revenue closing = -50000, budget = 55000
-      // variance = closing - budget = -50000 - 55000 = -105000
-      expect(revenueRow!.values.closing).toBe(-50000);
+      // FAL reports stored magnitudes directly: revenue closing = 50000, budget = 55000
+      // variance = closing - budget = 50000 - 55000 = -5000
+      expect(revenueRow!.values.closing).toBe(50000);
       expect(revenueRow!.values.budget).toBe(55000);
     });
 
@@ -570,7 +573,7 @@ describe("Report Engine", () => {
       expect(result.rows[1].type).toBe("data");
       expect(result.rows[1].label).toBe("Room Revenue");
       expect(result.rows[1].formatting?.indent).toBe(1);
-      // Revenue closing = -50000, REVERSE sign = -1 * -50000 = 50000
+      // Revenue stored +50000 → natural −50000, REVERSE sign = -1 * -50000 = 50000
       expect(result.rows[1].values.col_0).toBe(50000);
     });
 
@@ -717,7 +720,7 @@ describe("Report Engine", () => {
         { periodId: PERIOD_ID }
       );
 
-      // AP closing = -7000, REVERSE = 7000 (displayed as positive)
+      // AP stored +7000 → natural −7000, REVERSE = 7000 (displayed as positive)
       expect(result.rows[0].values.col_0).toBe(7000);
     });
 

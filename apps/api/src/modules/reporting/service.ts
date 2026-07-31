@@ -1,16 +1,10 @@
-import { Prisma, type PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "../../db/client.js";
 import { getReportQueue } from "./queue.js";
 import type { CreateReportRunInput } from "./types.js";
 
-export class ReportingServiceError extends Error {
-  constructor(
-    public readonly code: string,
-    message: string,
-    public readonly statusCode = 400
-  ) {
-    super(message);
-  }
-}
+import { ServiceError } from "../../shared/service-error.js";
+
+export class ReportingServiceError extends ServiceError {}
 
 export class ReportingService {
   constructor(private readonly prisma: PrismaClient) {}

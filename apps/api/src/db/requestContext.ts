@@ -10,6 +10,8 @@ export type RequestContext = {
   disableAudit: boolean;
   tenantSlug: string | null;
   tenantDbUrl: string | null;
+  /** Depth counter for RLS context wrapping — >0 means inside a scope with RLS set */
+  _rlsDepth: number;
 };
 
 const storage = new AsyncLocalStorage<RequestContext>();
@@ -24,7 +26,8 @@ function defaultContext(): RequestContext {
     userAgent: null,
     disableAudit: false,
     tenantSlug: null,
-    tenantDbUrl: null
+    tenantDbUrl: null,
+    _rlsDepth: 0
   };
 }
 

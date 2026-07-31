@@ -12,10 +12,15 @@ function createServiceWithAccounts(accounts: Array<Record<string, unknown>>) {
 }
 
 describe("GLService.validateBalance", () => {
-  it("accepts balanced journal lines", () => {
-    const service = createServiceWithAccounts([]);
-    expect(() =>
-      service.validateBalance([
+  const entityId = "entity-1";
+
+  it("accepts balanced journal lines", async () => {
+    const service = createServiceWithAccounts([
+      { id: "00000000-0000-0000-0000-000000000001", type: "ASSET" },
+      { id: "00000000-0000-0000-0000-000000000002", type: "REVENUE" }
+    ]);
+    await expect(
+      service.validateBalance(entityId, [
         {
           accountId: "00000000-0000-0000-0000-000000000001",
           debit: "100.0000",
@@ -31,13 +36,16 @@ describe("GLService.validateBalance", () => {
           fxRate: "1"
         }
       ])
-    ).not.toThrow();
+    ).resolves.toBeUndefined();
   });
 
-  it("throws GL_UNBALANCED_JOURNAL for unbalanced lines", () => {
-    const service = createServiceWithAccounts([]);
-    expect(() =>
-      service.validateBalance([
+  it("throws GL_UNBALANCED_JOURNAL for unbalanced lines", async () => {
+    const service = createServiceWithAccounts([
+      { id: "00000000-0000-0000-0000-000000000001", type: "ASSET" },
+      { id: "00000000-0000-0000-0000-000000000002", type: "REVENUE" }
+    ]);
+    await expect(
+      service.validateBalance(entityId, [
         {
           accountId: "00000000-0000-0000-0000-000000000001",
           debit: "100.0000",
@@ -53,7 +61,88 @@ describe("GLService.validateBalance", () => {
           fxRate: "1"
         }
       ])
-    ).toThrowError(GLServiceError);
+    ).rejects.toThrowError(GLServiceError);
+  });
+
+  it("throws GL_UNBALANCED_JOURNAL when lines balance in transaction amounts but not functionally", async () => {
+    const service = createServiceWithAccounts([
+      { id: "00000000-0000-0000-0000-000000000001", type: "ASSET" },
+      { id: "00000000-0000-0000-0000-000000000002", type: "REVENUE" }
+    ]);
+    // 100 EUR @ 1.10 = 110 functional debit vs 100 USD @ 1 = 100 functional credit
+    await expect(
+      service.validateBalance(entityId, [
+        {
+          accountId: "00000000-0000-0000-0000-000000000001",
+          debit: "100.0000",
+          credit: "0",
+          currency: "EUR",
+          fxRate: "1.10"
+        },
+        {
+          accountId: "00000000-0000-0000-0000-000000000002",
+          debit: "0",
+          credit: "100.0000",
+          currency: "USD",
+          fxRate: "1"
+        }
+      ])
+    ).rejects.toThrowError(GLServiceError);
+  });
+
+  it("accepts multi-currency lines that balance in functional currency", async () => {
+    const service = createServiceWithAccounts([
+      { id: "00000000-0000-0000-0000-000000000001", type: "ASSET" },
+      { id: "00000000-0000-0000-0000-000000000002", type: "REVENUE" }
+    ]);
+    // 100 EUR @ 1.10 = 110 functional debit vs 110 USD @ 1 = 110 functional credit
+    await expect(
+      service.validateBalance(entityId, [
+        {
+          accountId: "00000000-0000-0000-0000-000000000001",
+          debit: "100.0000",
+          credit: "0",
+          currency: "EUR",
+          fxRate: "1.10"
+        },
+        {
+          accountId: "00000000-0000-0000-0000-000000000002",
+          debit: "0",
+          credit: "110.0000",
+          currency: "USD",
+          fxRate: "1"
+        }
+      ])
+    ).resolves.toBeUndefined();
+  });
+
+  it("skips balance check for statistics-only journals (memo accounts)", async () => {
+    const service = createServiceWithAccounts([
+      { id: "stat-1", type: "STATISTICAL" },
+      { id: "stat-2", type: "STATISTICAL" }
+    ]);
+    // Intentionally unbalanced: statistical memo postings are single-sided.
+    await expect(
+      service.validateBalance(entityId, [
+        { accountId: "stat-1", debit: "26", credit: "0", currency: "USD", fxRate: "1" },
+        { accountId: "stat-2", debit: "48", credit: "0", currency: "USD", fxRate: "1" }
+      ])
+    ).resolves.toBeUndefined();
+  });
+
+  it("checks balance only on non-statistical lines in mixed journals", async () => {
+    const service = createServiceWithAccounts([
+      { id: "asset-1", type: "ASSET" },
+      { id: "rev-1", type: "REVENUE" },
+      { id: "stat-1", type: "STATISTICAL" }
+    ]);
+    await expect(
+      service.validateBalance(entityId, [
+        { accountId: "asset-1", debit: "100", credit: "0", currency: "USD", fxRate: "1" },
+        { accountId: "rev-1", debit: "0", credit: "100", currency: "USD", fxRate: "1" },
+        { accountId: "stat-1", debit: "1", credit: "0", currency: "USD", fxRate: "1" }
+      ])
+    ).resolves.toBeUndefined();
   });
 });
 

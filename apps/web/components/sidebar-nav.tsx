@@ -50,8 +50,8 @@ const navGroups: NavGroup[] = [
       { href: "/dashboard/controller", label: "Financial Controller", icon: Scale },
       { href: "/dashboard/cfo", label: "CFO", icon: TrendingUp },
       { href: "/dashboard/directors", label: "Directors", icon: PieChart },
-      { href: "/dashboard/ap", label: "AP Clerk", icon: CreditCard },
-      { href: "/dashboard/ar", label: "AR Clerk", icon: FileText },
+      { href: "/dashboard/ap", label: "Accounts Payable Clerk", icon: CreditCard },
+      { href: "/dashboard/ar", label: "Accounts Receivable Clerk", icon: FileText },
       { href: "/dashboard/night-audit", label: "Night Auditor", icon: Clock },
       { href: "/dashboard/cost-controller", label: "Cost Controller", icon: DollarSign }
     ]
@@ -60,10 +60,11 @@ const navGroups: NavGroup[] = [
     label: "General Ledger",
     items: [
       { href: "/gl/accounts", label: "Chart of Accounts", icon: PieChart },
-      { href: "/gl/accounts/import", label: "Import COA", icon: Upload },
+      { href: "/gl/accounts/import", label: "Import Chart of Accounts", icon: Upload },
       { href: "/gl/journals", label: "General Journal", icon: BookOpen },
       { href: "/gl/journals/new", label: "New Journal", icon: FileText },
       { href: "/gl/trial-balance", label: "Trial Balance", icon: Scale },
+      { href: "/gl/recurring-journals", label: "Recurring Journals", icon: RefreshCcw },
       { href: "/settings/journal-types", label: "Journal Types", icon: Tags },
       { href: "/settings/account-types", label: "Account Types", icon: SlidersHorizontal }
     ]
@@ -75,13 +76,13 @@ const navGroups: NavGroup[] = [
       { href: "/ap/suppliers", label: "Suppliers", icon: Users },
       { href: "/ap/payment-runs", label: "Payment Runs", icon: Banknote },
       { href: "/ar", label: "Accounts Receivable", icon: FileText },
-      { href: "/ar/ageing", label: "AR Ageing", icon: Clock }
+      { href: "/ar/ageing", label: "Accounts Receivable Ageing", icon: Clock }
     ]
   },
   {
     label: "Finance",
     items: [
-      { href: "/fx", label: "FX Rates", icon: TrendingUp },
+      { href: "/fx", label: "Exchange Rates", icon: TrendingUp },
       { href: "/budget", label: "Budget", icon: DollarSign },
       { href: "/budget/variance", label: "Variance Report", icon: BarChart2 },
       { href: "/reports", label: "Reports", icon: BarChart3 },
@@ -90,10 +91,20 @@ const navGroups: NavGroup[] = [
       { href: "/reports/cashflow", label: "Cash Flow", icon: Activity },
       { href: "/reports/runner", label: "Report Runner", icon: BarChart3 },
       { href: "/reports/builder", label: "Report Builder", icon: SlidersHorizontal },
-      { href: "/bank/reconciliation", label: "Bank Recon", icon: Landmark },
+      { href: "/bank/reconciliation", label: "Bank Reconciliation", icon: Landmark },
       { href: "/allocations", label: "Allocations", icon: SlidersHorizontal },
       { href: "/fixed-assets", label: "Fixed Assets", icon: Package },
       { href: "/authorizations", label: "Authorizations", icon: ShieldCheck }
+    ]
+  },
+  {
+    label: "Intercompany",
+    items: [
+      { href: "/intercompany", label: "Transactions", icon: ArrowLeftRight },
+      { href: "/intercompany/new", label: "New Transaction", icon: ArrowLeftRight },
+      { href: "/intercompany/approvals", label: "Approvals", icon: ShieldCheck },
+      { href: "/intercompany/reconciliation", label: "Reconciliation", icon: Scale },
+      { href: "/intercompany/settings", label: "Configuration", icon: SlidersHorizontal }
     ]
   },
   {
@@ -130,7 +141,7 @@ const navGroups: NavGroup[] = [
 export function SidebarNav() {
   const pathname = usePathname();
   const tenantSlug = useTenantSlugSafe();
-  const prefix = tenantSlug ? `/${tenantSlug}` : "";
+  const prefix = tenantSlug ? `/t/${tenantSlug}` : "";
 
   // Prefix all nav hrefs with tenant slug
   const prefixedNavGroups = navGroups.map((group) => ({

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { ZodError } from "zod";
 import { requireAuth } from "../../middleware/requireAuth.js";
+import { requirePermission } from "../../middleware/requirePermission.js";
 import { SetupService } from "./service.js";
 
 export async function registerSetupRouter(app: FastifyInstance): Promise<void> {
@@ -24,6 +25,7 @@ export async function registerSetupRouter(app: FastifyInstance): Promise<void> {
 
       router.put<{ Params: { step: string }; Querystring: { saveOnly?: string } }>(
         "/steps/:step",
+        { preHandler: [requirePermission("ADMIN_SETTINGS")] },
         async (request, reply) => {
           const tenantSlug = request.tenantSlug ?? (request.user as any)?.tenantSlug;
           if (!tenantSlug) {
@@ -59,24 +61,28 @@ export async function registerSetupRouter(app: FastifyInstance): Promise<void> {
         }
       );
 
-      router.post("/complete", async (request, reply) => {
-        const tenantSlug = request.tenantSlug ?? (request.user as any)?.tenantSlug;
-        if (!tenantSlug) {
-          return reply.code(400).send({
-            data: null,
-            errors: [{ code: "TENANT_REQUIRED", message: "Tenant context required." }]
-          });
+      router.post(
+        "/complete",
+        { preHandler: [requirePermission("ADMIN_SETTINGS")] },
+        async (request, reply) => {
+          const tenantSlug = request.tenantSlug ?? (request.user as any)?.tenantSlug;
+          if (!tenantSlug) {
+            return reply.code(400).send({
+              data: null,
+              errors: [{ code: "TENANT_REQUIRED", message: "Tenant context required." }]
+            });
+          }
+          try {
+            const result = await service.complete(tenantSlug);
+            return { data: result, errors: [] };
+          } catch (err: any) {
+            return reply.code(400).send({
+              data: null,
+              errors: [{ code: "SETUP_INCOMPLETE", message: err.message }]
+            });
+          }
         }
-        try {
-          const result = await service.complete(tenantSlug);
-          return { data: result, errors: [] };
-        } catch (err: any) {
-          return reply.code(400).send({
-            data: null,
-            errors: [{ code: "SETUP_INCOMPLETE", message: err.message }]
-          });
-        }
-      });
+      );
     },
     { prefix: "/api/v1/setup" }
   );

@@ -48,7 +48,7 @@ export const PROVISIONING_STEPS = [
   { name: "creating_database", order: 1, label: "Creating database" },
   { name: "running_migrations", order: 2, label: "Running migrations" },
   { name: "applying_security", order: 3, label: "Applying security policies" },
-  { name: "creating_auth", order: 4, label: "Creating auth realm" },
+  { name: "creating_auth", order: 4, label: "Creating native auth user" },
   { name: "seeding_data", order: 5, label: "Seeding initial data" },
   { name: "sending_email", order: 6, label: "Sending activation email" }
 ] as const;

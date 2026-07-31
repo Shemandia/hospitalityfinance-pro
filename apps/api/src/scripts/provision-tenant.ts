@@ -9,6 +9,7 @@
  *     --name "Jumeirah Group" \
  *     --slug "jumeirah" \
  *     --admin-email "admin@jumeirah.com" \
+ *     --admin-password "TemporaryPassword123" \
  *     --plan standard \
  *     --max-properties 20
  *
@@ -20,9 +21,67 @@
  *   TENANT_DB_PASSWORD     — password (default: from DATABASE_URL)
  */
 
-import { PrismaClient } from "@prisma/client";
+import crypto from "node:crypto";
+import { PrismaClient } from "../db/client.js";
+import { PrismaClient as RegistryPrismaClient } from "../db/registry-client.js";
 import { execSync } from "node:child_process";
 import { resolve } from "node:path";
+import bcrypt from "bcrypt";
+
+const SYSTEM_PERMISSION_CODES = [
+  "GL_READ",
+  "GL_WRITE",
+  "GL_POST",
+  "GL_REVERSE",
+  "GL_APPROVE",
+  "COA_READ",
+  "COA_CREATE",
+  "COA_EDIT",
+  "AP_READ",
+  "AP_WRITE",
+  "AP_APPROVE",
+  "AP_PAYMENT_CONFIRM",
+  "PAYMENT_RUN_READ",
+  "PAYMENT_RUN_CREATE",
+  "PAYMENT_RUN_APPROVE",
+  "AR_READ",
+  "AR_WRITE",
+  "AR_DUNNING",
+  "BUDGET_READ",
+  "BUDGET_WRITE",
+  "BUDGET_APPROVE",
+  "FX_READ",
+  "FX_WRITE",
+  "REPORT_READ",
+  "REPORT_WRITE",
+  "REPORT_EXPORT",
+  "REPORT_CREATE_CUSTOM",
+  "PERIOD_READ",
+  "PERIOD_MANAGE",
+  "PERIOD_REOPEN",
+  "TRANSFER_DESK_READ",
+  "TRANSFER_DESK_EXECUTE",
+  "TRANSFER_DESK_CONFIG",
+  "INTEGRATION_READ",
+  "INTEGRATION_IMPORT",
+  "INTEGRATION_CONFIG",
+  "IC_READ",
+  "IC_CREATE",
+  "IC_APPROVE",
+  "IC_REVERSE",
+  "IC_CONFIG",
+  "IC_RECONCILE",
+  "CONSOLIDATION_RUN",
+  "STATS_READ",
+  "STATS_IMPORT",
+  "AUDIT_READ",
+  "ADMIN_USERS_READ",
+  "ADMIN_USERS",
+  "ADMIN_ROLES_MANAGE",
+  "ADMIN_SETTINGS",
+  "ADMIN_ENTITIES",
+  "ADMIN_AUDIT_LOG"
+];
 
 // ── Parse args ────────────────────────────────────────────────────────────────
 
@@ -30,6 +89,8 @@ function parseArgs(): {
   name: string;
   slug: string;
   adminEmail: string;
+  adminPassword: string;
+  generatedPassword: boolean;
   plan: string;
   maxProperties: number;
 } {
@@ -48,7 +109,9 @@ function parseArgs(): {
 
   if (!name || !slug || !adminEmail) {
     console.error("Usage: provision-tenant --name <name> --slug <slug> --admin-email <email>");
-    console.error("  Optional: --plan <standard|enterprise|trial> --max-properties <n>");
+    console.error(
+      "  Optional: --admin-password <temporary-password> --plan <standard|enterprise|trial> --max-properties <n>"
+    );
     process.exit(1);
   }
 
@@ -64,6 +127,8 @@ function parseArgs(): {
     name,
     slug,
     adminEmail,
+    adminPassword: map.get("admin-password") ?? crypto.randomBytes(18).toString("base64url"),
+    generatedPassword: !map.has("admin-password"),
     plan: map.get("plan") ?? "standard",
     maxProperties: parseInt(map.get("max-properties") ?? "10", 10)
   };
@@ -98,6 +163,38 @@ function buildDbUrl(
   return `postgresql://${user}:${encodeURIComponent(password)}@${host}:${port}/${database}`;
 }
 
+async function ensureTenantAdminRole(tenantClient: PrismaClient) {
+  const role = await tenantClient.role.upsert({
+    where: { code: "TENANT_ADMIN" },
+    update: {
+      name: "Tenant Administrator",
+      description: "Full system access - manages users, roles, entities, and all modules",
+      isSystem: true
+    },
+    create: {
+      code: "TENANT_ADMIN",
+      name: "Tenant Administrator",
+      description: "Full system access - manages users, roles, entities, and all modules",
+      isSystem: true
+    }
+  });
+
+  for (const code of SYSTEM_PERMISSION_CODES) {
+    const permission = await tenantClient.permission.upsert({
+      where: { code },
+      update: {},
+      create: { code, description: code.replace(/_/g, " "), category: "System" }
+    });
+    await tenantClient.rolePermission.upsert({
+      where: { roleId_permissionId: { roleId: role.id, permissionId: permission.id } },
+      update: {},
+      create: { roleId: role.id, permissionId: permission.id }
+    });
+  }
+
+  return role;
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -109,7 +206,7 @@ async function main() {
     process.exit(1);
   }
 
-  const registry = new PrismaClient({ datasourceUrl: registryUrl });
+  const registry = new RegistryPrismaClient({ datasourceUrl: registryUrl });
 
   console.log(`\n=== Provisioning tenant: ${config.name} (${config.slug}) ===\n`);
 
@@ -212,6 +309,11 @@ async function main() {
     data: {
       name: config.name,
       slug: config.slug,
+      tenantCode: crypto
+        .createHash("sha256")
+        .update(config.slug + ":" + Date.now() + ":" + Math.random())
+        .digest("hex")
+        .substring(0, 8),
       databaseUrl: tenantDbUrl,
       adminEmail: config.adminEmail,
       plan: config.plan,
@@ -225,13 +327,32 @@ async function main() {
 
   // 7. Create admin user in tenant database
   console.log("\n5. Creating admin user...");
-  await tenantClient.user.create({
-    data: {
-      email: config.adminEmail,
+  const tenantAdminRole = await ensureTenantAdminRole(tenantClient);
+  const passwordHash = await bcrypt.hash(config.adminPassword, 12);
+  const adminUser = await tenantClient.user.upsert({
+    where: { email: config.adminEmail.toLowerCase() },
+    update: {
       name: config.name + " Admin",
+      passwordHash,
+      mustChangePassword: true,
+      isActive: true
+    },
+    create: {
+      email: config.adminEmail.toLowerCase(),
+      name: config.name + " Admin",
+      passwordHash,
+      mustChangePassword: true,
       isActive: true
     }
   });
+  const existingRole = await tenantClient.userRole.findFirst({
+    where: { userId: adminUser.id, roleId: tenantAdminRole.id, entityId: null }
+  });
+  if (!existingRole) {
+    await tenantClient.userRole.create({
+      data: { userId: adminUser.id, roleId: tenantAdminRole.id, entityId: null }
+    });
+  }
   console.log(`   Admin user created: ${config.adminEmail}`);
 
   await tenantClient.$disconnect();
@@ -241,10 +362,15 @@ async function main() {
   console.log(`  ID: ${tenant.id}`);
   console.log(`  Database: ${tenantDbName}`);
   console.log(`  URL: ${tenantDbUrl}`);
+  if (config.generatedPassword) {
+    console.log(`  Temporary admin password: ${config.adminPassword}`);
+  }
   console.log(`\nNext steps:`);
-  console.log(`  1. Add tenant_slug="${config.slug}" to Keycloak user attributes`);
-  console.log(`  2. Set X-Tenant-Slug: ${config.slug} header in API requests`);
-  console.log(`  3. Run seed-uat.ts with DATABASE_URL=${tenantDbUrl} to populate demo data`);
+  console.log(`  1. Sign in at /t/${tenant.tenantCode}/login with ${config.adminEmail}`);
+  console.log(`  2. Change the temporary password on first login`);
+  console.log(
+    `  3. Run seed-uat.ts with DATABASE_URL=${tenantDbUrl} to populate demo data if needed`
+  );
 }
 
 main().catch((error) => {

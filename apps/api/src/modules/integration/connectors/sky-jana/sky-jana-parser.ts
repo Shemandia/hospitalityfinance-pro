@@ -93,12 +93,12 @@ export function extractJanaVouchers(result: SAFParseResult): JanaPurchasingVouch
     const expenseDebits = debits.filter((l) => !l.accountCode.startsWith("23"));
     const vatDebits = debits.filter((l) => l.accountCode.startsWith("23"));
 
-    const totalDebits = debits.reduce((s, l) => s + l.amount, 0);
-    const totalCredits = credits.reduce((s, l) => s + l.amount, 0);
+    const totalDebits = debits.reduce((s, l) => s + Number(l.amount), 0);
+    const totalCredits = credits.reduce((s, l) => s + Number(l.amount), 0);
 
     const expenseLines: JanaExpenseLine[] = expenseDebits.map((l, i) => ({
       accountCode: l.accountCode,
-      amount: l.amount,
+      amount: Number(l.amount),
       description: l.description,
       department: l.t1,
       vatRate: l.t0,
@@ -107,14 +107,14 @@ export function extractJanaVouchers(result: SAFParseResult): JanaPurchasingVouch
 
     const vendorLines: JanaVendorLine[] = credits.map((l, i) => ({
       vendorCode: l.accountCode,
-      amount: l.amount,
+      amount: Number(l.amount),
       description: l.description,
       reference: l.transactionReference,
       lineNumber: i + 1
     }));
 
-    const totalVAT = vatDebits.reduce((s, l) => s + l.amount, 0);
-    const totalNet = expenseDebits.reduce((s, l) => s + l.amount, 0);
+    const totalVAT = vatDebits.reduce((s, l) => s + Number(l.amount), 0);
+    const totalNet = expenseDebits.reduce((s, l) => s + Number(l.amount), 0);
 
     vouchers.push({
       reference: ref,

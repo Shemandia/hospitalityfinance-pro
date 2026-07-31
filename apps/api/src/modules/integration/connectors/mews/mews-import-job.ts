@@ -14,11 +14,18 @@
  * Email notification on completion.
  */
 
-import { Prisma, type PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "../../../../db/client.js";
 import { MewsClient, getMewsCredentials } from "./mews-client.js";
 import { mapMewsToGL } from "./mews-mapper.js";
 import { sendEmail } from "../../../../shared/email.js";
+import {
+  getOrCreateSuspenseAccount,
+  computeImbalance,
+  suspensePlugSides,
+  assertBalanced
+} from "../shared/suspense.js";
 
+import { applyBalanceDeltas } from "../../../../db/balance-writer.js";
 type ImportInput = {
   entityId: string;
   startUtc: string; // ISO 8601 e.g. "2025-03-20T00:00:00Z"
@@ -155,6 +162,17 @@ export async function runMewsImport(
     // ── Build journal lines ───────────────────────────────────────────────
     let journalId: string | null = null;
 
+    // F14: if there is revenue to post but the cash/settlement anchor account is
+    // missing, FAIL loudly — do not fall through to the "no journal" branch and
+    // mark the import SUCCESS while posting nothing. The catch block records this
+    // as FAILED with an actionable message.
+    if (mapped.length > 0 && !cashSettlement) {
+      throw new Error(
+        "Cannot post Mews import: no cash/settlement account found " +
+          "(expected code 1010 or 1000 with allowPosting=true). Create it before importing."
+      );
+    }
+
     if (mapped.length > 0 && cashSettlement) {
       let lineNumber = 1;
       const lines: Array<{
@@ -223,6 +241,27 @@ export async function runMewsImport(
         });
       }
 
+      // F3: the debit (cash settlement = full revenue + tax) can exceed the
+      // credits when a category is unmapped or the tax account is missing, which
+      // would post an out-of-balance journal. Park any residual in Import Suspense
+      // so the journal always balances; finance clears it later.
+      const plug = suspensePlugSides(computeImbalance(lines));
+      if (plug) {
+        const suspense = await getOrCreateSuspenseAccount(prisma, input.entityId);
+        lines.push({
+          accountId: suspense.id,
+          debit: plug.debit,
+          credit: plug.credit,
+          currency: txCurrency,
+          fxRate,
+          debitFunctional: plug.debit.mul(fxRate),
+          creditFunctional: plug.credit.mul(fxRate),
+          description: `Import suspense — unmapped categories / missing accounts (${unmapped.length} unmapped)`,
+          lineNumber: lineNumber++
+        });
+      }
+      assertBalanced(lines, `Mews journal ${businessDate}`);
+
       // ── Create journal, update balances, and mark import log SUCCESS ──
       await prisma.$transaction(async (tx) => {
         const journal = await tx.journal.create({
@@ -243,31 +282,18 @@ export async function runMewsImport(
         journalId = journal.id;
 
         // ── Update account balances ───────────────────────────────────
-        for (const line of lines) {
-          await tx.accountPeriodBalance.upsert({
-            where: {
-              entityId_accountId_periodId: {
-                entityId: input.entityId,
-                accountId: line.accountId,
-                periodId: period.id
-              }
-            },
-            create: {
-              entityId: input.entityId,
-              accountId: line.accountId,
-              periodId: period.id,
-              openingBalance: new Prisma.Decimal(0),
-              periodDebits: line.debitFunctional,
-              periodCredits: line.creditFunctional,
-              closingBalance: line.debitFunctional.sub(line.creditFunctional)
-            },
-            update: {
-              periodDebits: { increment: line.debitFunctional },
-              periodCredits: { increment: line.creditFunctional },
-              closingBalance: { increment: line.debitFunctional.sub(line.creditFunctional) }
-            }
-          });
-        }
+        // Canonical signed writer — this used to write `debit - credit`
+        // unsigned, moving every credit-normal account the wrong way.
+        await applyBalanceDeltas(
+          tx,
+          input.entityId,
+          period.id,
+          lines.map((line) => ({
+            accountId: line.accountId,
+            debitFunctional: line.debitFunctional,
+            creditFunctional: line.creditFunctional
+          }))
+        );
 
         // ── Update import log ─────────────────────────────────────────
         await tx.importLog.update({

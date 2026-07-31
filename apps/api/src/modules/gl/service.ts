@@ -59,15 +59,9 @@ type PostingJournal = {
   }>;
 };
 
-export class GLServiceError extends Error {
-  constructor(
-    public readonly code: string,
-    message: string,
-    public readonly statusCode = 400
-  ) {
-    super(message);
-  }
-}
+import { ServiceError } from "../../shared/service-error.js";
+
+export class GLServiceError extends ServiceError {}
 
 export class GLService {
   constructor(private readonly prisma: PrismaClient) {}
@@ -153,7 +147,22 @@ export class GLService {
 
   async updateAccount(entityId: string, id: string, input: AccountUpdateInput) {
     const repository = this.repository(this.prisma);
-    await this.getAccount(entityId, id);
+    const existing = await this.getAccount(entityId, id);
+
+    // Account type is immutable once transactions have been posted to the account.
+    // This matches SunSystems Memo-account semantics and prevents silently corrupting
+    // historical balances when flipping between financial and statistical types.
+    if (input.type && input.type !== existing.type) {
+      const usageCount = await repository.countJournalLinesByAccount(entityId, id);
+      if (usageCount > 0) {
+        throw new GLServiceError(
+          "GL_ACCOUNT_TYPE_IMMUTABLE",
+          `Account ${existing.code} already has ${usageCount} posted journal line(s). ` +
+            `Account type cannot be changed once transactions exist.`,
+          409
+        );
+      }
+    }
 
     if (input.code) {
       const existing = await repository.findAccountByCode(entityId, input.code);
@@ -198,13 +207,37 @@ export class GLService {
     return { id, deleted: true };
   }
 
-  validateBalance(lines: JournalCreateInput["lines"]): void {
-    const totals = lines.reduce(
+  /**
+   * Validate that the sum of debits equals the sum of credits across `lines`.
+   *
+   * Statistics-only journals (every line posts to a STATISTICAL-type account)
+   * are memo entries with no GL impact, so they skip the balance check entirely —
+   * matching SunSystems Memo-account semantics. Mixed journals must balance on
+   * their non-statistical lines independently.
+   */
+  async validateBalance(entityId: string, lines: JournalCreateInput["lines"]): Promise<void> {
+    const accountIds = [...new Set(lines.map((l) => l.accountId))];
+    const accounts = accountIds.length
+      ? await this.repository(this.prisma).findAccountsByIds(entityId, accountIds)
+      : [];
+    const statAccountIds = new Set(
+      accounts.filter((a) => a.type === "STATISTICAL").map((a) => a.id)
+    );
+
+    const nonStatLines = lines.filter((l) => !statAccountIds.has(l.accountId));
+    if (nonStatLines.length === 0) {
+      return;
+    }
+
+    // Balance is asserted in FUNCTIONAL currency (amount × fxRate): a
+    // multi-currency journal that balances on raw transaction amounts can
+    // still be functionally imbalanced, which corrupts account balances and
+    // deadlocks hard close (GL-1, audit 2026-07-08).
+    const totals = nonStatLines.reduce(
       (acc, line) => {
-        const debit = new Prisma.Decimal(line.debit);
-        const credit = new Prisma.Decimal(line.credit);
-        acc.debit = acc.debit.add(debit);
-        acc.credit = acc.credit.add(credit);
+        const rate = new Prisma.Decimal(line.fxRate ?? "1");
+        acc.debit = acc.debit.add(new Prisma.Decimal(line.debit).mul(rate));
+        acc.credit = acc.credit.add(new Prisma.Decimal(line.credit).mul(rate));
         return acc;
       },
       {
@@ -216,17 +249,21 @@ export class GLService {
     if (totals.debit.toDecimalPlaces(4).equals(totals.credit.toDecimalPlaces(4)) === false) {
       throw new GLServiceError(
         "GL_UNBALANCED_JOURNAL",
-        `Journal is unbalanced. Debits=${totals.debit.toFixed(4)}, Credits=${totals.credit.toFixed(4)}.`,
+        `Journal is unbalanced in functional currency. Functional debits=${totals.debit.toFixed(4)}, credits=${totals.credit.toFixed(4)}.`,
         422
       );
     }
   }
 
   private computeJournalAmount(lines: JournalCreateInput["lines"]): Prisma.Decimal {
-    return lines.reduce((total, line) => {
-      const debitFunctional = new Prisma.Decimal(line.debit).mul(new Prisma.Decimal(line.fxRate));
-      return total.add(debitFunctional.abs());
-    }, new Prisma.Decimal(0));
+    const ZERO = new Prisma.Decimal(0);
+    const totalDebit = lines.reduce((sum, line) => {
+      return sum.add(new Prisma.Decimal(line.debit).mul(new Prisma.Decimal(line.fxRate)).abs());
+    }, ZERO);
+    const totalCredit = lines.reduce((sum, line) => {
+      return sum.add(new Prisma.Decimal(line.credit).mul(new Prisma.Decimal(line.fxRate)).abs());
+    }, ZERO);
+    return Prisma.Decimal.max(totalDebit, totalCredit);
   }
 
   private toJournalInputLines(journal: PostingJournal): JournalCreateInput["lines"] {
@@ -269,7 +306,7 @@ export class GLService {
       );
     }
 
-    this.validateBalance(this.toJournalInputLines(journal));
+    await this.validateBalance(journal.entityId, this.toJournalInputLines(journal));
 
     // Conditional update: only succeeds if journal is still in expected state
     const result = await repository.setJournalStatusConditional(
@@ -287,16 +324,16 @@ export class GLService {
       );
     }
 
-    for (const line of journal.lines) {
-      await repository.updateAccountBalance(
-        journal.entityId,
-        line.accountId,
-        journal.periodId,
-        line.debitFunctional,
-        line.creditFunctional,
-        line.account.type
-      );
-    }
+    await repository.batchUpdateAccountBalances(
+      journal.entityId,
+      journal.periodId,
+      journal.lines.map((line) => ({
+        accountId: line.accountId,
+        debitFunctional: line.debitFunctional,
+        creditFunctional: line.creditFunctional,
+        accountType: line.account.type
+      }))
+    );
   }
 
   /**
@@ -399,11 +436,11 @@ export class GLService {
       }
     }
 
-    // Skip balance validation for statistical types
-    if (!jt.requireBalance) {
-      // Don't validate balance — statistical journals are intentionally unbalanced
-    } else {
-      this.validateBalance(input.lines);
+    // Skip balance validation for statistical journal types.
+    // validateBalance itself also short-circuits for statistics-only journals
+    // so account-level memo semantics still hold if requireBalance is left on.
+    if (jt.requireBalance) {
+      await this.validateBalance(entityId, input.lines);
     }
 
     // Auto-generate reference from type prefix + sequence
@@ -657,16 +694,16 @@ export class GLService {
 
         // Reverse account balances if journal was already posted
         if (journal.status === "POSTED") {
-          for (const line of journal.lines) {
-            await repository.updateAccountBalance(
-              entityId,
-              line.accountId,
-              journal.periodId,
-              line.creditFunctional, // swapped: credits become debits
-              line.debitFunctional, // swapped: debits become credits
-              line.account.type
-            );
-          }
+          await repository.batchUpdateAccountBalances(
+            entityId,
+            journal.periodId,
+            journal.lines.map((line: any) => ({
+              accountId: line.accountId,
+              debitFunctional: line.creditFunctional, // swapped: credits become debits
+              creditFunctional: line.debitFunctional, // swapped: debits become credits
+              accountType: line.account.type
+            }))
+          );
         }
 
         await repository.setJournalStatus(entityId, journalId, "DRAFT", null);

@@ -1,4 +1,5 @@
 import { Prisma, PrismaClient } from "../../db/client.js";
+import { withBypassRLS } from "../../db/rls-bypass.js";
 import { ServiceError } from "../../shared/service-error.js";
 
 export class ConsolidationServiceError extends ServiceError {}
@@ -193,6 +194,47 @@ export class ConsolidationService {
       }
     }
 
+    // ── Rate preflight ───────────────────────────────────────────────────────
+    // Refuse to consolidate at all if any child needs translation and lacks a
+    // rate. This previously fell back to 1:1 with a warning, which silently
+    // overstated a TZS child in a USD group by roughly 2,500x — a consolidated
+    // balance sheet that looks plausible and is wrong by orders of magnitude is
+    // far more dangerous than no report.
+    // Populated per child below; eliminations reuse these so they translate at
+    // exactly the rates their entity's balances were translated at.
+    const entityRates = new Map<
+      string,
+      { closingRate: Prisma.Decimal; averageRate: Prisma.Decimal }
+    >();
+
+    const missingRates: string[] = [];
+    for (const childEntityId of request.childEntityIds) {
+      const childEntity = childEntityMap.get(childEntityId);
+      if (!childEntity) continue;
+      const localCurrency = childEntity.functionalCurrency;
+      if (localCurrency === request.reportingCurrency) continue;
+
+      const rates = fxRatesMap.get(localCurrency);
+      if (!rates || rates.closing.isZero() || rates.average.isZero()) {
+        const missing = [
+          !rates || rates.closing.isZero() ? "CLOSING" : null,
+          !rates || rates.average.isZero() ? "AVERAGE" : null
+        ].filter(Boolean);
+        missingRates.push(
+          `${childEntity.name}: ${localCurrency}/${request.reportingCurrency} (${missing.join(" and ")})`
+        );
+      }
+    }
+    if (missingRates.length > 0) {
+      throw new ConsolidationServiceError(
+        "CONSOLIDATION_MISSING_FX_RATES",
+        `Cannot consolidate: FX rates are missing for ${missingRates.length} entity/currency ` +
+          `combination(s) — ${missingRates.join("; ")}. Enter the rates for this period first. ` +
+          `Balances are no longer translated at 1:1 when a rate is absent.`,
+        422
+      );
+    }
+
     // ── Process each child entity ────────────────────────────────────────────
     for (const childEntityId of request.childEntityIds) {
       const childEntity = childEntityMap.get(childEntityId);
@@ -205,16 +247,14 @@ export class ConsolidationService {
       let averageRate = new Prisma.Decimal(1);
 
       if (needsTranslation) {
-        const rates = fxRatesMap.get(localCurrency);
-        if (!rates || rates.closing.isZero() || rates.average.isZero()) {
-          eliminationWarnings.push(
-            `Missing FX rates for ${localCurrency}/${request.reportingCurrency} — entity ${childEntity.name} translated at 1:1`
-          );
-        } else {
-          closingRate = rates.closing;
-          averageRate = rates.average;
-        }
+        // Guaranteed present by the preflight above.
+        const rates = fxRatesMap.get(localCurrency)!;
+        closingRate = rates.closing;
+        averageRate = rates.average;
       }
+
+      // Rates each child was translated at, so eliminations can use the same.
+      entityRates.set(childEntityId, { closingRate, averageRate });
 
       // Get trial balance for this child entity (uses materialized view — must stay per-entity)
       const trialBalance = await this.prisma.$queryRaw<EntityTrialBalanceRow[]>`
@@ -295,29 +335,65 @@ export class ConsolidationService {
       });
     }
 
-    // Identify and eliminate inter-company balances (dimension1 tagged as IC)
-    const intercompanyLines = await this.prisma.journalLine.findMany({
-      where: {
-        journal: {
-          entityId: { in: request.childEntityIds },
-          periodId: request.periodId
+    // Identify and eliminate inter-company balances (dimension1 tagged as IC).
+    //
+    // Bypasses RLS for the same reason the balance read does. This filters on
+    // journal.entityId, and `journals` is entity-scoped, so running in the
+    // PARENT's context hid every CHILD journal and the query returned nothing —
+    // eliminations silently did not happen at all. Child balances are already
+    // read through mv_period_account_balances, which has no RLS;
+    // assertChildrenAreSubsidiaries above is the access boundary for both.
+    const intercompanyLines = await withBypassRLS(this.prisma, async (tx: any) =>
+      tx.journalLine.findMany({
+        where: {
+          journal: {
+            entityId: { in: request.childEntityIds },
+            periodId: request.periodId
+          },
+          dimension1: "INTERCOMPANY"
         },
-        dimension1: "INTERCOMPANY"
-      },
-      include: {
-        journal: { select: { entityId: true } },
-        account: true
-      }
-    });
+        include: {
+          journal: { select: { entityId: true } },
+          account: true
+        }
+      })
+    );
 
+    // Aggregate intercompany balances into REPORTING currency.
+    //
+    // Two defects lived here. The net line was summed in the posting entity's
+    // FUNCTIONAL currency and then subtracted from a reporting-currency figure,
+    // so eliminating a TZS intercompany balance from a USD consolidation was
+    // out by the exchange rate itself. And the lines were grouped by account
+    // alone, across every child, so there was no single rate that could have
+    // been applied even in principle — each child translates at its own.
+    //
+    // The sign was wrong too: consolidatedAmount accumulates
+    // normal-balance-positive translated balances, while debit - credit is
+    // natural-sign. For a credit-normal intercompany payable the two disagree,
+    // so the "elimination" increased the balance instead of removing it.
     const icGrouped = new Map<string, Prisma.Decimal>();
     for (const line of intercompanyLines) {
-      const key = `${line.accountId}`;
-      const current = icGrouped.get(key) ?? new Prisma.Decimal(0);
-      const netLine = new Prisma.Decimal(line.debitFunctional).sub(
+      const postingEntityId = line.journal.entityId;
+      const rates = entityRates.get(postingEntityId);
+      if (!rates) continue; // line belongs to an entity outside this run
+
+      // Same rate rule as the trial balance: closing for balance-sheet
+      // accounts, average for income and expense.
+      const isBalanceSheet = ["ASSET", "LIABILITY", "EQUITY"].includes(line.account.type);
+      const rate = isBalanceSheet ? rates.closingRate : rates.averageRate;
+
+      // Natural sign, then normalised to normal-balance-positive to match the
+      // convention consolidatedAmount is accumulated in.
+      const naturalNet = new Prisma.Decimal(line.debitFunctional).sub(
         new Prisma.Decimal(line.creditFunctional)
       );
-      icGrouped.set(key, current.add(netLine));
+      const sign = line.account.normalBalance === "DEBIT" ? 1 : -1;
+      const normalised = naturalNet.mul(sign);
+
+      const key = line.accountId;
+      const current = icGrouped.get(key) ?? new Prisma.Decimal(0);
+      icGrouped.set(key, current.add(normalised.mul(rate)));
     }
 
     for (const [accountId, icBalance] of icGrouped) {
@@ -335,28 +411,40 @@ export class ConsolidationService {
       }
     }
 
-    // Persist the run
-    const run = await this.prisma.consolidationRun.create({
-      data: {
-        parentEntityId: request.parentEntityId,
-        reportingCurrency: request.reportingCurrency,
-        periodId: request.periodId,
-        status: "COMPLETE",
-        runAt: new Date(),
-        eliminationJournals: Object.fromEntries(icGrouped) as Prisma.InputJsonValue,
-        entityResults: {
-          create: entityResults.map((er) => ({
-            entityId: er.entityId,
-            localCurrency: er.localCurrency,
-            closingRate: er.closingRate,
-            averageRate: er.averageRate,
-            translatedDebits: er.translatedDebits,
-            translatedCredits: er.translatedCredits,
-            ctaAmount: er.ctaAmount
-          }))
+    // Persist the run.
+    //
+    // consolidation_run_entities is entity-scoped under RLS, so each row must
+    // satisfy entity_id = app_current_entity_id(). A consolidation necessarily
+    // runs in the PARENT's context while writing one row per CHILD, so every
+    // insert was rejected with 42501 and no consolidation could be saved at all.
+    //
+    // The access boundary for this operation is assertChildrenAreSubsidiaries
+    // above, which already refuses any child that is not a strict descendant of
+    // the parent — the same boundary the service relies on when reading child
+    // balances through mv_period_account_balances, which has no RLS either.
+    const run = await withBypassRLS(this.prisma, async (tx: any) =>
+      tx.consolidationRun.create({
+        data: {
+          parentEntityId: request.parentEntityId,
+          reportingCurrency: request.reportingCurrency,
+          periodId: request.periodId,
+          status: "COMPLETE",
+          runAt: new Date(),
+          eliminationJournals: Object.fromEntries(icGrouped) as Prisma.InputJsonValue,
+          entityResults: {
+            create: entityResults.map((er) => ({
+              entityId: er.entityId,
+              localCurrency: er.localCurrency,
+              closingRate: er.closingRate,
+              averageRate: er.averageRate,
+              translatedDebits: er.translatedDebits,
+              translatedCredits: er.translatedCredits,
+              ctaAmount: er.ctaAmount
+            }))
+          }
         }
-      }
-    });
+      })
+    );
 
     return {
       runId: run.id,

@@ -9,9 +9,10 @@
  * the correct tenant's database — NO changes needed to services or repositories.
  */
 
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient } from "./client.js";
 import { createEntityScopeExtension } from "./entityScope.js";
 import { getRequestContext } from "./requestContext.js";
+import { registerRLSMiddleware } from "./rlsMiddleware.js";
 import { registerAuditMiddleware } from "./auditMiddleware.js";
 
 // ── Pool (LRU-bounded) ──────────────────────────────────────────────────────
@@ -26,6 +27,8 @@ const lastAccess = new Map<string, number>();
 function createTenantClient(databaseUrl: string) {
   const base = new PrismaClient({ datasourceUrl: databaseUrl });
 
+  // RLS first, then audit (audit runs inside the RLS transaction)
+  registerRLSMiddleware(base, () => getRequestContext().entityId);
   registerAuditMiddleware(base, () => getRequestContext().entityId);
 
   // Entity scope extension

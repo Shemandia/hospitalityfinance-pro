@@ -3,28 +3,38 @@
  *
  * Exports `prisma` which resolves per-request to the correct tenant's database.
  * When a tenant context is set (via requestContext), it uses the tenant pool.
- * Otherwise it falls back to the default DATABASE_URL (registry/dev database).
+ * Otherwise it falls back to the default DATABASE_URL (dev database).
  *
  * Existing code that imports `prisma` works unchanged — the proxy transparently
  * routes to the correct PrismaClient based on the current request context.
+ *
+ * Two distinct Prisma clients:
+ * - Tenant client (from schema-tenant.prisma): business data models
+ * - Registry client (from schema-registry.prisma): tenant management models
  */
 
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient as TenantPrismaClient } from "./generated/tenant/index.js";
+import { PrismaClient as RegistryPrismaClient } from "./generated/registry/index.js";
 import { createEntityScopeExtension } from "./entityScope.js";
 import { getRequestContext } from "./requestContext.js";
 import { getTenantClient } from "./tenantPool.js";
+import { registerRLSMiddleware } from "./rlsMiddleware.js";
 import { registerAuditMiddleware } from "./auditMiddleware.js";
 
 let fallbackEntityContext: string | null = null;
 
-// ── Default client (registry DB / dev fallback) ─────────────────────────────
+// ── Default tenant client (dev fallback) ───────────────────────────────────
 
-const baseClient = new PrismaClient();
+const baseClient = new TenantPrismaClient();
 
 function getEntityFromContext(): string | null {
   return getRequestContext().entityId ?? fallbackEntityContext;
 }
 
+// Order matters: RLS middleware wraps writes in a transaction that sets
+// app.current_entity_id.  Audit middleware runs INSIDE that transaction
+// so it inherits the RLS context and can write audit_events.
+registerRLSMiddleware(baseClient, () => getEntityFromContext());
 registerAuditMiddleware(baseClient, () => getEntityFromContext());
 
 export function setEntityContext(entityId: string | null): void {
@@ -33,9 +43,15 @@ export function setEntityContext(entityId: string | null): void {
 
 const defaultClient = baseClient.$extends(createEntityScopeExtension(() => getEntityFromContext()));
 
+// ── Registry client (shared registry DB) ───────────────────────────────────
+
+const registryBaseClient = new RegistryPrismaClient({
+  datasourceUrl: process.env.REGISTRY_DATABASE_URL ?? process.env.DATABASE_URL
+});
+
 // ── Tenant-aware proxy ──────────────────────────────────────────────────────
 // When tenantSlug + tenantDbUrl are set in request context, route to that
-// tenant's PrismaClient. Otherwise use the default (registry/dev) client.
+// tenant's PrismaClient. Otherwise use the default (dev) client.
 
 type PrismaLike = typeof defaultClient;
 
@@ -73,7 +89,7 @@ export const prisma: PrismaLike = new Proxy(defaultClient, {
 }) as PrismaLike;
 
 /**
- * Direct access to the registry/default client (bypasses tenant routing).
- * Used by tenant management endpoints and health checks.
+ * Direct access to the registry client (bypasses tenant routing).
+ * Used by tenant management, provisioning, and platform admin endpoints.
  */
-export const registryPrisma = defaultClient;
+export const registryPrisma = registryBaseClient;

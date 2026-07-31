@@ -1,14 +1,7 @@
-import { Prisma, type PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "../../db/client.js";
+import { ServiceError } from "../../shared/service-error.js";
 
-export class KPIServiceError extends Error {
-  constructor(
-    public readonly code: string,
-    message: string,
-    public readonly statusCode = 400
-  ) {
-    super(message);
-  }
-}
+export class KPIServiceError extends ServiceError {}
 
 export interface KPIRequest {
   entityId: string;
@@ -188,11 +181,10 @@ export class KPIService {
       usali_department: string | null;
     };
     const balances = await this.prisma.$queryRaw<BalanceRow[]>`
-      SELECT a.code, apb.closing_balance, a.type as account_type, a.usali_department
-      FROM account_period_balances apb
-      JOIN accounts a ON a.id = apb.account_id
-      WHERE apb.entity_id = ${req.entityId}
-        AND apb.period_id = ${req.periodId}
+      SELECT account_code AS code, closing_balance, account_type, usali_department
+      FROM mv_period_account_balances
+      WHERE "entityId" = ${req.entityId}
+        AND "periodId" = ${req.periodId}
     `;
 
     // Classify by account type + usali_department, with code-prefix fallback
@@ -285,13 +277,13 @@ export class KPIService {
       closing_balance: Prisma.Decimal;
     };
     const rows = await this.prisma.$queryRaw<BSRow[]>`
-      SELECT a.id, a.code, a.name, a.type as account_type, apb.closing_balance
-      FROM account_period_balances apb
-      JOIN accounts a ON a.id = apb.account_id
-      WHERE apb.entity_id = ${req.entityId}
-        AND apb.period_id = ${req.periodId}
-        AND a.type IN ('ASSET', 'LIABILITY', 'EQUITY')
-      ORDER BY a.code
+      SELECT "accountId" AS id, account_code AS code, account_name AS name,
+             account_type, closing_balance
+      FROM mv_period_account_balances
+      WHERE "entityId" = ${req.entityId}
+        AND "periodId" = ${req.periodId}
+        AND account_type IN ('ASSET', 'LIABILITY', 'EQUITY')
+      ORDER BY account_code
     `;
 
     const groupBy = (type: string): BalanceSheetSection[] => {
@@ -362,13 +354,12 @@ export class KPIService {
       closing_balance: Prisma.Decimal;
     };
     const rows = await this.prisma.$queryRaw<CFRow[]>`
-      SELECT a.code, a.name, a.type as account_type,
-             apb.period_debits, apb.period_credits, apb.closing_balance
-      FROM account_period_balances apb
-      JOIN accounts a ON a.id = apb.account_id
-      WHERE apb.entity_id = ${req.entityId}
-        AND apb.period_id = ${req.periodId}
-      ORDER BY a.code
+      SELECT account_code AS code, account_name AS name, account_type,
+             period_debits, period_credits, closing_balance
+      FROM mv_period_account_balances
+      WHERE "entityId" = ${req.entityId}
+        AND "periodId" = ${req.periodId}
+      ORDER BY account_code
     `;
 
     const netIncome = rows

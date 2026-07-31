@@ -1,0 +1,39 @@
+# Worker supervisor — runs all background workers with auto-restart
+# Uses the same build as the API Dockerfile
+FROM node:22-alpine AS builder
+
+RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
+
+WORKDIR /app
+
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY apps/api/package.json apps/api/
+COPY packages/ packages/
+
+RUN pnpm install --frozen-lockfile
+
+COPY apps/api/ apps/api/
+
+RUN pnpm --filter @hfp/api db:generate
+RUN pnpm --filter @hfp/api build
+RUN pnpm prune --prod
+
+FROM node:22-alpine AS runtime
+
+RUN apk add --no-cache tini
+
+ENV NODE_ENV=production
+WORKDIR /app
+
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/apps/api/node_modules ./apps/api/node_modules
+COPY --from=builder /app/apps/api/dist ./apps/api/dist
+COPY --from=builder /app/apps/api/package.json ./apps/api/
+COPY --from=builder /app/apps/api/src/db/generated ./apps/api/src/db/generated
+COPY --from=builder /app/packages ./packages
+
+RUN addgroup -g 1001 -S hfp && adduser -S hfp -u 1001 -G hfp
+USER hfp
+
+ENTRYPOINT ["tini", "--"]
+CMD ["node", "apps/api/dist/jobs/worker-supervisor.js"]

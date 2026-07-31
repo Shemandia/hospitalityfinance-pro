@@ -1,4 +1,8 @@
-import type { PrismaClient } from "../../db/client.js";
+import { Prisma, type PrismaClient } from "../../db/client.js";
+
+const D = (v: unknown): Prisma.Decimal => new Prisma.Decimal(String(v ?? 0));
+const ZERO = new Prisma.Decimal(0);
+const HUNDRED = new Prisma.Decimal(100);
 import type {
   FALTemplate,
   FSLTemplate,
@@ -104,13 +108,13 @@ async function executeFAL(
   }
 
   // Get budget data if requested
-  const budgetMap = new Map<string, number>();
+  const budgetMap = new Map<string, Prisma.Decimal>();
   if (template.columns.includes("budget") && params.budgetDefinitionId) {
     const budgetLines = await (prisma as any).budgetLine.findMany({
       where: { budgetDefinitionId: params.budgetDefinitionId }
     });
     for (const bl of budgetLines) {
-      budgetMap.set(bl.accountId, Number(bl.amount));
+      budgetMap.set(bl.accountId, D(bl.amount));
     }
   }
 
@@ -148,24 +152,24 @@ async function executeFAL(
 
   for (const account of accounts) {
     const bal = balanceMap.get(account.id);
-    const opening = bal ? Number(bal.openingBalance) : 0;
-    const debit = bal ? Number(bal.periodDebits) : 0;
-    const credit = bal ? Number(bal.periodCredits) : 0;
-    const closing = bal ? Number(bal.closingBalance) : 0;
+    const opening = bal ? D(bal.openingBalance) : ZERO;
+    const debit = bal ? D(bal.periodDebits) : ZERO;
+    const credit = bal ? D(bal.periodCredits) : ZERO;
+    const closing = bal ? D(bal.closingBalance) : ZERO;
 
     if (
       !template.showZeroBalances &&
-      opening === 0 &&
-      debit === 0 &&
-      credit === 0 &&
-      closing === 0
+      opening.isZero() &&
+      debit.isZero() &&
+      credit.isZero() &&
+      closing.isZero()
     ) {
       continue;
     }
 
-    const budgetAmt = budgetMap.get(account.id) ?? 0;
-    const variance = closing - budgetAmt;
-    const variancePct = budgetAmt !== 0 ? (variance / Math.abs(budgetAmt)) * 100 : 0;
+    const budgetAmt = budgetMap.get(account.id) ?? ZERO;
+    const variance = closing.sub(budgetAmt);
+    const variancePct = !budgetAmt.isZero() ? variance.div(budgetAmt.abs()).mul(HUNDRED) : ZERO;
 
     const values: Record<string, number | null> = {};
     for (const col of template.columns) {
@@ -180,25 +184,25 @@ async function executeFAL(
           values.type = null;
           break;
         case "opening":
-          values.opening = opening;
+          values.opening = roundD2(opening);
           break;
         case "debit":
-          values.debit = debit;
+          values.debit = roundD2(debit);
           break;
         case "credit":
-          values.credit = credit;
+          values.credit = roundD2(credit);
           break;
         case "closing":
-          values.closing = closing;
+          values.closing = roundD2(closing);
           break;
         case "budget":
-          values.budget = budgetAmt;
+          values.budget = roundD2(budgetAmt);
           break;
         case "variance":
-          values.variance = variance;
+          values.variance = roundD2(variance);
           break;
         case "variancePct":
-          values.variancePct = round2(variancePct);
+          values.variancePct = roundD2(variancePct);
           break;
       }
     }
@@ -271,7 +275,7 @@ async function executeFSL(
   }
 
   // Budget data
-  let budgetMap: Map<string, number> | null = null;
+  let budgetMap: Map<string, Prisma.Decimal> | null = null;
   const needsBudget = template.columns.some(
     (c) =>
       c.type === "BUDGET" ||
@@ -369,12 +373,12 @@ async function executeFSL(
 
       for (let ci = 0; ci < template.columns.length; ci++) {
         const key = `col_${ci}`;
-        let sum = 0;
+        let sum = ZERO;
         for (const refRow of rowDef.sumRows) {
           const refVals = rowValuesMap.get(refRow);
-          if (refVals) sum += refVals[key] ?? 0;
+          if (refVals) sum = sum.add(D(refVals[key] ?? 0));
         }
-        colValues[key] = round2(sum);
+        colValues[key] = roundD2(sum);
       }
 
       rowValuesMap.set(ri, colValues);
@@ -393,7 +397,7 @@ async function executeFSL(
 
       for (let ci = 0; ci < template.columns.length; ci++) {
         const key = `col_${ci}`;
-        colValues[key] = round2(evaluateFormula(rowDef.formula, rowValuesMap, key));
+        colValues[key] = roundD2(evaluateFormulaDecimal(rowDef.formula, rowValuesMap, key));
       }
 
       rowValuesMap.set(ri, colValues);
@@ -471,10 +475,9 @@ async function executeFTL(
   let filteredLines = lines;
   if (template.amountMin !== undefined || template.amountMax !== undefined) {
     filteredLines = lines.filter((line: any) => {
-      const amount =
-        Math.abs(Number(line.debitFunctional ?? 0)) + Math.abs(Number(line.creditFunctional ?? 0));
-      if (template.amountMin !== undefined && amount < template.amountMin) return false;
-      if (template.amountMax !== undefined && amount > template.amountMax) return false;
+      const amount = D(line.debitFunctional).abs().add(D(line.creditFunctional).abs());
+      if (template.amountMin !== undefined && amount.lt(D(template.amountMin))) return false;
+      if (template.amountMax !== undefined && amount.gt(D(template.amountMax))) return false;
       return true;
     });
   }
@@ -498,8 +501,8 @@ async function executeFTL(
       reference: null,
       account: null,
       description: null,
-      debit: Number(line.debitFunctional ?? 0),
-      credit: Number(line.creditFunctional ?? 0),
+      debit: roundD2(D(line.debitFunctional)),
+      credit: roundD2(D(line.creditFunctional)),
       source: null
     },
     // Stash text fields in formatting metadata for frontend
@@ -518,11 +521,35 @@ async function executeFTL(
 // ── Helper Functions ────────────────────────────────────────────────────────
 
 type BalanceData = {
-  opening: number;
-  debit: number;
-  credit: number;
-  closing: number;
+  opening: Prisma.Decimal;
+  debit: Prisma.Decimal;
+  credit: Prisma.Decimal;
+  closing: Prisma.Decimal;
 };
+
+/**
+ * Convert a stored account_period_balances amount to NATURAL sign
+ * (debit balances positive, credit balances negative).
+ *
+ * The write path (`db/balance-writer.ts`) stores balances as positive
+ * magnitudes for BOTH normal sides — a revenue account with 50k credits stores
+ * closing_balance = +50000. The FSL templates, however, are written against the
+ * classic natural-sign convention (revenue/liability rows carry sign REVERSE to
+ * display positive). Reading the stored magnitude without this conversion
+ * rendered every credit-normal row sign-inverted on the Income Statement /
+ * Balance Sheet (RPT-C1, audit 2026-07-08). All FSL balance loading must go
+ * through this helper.
+ *
+ * Keyed on the account's normal balance, exactly as the writer signs it. It
+ * previously keyed on a hardcoded type-code list, which would read a custom
+ * account type back with the opposite sign to the one it was written with.
+ */
+export function storedBalanceToNatural(
+  stored: Prisma.Decimal,
+  normalBalance: string
+): Prisma.Decimal {
+  return normalBalance === "DEBIT" ? stored : stored.neg();
+}
 
 async function loadBalancesByCode(
   prisma: PrismaClient,
@@ -531,15 +558,15 @@ async function loadBalancesByCode(
 ): Promise<Map<string, BalanceData>> {
   const balances = await (prisma as any).accountPeriodBalance.findMany({
     where: { entityId, periodId },
-    include: { account: { select: { code: true } } }
+    include: { account: { select: { code: true, type: true } } }
   });
   const map = new Map<string, BalanceData>();
   for (const b of balances) {
     map.set(b.account.code, {
-      opening: Number(b.openingBalance),
-      debit: Number(b.periodDebits),
-      credit: Number(b.periodCredits),
-      closing: Number(b.closingBalance)
+      opening: storedBalanceToNatural(D(b.openingBalance), b.account.normalBalance),
+      debit: D(b.periodDebits),
+      credit: D(b.periodCredits),
+      closing: storedBalanceToNatural(D(b.closingBalance), b.account.normalBalance)
     });
   }
   return map;
@@ -553,14 +580,21 @@ async function loadBalancesByCodeMultiPeriod(
   if (periodIds.length === 0) return new Map();
   const balances = await (prisma as any).accountPeriodBalance.findMany({
     where: { entityId, periodId: { in: periodIds } },
-    include: { account: { select: { code: true } } }
+    include: { account: { select: { code: true, type: true } } }
   });
   const map = new Map<string, BalanceData>();
   for (const b of balances) {
-    const existing = map.get(b.account.code) ?? { opening: 0, debit: 0, credit: 0, closing: 0 };
-    existing.debit += Number(b.periodDebits);
-    existing.credit += Number(b.periodCredits);
-    existing.closing += Number(b.closingBalance);
+    const existing = map.get(b.account.code) ?? {
+      opening: ZERO,
+      debit: ZERO,
+      credit: ZERO,
+      closing: ZERO
+    };
+    existing.debit = existing.debit.add(D(b.periodDebits));
+    existing.credit = existing.credit.add(D(b.periodCredits));
+    existing.closing = existing.closing.add(
+      storedBalanceToNatural(D(b.closingBalance), b.account.normalBalance)
+    );
     map.set(b.account.code, existing);
   }
   return map;
@@ -570,15 +604,15 @@ async function loadBudgetByCode(
   prisma: PrismaClient,
   budgetDefId: string,
   month: number
-): Promise<Map<string, number>> {
+): Promise<Map<string, Prisma.Decimal>> {
   const lines = await (prisma as any).budgetLine.findMany({
     where: { budgetDefinitionId: budgetDefId, month },
     include: { account: { select: { code: true } } }
   });
-  const map = new Map<string, number>();
+  const map = new Map<string, Prisma.Decimal>();
   for (const l of lines) {
-    const existing = map.get(l.account.code) ?? 0;
-    map.set(l.account.code, existing + Number(l.amount));
+    const existing = map.get(l.account.code) ?? ZERO;
+    map.set(l.account.code, existing.add(D(l.amount)));
   }
   return map;
 }
@@ -589,26 +623,26 @@ function sumBalancesInRange(
   codeTo: string,
   field: keyof BalanceData,
   accountTypes?: string[]
-): number {
-  let sum = 0;
+): Prisma.Decimal {
+  let sum = ZERO;
   for (const [code, data] of balances) {
     if (code >= codeFrom && code <= codeTo) {
-      sum += data[field];
+      sum = sum.add(data[field]);
     }
   }
   return sum;
 }
 
 function sumBudgetInRange(
-  budgetMap: Map<string, number> | null,
+  budgetMap: Map<string, Prisma.Decimal> | null,
   codeFrom: string,
   codeTo: string
-): number {
-  if (!budgetMap) return 0;
-  let sum = 0;
+): Prisma.Decimal {
+  if (!budgetMap) return ZERO;
+  let sum = ZERO;
   for (const [code, amount] of budgetMap) {
     if (code >= codeFrom && code <= codeTo) {
-      sum += amount;
+      sum = sum.add(amount);
     }
   }
   return sum;
@@ -620,75 +654,78 @@ function computeAccountsColumnValue(
   periodBalances: Map<string, BalanceData>,
   ytdBalances: Map<string, BalanceData> | null,
   compBalances: Map<string, BalanceData> | null,
-  budgetMap: Map<string, number> | null
+  budgetMap: Map<string, Prisma.Decimal> | null
 ): number {
-  const sign = rowDef.sign === "REVERSE" ? -1 : 1;
+  const signMultiplier = rowDef.sign === "REVERSE" ? new Prisma.Decimal(-1) : new Prisma.Decimal(1);
   const from = rowDef.accountCodeFrom;
   const to = rowDef.accountCodeTo;
 
   switch (col.type) {
     case "PERIOD": {
       const val = sumBalancesInRange(periodBalances, from, to, "closing");
-      return round2(val * sign);
+      return roundD2(val.mul(signMultiplier));
     }
     case "YTD": {
       if (!ytdBalances) return 0;
       const val = sumBalancesInRange(ytdBalances, from, to, "closing");
-      return round2(val * sign);
+      return roundD2(val.mul(signMultiplier));
     }
     case "COMPARATIVE": {
       if (!compBalances) return 0;
       const val = sumBalancesInRange(compBalances, from, to, "closing");
-      return round2(val * sign);
+      return roundD2(val.mul(signMultiplier));
     }
     case "BUDGET": {
-      return round2(sumBudgetInRange(budgetMap, from, to) * sign);
+      return roundD2(sumBudgetInRange(budgetMap, from, to).mul(signMultiplier));
     }
     case "VARIANCE": {
-      const actual = sumBalancesInRange(periodBalances, from, to, "closing") * sign;
-      let base: number;
+      const actual = sumBalancesInRange(periodBalances, from, to, "closing").mul(signMultiplier);
+      let base: Prisma.Decimal;
       if (col.against === "BUDGET") {
-        base = sumBudgetInRange(budgetMap, from, to) * sign;
+        base = sumBudgetInRange(budgetMap, from, to).mul(signMultiplier);
       } else {
-        base = compBalances ? sumBalancesInRange(compBalances, from, to, "closing") * sign : 0;
+        base = compBalances
+          ? sumBalancesInRange(compBalances, from, to, "closing").mul(signMultiplier)
+          : ZERO;
       }
-      return round2(actual - base);
+      return roundD2(actual.sub(base));
     }
     case "VARIANCE_PCT": {
-      const actual = sumBalancesInRange(periodBalances, from, to, "closing") * sign;
-      let base: number;
+      const actual = sumBalancesInRange(periodBalances, from, to, "closing").mul(signMultiplier);
+      let base: Prisma.Decimal;
       if (col.against === "BUDGET") {
-        base = sumBudgetInRange(budgetMap, from, to) * sign;
+        base = sumBudgetInRange(budgetMap, from, to).mul(signMultiplier);
       } else {
-        base = compBalances ? sumBalancesInRange(compBalances, from, to, "closing") * sign : 0;
+        base = compBalances
+          ? sumBalancesInRange(compBalances, from, to, "closing").mul(signMultiplier)
+          : ZERO;
       }
-      if (base === 0) return 0;
-      return round2(((actual - base) / Math.abs(base)) * 100);
+      if (base.isZero()) return 0;
+      return roundD2(actual.sub(base).div(base.abs()).mul(HUNDRED));
     }
   }
 }
 
 /**
- * Evaluate a formula like "R0+R1-R4" or "R2+R3"
+ * Evaluate a formula like "R0+R1-R4" or "R2+R3" using Decimal arithmetic.
  * Rn refers to the computed value of row n for the given column key.
  */
-function evaluateFormula(
+function evaluateFormulaDecimal(
   formula: string,
   rowValuesMap: Map<number, Record<string, number>>,
   colKey: string
-): number {
-  // Parse formula tokens: R0, +, R1, -, R4, etc.
+): Prisma.Decimal {
   const tokens = formula.match(/[+\-]?R\d+/g);
-  if (!tokens) return 0;
+  if (!tokens) return ZERO;
 
-  let result = 0;
+  let result = ZERO;
   for (const token of tokens) {
     const match = token.match(/([+\-]?)R(\d+)/);
     if (!match) continue;
-    const sign = match[1] === "-" ? -1 : 1;
     const rowIdx = parseInt(match[2], 10);
     const rowVals = rowValuesMap.get(rowIdx);
-    result += sign * (rowVals?.[colKey] ?? 0);
+    const val = D(rowVals?.[colKey] ?? 0);
+    result = match[1] === "-" ? result.sub(val) : result.add(val);
   }
   return result;
 }
@@ -726,8 +763,9 @@ function getFTLOrderBy(sortBy: string, sortDirection: string) {
   }
 }
 
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
+/** Round a Prisma.Decimal to 2 decimal places and convert to number for JSON output */
+function roundD2(d: Prisma.Decimal): number {
+  return d.toDecimalPlaces(2).toNumber();
 }
 
 // ── System Report Definitions ───────────────────────────────────────────────
@@ -1025,7 +1063,13 @@ export const SYSTEM_DEFINITIONS: Array<{
           sign: "NATURAL",
           indent: 1
         },
-        { type: "FORMULA", label: "Rooms Departmental Income", formula: "R2-R3", bold: true },
+        {
+          type: "FORMULA",
+          label: "Rooms Departmental Income",
+          formula: "R2-R3",
+          bold: true,
+          underline: "SINGLE" as const
+        },
         { type: "BLANK" },
         // Food & Beverage
         { type: "HEADING", label: "Food & Beverage", level: 2 },
@@ -1053,7 +1097,13 @@ export const SYSTEM_DEFINITIONS: Array<{
           sign: "NATURAL",
           indent: 1
         },
-        { type: "FORMULA", label: "F&B Departmental Income", formula: "R7-R8-R9", bold: true },
+        {
+          type: "FORMULA",
+          label: "F&B Departmental Income",
+          formula: "R7-R8-R9",
+          bold: true,
+          underline: "SINGLE" as const
+        },
         { type: "BLANK" },
         // Other Operated
         { type: "HEADING", label: "Other Operated Departments", level: 2 },
@@ -1073,7 +1123,13 @@ export const SYSTEM_DEFINITIONS: Array<{
           sign: "NATURAL",
           indent: 1
         },
-        { type: "FORMULA", label: "Other Dept Income", formula: "R13-R14", bold: true },
+        {
+          type: "FORMULA",
+          label: "Other Dept Income",
+          formula: "R13-R14",
+          bold: true,
+          underline: "SINGLE" as const
+        },
         { type: "BLANK" },
         // Total Departmental
         {
@@ -1214,7 +1270,13 @@ export const SYSTEM_DEFINITIONS: Array<{
           sign: "NATURAL",
           indent: 1
         },
-        { type: "FORMULA", label: "Net Income", formula: "R1-R2", bold: false },
+        {
+          type: "FORMULA",
+          label: "Net Income",
+          formula: "R1-R2",
+          bold: false,
+          underline: "NONE" as const
+        },
         {
           type: "ACCOUNTS",
           label: "Change in Receivables",

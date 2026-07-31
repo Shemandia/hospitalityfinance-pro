@@ -1,12 +1,14 @@
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "../../db/client.js";
-import { z, ZodError } from "zod";
+import { z } from "zod";
 import { prisma } from "../../db/prisma.js";
 import { setEntityDbContext } from "../../db/tenantContext.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
 import { requireRole } from "../../middleware/requireRole.js";
-import { requireWriteAccess } from "../../middleware/requireWriteAccess.js";
-import { GLService, GLServiceError } from "./service.js";
+import { requirePermission } from "../../middleware/requirePermission.js";
+import { GLService } from "./service.js";
+import { mapError, requireEntityId } from "../../shared/router-utils.js";
+import { ServiceError } from "../../shared/service-error.js";
 import {
   accountCreateSchema,
   accountUpdateSchema,
@@ -26,7 +28,7 @@ import {
   type FileInput
 } from "./coa-import-service.js";
 
-import { RecurringJournalService, RecurringJournalError } from "./recurring-service.js";
+import { RecurringJournalService } from "./recurring-service.js";
 
 const recurringJournalSchema = z.object({
   name: z.string().min(1).max(200),
@@ -61,51 +63,9 @@ const recurringJournalSchema = z.object({
 const glService = new GLService(prisma as unknown as PrismaClient);
 const recurringService = new RecurringJournalService(prisma as unknown as PrismaClient);
 
-function mapError(reply: FastifyReply, error: unknown) {
-  if (error instanceof ZodError) {
-    return reply.code(400).send({
-      data: null,
-      errors: [
-        { code: "VALIDATION_ERROR", message: error.issues.map((issue) => issue.message).join("; ") }
-      ]
-    });
-  }
-
-  if (error instanceof GLServiceError || error instanceof RecurringJournalError) {
-    return reply.code(error.statusCode).send({
-      data: null,
-      errors: [{ code: error.code, message: error.message }]
-    });
-  }
-
-  const message = error instanceof Error ? error.message : "Unknown error";
-  const stack = error instanceof Error ? error.stack : "";
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const fs = require("node:fs") as typeof import("node:fs");
-    fs.appendFileSync(
-      "C:\\tmp\\gl-errors.log",
-      `${new Date().toISOString()} ${message}\n${stack}\n---\n`
-    );
-  } catch {
-    /* ignore */
-  }
-  return reply.code(500).send({
-    data: null,
-    errors: [{ code: "INTERNAL_SERVER_ERROR", message }]
-  });
-}
-
-function requireEntityId(entityId: string | undefined): string {
-  if (!entityId) {
-    throw new GLServiceError("GL_ENTITY_CONTEXT_REQUIRED", "X-Entity-ID header is required.", 400);
-  }
-  return entityId;
-}
-
 function requireUserId(sub: unknown): string {
   if (typeof sub !== "string" || sub.length === 0) {
-    throw new GLServiceError("GL_USER_CONTEXT_REQUIRED", "Token subject is required.", 401);
+    throw new ServiceError("GL_USER_CONTEXT_REQUIRED", "Token subject is required.", 401);
   }
   return sub;
 }
@@ -114,7 +74,6 @@ export async function registerGLRouter(app: FastifyInstance): Promise<void> {
   app.register(
     async (router) => {
       router.addHook("preHandler", requireAuth);
-      router.addHook("preHandler", requireWriteAccess);
 
       router.get("/accounts", async (request, reply) => {
         try {
@@ -164,199 +123,243 @@ export async function registerGLRouter(app: FastifyInstance): Promise<void> {
         }
       });
 
-      router.post("/accounts", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const payload = accountCreateSchema.parse(request.body);
-          const data = await glService.createAccount(entityId, payload);
-          return reply.code(201).send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.post(
+        "/accounts",
+        { preHandler: [requirePermission("COA_CREATE")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const payload = accountCreateSchema.parse(request.body);
+            const data = await glService.createAccount(entityId, payload);
+            return reply.code(201).send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.put<{ Params: { id: string } }>("/accounts/:id", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const payload = accountUpdateSchema.parse(request.body);
-          const data = await glService.updateAccount(entityId, request.params.id, payload);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.put<{ Params: { id: string } }>(
+        "/accounts/:id",
+        { preHandler: [requirePermission("COA_EDIT")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const payload = accountUpdateSchema.parse(request.body);
+            const data = await glService.updateAccount(entityId, request.params.id, payload);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.delete<{ Params: { id: string } }>("/accounts/:id", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await glService.deleteAccount(entityId, request.params.id);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.delete<{ Params: { id: string } }>(
+        "/accounts/:id",
+        { preHandler: [requirePermission("COA_EDIT")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await glService.deleteAccount(entityId, request.params.id);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       // ── Chart of Accounts Import ──────────────────────────────────────
 
-      router.post("/accounts/import/preview", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const { fileContent, fileBase64, sheetName } = request.body as FileInput;
-          if (!fileContent && !fileBase64) {
-            return reply.code(400).send({
-              data: null,
-              errors: [{ code: "MISSING_FILE", message: "fileContent or fileBase64 is required" }]
+      router.post(
+        "/accounts/import/preview",
+        { preHandler: [requirePermission("COA_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const { fileContent, fileBase64, sheetName } = request.body as FileInput;
+            if (!fileContent && !fileBase64) {
+              return reply.code(400).send({
+                data: null,
+                errors: [{ code: "MISSING_FILE", message: "fileContent or fileBase64 is required" }]
+              });
+            }
+            const data = await previewCOAImport(prisma as unknown as PrismaClient, entityId, {
+              fileContent,
+              fileBase64,
+              sheetName
             });
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
           }
-          const data = await previewCOAImport(prisma as unknown as PrismaClient, entityId, {
-            fileContent,
-            fileBase64,
-            sheetName
-          });
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
         }
-      });
+      );
 
-      router.post("/accounts/import/execute", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const {
-            fileContent,
-            fileBase64,
-            sheetName,
-            updateExisting,
-            reactivateInactive,
-            skipErrors
-          } = request.body as FileInput & {
-            updateExisting?: boolean;
-            reactivateInactive?: boolean;
-            skipErrors?: boolean;
-          };
-          if (!fileContent && !fileBase64) {
-            return reply.code(400).send({
-              data: null,
-              errors: [{ code: "MISSING_FILE", message: "fileContent or fileBase64 is required" }]
-            });
+      router.post(
+        "/accounts/import/execute",
+        { preHandler: [requirePermission(["COA_CREATE", "COA_EDIT"])] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const {
+              fileContent,
+              fileBase64,
+              sheetName,
+              updateExisting,
+              reactivateInactive,
+              skipErrors
+            } = request.body as FileInput & {
+              updateExisting?: boolean;
+              reactivateInactive?: boolean;
+              skipErrors?: boolean;
+            };
+            if (!fileContent && !fileBase64) {
+              return reply.code(400).send({
+                data: null,
+                errors: [{ code: "MISSING_FILE", message: "fileContent or fileBase64 is required" }]
+              });
+            }
+            // RLS context is set inside executeCOAImport via withEntityRLS
+            const data = await executeCOAImport(
+              prisma as unknown as PrismaClient,
+              entityId,
+              { fileContent, fileBase64, sheetName },
+              { updateExisting, reactivateInactive, skipErrors }
+            );
+            return reply.code(201).send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
           }
-          // RLS context is set inside executeCOAImport via withEntityRLS
-          const data = await executeCOAImport(
-            prisma as unknown as PrismaClient,
-            entityId,
-            { fileContent, fileBase64, sheetName },
-            { updateExisting, reactivateInactive, skipErrors }
-          );
-          return reply.code(201).send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
         }
-      });
+      );
 
-      router.post("/accounts/import/sheets", async (request, reply) => {
-        try {
-          requireEntityId(request.entityId);
-          const { fileBase64 } = request.body as { fileBase64: string };
-          if (!fileBase64) {
-            return reply.code(400).send({
-              data: null,
-              errors: [{ code: "MISSING_FILE", message: "fileBase64 is required" }]
-            });
+      router.post(
+        "/accounts/import/sheets",
+        { preHandler: [requirePermission("COA_READ")] },
+        async (request, reply) => {
+          try {
+            requireEntityId(request.entityId);
+            const { fileBase64 } = request.body as { fileBase64: string };
+            if (!fileBase64) {
+              return reply.code(400).send({
+                data: null,
+                errors: [{ code: "MISSING_FILE", message: "fileBase64 is required" }]
+              });
+            }
+            const data = getExcelSheetNames(fileBase64);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
           }
-          const data = getExcelSheetNames(fileBase64);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
         }
-      });
+      );
 
       // ── Journals ───────────────────────────────────────────────────────
 
-      router.post("/journals", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const userId = requireUserId(request.user?.sub);
-          const payload = journalCreateSchema.parse(request.body);
+      router.post(
+        "/journals",
+        { preHandler: [requirePermission("GL_WRITE")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const userId = requireUserId(request.user?.sub);
+            const payload = journalCreateSchema.parse(request.body);
 
-          // Source override requires CONTROLLER or ADMIN role
-          if (payload.sourceOverrideReason) {
-            const userRoles = (request.user?.roles ?? []).map((r: string) => r.toUpperCase());
-            const allowed = ["CONTROLLER", "ADMIN", "SUPERADMIN"];
-            if (!allowed.some((r) => userRoles.includes(r))) {
-              return reply.code(403).send({
-                data: null,
-                errors: [
-                  {
-                    code: "GL_SOURCE_OVERRIDE_FORBIDDEN",
-                    message: "Only CONTROLLER or ADMIN can override source restrictions."
-                  }
-                ]
-              });
+            // Source override requires CONTROLLER or ADMIN role
+            if (payload.sourceOverrideReason) {
+              const userRoles = (request.user?.roles ?? []).map((r: string) => r.toUpperCase());
+              const allowed = ["CONTROLLER", "ADMIN", "SUPERADMIN"];
+              if (!allowed.some((r) => userRoles.includes(r))) {
+                return reply.code(403).send({
+                  data: null,
+                  errors: [
+                    {
+                      code: "GL_SOURCE_OVERRIDE_FORBIDDEN",
+                      message: "Only CONTROLLER or ADMIN can override source restrictions."
+                    }
+                  ]
+                });
+              }
             }
+
+            const data = await glService.createJournal(entityId, userId, payload);
+            return reply.code(201).send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
           }
-
-          const data = await glService.createJournal(entityId, userId, payload);
-          return reply.code(201).send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
         }
-      });
+      );
 
-      router.post<{ Params: { id: string } }>("/journals/:id/post", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const userId = requireUserId(request.user?.sub);
-          const data = await glService.postJournal(entityId, request.params.id, userId);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.post<{ Params: { id: string } }>(
+        "/journals/:id/post",
+        { preHandler: [requirePermission("GL_POST")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const userId = requireUserId(request.user?.sub);
+            const data = await glService.postJournal(entityId, request.params.id, userId);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.post<{ Params: { id: string } }>("/journals/:id/approve", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const userId = requireUserId(request.user?.sub);
-          const payload = journalDecisionSchema.parse(request.body ?? {});
-          const data = await glService.approveJournal(
-            entityId,
-            request.params.id,
-            userId,
-            payload.reason
-          );
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.post<{ Params: { id: string } }>(
+        "/journals/:id/approve",
+        { preHandler: [requirePermission("GL_APPROVE")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const userId = requireUserId(request.user?.sub);
+            const payload = journalDecisionSchema.parse(request.body ?? {});
+            const data = await glService.approveJournal(
+              entityId,
+              request.params.id,
+              userId,
+              payload.reason
+            );
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.post<{ Params: { id: string } }>("/journals/:id/reject", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const userId = requireUserId(request.user?.sub);
-          const payload = journalDecisionSchema.parse(request.body ?? {});
-          const data = await glService.rejectJournal(
-            entityId,
-            request.params.id,
-            userId,
-            payload.reason
-          );
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.post<{ Params: { id: string } }>(
+        "/journals/:id/reject",
+        { preHandler: [requirePermission("GL_APPROVE")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const userId = requireUserId(request.user?.sub);
+            const payload = journalDecisionSchema.parse(request.body ?? {});
+            const data = await glService.rejectJournal(
+              entityId,
+              request.params.id,
+              userId,
+              payload.reason
+            );
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.post<{ Params: { id: string } }>("/journals/:id/reverse", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const userId = requireUserId(request.user?.sub);
-          const data = await glService.reverseJournal(entityId, request.params.id, userId);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.post<{ Params: { id: string } }>(
+        "/journals/:id/reverse",
+        { preHandler: [requirePermission("GL_REVERSE")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const userId = requireUserId(request.user?.sub);
+            const data = await glService.reverseJournal(entityId, request.params.id, userId);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.get("/journals", async (request, reply) => {
         try {
@@ -410,7 +413,7 @@ export async function registerGLRouter(app: FastifyInstance): Promise<void> {
 
       router.post(
         "/approval-rules",
-        { preHandler: [requireRole(["ADMIN", "SUPERADMIN"])] },
+        { preHandler: [requirePermission(["GL_WRITE", "ADMIN_SETTINGS"])] },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
@@ -423,26 +426,34 @@ export async function registerGLRouter(app: FastifyInstance): Promise<void> {
         }
       );
 
-      router.put<{ Params: { id: string } }>("/approval-rules/:id", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const payload = approvalRuleUpdateSchema.parse(request.body);
-          const data = await glService.updateApprovalRule(entityId, request.params.id, payload);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.put<{ Params: { id: string } }>(
+        "/approval-rules/:id",
+        { preHandler: [requirePermission(["GL_APPROVE", "ADMIN_SETTINGS"])] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const payload = approvalRuleUpdateSchema.parse(request.body);
+            const data = await glService.updateApprovalRule(entityId, request.params.id, payload);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.delete<{ Params: { id: string } }>("/approval-rules/:id", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          await glService.deleteApprovalRule(entityId, request.params.id);
-          return reply.code(204).send();
-        } catch (error) {
-          return mapError(reply, error);
+      router.delete<{ Params: { id: string } }>(
+        "/approval-rules/:id",
+        { preHandler: [requirePermission(["GL_APPROVE", "ADMIN_SETTINGS"])] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            await glService.deleteApprovalRule(entityId, request.params.id);
+            return reply.code(204).send();
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       // Lightweight users list for approver picker
       router.get("/users", async (request, reply) => {
@@ -483,37 +494,49 @@ export async function registerGLRouter(app: FastifyInstance): Promise<void> {
         }
       });
 
-      router.post("/journal-types", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const payload = journalTypeCreateSchema.parse(request.body);
-          const data = await glService.createJournalType(entityId, payload);
-          return reply.code(201).send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.post(
+        "/journal-types",
+        { preHandler: [requirePermission(["GL_WRITE", "ADMIN_SETTINGS"])] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const payload = journalTypeCreateSchema.parse(request.body);
+            const data = await glService.createJournalType(entityId, payload);
+            return reply.code(201).send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.put<{ Params: { id: string } }>("/journal-types/:id", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const payload = journalTypeUpdateSchema.parse(request.body);
-          const data = await glService.updateJournalType(entityId, request.params.id, payload);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.put<{ Params: { id: string } }>(
+        "/journal-types/:id",
+        { preHandler: [requirePermission(["GL_WRITE", "ADMIN_SETTINGS"])] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const payload = journalTypeUpdateSchema.parse(request.body);
+            const data = await glService.updateJournalType(entityId, request.params.id, payload);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.delete<{ Params: { id: string } }>("/journal-types/:id", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await glService.deleteJournalType(entityId, request.params.id);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.delete<{ Params: { id: string } }>(
+        "/journal-types/:id",
+        { preHandler: [requirePermission(["GL_WRITE", "ADMIN_SETTINGS"])] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await glService.deleteJournalType(entityId, request.params.id);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.get("/trial-balance", async (request, reply) => {
         try {
@@ -538,7 +561,7 @@ export async function registerGLRouter(app: FastifyInstance): Promise<void> {
 
       router.get("/recurring-journals", { preHandler: [requireAuth] }, async (request, reply) => {
         try {
-          const entityId = request.entityId!;
+          const entityId = requireEntityId(request.entityId);
           const data = await recurringService.list(entityId);
           return { data, errors: [] };
         } catch (error) {
@@ -551,7 +574,8 @@ export async function registerGLRouter(app: FastifyInstance): Promise<void> {
         { preHandler: [requireAuth] },
         async (request, reply) => {
           try {
-            const data = await recurringService.getById(request.entityId!, request.params.id);
+            const entityId = requireEntityId(request.entityId);
+            const data = await recurringService.getById(entityId, request.params.id);
             return { data, errors: [] };
           } catch (error) {
             return mapError(reply, error);
@@ -561,15 +585,15 @@ export async function registerGLRouter(app: FastifyInstance): Promise<void> {
 
       router.post(
         "/recurring-journals",
-        { preHandler: [requireAuth, requireWriteAccess] },
+        { preHandler: [requireAuth, requirePermission("GL_WRITE")] },
         async (request, reply) => {
           try {
-            const entityId = request.entityId!;
+            const entityId = requireEntityId(request.entityId);
             const userId = (request.user as any)?.id ?? "";
             const data = await recurringService.create(
               entityId,
               userId,
-              recurringJournalSchema.parse(request.body)
+              recurringJournalSchema.parse(request.body) as any
             );
             reply.code(201);
             return { data, errors: [] };
@@ -581,13 +605,14 @@ export async function registerGLRouter(app: FastifyInstance): Promise<void> {
 
       router.put<{ Params: { id: string } }>(
         "/recurring-journals/:id",
-        { preHandler: [requireAuth, requireWriteAccess] },
+        { preHandler: [requireAuth, requirePermission("GL_WRITE")] },
         async (request, reply) => {
           try {
+            const entityId = requireEntityId(request.entityId);
             const data = await recurringService.update(
-              request.entityId!,
+              entityId,
               request.params.id,
-              recurringJournalSchema.partial().parse(request.body)
+              recurringJournalSchema.partial().parse(request.body) as any
             );
             return { data, errors: [] };
           } catch (error) {
@@ -598,10 +623,11 @@ export async function registerGLRouter(app: FastifyInstance): Promise<void> {
 
       router.delete<{ Params: { id: string } }>(
         "/recurring-journals/:id",
-        { preHandler: [requireAuth, requireRole(["ADMIN", "SUPERADMIN"])] },
+        { preHandler: [requireAuth, requirePermission(["GL_WRITE", "ADMIN_SETTINGS"])] },
         async (request, reply) => {
           try {
-            await recurringService.deactivate(request.entityId!, request.params.id);
+            const entityId = requireEntityId(request.entityId);
+            await recurringService.deactivate(entityId, request.params.id);
             reply.code(204);
             return;
           } catch (error) {
@@ -612,10 +638,10 @@ export async function registerGLRouter(app: FastifyInstance): Promise<void> {
 
       router.post<{ Params: { id: string } }>(
         "/recurring-journals/:id/generate",
-        { preHandler: [requireAuth, requireRole(["ADMIN", "SUPERADMIN"])] },
+        { preHandler: [requireAuth, requirePermission(["GL_WRITE", "ADMIN_SETTINGS"])] },
         async (request, reply) => {
           try {
-            const entityId = request.entityId!;
+            const entityId = requireEntityId(request.entityId);
             const { periodId } = request.body as { periodId: string };
             if (!periodId) {
               reply.code(400);

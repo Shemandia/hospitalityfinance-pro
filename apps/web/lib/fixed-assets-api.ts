@@ -14,10 +14,13 @@ async function request<T>(
 ): Promise<Envelope<T>> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${context.accessToken}`,
-      "X-Entity-ID": context.entityId,
+      ...(context.accessToken && context.accessToken !== "cookie"
+        ? { Authorization: `Bearer ${context.accessToken}` }
+        : {}),
+      ...(context.entityId ? { "X-Entity-ID": context.entityId } : {}),
       ...(context.tenantSlug ? { "X-Tenant-Slug": context.tenantSlug } : {}),
       ...(init?.headers ?? {})
     }

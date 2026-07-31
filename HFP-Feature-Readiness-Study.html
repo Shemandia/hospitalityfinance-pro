@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HospitalityFinance Pro — Feature & Readiness Study</title>
+<style>
+  :root{
+    --bg:#0f141b; --panel:#161d27; --panel2:#1b2431; --line:#28323f;
+    --ink:#e7edf5; --muted:#9aa8ba; --faint:#6b7a8d;
+    --accent:#4aa3ff; --accent2:#7c5cff;
+    --ok:#2fbf71; --warn:#e8a13a; --bad:#e8544d; --info:#38b6c4;
+    --p0:#e8544d; --p1:#e8a13a; --p2:#5aa9e6;
+    --chip:#22304a;
+    --radius:14px;
+    font-synthesis:none;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.55; font-size:15px;
+  }
+  a{color:var(--accent);text-decoration:none}
+  code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.85em;background:#0c1219;border:1px solid var(--line);padding:1px 5px;border-radius:5px;color:#bcd3ea}
+  .wrap{display:flex;max-width:1500px;margin:0 auto}
+  /* Sidebar */
+  aside{
+    position:sticky;top:0;align-self:flex-start;height:100vh;overflow-y:auto;
+    width:250px;flex:0 0 250px;padding:26px 16px;border-right:1px solid var(--line);
+    background:linear-gradient(180deg,#131a23,#0f141b);
+  }
+  aside .brand{font-weight:700;font-size:15px;letter-spacing:.2px}
+  aside .brand span{color:var(--accent)}
+  aside .sub{color:var(--faint);font-size:12px;margin:2px 0 22px}
+  nav a{display:block;color:var(--muted);padding:7px 10px;border-radius:8px;font-size:13.5px;margin:1px 0}
+  nav a:hover{background:var(--panel2);color:var(--ink)}
+  nav a.active{background:#20304a;color:#fff}
+  nav .grp{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--faint);margin:18px 8px 6px}
+  main{flex:1;min-width:0;padding:38px 46px 120px}
+  @media(max-width:1000px){
+    aside{display:none} main{padding:24px 18px 90px}
+  }
+  h1{font-size:30px;margin:0 0 6px;letter-spacing:-.4px}
+  h2{font-size:22px;margin:46px 0 4px;letter-spacing:-.3px;padding-top:10px}
+  h3{font-size:16px;margin:26px 0 8px;color:#cfe0f2}
+  .lead{color:var(--muted);font-size:16px;max-width:70ch}
+  section{scroll-margin-top:20px}
+  .divider{height:1px;background:var(--line);margin:12px 0 0}
+  /* Cards */
+  .grid{display:grid;gap:14px}
+  .g2{grid-template-columns:1fr 1fr}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  @media(max-width:900px){.g2,.g3,.g4{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px 18px}
+  .card.tight{padding:14px 16px}
+  .kpi{display:flex;flex-direction:column;gap:2px}
+  .kpi .big{font-size:30px;font-weight:700;letter-spacing:-.5px}
+  .kpi .lbl{color:var(--muted);font-size:12.5px}
+  .accent{color:var(--accent)}
+  /* Verdict banner */
+  .verdict{background:linear-gradient(120deg,#182233,#141b26);border:1px solid var(--line);border-left:4px solid var(--warn);border-radius:var(--radius);padding:20px 22px;margin:20px 0}
+  .verdict b{color:#fff}
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:999px;border:1px solid transparent;white-space:nowrap}
+  .pill.ok{background:rgba(47,191,113,.13);color:#6fe0a3;border-color:rgba(47,191,113,.3)}
+  .pill.warn{background:rgba(232,161,58,.13);color:#f2c078;border-color:rgba(232,161,58,.3)}
+  .pill.bad{background:rgba(232,84,77,.14);color:#f7938d;border-color:rgba(232,84,77,.32)}
+  .pill.info{background:rgba(56,182,196,.13);color:#79d6e0;border-color:rgba(56,182,196,.3)}
+  .pill.p0{background:rgba(232,84,77,.14);color:#f7938d;border-color:rgba(232,84,77,.32)}
+  .pill.p1{background:rgba(232,161,58,.13);color:#f2c078;border-color:rgba(232,161,58,.3)}
+  .pill.p2{background:rgba(90,169,230,.13);color:#a9d2f4;border-color:rgba(90,169,230,.3)}
+  .pill.dot::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;display:inline-block}
+  /* Readiness bars */
+  .mod{display:grid;grid-template-columns:190px 1fr 46px;align-items:center;gap:12px;padding:7px 0;border-bottom:1px solid #202a36}
+  .mod:last-child{border-bottom:none}
+  .mod .name{font-size:13.5px;color:#d7e3f1}
+  .mod .name small{display:block;color:var(--faint);font-size:11px}
+  .bar{height:9px;border-radius:6px;background:#111823;overflow:hidden;border:1px solid #1e2733}
+  .bar > i{display:block;height:100%;border-radius:6px}
+  .mod .pct{text-align:right;font-variant-numeric:tabular-nums;font-size:13px;color:var(--muted)}
+  .sc-lo > i{background:linear-gradient(90deg,#b23b36,#e8544d)}
+  .sc-md > i{background:linear-gradient(90deg,#c98a2e,#e8a13a)}
+  .sc-hi > i{background:linear-gradient(90deg,#279a5c,#3fd07f)}
+  /* Findings table */
+  .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:14px 0 10px}
+  .controls select,.controls input{background:var(--panel2);border:1px solid var(--line);color:var(--ink);padding:7px 10px;border-radius:9px;font-size:13px}
+  .fbtn{cursor:pointer;background:var(--panel2);border:1px solid var(--line);color:var(--muted);padding:6px 11px;border-radius:999px;font-size:12.5px}
+  .fbtn.on{background:#20304a;color:#fff;border-color:#33507a}
+  .find{border:1px solid var(--line);border-radius:12px;margin:9px 0;overflow:hidden;background:var(--panel)}
+  .find summary{cursor:pointer;list-style:none;padding:12px 15px;display:flex;gap:10px;align-items:flex-start}
+  .find summary::-webkit-details-marker{display:none}
+  .find summary:hover{background:var(--panel2)}
+  .find .t{flex:1;min-width:0}
+  .find .t .h{font-weight:600;font-size:14px;color:#eaf1f9}
+  .find .t .m{color:var(--muted);font-size:12.5px;margin-top:2px}
+  .find .body{padding:0 15px 14px 15px;color:#cdd9e6;font-size:13.5px}
+  .find .body .loc{color:var(--faint);font-size:12px;margin-top:6px}
+  .sev{flex:0 0 auto;margin-top:1px}
+  .modtag{flex:0 0 auto;font-size:10.5px;color:var(--faint);border:1px solid var(--line);padding:2px 7px;border-radius:6px;margin-top:1px;white-space:nowrap}
+  ul.clean{margin:8px 0;padding-left:18px}
+  ul.clean li{margin:5px 0}
+  .tabs{display:flex;gap:6px;margin:14px 0 12px;flex-wrap:wrap}
+  .tab{cursor:pointer;padding:8px 15px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);font-size:13.5px;font-weight:600}
+  .tab.on{color:#fff;background:#20304a;border-color:#33507a}
+  .tabpane{display:none} .tabpane.on{display:block}
+  table.cmp{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:6px}
+  table.cmp th,table.cmp td{text-align:left;padding:9px 11px;border-bottom:1px solid var(--line);vertical-align:top}
+  table.cmp th{color:var(--faint);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.06em}
+  table.cmp tr:hover td{background:var(--panel2)}
+  .road{border-left:2px solid var(--line);margin-left:8px;padding-left:20px}
+  .phase{position:relative;margin:0 0 24px}
+  .phase::before{content:"";position:absolute;left:-27px;top:4px;width:12px;height:12px;border-radius:50%;background:var(--accent);border:2px solid var(--bg)}
+  .phase.p0::before{background:var(--p0)} .phase.p1::before{background:var(--p1)} .phase.p2::before{background:var(--p2)}
+  .phase h3{margin-top:0}
+  .foot{color:var(--faint);font-size:12.5px;margin-top:40px;border-top:1px solid var(--line);padding-top:16px}
+  .callout{background:#12202b;border:1px solid #1d3340;border-left:3px solid var(--info);padding:12px 15px;border-radius:10px;margin:12px 0;font-size:13.5px;color:#cfe6ec}
+  .tag{font-size:11px;color:var(--faint)}
+  .hl{color:#fff;font-weight:600}
+  .noshow{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+<aside>
+  <div class="brand">HospitalityFinance <span>Pro</span></div>
+  <div class="sub">Feature & Production-Readiness Study · Jul 2026</div>
+  <nav id="nav">
+    <div class="grp">Overview</div>
+    <a href="#summary">Executive summary</a>
+    <a href="#scorecard">Module scorecard</a>
+    <a href="#works">What's working</a>
+    <div class="grp">Diagnosis</div>
+    <a href="#blockers">Go-live blockers (P0)</a>
+    <a href="#findings">All findings</a>
+    <div class="grp">Strategy</div>
+    <a href="#keepadd">Keep · Remove · Add</a>
+    <a href="#sunsystems">SunSystems parity</a>
+    <a href="#roadmap">Roadmap to production</a>
+  </nav>
+</aside>
+<main>
+
+<section id="summary">
+  <h1>HospitalityFinance Pro — Feature & Readiness Study</h1>
+  <p class="lead">A module-by-module technical audit of the platform, focused on one question: <b>what stands between today's build and books your hotels can actually trust and close.</b> Verified against the live codebase (133k LOC), the two prior inspection reports, and git history — not taken on faith.</p>
+
+  <div class="grid g4" style="margin-top:22px">
+    <div class="card kpi"><span class="big accent">~50%</span><span class="lbl">Production-ready (financial correctness weighted)</span></div>
+    <div class="card kpi"><span class="big">24</span><span class="lbl">Modules built (GL → consolidation → Transfer Desk)</span></div>
+    <div class="card kpi"><span class="big" style="color:var(--bad)">9</span><span class="lbl">P0 correctness blockers before go-live</span></div>
+    <div class="card kpi"><span class="big" style="color:var(--ok)">Strong</span><span class="lbl">Architecture & breadth — a real ERP, not a prototype</span></div>
+  </div>
+
+  <div class="verdict">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+      <span class="pill ok dot">Genuinely impressive foundation</span>
+      <span class="pill warn dot">Books don't yet close correctly</span>
+      <span class="pill bad dot">Not tax-aware (TZ VAT)</span>
+      <span class="pill info dot">SunSystems parity is real, not cosmetic</span>
+    </div>
+    <p style="margin:0 0 8px">This is a <b>serious, well-architected financial ERP</b> — multi-tenant (database-per-tenant with row-level security), multi-entity (Group → Property), multi-currency, with a real SunSystems-style report writer (FAL/FSL/FTL), a working <b>Transfer Desk</b> import subsystem with its own format engine (<code>fsd-engine</code>) and sandboxed transformation language (<code>tml-engine</code>), plus PMS/POS/bank/payroll connectors and USALI hospitality P&L. The double-entry plumbing — row-locking on posting, atomic balance upserts, <code>Decimal</code> money math — is solid where it counts. Many critical issues from the April inspections have genuinely been fixed.</p>
+    <p style="margin:0"><b>But it cannot yet be trusted to close a month or a year.</b> A small number of deep, cross-cutting defects break the one thing a finance system exists to do — produce a correct trial balance and balance sheet. The gap is not breadth (breadth is excellent); it's <b>a handful of correctness fixes at the core</b>. Fix the nine P0 items and this crosses from "impressive demo running on live data" to "system of record."</p>
+  </div>
+
+  <div class="callout">
+    <b>The one-sentence diagnosis:</b> the ledger never carries balances forward from one period to the next, the reporting materialized view never gets created (a table-name casing bug), and the system posts and pays <i>net of tax</i> — so trial balance, balance sheet, KPIs, and Tanzanian VAT are all wrong today, even though every screen and module exists and looks finished.
+  </div>
+</section>
+
+<section id="scorecard">
+  <h2>Module scorecard</h2>
+  <p class="lead">Production-readiness per module, weighted for <b>financial correctness</b> (a screen that renders but posts wrong numbers scores low). Green = trustworthy, amber = works with caveats, red = has a correctness blocker.</p>
+  <div class="card" style="margin-top:14px" id="scoreList"></div>
+  <p class="tag" style="margin-top:10px">Scores are the analyst's synthesis across the six domain audits; each maps to specific findings below.</p>
+</section>
+
+<section id="works">
+  <h2>What's working (and worth protecting)</h2>
+  <p class="lead">The strengths are real and should not be disturbed while fixing the rest. These are the load-bearing walls.</p>
+  <div class="grid g2" style="margin-top:14px">
+    <div class="card">
+      <h3 style="margin-top:2px">Core ledger discipline</h3>
+      <ul class="clean">
+        <li><b>Double-entry is enforced in functional currency</b> and re-checked at period close (<code>gl/service.ts:218</code>).</li>
+        <li><b>Row-locking on posting</b> (<code>SELECT … FOR UPDATE</code>) across AP, AR, receipts, payment runs and periods — no double-posting races.</li>
+        <li><b>Atomic balance updates</b> via <code>INSERT … ON CONFLICT DO UPDATE</code> with SQL-side Decimal addition — no lost updates under load.</li>
+        <li><b>Decimal money math</b> throughout the core GL/AP/AR paths — no float drift where it matters.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:2px">Platform & security</h3>
+      <ul class="clean">
+        <li><b>Database-per-tenant + row-level security</b> for entity isolation. The April "RLS disable" and hardcoded-platform-key criticals are <b>verified fixed</b> (migration <code>20260413…_fix_rls_bypass</code>).</li>
+        <li><b>Real RBAC</b> with a privilege ceiling and entity-lineage scoping; startup fails if secrets are unset.</li>
+        <li><b>Advisory-lock process locks</b> serialize period-close / consolidation / depreciation against double-runs.</li>
+        <li><b>Fail-closed</b> transformation sandbox (refuses insecure VM in production).</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:2px">SunSystems-class capability</h3>
+      <ul class="clean">
+        <li><b>Genuine Q&A-style report writer</b> — FAL (account listing), FSL (P&L/BS/CF), FTL (transaction listing) with drill-down and seeded USALI departmental P&L (<code>reporting/report-engine.ts</code>).</li>
+        <li><b>Transfer Desk is end-to-end and governed</b> — upload → detect → parse → transform → <b>held batch → review → commit through GL approval</b>, not a bypass.</li>
+        <li><b>Own format engine + transformation DSL</b> (<code>fsd-engine</code>, <code>tml-engine</code>) — the actual SunSystems differentiator, and it's real.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:2px">Breadth already built</h3>
+      <ul class="clean">
+        <li><b>All role dashboards are API-wired</b> (CFO, Controller, GM, Night Audit, Cost Controller, Directors) — no mock dashboards.</li>
+        <li><b>Strong connectors</b>: Mews and the generic Inbound path are reference-quality (transactional, Decimal-clean, suspense-balanced); SAF/.SUN Opera import is solid.</li>
+        <li><b>Fixed-asset depreciation is idempotent</b>; intercompany dual-posting (new path) updates both entities in one transaction.</li>
+        <li>Periods, allocations, budget, bank reconciliation, fixed-asset lifecycle — all present and functional.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="blockers">
+  <h2>Go-live blockers — the P0 nine</h2>
+  <p class="lead">These are the defects that make the numbers wrong. Nothing else matters until these are closed, because every report sits downstream of them. Ordered by how directly they corrupt the books.</p>
+  <div id="blockerList" style="margin-top:14px"></div>
+</section>
+
+<section id="findings">
+  <h2>All findings</h2>
+  <p class="lead">Every verified issue across the six audits, with file references. Filter by module and severity.</p>
+  <div class="controls">
+    <label class="tag">Severity:</label>
+    <span class="fbtn on" data-sev="all">All</span>
+    <span class="fbtn" data-sev="P0">P0 blocker</span>
+    <span class="fbtn" data-sev="HIGH">High</span>
+    <span class="fbtn" data-sev="MED">Medium</span>
+    <span class="fbtn" data-sev="LOW">Low</span>
+    <select id="modFilter" style="margin-left:auto"><option value="all">All modules</option></select>
+    <input id="txtFilter" placeholder="search…" style="width:150px">
+  </div>
+  <div id="findingList"></div>
+  <p class="tag" id="findCount" style="margin-top:8px"></p>
+</section>
+
+<section id="keepadd">
+  <h2>Keep · Remove · Add</h2>
+  <p class="lead">The feature-level answer to your question: what to protect, what to retire, and what to build — all filtered through "does it help these hotels close their books and run better."</p>
+  <div class="tabs">
+    <div class="tab on" data-tab="keep">✅ Keep &amp; harden</div>
+    <div class="tab" data-tab="remove">🗑 Remove / retire</div>
+    <div class="tab" data-tab="add">➕ Add</div>
+  </div>
+  <div class="tabpane on" id="tab-keep">
+    <table class="cmp"><thead><tr><th style="width:230px">Feature</th><th>Why keep it</th></tr></thead><tbody id="keepBody"></tbody></table>
+  </div>
+  <div class="tabpane" id="tab-remove">
+    <p class="lead" style="font-size:14px">Dead, duplicated, or half-built code that adds risk and confusion. Removing these <i>reduces</i> the surface you have to keep correct.</p>
+    <table class="cmp"><thead><tr><th style="width:230px">Remove / retire</th><th>Why</th></tr></thead><tbody id="removeBody"></tbody></table>
+  </div>
+  <div class="tabpane" id="tab-add">
+    <table class="cmp"><thead><tr><th style="width:230px">Add</th><th>Why it matters for your hotels</th><th style="width:70px">Priority</th></tr></thead><tbody id="addBody"></tbody></table>
+  </div>
+</section>
+
+<section id="sunsystems">
+  <h2>SunSystems parity — where you stand</h2>
+  <p class="lead">How the build measures against the SunSystems capability set that inspired it. The strategy insight: you are already <b>at or beyond parity on breadth</b> — including things SunSystems lacks natively (USALI, PMS integration) — so the winning move is <b>depth and correctness on what you have</b>, not more modules.</p>
+  <table class="cmp" style="margin-top:8px">
+    <thead><tr><th style="width:220px">SunSystems capability</th><th style="width:120px">HFP status</th><th>Notes</th></tr></thead>
+    <tbody id="ssBody"></tbody>
+  </table>
+</section>
+
+<section id="roadmap">
+  <h2>Roadmap to production</h2>
+  <p class="lead">A sequence, not a backlog. Each phase leaves the system in a more trustworthy state than the last. Phase 1 is the difference between "wrong numbers" and "right numbers"; everything after is polish, safety, and reach.</p>
+  <div class="road" style="margin-top:18px">
+    <div class="phase p0">
+      <h3>Phase 1 · Make the numbers correct <span class="pill p0" style="margin-left:8px">P0 · ~2–4 weeks</span></h3>
+      <p class="tag" style="margin-top:0">Goal: a trial balance and balance sheet you can trust; VAT-correct AP/AR; TZS shown and paid correctly.</p>
+      <ul class="clean">
+        <li>Build the <b>opening-balance / carry-forward engine</b> — next period's opening = this period's closing for balance-sheet accounts; cumulative within-year for P&L. Then re-point year-end cleardown at true annual balances.</li>
+        <li>Fix the <b>materialized-view casing bug</b> (<code>performance.sql</code> + <code>20260322</code> migration → snake_case) and make the MV refresh after posting. Unblocks all KPI / balance-sheet / cash-flow 500s.</li>
+        <li>Add a <b>VAT/tax engine</b>: tax-code → GL mapping, post input &amp; output VAT, pay <i>gross</i> in payment runs, VAT-return report.</li>
+        <li>Add a <b>currency-decimal registry</b> (TZS = 0) feeding both on-screen formatting and every payment-file format.</li>
+        <li>Unify the <b>balance-update path</b> to one signed writer; delete the divergent unsigned FX/fixed-asset writers. Fix the FX-revaluation sign bug and idempotency double-post.</li>
+        <li>Fix <b>consolidation</b>: translate eliminations to reporting currency; fail (don't 1:1) when a rate is missing.</li>
+        <li>Aggregate journal lines by account before balance update (kills the duplicate-account post crash).</li>
+      </ul>
+    </div>
+    <div class="phase p1">
+      <h3>Phase 2 · Close the workflow gaps <span class="pill p1" style="margin-left:8px">P1 · ~3–5 weeks</span></h3>
+      <p class="tag" style="margin-top:0">Goal: a finance clerk can run the full monthly cycle from the UI without SQL.</p>
+      <ul class="clean">
+        <li><b>Import idempotency</b> — content-hash / unique-constraint on the generic Transfer Desk path, bank, and Sky Jana so re-runs can't duplicate journals; wrap commits in transactions and make them resumable.</li>
+        <li><b>Overdue-aging job</b> so dunning actually fires; fix or remove the broken collection-run.</li>
+        <li>Kill remaining <b>float on money</b> in <code>fsd-engine</code> coercion, <code>tml-engine</code> money functions, and the bank / Sky Jana parsers.</li>
+        <li>Wire the <b>already-built endpoints</b> with no UI: report scheduling, AR receipts register, AP/AR invoice edit/delete/void, user activate-deactivate.</li>
+        <li><b>Segregation of duties</b>: enforce creator ≠ approver; consolidate the two overlapping journal-approval systems into one.</li>
+        <li>Entity-scope + RLS on Transfer Desk batch tables; make background jobs (dunning, recurring, reports) tenant-aware.</li>
+        <li>Client-side numeric validation on money inputs; realized FX gain/loss on settlement; AR credit notes &amp; write-offs.</li>
+      </ul>
+    </div>
+    <div class="phase p2">
+      <h3>Phase 3 · Make it safe to operate <span class="pill p2" style="margin-left:8px">P2 · ongoing</span></h3>
+      <p class="tag" style="margin-top:0">Goal: you can run it for real customers and sleep at night.</p>
+      <ul class="clean">
+        <li><b>Backups / point-in-time recovery</b> per tenant DB; encrypt tenant connection strings at rest.</li>
+        <li><b>Monitoring &amp; alerting</b>: error tracking (e.g. Sentry), job dead-letter queues, health metrics — today job failures only hit the console.</li>
+        <li><b>Test suites</b> for the FSD/TML engines and sandbox-security (currently zero), plus regression tests for the P0 fixes.</li>
+        <li>Harden AsyncLocalStorage tenant context (drop <code>enterWith</code> for <code>runWithContext</code>); add <code>entity_id</code> + RLS to child line tables; default-deny auth.</li>
+        <li>Add multi-dimensional <b>analysis-code masters</b> (validate dimension1–6) to reach true SunSystems analysis-ledger depth.</li>
+        <li>Retire dead code: legacy intercompany no-op path, orphan parsers, unused RabbitMQ, duplicate entity stores.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<div class="foot">
+  <p><b>Method.</b> Six parallel domain audits read the live source at file/line granularity — GL core; AP/AR; multi-entity finance (FX, consolidation, intercompany, budget, fixed assets); Transfer Desk &amp; connectors; platform/tenancy/security; web UI &amp; reporting — cross-checked against the two April inspection reports and git history, then reconciled. The two root-cause claims (missing balance carry-forward; materialized-view casing bug) were re-verified by hand in the code. Findings reflect the codebase as of the last commit (12 Jun 2026).</p>
+  <p>Prepared for the HospitalityFinance Pro team · running live for Essque Hotels Group (Essque Zalu Zanzibar, Niamembe Island).</p>
+</div>
+
+</main>
+</div>
+
+<script>
+/* ---------- DATA ---------- */
+const scores=[
+ ["GL / Journals","posting, approvals",60,"md"],
+ ["Period close / Year-end","the carry-forward gap",35,"lo"],
+ ["Accounts Payable","invoices, payment runs",45,"lo"],
+ ["Accounts Receivable","invoices, receipts, dunning",45,"lo"],
+ ["Payments / Bank files","SWIFT / pain.001",40,"lo"],
+ ["FX / Revaluation","IAS 21",35,"lo"],
+ ["Consolidation","group reporting",30,"lo"],
+ ["Intercompany","dual-entity postings",60,"md"],
+ ["Budget","variance",65,"md"],
+ ["Fixed assets","depreciation, disposal",50,"md"],
+ ["Transfer Desk engine","import pipeline",65,"md"],
+ ["Integration connectors","PMS/POS/bank/payroll",55,"md"],
+ ["Reporting engine","FAL/FSL/FTL, USALI",70,"hi"],
+ ["Dashboards / KPI","role dashboards",40,"lo"],
+ ["Multi-tenancy / RLS","isolation",70,"hi"],
+ ["Auth / RBAC","roles, permissions",75,"hi"],
+ ["Web UX / forms","screens, validation",55,"md"],
+ ["Ops (backup/monitor)","run-safety",20,"lo"],
+];
+
+const blockers=[
+ {n:1,h:"Balances never carry forward between periods",mod:"Period / GL",
+  d:"<code>closePeriod</code> only advances the current-period pointer (<code>period/service.ts:288</code>); it never writes the next period's opening balance, and every balance row inserts opening = 0 (<code>gl/repository.ts:492–509</code>). So each period's closing balance for Cash, Bank, AR, AP, Equity is <i>that period's movement only</i>. The trial balance and balance sheet are structurally wrong.",
+  s:"Post rent in Jan, none in Feb → Feb balance sheet shows the Cash account back at zero."},
+ {n:2,h:"Reporting materialized view is never created (KPI/BS/CF all 500)",mod:"Reporting / DB",
+  d:"<code>performance.sql</code> and the <code>20260322</code> migration reference PascalCase tables (<code>\"AccountPeriodBalance\"</code>, <code>\"Journal\"</code>, <code>\"ARInvoice\"</code>) but Prisma maps everything to snake_case. The first statement throws <code>42P01</code> and aborts the whole file, so <code>mv_period_account_balances</code> is never built — the source of the console flood of 500s on <code>/kpi/revpar</code>, balance sheet and cash flow.",
+  s:"Open any KPI dashboard → repeated 500 Internal Server Error; balance sheet / cash flow won't load."},
+ {n:3,h:"Year-end cleardown sweeps the wrong profit",mod:"Period",
+  d:"Cleardown sums P&L <i>closing balances of the final period only</i> (<code>year-end-cleardown.ts:149–172</code>) and skips accounts with no December activity. Combined with #1 that equals just one month's revenue/expense — so the net profit rolled to Retained Earnings is grossly wrong, and the period isn't locked afterward.",
+  s:"Full-year profit of $2.4m sweeps to equity as only December's $180k."},
+ {n:4,h:"System posts and pays net of tax — no VAT",mod:"AP / AR",
+  d:"AP posting iterates only invoice lines (forced to equal net) and never books <code>taxAmount</code> (<code>ap/service.ts:584–625</code>); payment runs pay <code>netAmount</code> not gross (<code>ap/service.ts:702</code>). AR credits the full amount to revenue with no output-VAT split (<code>ar/service.ts:170</code>). For Tanzania's 18% VAT this is a compliance and cash blocker.",
+  s:"Book a 118,000 TZS invoice (100k + 18k VAT) → liability shows 100k, supplier underpaid by 18k, VAT return impossible."},
+ {n:5,h:"Two balance writers with opposite sign conventions",mod:"FX / Fixed assets / GL",
+  d:"The GL writer is signed by account type; the FX-revaluation writer (<code>fx/repository.ts:218</code>) and fixed-asset writer are unsigned. Revaluing a liability (AP control) moves its balance the wrong direction, unbalancing the trial balance. A single authoritative balance path is needed.",
+  s:"Month-end FX revaluation of foreign payables pushes AP control the wrong way; TB no longer balances."},
+ {n:6,h:"FX revaluation double-posts on re-run",mod:"FX",
+  d:"The idempotency guard writes reference <code>FX-REVAL-{today}</code> but checks for <code>FX-REVAL-{closingRateDate}</code> (<code>fx/service.ts:297–310</code>). Whenever the closing date ≠ run date the prior run isn't found, so re-running duplicates the gain/loss journal. Also, invoice revaluation only reads CLOSING rates, which nothing populates — so it often silently posts nothing.",
+  s:"Re-run April revaluation in May → a second FX gain/loss journal is posted on top of the first."},
+ {n:7,h:"TZS zero-decimal unhandled in display and payment files",mod:"Currency",
+  d:"Every payment format hardcodes 2 decimals (<code>ap/service.ts:187/216/269</code>) and the UI's <code>isZeroDecimalCurrency</code> omits TZS despite the comment claiming otherwise (<code>lib/format.ts:74</code>). A TZS MT103 emitting <code>402500,00</code> risks bank rejection; shillings show phantom cents on every screen.",
+  s:"Pay a supplier 402,500 TZS → bank file carries “402500,00”, misread or rejected."},
+ {n:8,h:"Consolidation eliminations and translation are wrong",mod:"Consolidation",
+  d:"IC eliminations are summed in each child's <i>functional</i> currency then subtracted from a <i>reporting</i>-currency figure (<code>consolidation/service.ts:314</code>) — a ~2500× mismatch for a TZS child in USD. And a missing closing/average rate falls back to 1:1 with only a warning (<code>:209</code>), silently overstating foreign balances.",
+  s:"Consolidate a TZS property into the USD group → eliminations and translated balances are off by orders of magnitude."},
+ {n:9,h:"Imports can duplicate journals on re-run",mod:"Transfer Desk / Bank",
+  d:"The generic Transfer Desk path has no import-level idempotency — re-running creates a second held batch → duplicate GL journals (<code>transfer-desk-record-mapper.ts:122</code>); commit flips batch status <i>before</i> posting and isn't transactional (<code>batch-service.ts:116</code>). Bank and Sky Jana re-imports duplicate the whole statement. Batch operations also aren't entity-scoped (cross-property exposure).",
+  s:"Re-upload last night's PMS file after a timeout → revenue posted twice."},
+];
+
+const findings=[
+ // GL
+ {sev:"P0",mod:"GL",h:"Opening balances never roll forward",loc:"period/service.ts:288 · gl/repository.ts:492",d:"See blocker #1. Root cause of an unusable balance sheet."},
+ {sev:"P0",mod:"GL",h:"Year-end cleardown sums final period only",loc:"year-end-cleardown.ts:149–172",d:"See blocker #3. Net profit swept to retained earnings is wrong; period not locked after sweep."},
+ {sev:"HIGH",mod:"GL",h:"Two lines to the same account crash the post",loc:"gl/repository.ts:518–571",d:"Duplicate (entity,account,period) keys in one ON CONFLICT throw Postgres 21000. A dimensional split to the same GL account fails with a 500. Fix: aggregate lines by account before the batch update."},
+ {sev:"HIGH",mod:"GL",h:"Self-approval / SoD hole in legacy approval",loc:"gl/service.ts:632–657",d:"Any caller with GL_APPROVE creates an APPROVED decision that counts toward requiredCount; a creator with both permissions can self-approve and post. No creator≠approver check."},
+ {sev:"MED",mod:"GL",h:"Multi-stage auth posts into closed periods",loc:"authorization/service.ts:1169–1206",d:"Final-stage approval posts with no period-OPEN check and no balance re-validation, bypassing postJournalInternal's guards."},
+ {sev:"MED",mod:"GL",h:"Recurring auto-post: wrong sign, not transactional",loc:"recurring-service.ts:209–239",d:"Omits CONTRA_REVENUE from the sign set; journal create + balance update + template increment are separate awaits (partial state on crash); no functional-balance check."},
+ {sev:"MED",mod:"GL",h:"Allocation can post an unbalanced journal",loc:"allocation/service.ts:451–500",d:"A non-split target with no offset account pushes only one line, and executeAllocation posts with no debit=credit validation — a one-sided journal corrupts the ledger."},
+ {sev:"MED",mod:"GL",h:"No GL audit events on post / reverse",loc:"gl/service.ts (whole)",d:"GLService never writes audit events; only approval rows exist. No immutable who-posted / who-reversed trail."},
+ {sev:"MED",mod:"GL",h:"Trial-balance 'isBalanced' is trivially true",loc:"gl/service.ts:871–880",d:"Checks period debits = credits (always true for balanced postings) rather than closing balances netting to zero — false assurance."},
+ {sev:"LOW",mod:"GL",h:"Repair script uses wrong sign convention",loc:"scripts/recalculate-balances.ts:78",d:"Computes closing = debit − credit with no normal-balance sign; running it flips every credit-normal account. Fix or delete."},
+ {sev:"LOW",mod:"GL",h:"fxRate=0 / all-zero journals accepted",loc:"gl/types.ts:3",d:"Schema allows fxRate of 0/negative; zeroes functional on both sides and passes the balance check while posting non-zero transaction amounts."},
+ {sev:"LOW",mod:"GL",h:"Dead reversal branch in rejectJournal",loc:"gl/service.ts:696–707",d:"POSTED branch unreachable; reject also resets to DRAFT rather than REJECTED."},
+ // AP/AR
+ {sev:"P0",mod:"AP",h:"AP posting drops tax",loc:"ap/service.ts:584–625",d:"See blocker #4. Input VAT never booked; AP liability understated by the tax amount."},
+ {sev:"P0",mod:"AP",h:"Payment runs pay net, not gross",loc:"ap/service.ts:702",d:"Supplier underpaid by the VAT amount on every tax-bearing invoice."},
+ {sev:"P0",mod:"AR",h:"AR has no tax field; output VAT never split",loc:"ar/types.ts:25 · ar/service.ts:170",d:"Full amount credited to revenue; VAT-return preparation impossible."},
+ {sev:"HIGH",mod:"AP",h:"Collection run is a broken no-op",loc:"payment-profile-service.ts:264",d:"Defaults both sides of the journal to account 1200 (nets to zero), never updates balances, force-sets invoices to PAID. Live at POST /ap/collection-runs."},
+ {sev:"HIGH",mod:"AR",h:"Dunning never fires",loc:"ar/service.ts:499–543",d:"runDunning only queries status OVERDUE, but no code transitions invoices to OVERDUE. The daily job processes an empty set forever."},
+ {sev:"MED",mod:"AP",h:"AP FX gain/loss never posted",loc:"ap/service.ts:1048–1094",d:"Rate difference between invoice and payment date is stranded in AP control; no realized-FX account touched."},
+ {sev:"MED",mod:"AP",h:"Inconsistent AP clearing account",loc:"ap/service.ts:607 vs 1066",d:"Invoice credits control 2000 but payment debits a supplier-code account; 2000 never clears for API-posted invoices."},
+ {sev:"MED",mod:"AR",h:"Unapplied cash relieves AR control directly",loc:"ar/service.ts:350",d:"Receipt credits AR control before allocation; GL and subledger diverge. No payments-on-account control account."},
+ {sev:"MED",mod:"AP",h:"TZS zero-decimal not handled in payment files",loc:"ap/service.ts:187/216/269",d:"See blocker #7."},
+ {sev:"LOW",mod:"AR",h:"Ageing report doesn't foot",loc:"ar/service.ts:483 vs repository.ts:239",d:"Repository computes a current bucket the service omits; buckets sum to less than the total when current invoices exist."},
+ {sev:"LOW",mod:"AR",h:"origin / pmsFolioRef accepted but not persisted",loc:"ar/repository.ts:106",d:"Journal source is always 'AR', defeating PMS/POS tagging."},
+ {sev:"LOW",mod:"AP",h:"No duplicate supplier-invoice guard",loc:"ap/service.ts createInvoice",d:"No uniqueness on supplier + invoice number."},
+ // Multi-entity
+ {sev:"P0",mod:"FX",h:"Revaluation writes unsigned balances",loc:"fx/repository.ts:218",d:"See blocker #5. Opposite sign to the GL convention for credit-normal accounts."},
+ {sev:"P0",mod:"FX",h:"Revaluation idempotency reference mismatch",loc:"fx/service.ts:297–310",d:"See blocker #6. Re-runs double-post."},
+ {sev:"P0",mod:"Consolidation",h:"Eliminations in functional vs reporting currency",loc:"consolidation/service.ts:314",d:"See blocker #8."},
+ {sev:"HIGH",mod:"Consolidation",h:"Missing rate falls back to 1:1",loc:"consolidation/service.ts:209",d:"Foreign balances silently overstated when a closing/average rate is absent — warning only."},
+ {sev:"HIGH",mod:"FX",h:"Invoice revaluation reads only CLOSING rates",loc:"fx/service.ts:383",d:"ECB import writes SPOT only, so with no CLOSING rate every invoice is skipped and revaluation posts nothing (this engine has no SPOT fallback)."},
+ {sev:"MED",mod:"FX",h:"AP revaluation over-revalues partial payments",loc:"fx/service.ts:393",d:"Uses gross netAmount, not outstanding (amount − paid); AR path does this correctly."},
+ {sev:"MED",mod:"FixedAssets",h:"Disposal credits the P&L depreciation account",loc:"fixed-asset/service.ts:664–694",d:"No asset-cost balance-sheet field; acquisition posts no journal, so original cost never leaves the balance sheet and P&L gets a spurious credit."},
+ {sev:"MED",mod:"Intercompany",h:"Tri-currency counterparty booked at rate 1",loc:"intercompany/service.ts:499–521",d:"Early return skips the counterparty rate lookup when the transaction currency differs from both entities' functional currencies."},
+ {sev:"MED",mod:"Intercompany",h:"Approval workflow is dead code",loc:"intercompany/service.ts:377",d:"createTransaction always posts immediately; approve / auto-approve-threshold / 'cannot approve your own' never run. No SoD on IC postings."},
+ {sev:"MED",mod:"FX",h:"Ledger revaluation ignores prior-period balances",loc:"ledger-revaluation.ts:151",d:"Only revalues lines in the current period; foreign monetary balances from prior periods aren't revalued at closing rate (contra IAS 21)."},
+ {sev:"MED",mod:"Budget",h:"Monthly budget compared to cumulative balance",loc:"budget/service.ts:130",d:"Variance compares a monthly line to the cumulative MV closing balance; over/understates for P&L accounts carrying within-year balances."},
+ {sev:"LOW",mod:"FixedAssets",h:"Depreciation ignores in-service timing",loc:"fixed-asset/service.ts:235–304",d:"depreciationStartPeriodId / firstPeriodDays stored but unused; no first-period proration; assets depreciate before in-service; USER_TABLE method returns zero."},
+ {sev:"LOW",mod:"Consolidation",h:"MV read without pre-refresh",loc:"jobs/mv-refresh-job.ts:44",d:"Consolidation/budget read the MV with no pre-refresh; a 15-min cron with a singleton jobId can drop a queued refresh → up to 15-min stale financials."},
+ // Transfer Desk / integrations
+ {sev:"P0",mod:"TransferDesk",h:"Generic imports duplicate journals on re-run",loc:"transfer-desk-record-mapper.ts:122 · batch-service.ts:116",d:"See blocker #9. No import idempotency; non-transactional, non-resumable commit."},
+ {sev:"HIGH",mod:"TransferDesk",h:"Batch operations not entity-scoped",loc:"batch-service.ts:40–112",d:"getBatch/commit/discard query by id only; routes never pass entityId; batch tables absent from RLS. A user in hotel A can commit or discard hotel B's staged batch."},
+ {sev:"HIGH",mod:"TransferDesk",h:"FSD engine coerces money to float64",loc:"fsd-engine/src/parsers/shared.ts:70",d:"decimal/currency fields parsed to JS float, then String()→Decimal — precision lost whenever a profile types an amount as decimal/currency. Config-dependent and silent."},
+ {sev:"HIGH",mod:"Integration",h:"Bank import: float money + duplicates statements",loc:"bank-statement-importer.ts:112",d:"parseFloat on all amounts; re-importing the same MT940/OFX creates a new statement id so dedup fails and the whole statement duplicates. No file hash, no transaction."},
+ {sev:"MED",mod:"TransferDesk",h:"TML money functions use float",loc:"tml-engine/src/functions.ts:98",d:"multiply/divide/round/taxExtract use Number() and round to 2dp — truncates the 3rd decimal of ÷1000 amounts. Any money math in TML loses precision."},
+ {sev:"MED",mod:"Integration",h:"Sky Jana job: no dedup, float, no transaction",loc:"sky-jana-sync-job.ts:196",d:"Creates JANA- journals with no existence check; re-run or archive failure duplicates journals; 2dp rounding on 3-decimal amounts."},
+ {sev:"MED",mod:"Integration",h:"No transaction on Opera/SAF/payroll posts",loc:"opera-cloud-import-job.ts:436",d:"Journal + balance upserts + import-log update are separate writes; a mid-run crash leaves partial balances and a stuck RUNNING log."},
+ {sev:"MED",mod:"Integration",h:"Simphony posting code is dead but unsafe",loc:"simphony-import-job.ts:60",d:"Hard-disabled by a throw; the dead path would post unbalanced POSTED journals (float, no suspense) if ever re-enabled."},
+ {sev:"MED",mod:"TransferDesk",h:"No FSD/TML/sandbox tests",loc:"packages/*/tests",d:"Zero unit tests for the format and transformation engines; the isolated-vm escape surface is entirely unverified."},
+ {sev:"LOW",mod:"TransferDesk",h:"Orphan parsers not wired",loc:"fsd-engine/src/parsers/",d:"delimited.ts / fixed-width.ts / xml.ts exist but aren't imported by engine.ts — dead/duplicate code. Serialisation is CSV/TSV only."},
+ {sev:"LOW",mod:"TransferDesk",h:"AUTO_COMMIT bypasses human review",loc:"transfer-desk-batch-stager.ts:108",d:"Scheduled/automation runs skip the held-batch review entirely — a controls question worth an explicit decision."},
+ // Platform
+ {sev:"HIGH",mod:"Platform",h:"AsyncLocalStorage uses unsafe enterWith",loc:"app.ts:104 · requestContext.ts:47",d:"Hot path uses enterWith (no clean exit, can bleed context across async continuations) though the safe runWithContext exists and is imported. If context is lost, the proxy routes to the shared default DB."},
+ {sev:"HIGH",mod:"Platform",h:"Child line tables have no RLS",loc:"schema-tenant.prisma:750",d:"journal_lines / ap_invoice_lines / ar_invoice_lines / po_lines / recurring_journal_lines have no entity_id and no policy; raw SQL or a bare findMany bypasses isolation on the highest-volume tables."},
+ {sev:"HIGH",mod:"Platform",h:"Background jobs aren't tenant-aware",loc:"recurring-journal-job.ts:36",d:"Dunning / recurring / report / scheduled-report workers use a single default-DB client; in DB-per-tenant they silently skip or mis-target other tenants."},
+ {sev:"MED",mod:"Platform",h:"login_audits / consolidation_runs have no RLS",loc:"entity-rls.sql",d:"Within a tenant, any entity context can read all login/consolidation header rows."},
+ {sev:"MED",mod:"Platform",h:"Superadmin inferred from empty entityIds",loc:"entity/router.ts:91",d:"Full-tenant listing granted on empty claim rather than an explicit role — a fragile invariant."},
+ {sev:"MED",mod:"Platform",h:"Tenant databaseUrl has no host allowlist",loc:"tenant/router.ts:88",d:"A leaked platform key can register a tenant pointing at an arbitrary DB."},
+ {sev:"MED",mod:"Platform",h:"Auth is opt-in, not default-deny",loc:"app.ts",d:"No global auth hook; a route that forgets requireAuth is unauthenticated."},
+ {sev:"LOW",mod:"Platform",h:"Non-constant-time platform-key compare",loc:"tenant/router.ts:29",d:"Timing side-channel on the shared static key; relies on Fastify short-circuit."},
+ // Web / reporting
+ {sev:"P0",mod:"Reporting",h:"Materialized view never created (KPI 500s)",loc:"performance.sql:11 · sqlRunner.ts:116",d:"See blocker #2. PascalCase table names abort MV creation; /kpi/revpar, balance-sheet, cash-flow all 500."},
+ {sev:"HIGH",mod:"Web",h:"Journal debit/credit accept arbitrary text",loc:"gl/journals/new/page.tsx:211",d:"Bare z.string() with no numeric/NaN refine; '1abc'/negative/blank pass client validation."},
+ {sev:"HIGH",mod:"Web",h:"AP invoice form has no validation",loc:"ap/page.tsx:233",d:"grossAmount is a raw string posted directly; non-numeric posts as NaN/garbage."},
+ {sev:"HIGH",mod:"Web",h:"Logout doesn't clear cache / entity",loc:"components/auth-provider.tsx:138",d:"No queryClient.clear(); localStorage entity + store persist. Next user on the same browser can see the prior tenant's cached data."},
+ {sev:"MED",mod:"Web",h:"TZS renders with 2 decimals",loc:"lib/format.ts:74",d:"isZeroDecimalCurrency omits TZS despite the comment; the hotels' core currency shows phantom cents."},
+ {sev:"MED",mod:"Web",h:"~15 pages use local fmt() / runtime locale",loc:"budget/page.tsx:183 · ar/page.tsx:211",d:"toLocaleString(undefined,…) → hydration mismatch + inconsistent grouping; local fmts drop currency symbols."},
+ {sev:"MED",mod:"Web",h:"Missing UI for built endpoints",loc:"reporting/router.ts:158 · ar/router.ts:148",d:"Report scheduling, AR receipts list, AP/AR invoice edit-delete, user activate-deactivate all have backend + client fns but no screen."},
+ {sev:"LOW",mod:"Web",h:"CSV exports lack UTF-8 BOM",loc:"reports/*",d:"Excel on Windows mangles non-ASCII; trial-balance 'Excel' export is actually an HTML .xls that triggers a format warning."},
+ {sev:"LOW",mod:"Web",h:"Two competing persisted entity stores",loc:"useAppStore.ts:14 vs entity-provider.tsx:38",d:"Only one drives API calls; the other is stale/dead-ish — confusing source of truth."},
+];
+
+const keep=[
+ ["Row-locking + atomic balance upserts","The concurrency backbone — proven correct across AP/AR/periods. Don't refactor casually."],
+ ["Decimal money math (core GL/AP/AR)","Prevents float drift where it counts. Extend this discipline outward, don't dilute it."],
+ ["Database-per-tenant + RLS","Strong isolation model; the April criticals are fixed. This is a genuine competitive asset."],
+ ["RBAC with privilege ceiling","Real, enforced, entity-scoped. Only needs default-deny and a couple of policy gaps closed."],
+ ["FAL/FSL/FTL report engine + USALI","The SunSystems Q&A parity — real and rare. This is a headline selling point."],
+ ["Transfer Desk + fsd/tml engines","Your core differentiator vs generic accounting tools. Fix precision + idempotency, then market it hard."],
+ ["Mews & Inbound connectors","Reference-quality (transactional, Decimal-clean, suspense-balanced). Use them as the template for the others."],
+ ["Advisory-lock process locks","Correctly serialize close/consolidation/depreciation. Keep."],
+ ["Role dashboards","All real and API-wired — no mock data to unwind."],
+];
+
+const remove=[
+ ["Legacy intercompany posting path","postLegacyICJournals posts DR and CR to the same account (net-zero, records nothing) and never updates balances. Dead and dangerous — delete."],
+ ["One of the two FX revaluation engines","The invoice-level engine has the sign + idempotency bugs; the ledger engine is correct. Keep one, delete the other — two competing engines is itself a liability."],
+ ["Orphan FSD parsers","delimited.ts / fixed-width.ts / xml.ts aren't wired into the engine. Delete or wire — don't leave duplicate parsers."],
+ ["Simphony dead posting code","Hard-disabled but would post unbalanced journals if re-enabled. Either finish it properly or remove it."],
+ ["recalculate-balances.ts repair script","Wrong sign convention; running it corrupts credit-normal balances. Fix to match live posting or delete."],
+ ["Duplicate entity store","useAppStore.activeEntityId duplicates entity-provider's store; only one drives API calls. Collapse to one."],
+ ["getKPIDashboard dead wrapper","Never called; dashboards compose individual endpoints. Remove."],
+ ["RabbitMQ service","Present in docker-compose but unused (runtime is BullMQ/Redis). Extra attack surface — drop it."],
+ ["'Coming soon' placeholders","Transfer Desk 'Recent Executions' widget and disabled 'New Profile' button — wire or hide."],
+];
+
+const add=[
+ ["Opening-balance / carry-forward engine","Without it there is no correct balance sheet. This is the single highest-value fix.","P0"],
+ ["VAT / tax engine","Tax-code→GL, input & output VAT, pay gross, VAT-return report. Non-negotiable for Tanzania's 18% VAT.","P0"],
+ ["Currency-decimal registry (TZS=0)","One source of truth for decimals feeding both display and every payment-file format.","P0"],
+ ["Single signed balance-update path","Collapse the three writers into one; delete the unsigned ones. Removes a whole class of TB-corruption bugs.","P0"],
+ ["Import idempotency","Content-hash / unique constraint on generic TD + bank + Sky Jana so re-runs can't duplicate journals.","P1"],
+ ["Overdue-aging job","Transition posted invoices to OVERDUE so dunning actually does something.","P1"],
+ ["Realized FX gain/loss on settlement","Book the rate difference at AP payment / AR receipt instead of stranding it.","P1"],
+ ["AR credit notes, write-offs, receipt reversal","Everyday finance-clerk workflows currently impossible.","P1"],
+ ["Report scheduling UI","Engine + worker already exist — just needs a screen to email monthly USALI/BS/P&L.","P1"],
+ ["Segregation-of-duties enforcement","Creator ≠ approver; unify the two approval systems. Table stakes for auditability.","P1"],
+ ["Backups / PITR + monitoring + job DLQ","Run-safety for real customers; today job failures only hit the console.","P2"],
+ ["FSD/TML + sandbox-security test suites","Zero tests today on your differentiating engines and the VM escape surface.","P2"],
+ ["Analysis-code masters (validate dimension1–6)","Reaches true SunSystems analysis-ledger depth; today dimensions are free-text.","P2"],
+];
+
+const ss=[
+ ["Multi-ledger GL + subledgers","At parity","GL, AP, AR present with double-entry and locking. Depth gaps (VAT, carry-forward) are the work.","hi"],
+ ["Multi-currency + revaluation","Partial","Rates and two reval engines exist but have sign/idempotency/rate-source bugs. Correct the engine, don't add more.","lo"],
+ ["Consolidation","Partial","Aggregation + lineage-checked eliminations exist but currency translation is broken. Report-only (no consolidated journal / NCI).","lo"],
+ ["Transfer Desk (import)","At / beyond parity","Own format engine + transformation DSL + governed held-batch review. Precision + idempotency are the gaps.","md"],
+ ["Q&A ad-hoc report writer","At parity","FAL/FSL/FTL with drill-down and seeded definitions — genuinely SunSystems-class.","hi"],
+ ["Budgeting","At parity","Definitions, lines, variance. Minor basis fix needed.","md"],
+ ["Fixed assets","Partial","Register + idempotent depreciation, but acquisition/disposal don't post to the GL correctly.","lo"],
+ ["Allocations","Basic parity","Ratio/threshold allocation runs, but can post unbalanced; no analysis-dimension driver.","md"],
+ ["Analysis dimensions (T-codes)","Behind","dimension1–6 exist as free-text; no analysis-code master or validation — SunSystems' signature strength.","lo"],
+ ["USALI hospitality P&L","Beyond","Native USALI departmental P&L — SunSystems needs customisation for this. A real edge.","hi"],
+ ["PMS / POS integration","Beyond","Opera, Mews, Simphony, Sky Jana connectors — not a native SunSystems capability. A real edge.","md"],
+ ["Multi-tenant SaaS","Beyond","Database-per-tenant + RLS; SunSystems is classically on-prem/single-tenant. A modern advantage.","hi"],
+];
+
+/* ---------- RENDER ---------- */
+const $=(s,c=document)=>c.querySelector(s), $$=(s,c=document)=>[...c.querySelectorAll(s)];
+const sevPill={P0:'<span class="pill p0 sev">P0</span>',HIGH:'<span class="pill bad sev">HIGH</span>',MED:'<span class="pill warn sev">MED</span>',LOW:'<span class="pill info sev">LOW</span>'};
+
+// scorecard
+$("#scoreList").innerHTML=scores.map(([n,s,p,c])=>`
+ <div class="mod"><div class="name">${n}<small>${s}</small></div>
+ <div class="bar sc-${c}"><i style="width:${p}%"></i></div>
+ <div class="pct">${p}%</div></div>`).join("");
+
+// blockers
+$("#blockerList").innerHTML=blockers.map(b=>`
+ <div class="card tight" style="margin:10px 0;border-left:3px solid var(--p0)">
+  <div style="display:flex;gap:10px;align-items:flex-start">
+   <div style="flex:0 0 26px;height:26px;border-radius:8px;background:rgba(232,84,77,.16);color:#f7938d;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px">${b.n}</div>
+   <div style="flex:1">
+     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="hl" style="font-size:15px">${b.h}</span><span class="modtag">${b.mod}</span></div>
+     <div style="color:#cdd9e6;font-size:13.5px;margin-top:6px">${b.d}</div>
+     <div style="margin-top:8px;font-size:12.5px;color:#f2c9c6"><b style="color:#f7938d">Fails like:</b> ${b.s}</div>
+   </div>
+  </div>
+ </div>`).join("");
+
+// findings
+const mods=[...new Set(findings.map(f=>f.mod))].sort();
+$("#modFilter").innerHTML+=mods.map(m=>`<option value="${m}">${m}</option>`).join("");
+function renderFindings(){
+ const sev=$(".fbtn.on",$(".controls")).dataset.sev;
+ const mod=$("#modFilter").value, q=$("#txtFilter").value.toLowerCase();
+ let shown=0;
+ $("#findingList").innerHTML=findings.map(f=>{
+   const ok=(sev==="all"||f.sev===sev)&&(mod==="all"||f.mod===mod)&&(!q||(f.h+f.d+f.loc).toLowerCase().includes(q));
+   if(ok)shown++;
+   return `<details class="find ${ok?'':'noshow'}"><summary>${sevPill[f.sev]}<span class="modtag">${f.mod}</span>
+     <div class="t"><div class="h">${f.h}</div><div class="m">${f.loc}</div></div></summary>
+     <div class="body">${f.d}<div class="loc">📄 ${f.loc}</div></div></details>`;
+ }).join("");
+ $("#findCount").textContent=`Showing ${shown} of ${findings.length} findings`;
+}
+$$(".controls .fbtn").forEach(b=>b.onclick=()=>{$$(".controls .fbtn").forEach(x=>x.classList.remove("on"));b.classList.add("on");renderFindings();});
+$("#modFilter").onchange=renderFindings; $("#txtFilter").oninput=renderFindings;
+renderFindings();
+
+// keep/remove/add
+$("#keepBody").innerHTML=keep.map(([a,b])=>`<tr><td class="hl">${a}</td><td>${b}</td></tr>`).join("");
+$("#removeBody").innerHTML=remove.map(([a,b])=>`<tr><td class="hl">${a}</td><td>${b}</td></tr>`).join("");
+$("#addBody").innerHTML=add.map(([a,b,p])=>`<tr><td class="hl">${a}</td><td>${b}</td><td><span class="pill ${p.toLowerCase()}">${p}</span></td></tr>`).join("");
+$$(".tab").forEach(t=>t.onclick=()=>{$$(".tab").forEach(x=>x.classList.remove("on"));t.classList.add("on");$$(".tabpane").forEach(p=>p.classList.remove("on"));$("#tab-"+t.dataset.tab).classList.add("on");});
+
+// sunsystems
+const ssPill={hi:'<span class="pill ok">Strong</span>',md:'<span class="pill warn">Partial</span>',lo:'<span class="pill bad">Weak</span>'};
+$("#ssBody").innerHTML=ss.map(([a,b,c,s])=>`<tr><td class="hl">${a}</td><td>${ssPill[s]} <span style="font-size:12px;color:var(--muted)">${b}</span></td><td>${c}</td></tr>`).join("");
+
+// scrollspy
+const secs=$$("section[id]"), links=$$("#nav a");
+const spy=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){links.forEach(l=>l.classList.toggle("active",l.getAttribute("href")==="#"+e.target.id));}});},{rootMargin:"-10% 0px -80% 0px"});
+secs.forEach(s=>spy.observe(s));
+</script>
+</body>
+</html>

@@ -16,7 +16,7 @@ const ENTITY_TREE: Record<string, { id: string; parentId: string | null }> = {
 };
 
 function createMockPrisma() {
-  return {
+  const mock: any = {
     entity: {
       findUnique: vi
         .fn()
@@ -47,11 +47,20 @@ function createMockPrisma() {
     consolidationRun: {
       create: vi.fn().mockResolvedValue({ id: "run-1" })
     },
+    // Consolidation reads child journals and persists run rows through
+    // withBypassRLS: under the parent's RLS context the children's journals are
+    // invisible and consolidation_run_entities inserts are rejected. That helper
+    // opens a transaction, so the stub needs one.
+    $transaction: vi
+      .fn()
+      .mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => fn(mock)),
+    $executeRawUnsafe: vi.fn().mockResolvedValue(0),
     $queryRaw: vi.fn().mockResolvedValue([]),
     $queryRawUnsafe: vi.fn().mockImplementation(async (_sql: string, id: string) => {
       return ENTITY_TREE[id] ? [ENTITY_TREE[id]] : [];
     })
-  } as any;
+  };
+  return mock;
 }
 
 describe("Consolidation child-entity lineage validation (NS3)", () => {

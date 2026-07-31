@@ -34,62 +34,74 @@ function makeMockPrisma() {
   locks = [];
   idCounter = 0;
 
-  return {
-    processLock: {
-      findFirst: vi.fn().mockImplementation(({ where }: any) => {
-        return Promise.resolve(
-          locks.find(
-            (l) =>
-              l.entityId === where.entityId &&
-              l.processType === where.processType &&
-              l.ledger === where.ledger &&
-              l.isActive === where.isActive
-          ) ?? null
-        );
-      }),
-      findMany: vi.fn().mockImplementation(({ where }: any) => {
-        return Promise.resolve(
-          locks.filter((l) => l.entityId === where.entityId && l.isActive === where.isActive)
-        );
-      }),
-      create: vi.fn().mockImplementation(({ data }: any) => {
-        idCounter++;
-        const lock: MockLock = {
-          id: `lock-${idCounter}`,
-          entityId: data.entityId,
-          processType: data.processType,
-          ledger: data.ledger,
-          acquiredAt: new Date(),
-          expiresAt: data.expiresAt,
-          releasedAt: null,
-          acquiredById: data.acquiredById,
-          workerId: data.workerId,
-          isActive: true
-        };
-        locks.push(lock);
-        return Promise.resolve(lock);
-      }),
-      update: vi.fn().mockImplementation(({ where, data }: any) => {
-        const lock = locks.find((l) => l.id === where.id);
-        if (lock) {
-          Object.assign(lock, data);
-        }
-        return Promise.resolve(lock);
-      }),
-      updateMany: vi.fn().mockImplementation(({ where, data }: any) => {
-        let count = 0;
-        for (const lock of locks) {
-          if (lock.isActive && where.expiresAt?.lt && lock.expiresAt < where.expiresAt.lt) {
-            if (!where.entityId || lock.entityId === where.entityId) {
-              Object.assign(lock, data);
-              count++;
-            }
+  const processLockMethods = {
+    findFirst: vi.fn().mockImplementation(({ where }: any) => {
+      return Promise.resolve(
+        locks.find(
+          (l) =>
+            l.entityId === where.entityId &&
+            l.processType === where.processType &&
+            l.ledger === where.ledger &&
+            l.isActive === where.isActive
+        ) ?? null
+      );
+    }),
+    findMany: vi.fn().mockImplementation(({ where }: any) => {
+      return Promise.resolve(
+        locks.filter((l) => l.entityId === where.entityId && l.isActive === where.isActive)
+      );
+    }),
+    create: vi.fn().mockImplementation(({ data }: any) => {
+      idCounter++;
+      const lock: MockLock = {
+        id: `lock-${idCounter}`,
+        entityId: data.entityId,
+        processType: data.processType,
+        ledger: data.ledger,
+        acquiredAt: new Date(),
+        expiresAt: data.expiresAt,
+        releasedAt: null,
+        acquiredById: data.acquiredById,
+        workerId: data.workerId,
+        isActive: true
+      };
+      locks.push(lock);
+      return Promise.resolve(lock);
+    }),
+    update: vi.fn().mockImplementation(({ where, data }: any) => {
+      const lock = locks.find((l) => l.id === where.id);
+      if (lock) {
+        Object.assign(lock, data);
+      }
+      return Promise.resolve(lock);
+    }),
+    updateMany: vi.fn().mockImplementation(({ where, data }: any) => {
+      let count = 0;
+      for (const lock of locks) {
+        if (lock.isActive && where.expiresAt?.lt && lock.expiresAt < where.expiresAt.lt) {
+          if (!where.entityId || lock.entityId === where.entityId) {
+            Object.assign(lock, data);
+            count++;
           }
         }
-        return Promise.resolve({ count });
-      })
-    }
+      }
+      return Promise.resolve({ count });
+    })
+  };
+
+  const mock = {
+    processLock: processLockMethods,
+    // $transaction passes through to fn with a tx that shares the same mock methods
+    $transaction: vi.fn().mockImplementation(async (fn: any) => {
+      const tx = {
+        processLock: processLockMethods,
+        $executeRawUnsafe: vi.fn().mockResolvedValue(undefined)
+      };
+      return fn(tx);
+    })
   } as any;
+
+  return mock;
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────

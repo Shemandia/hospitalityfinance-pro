@@ -2,7 +2,7 @@
  * Transfer Desk — per-tenant BullMQ worker.
  *
  * One worker per active tenant, lazily started when the matching queue gets
- * its first job. The worker name follows the spec pattern `transfer:{tenant-slug}`
+ * its first job. The worker name follows the spec pattern `transfer-{tenant-slug}`
  * (TD-BL-027).
  *
  * Responsibilities:
@@ -40,6 +40,7 @@ import {
 } from "./transfer-desk-pipeline.js";
 import { getStorageBackend } from "./transfer-desk-storage.js";
 import { executeAutomation, type AutomationStep } from "./automation-engine.js";
+import { sendEmail } from "../shared/email.js";
 
 // ── Per-tenant worker cache ────────────────────────────────────────────────
 
@@ -255,6 +256,9 @@ async function processJob(
     throw err;
   }
 
+  // ── Send execution notifications (if configured via automation schedule) ─
+  await sendExecutionNotification(prisma, tenantSlug, profile, executionId, finalStatus, result);
+
   return {
     executionId,
     status: finalStatus,
@@ -275,6 +279,73 @@ async function markFailed(prisma: any, executionId: string, message: string): Pr
       }
     })
     .catch(() => {});
+}
+
+/**
+ * Send execution completion/failure notifications if the profile has a
+ * schedule with notification preferences (notifyOnSuccess, notifyOnFailure).
+ */
+async function sendExecutionNotification(
+  prisma: any,
+  tenantSlug: string,
+  profile: ProfileWithRelations,
+  executionId: string,
+  status: "COMPLETED" | "FAILED",
+  result: PipelineResult
+): Promise<void> {
+  try {
+    // Find the automation schedule for this profile to read notification config
+    const step = await prisma.transferAutomationStep.findFirst({
+      where: { profileId: profile.id },
+      include: {
+        automation: {
+          select: { description: true }
+        }
+      }
+    });
+
+    if (!step?.automation?.description) return;
+
+    let config: Record<string, unknown>;
+    try {
+      config = JSON.parse(step.automation.description);
+    } catch {
+      return;
+    }
+
+    const notifyEmails = Array.isArray(config.notifyEmails) ? config.notifyEmails : [];
+    if (notifyEmails.length === 0) return;
+
+    const shouldNotify =
+      (status === "COMPLETED" && config.notifyOnSuccess === true) ||
+      (status === "FAILED" && config.notifyOnFailure === true);
+
+    if (!shouldNotify) return;
+
+    const subject =
+      status === "COMPLETED"
+        ? `Transfer "${profile.name}" completed (${result.recordsSucceeded}/${result.recordsTotal} records)`
+        : `Transfer "${profile.name}" failed: ${result.errorMessage ?? "unknown error"}`;
+
+    const html = `
+      <p>Transfer Desk execution <strong>${status}</strong></p>
+      <ul>
+        <li>Profile: ${profile.name}</li>
+        <li>Execution: ${executionId}</li>
+        <li>Tenant: ${tenantSlug}</li>
+        <li>Records: ${result.recordsSucceeded} succeeded, ${result.recordsFailed} failed (${result.recordsTotal} total)</li>
+        ${result.errorMessage ? `<li>Error: ${result.errorMessage}</li>` : ""}
+      </ul>
+    `;
+
+    await Promise.allSettled(
+      notifyEmails.map((email: string) => sendEmail({ to: email, subject, html }))
+    );
+  } catch (err) {
+    console.warn(
+      `[TransferDeskWorker:${tenantSlug}] Notification send failed: ${(err as Error).message}`
+    );
+  }
 }
 
 /**

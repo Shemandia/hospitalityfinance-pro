@@ -3,6 +3,7 @@ import type { PrismaClient } from "../../db/client.js";
 import { prisma } from "../../db/prisma.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
 import { requireRole } from "../../middleware/requireRole.js";
+import { requirePermission } from "../../middleware/requirePermission.js";
 import { ProcessLockService, ProcessLockError } from "./service.js";
 
 const lockService = new ProcessLockService(prisma as unknown as PrismaClient);
@@ -25,7 +26,7 @@ export async function registerProcessLockRouter(app: FastifyInstance): Promise<v
   app.register(
     async (router) => {
       router.addHook("preHandler", requireAuth);
-      router.addHook("preHandler", requireRole(["ADMIN", "SUPERADMIN"]));
+      router.addHook("preHandler", requirePermission("ADMIN_SETTINGS"));
 
       // POST /process-locks/acquire
       router.post<{

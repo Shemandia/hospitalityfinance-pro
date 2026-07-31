@@ -9,7 +9,7 @@ import {
   useState,
   type ReactNode
 } from "react";
-import { useSession } from "next-auth/react";
+import { useSession } from "./auth-provider";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getEntities, type EntitySummaryItem } from "../lib/gl-api";
 import { useTenantSlug } from "../hooks/use-tenant-slug";
@@ -41,15 +41,25 @@ export function EntityProvider({ children }: { children: ReactNode }) {
   const { data: session } = useSession();
   const accessToken = session?.accessToken;
   const sessionEntityIds = session?.user?.entityIds ?? [];
+  const sessionRoles = session?.user?.roles ?? [];
+  const isCrossEntityAdmin = sessionRoles.some((role) =>
+    ["SUPERADMIN", "PLATFORM_ADMIN"].includes(role.toUpperCase())
+  );
   const urlTenantSlug = useTenantSlug();
-  const tenantSlug = urlTenantSlug ?? session?.user?.tenantSlug;
+  // The session's slug is authoritative — the /t/[code] URL segment is the
+  // tenant CODE, not the slug, and must not be sent as X-Tenant-Slug.
+  const tenantSlug = session?.user?.tenantSlug ?? urlTenantSlug ?? undefined;
 
   // Fetch all entities the user can access
   const { data: entities = [], isLoading } = useQuery({
     queryKey: ["entities", accessToken, tenantSlug],
     queryFn: () => {
       if (!accessToken) throw new Error("No session");
-      // Superadmin (empty entityIds) omits X-Entity-ID — backend returns all entities
+      if (sessionEntityIds.length === 0 && !isCrossEntityAdmin) {
+        throw new Error("No entity assignments");
+      }
+      // Empty entityIds omits X-Entity-ID only for SUPERADMIN/PLATFORM_ADMIN.
+      // Normal users with no assignments are blocked above with a configuration error.
       const contextEntityId = sessionEntityIds[0] ?? "";
       return getEntities({ accessToken, entityId: contextEntityId, tenantSlug }).then(
         (res) => res.data
@@ -60,9 +70,10 @@ export function EntityProvider({ children }: { children: ReactNode }) {
   });
 
   // Filter to entities the user has access to
-  // Superadmin (empty entityIds) sees all; others see granted entities + their children
+  // Empty entityIds means global access only for SUPERADMIN/PLATFORM_ADMIN.
+  // Other users see assigned entities plus children of assigned parents.
   const userEntities = useMemo(() => {
-    if (sessionEntityIds.length === 0) return entities; // superadmin
+    if (sessionEntityIds.length === 0) return isCrossEntityAdmin ? entities : [];
     const granted = new Set(sessionEntityIds);
     return entities.filter((e) => {
       if (granted.has(e.id)) return true;
@@ -70,7 +81,7 @@ export function EntityProvider({ children }: { children: ReactNode }) {
       if (e.parentId && granted.has(e.parentId)) return true;
       return false;
     });
-  }, [entities, sessionEntityIds]);
+  }, [entities, sessionEntityIds, isCrossEntityAdmin]);
 
   // Selected entity ID — initialize from localStorage or first entity
   const [selectedId, setSelectedId] = useState<string | null>(() => {
@@ -119,6 +130,20 @@ export function EntityProvider({ children }: { children: ReactNode }) {
     }),
     [userEntities, currentEntity, entityId, switchEntity, isLoading]
   );
+
+  if (accessToken && sessionEntityIds.length === 0 && !isCrossEntityAdmin && !isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 p-8">
+        <div className="mx-auto max-w-xl rounded-lg border border-amber-200 bg-white p-6 shadow-sm">
+          <h1 className="text-lg font-semibold text-slate-900">Entity access is not configured</h1>
+          <p className="mt-2 text-sm text-slate-600">
+            Your account is active, but no entity has been assigned to it. Contact an administrator
+            to assign property or group access before using financial modules.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return <EntityContext.Provider value={value}>{children}</EntityContext.Provider>;
 }

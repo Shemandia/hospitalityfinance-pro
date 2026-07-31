@@ -8,9 +8,9 @@ describe("FX revaluation transaction safety", () => {
       "utf-8"
     );
 
-    // Find the revaluation method
     const methodStart = source.indexOf("async runRevaluation");
-    const revalSection = source.slice(methodStart, methodStart + 5000);
+    const nextMethod = source.indexOf("\n  async ", methodStart + "async runRevaluation".length);
+    const revalSection = source.slice(methodStart, nextMethod === -1 ? undefined : nextMethod);
 
     const txStart = revalSection.indexOf("$transaction");
     const apRead = revalSection.indexOf("getOpenAPInvoices");

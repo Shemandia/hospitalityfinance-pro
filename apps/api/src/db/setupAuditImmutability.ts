@@ -8,8 +8,11 @@ async function main() {
   }
 
   const sqlPath = join(process.cwd(), "src", "db", "sql", "audit-events-immutable.sql");
-  const statementCount = await executeSqlFile(prisma, sqlPath);
-  console.log(`Audit immutability trigger configured (${statementCount} statements).`);
+  const { total, executed, skipped } = await executeSqlFile(prisma, sqlPath);
+  console.log(`Audit immutability trigger configured (${executed}/${total} statements).`);
+  if (skipped.length > 0) {
+    console.warn(`${skipped.length} statement(s) skipped as already-applied or not applicable.`);
+  }
 }
 
 main()

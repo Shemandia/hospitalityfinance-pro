@@ -9,7 +9,7 @@
  *   npx tsx src/scripts/provision-demo-chains.ts
  *
  * This script:
- *   1. Creates 3 tenant entries in the registry
+ *   1. Creates 3 tenant entries in the registry (with deterministic tenantCode)
  *   2. Creates 3 PostgreSQL databases
  *   3. Runs migrations on each
  *   4. Seeds each with its own entities, accounts, periods, and data
@@ -17,7 +17,9 @@
  * No hardcoded IDs — everything is auto-generated.
  */
 
-import { PrismaClient, Prisma } from "@prisma/client";
+import crypto from "node:crypto";
+import { PrismaClient, Prisma } from "../db/client.js";
+import { PrismaClient as RegistryPrismaClient } from "../db/registry-client.js";
 import { execSync } from "node:child_process";
 import { resolve } from "node:path";
 
@@ -27,7 +29,7 @@ if (!registryUrl) {
   process.exit(1);
 }
 
-const registry = new PrismaClient({ datasourceUrl: registryUrl });
+const registry = new RegistryPrismaClient({ datasourceUrl: registryUrl });
 
 function parseDbUrl(url: string) {
   const parsed = new URL(url);
@@ -136,7 +138,7 @@ async function provisionChain(chain: (typeof chains)[0]) {
 
   // 2. Run migrations
   console.log(`  Running migrations...`);
-  execSync(`npx prisma db push --schema src/db/schema.prisma --skip-generate`, {
+  execSync(`npx prisma db push --schema src/db/schema-tenant.prisma --skip-generate`, {
     cwd: apiRoot,
     env: { ...process.env, DATABASE_URL: tenantDbUrl },
     stdio: "pipe"
@@ -154,6 +156,7 @@ async function provisionChain(chain: (typeof chains)[0]) {
       data: {
         name: chain.name,
         slug: chain.slug,
+        tenantCode: crypto.createHash("sha256").update(chain.slug).digest("hex").substring(0, 8),
         databaseUrl: tenantDbUrl,
         adminEmail: chain.adminEmail,
         plan: "standard",

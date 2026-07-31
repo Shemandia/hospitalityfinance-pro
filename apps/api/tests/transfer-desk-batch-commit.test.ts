@@ -40,7 +40,7 @@ describe("commitBatch governance", () => {
   it("posts a journal when createJournal returns DRAFT (no approval rule)", async () => {
     createSpy.mockResolvedValue({ id: "j1", status: "DRAFT" } as any);
     const db = makeDb([item()]);
-    const summary = await new BatchReviewService(db).commitBatch("b1", "u1");
+    const summary = await new BatchReviewService(db).commitBatch("e1", "b1", "u1");
     expect(createSpy).toHaveBeenCalledTimes(1);
     expect(postSpy).toHaveBeenCalledWith("e1", "j1", "u1");
     expect(summary.committed).toBe(1);
@@ -50,7 +50,7 @@ describe("commitBatch governance", () => {
   it("leaves a journal for approval when createJournal returns PENDING_APPROVAL", async () => {
     createSpy.mockResolvedValue({ id: "j2", status: "PENDING_APPROVAL" } as any);
     const db = makeDb([item()]);
-    const summary = await new BatchReviewService(db).commitBatch("b1", "u1");
+    const summary = await new BatchReviewService(db).commitBatch("e1", "b1", "u1");
     expect(postSpy).not.toHaveBeenCalled();
     expect(summary.pendingApproval).toBe(1);
     expect(summary.committed).toBe(0);
@@ -59,7 +59,7 @@ describe("commitBatch governance", () => {
   it("skips REJECTED and ERROR items", async () => {
     createSpy.mockResolvedValue({ id: "j1", status: "DRAFT" } as any);
     const db = makeDb([item({ id: "ok" })]); // findMany already returns only eligible items
-    await new BatchReviewService(db).commitBatch("b1", "u1");
+    await new BatchReviewService(db).commitBatch("e1", "b1", "u1");
     expect(createSpy).toHaveBeenCalledTimes(1);
     // verify the eligibility filter is applied in the query
     expect(db.transferBatchItem.findMany).toHaveBeenCalledWith(
@@ -76,7 +76,7 @@ describe("commitBatch governance", () => {
   it("is idempotent — a non-PENDING_REVIEW batch creates no journals", async () => {
     const db = makeDb([item()]);
     db.transferBatch.updateMany.mockResolvedValue({ count: 0 });
-    const summary = await new BatchReviewService(db).commitBatch("b1", "u1");
+    const summary = await new BatchReviewService(db).commitBatch("e1", "b1", "u1");
     expect(createSpy).not.toHaveBeenCalled();
     expect(summary.alreadyCommitted).toBe(true);
   });
@@ -84,7 +84,7 @@ describe("commitBatch governance", () => {
   it("marks an item ERROR when createJournal throws but still commits the batch", async () => {
     createSpy.mockRejectedValueOnce(new Error("account locked"));
     const db = makeDb([item()]);
-    const summary = await new BatchReviewService(db).commitBatch("b1", "u1");
+    const summary = await new BatchReviewService(db).commitBatch("e1", "b1", "u1");
     expect(db.transferBatchItem.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "i1" },

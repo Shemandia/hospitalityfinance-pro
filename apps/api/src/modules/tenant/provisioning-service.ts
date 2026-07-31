@@ -1,8 +1,10 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient } from "../../db/client.js";
 import { execSync } from "node:child_process";
 import { resolve } from "node:path";
+import bcrypt from "bcrypt";
 import { registryPrisma } from "../../db/prisma.js";
-import { sendEmail } from "../../shared/email.js";
+import { generateTenantCode } from "../../db/generateTenantCode.js";
+import { sendWelcomeEmail } from "../../shared/email.js";
 import {
   PROVISIONING_STEPS,
   type ProvisionTenantInput,
@@ -10,6 +12,61 @@ import {
 } from "./types.js";
 
 type SSEWriter = (event: string, data: Record<string, unknown>) => void;
+
+const SYSTEM_PERMISSION_CODES = [
+  "GL_READ",
+  "GL_WRITE",
+  "GL_POST",
+  "GL_REVERSE",
+  "GL_APPROVE",
+  "COA_READ",
+  "COA_CREATE",
+  "COA_EDIT",
+  "AP_READ",
+  "AP_WRITE",
+  "AP_APPROVE",
+  "AP_PAYMENT_CONFIRM",
+  "PAYMENT_RUN_READ",
+  "PAYMENT_RUN_CREATE",
+  "PAYMENT_RUN_APPROVE",
+  "AR_READ",
+  "AR_WRITE",
+  "AR_DUNNING",
+  "BUDGET_READ",
+  "BUDGET_WRITE",
+  "BUDGET_APPROVE",
+  "FX_READ",
+  "FX_WRITE",
+  "REPORT_READ",
+  "REPORT_WRITE",
+  "REPORT_EXPORT",
+  "REPORT_CREATE_CUSTOM",
+  "PERIOD_READ",
+  "PERIOD_MANAGE",
+  "PERIOD_REOPEN",
+  "TRANSFER_DESK_READ",
+  "TRANSFER_DESK_EXECUTE",
+  "TRANSFER_DESK_CONFIG",
+  "INTEGRATION_READ",
+  "INTEGRATION_IMPORT",
+  "INTEGRATION_CONFIG",
+  "IC_READ",
+  "IC_CREATE",
+  "IC_APPROVE",
+  "IC_REVERSE",
+  "IC_CONFIG",
+  "IC_RECONCILE",
+  "CONSOLIDATION_RUN",
+  "STATS_READ",
+  "STATS_IMPORT",
+  "AUDIT_READ",
+  "ADMIN_USERS_READ",
+  "ADMIN_USERS",
+  "ADMIN_ROLES_MANAGE",
+  "ADMIN_SETTINGS",
+  "ADMIN_ENTITIES",
+  "ADMIN_AUDIT_LOG"
+];
 
 function parseDbUrl(url: string) {
   const u = new URL(url);
@@ -29,6 +86,38 @@ function buildDbUrl(
   dbName: string
 ): string {
   return `postgresql://${user}:${password}@${host}:${port}/${dbName}`;
+}
+
+async function ensureTenantAdminRole(tenantClient: PrismaClient) {
+  const role = await tenantClient.role.upsert({
+    where: { code: "TENANT_ADMIN" },
+    update: {
+      name: "Tenant Administrator",
+      description: "Full system access - manages users, roles, entities, and all modules",
+      isSystem: true
+    },
+    create: {
+      code: "TENANT_ADMIN",
+      name: "Tenant Administrator",
+      description: "Full system access - manages users, roles, entities, and all modules",
+      isSystem: true
+    }
+  });
+
+  for (const code of SYSTEM_PERMISSION_CODES) {
+    const permission = await tenantClient.permission.upsert({
+      where: { code },
+      update: {},
+      create: { code, description: code.replace(/_/g, " "), category: "System" }
+    });
+    await tenantClient.rolePermission.upsert({
+      where: { roleId_permissionId: { roleId: role.id, permissionId: permission.id } },
+      update: {},
+      create: { roleId: role.id, permissionId: permission.id }
+    });
+  }
+
+  return role;
 }
 
 export class ProvisioningService {
@@ -71,13 +160,16 @@ export class ProvisioningService {
 
     // Create tenant record + entitlement + provisioning steps in one transaction
     const tenantRecord = await registryPrisma.$transaction(async (tx) => {
+      const tenantCode = await generateTenantCode(tenant.slug);
       const t = await tx.tenant.create({
         data: {
           name: tenant.name,
           slug: tenant.slug,
+          tenantCode,
           databaseUrl: tenantDbUrl,
           domain: tenant.domain ?? null,
           adminEmail: tenant.adminEmail,
+          countryCode: tenant.countryCode,
           provisioningStatus: "PROVISIONING"
         }
       });
@@ -132,7 +224,7 @@ export class ProvisioningService {
 
     await this.executeStep(tenantRecord.id, "running_migrations", sse, async () => {
       const apiRoot = resolve(import.meta.dirname ?? __dirname, "../../..");
-      execSync("npx prisma db push --schema src/db/schema.prisma --skip-generate", {
+      execSync("npx prisma db push --schema src/db/schema-tenant.prisma --skip-generate", {
         cwd: apiRoot,
         env: { ...process.env, DATABASE_URL: tenantDbUrl },
         stdio: "pipe",
@@ -196,18 +288,37 @@ export class ProvisioningService {
     });
 
     await this.executeStep(tenantRecord.id, "creating_auth", sse, async () => {
-      // Keycloak user creation — in dev mode, create a User record in the tenant DB.
-      // In production, this would call the Keycloak Admin API to create a realm and user.
       const tenantClient = new PrismaClient({ datasourceUrl: tenantDbUrl });
       try {
-        await tenantClient.user.create({
-          data: {
-            keycloakId: `dev-${tenant.slug}-admin`,
-            email: adminUser.email,
+        const tenantAdminRole = await ensureTenantAdminRole(tenantClient);
+        const passwordHash = await bcrypt.hash(adminUser.temporaryPassword, 12);
+        const user = await tenantClient.user.upsert({
+          where: { email: adminUser.email.toLowerCase() },
+          update: {
             name: `${adminUser.firstName} ${adminUser.lastName}`,
+            phone: adminUser.phone ?? null,
+            passwordHash,
+            mustChangePassword: true,
+            isActive: true
+          },
+          create: {
+            email: adminUser.email.toLowerCase(),
+            name: `${adminUser.firstName} ${adminUser.lastName}`,
+            phone: adminUser.phone ?? null,
+            passwordHash,
+            mustChangePassword: true,
             isActive: true
           }
         });
+
+        const existingRole = await tenantClient.userRole.findFirst({
+          where: { userId: user.id, roleId: tenantAdminRole.id, entityId: null }
+        });
+        if (!existingRole) {
+          await tenantClient.userRole.create({
+            data: { userId: user.id, roleId: tenantAdminRole.id, entityId: null }
+          });
+        }
       } finally {
         await tenantClient.$disconnect();
       }
@@ -233,21 +344,13 @@ export class ProvisioningService {
 
     await this.executeStep(tenantRecord.id, "sending_email", sse, async () => {
       const appUrl = process.env.APP_BASE_URL ?? "http://localhost:3001";
-      const activationUrl = `${appUrl}/login?tenant=${tenant.slug}`;
-      await sendEmail({
+      const loginUrl = `${appUrl}/t/${tenantRecord.tenantCode}/login`;
+      await sendWelcomeEmail({
         to: adminUser.email,
-        subject: `Your HospitalityFinance Pro account is ready — ${tenant.name}`,
-        html: `
-          <p>Hello ${adminUser.firstName},</p>
-          <p>Your HospitalityFinance Pro account for <strong>${tenant.name}</strong> has been provisioned.</p>
-          <p>Log in at: <a href="${activationUrl}">${activationUrl}</a></p>
-          <p>Your temporary credentials:</p>
-          <ul>
-            <li>Email: ${adminUser.email}</li>
-            <li>Password: (set during onboarding — contact your platform administrator)</li>
-          </ul>
-          <p>On first login, you will be guided through a setup wizard to configure your organization.</p>
-        `
+        userName: adminUser.firstName,
+        tenantName: tenant.name,
+        loginUrl,
+        temporaryPassword: adminUser.temporaryPassword
       });
     });
 
@@ -263,7 +366,7 @@ export class ProvisioningService {
     sse("complete", {
       tenantId: tenantRecord.id,
       slug: tenant.slug,
-      url: `${process.env.APP_BASE_URL ?? "http://localhost:3001"}/login?tenant=${tenant.slug}`
+      url: `${process.env.APP_BASE_URL ?? "http://localhost:3001"}/t/${tenantRecord.tenantCode}/login`
     });
   }
 

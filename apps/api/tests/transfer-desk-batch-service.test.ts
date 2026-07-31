@@ -31,7 +31,7 @@ describe("rejectItem", () => {
     db.transferBatch.findFirst.mockResolvedValue({ id: "b1", status: "PENDING_REVIEW" });
     db.transferBatchItem.findFirst.mockResolvedValue({ id: "i1", batchId: "b1", status: "HELD" });
 
-    await service.rejectItem("b1", "i1", "u1", "wrong account");
+    await service.rejectItem("e1", "b1", "i1", "u1", "wrong account");
 
     expect(db.transferBatchItem.update).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -51,7 +51,7 @@ describe("rejectItem", () => {
 
   it("refuses to reject when the batch is already COMMITTED", async () => {
     db.transferBatch.findFirst.mockResolvedValue({ id: "b1", status: "COMMITTED" });
-    await expect(service.rejectItem("b1", "i1", "u1")).rejects.toMatchObject({
+    await expect(service.rejectItem("e1", "b1", "i1", "u1")).rejects.toMatchObject({
       code: "BATCH_NOT_REVIEWABLE",
       statusCode: 409
     });
@@ -60,7 +60,7 @@ describe("rejectItem", () => {
   it("refuses to reject an item that is not HELD", async () => {
     db.transferBatch.findFirst.mockResolvedValue({ id: "b1", status: "PENDING_REVIEW" });
     db.transferBatchItem.findFirst.mockResolvedValue({ id: "i1", batchId: "b1", status: "ERROR" });
-    await expect(service.rejectItem("b1", "i1", "u1")).rejects.toMatchObject({
+    await expect(service.rejectItem("e1", "b1", "i1", "u1")).rejects.toMatchObject({
       code: "ITEM_NOT_HELD",
       statusCode: 409
     });
@@ -75,7 +75,7 @@ describe("restoreItem", () => {
       batchId: "b1",
       status: "REJECTED"
     });
-    await service.restoreItem("b1", "i1");
+    await service.restoreItem("e1", "b1", "i1");
     expect(db.transferBatchItem.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ status: "HELD", rejectedReason: null })
@@ -95,7 +95,7 @@ describe("restoreItem", () => {
 describe("discardBatch", () => {
   it("sets a reviewable batch to DISCARDED", async () => {
     db.transferBatch.findFirst.mockResolvedValue({ id: "b1", status: "PENDING_REVIEW" });
-    await service.discardBatch("b1", "u1");
+    await service.discardBatch("e1", "b1", "u1");
     expect(db.transferBatch.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "b1" },
@@ -106,7 +106,7 @@ describe("discardBatch", () => {
 
   it("refuses to discard a committed batch", async () => {
     db.transferBatch.findFirst.mockResolvedValue({ id: "b1", status: "COMMITTED" });
-    await expect(service.discardBatch("b1", "u1")).rejects.toMatchObject({
+    await expect(service.discardBatch("e1", "b1", "u1")).rejects.toMatchObject({
       code: "BATCH_NOT_REVIEWABLE"
     });
   });
@@ -115,7 +115,7 @@ describe("discardBatch", () => {
 describe("getBatch", () => {
   it("throws when not found", async () => {
     db.transferBatch.findFirst.mockResolvedValue(null);
-    await expect(service.getBatch("nope")).rejects.toMatchObject({
+    await expect(service.getBatch("e1", "nope")).rejects.toMatchObject({
       code: "BATCH_NOT_FOUND",
       statusCode: 404
     });

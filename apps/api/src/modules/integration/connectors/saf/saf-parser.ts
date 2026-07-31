@@ -14,7 +14,7 @@
  *   Jana-Internal-Movements-Guide.md, Jana-Inventory-Differences-Guide.md
  */
 
-import { Prisma } from "@prisma/client";
+import { Prisma } from "../../../../db/client.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -143,6 +143,25 @@ function detectJanaFileType(
 function detectOperaFileType(filename?: string): OperaFileType {
   if (!filename) return null;
   const upper = filename.toUpperCase();
+
+  // F12: anchor to the type code that sits immediately before the 8-digit
+  // business date (`{PREFIX}{TYPE}{YYYYMMDD}.SUN`). This is robust against a
+  // configurable property prefix that happens to contain RV/CL/MS/DS.
+  const anchored = upper.match(/(RV|CL|MS|DS)(\d{8})/);
+  if (anchored) {
+    switch (anchored[1]) {
+      case "RV":
+        return "revenue";
+      case "CL":
+        return "city_ledger";
+      case "MS":
+        return "market_stats";
+      case "DS":
+        return "daily_stats";
+    }
+  }
+
+  // Fallback: loose substring match for renamed/non-standard filenames.
   if (upper.includes("RV")) return "revenue";
   if (upper.includes("CL")) return "city_ledger";
   if (upper.includes("MS")) return "market_stats";
@@ -188,7 +207,7 @@ function parseAmountJanaDivide1000(raw: string): string {
   // Use string manipulation to avoid float: extract digits, divide by 1000
   const digits = s.replace(/\D/g, "") || "0";
   const padded = digits.padStart(4, "0");
-  const whole = padded.slice(0, padded.length - 3) || "0";
+  const whole = padded.slice(0, padded.length - 3).replace(/^0+/, "") || "0";
   const frac = padded.slice(padded.length - 3);
   return `${whole}.${frac}`;
 }
@@ -222,7 +241,7 @@ function parseAmountOpera(raw: string): string {
   if (!s || s === "0") return "0";
   const digits = s.replace(/\D/g, "") || "0";
   const padded = digits.padStart(4, "0");
-  const whole = padded.slice(0, padded.length - 3) || "0";
+  const whole = padded.slice(0, padded.length - 3).replace(/^0+/, "") || "0";
   const frac = padded.slice(padded.length - 3);
   return `${whole}.${frac}`;
 }
@@ -470,7 +489,10 @@ function parseFixedWidthLine(
 // ── Main parser ──────────────────────────────────────────────────────────────
 
 export function parseSAFFile(content: string, filename?: string): SAFParseResult {
-  const rawLines = content.split(/\r?\n/);
+  // F11: strip a leading UTF-8 BOM (U+FEFF). In a fixed-width file a BOM on the
+  // first data line shifts every column by one and corrupts positional parsing.
+  const clean = content.charCodeAt(0) === 0xfeff ? content.slice(1) : content;
+  const rawLines = clean.split(/\r?\n/);
   const format = detectFormat(rawLines);
   const errors: SAFParseError[] = [];
   const txLines: SAFTransactionLine[] = [];

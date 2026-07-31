@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma } from "../../../../db/client.js";
 
 /**
  * Mews PMS — REST API Client

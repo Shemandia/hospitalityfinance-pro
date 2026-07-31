@@ -3,8 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Building2, Plus, ArrowRight, ExternalLink, Loader2 } from "lucide-react";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4500";
+import { PlatformLoginGate } from "../../../../components/platform-login-gate";
 
 type Tenant = {
   id: string;
@@ -18,87 +17,36 @@ type Tenant = {
 };
 
 export default function TenantListPage() {
-  const [platformKey, setPlatformKey] = useState<string | null>(null);
-  const [keyInput, setKeyInput] = useState("");
-  const [keyError, setKeyError] = useState("");
-  const [checking, setChecking] = useState(true);
+  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
 
   useEffect(() => {
-    const stored = sessionStorage.getItem("hfp-platform-key");
-    if (stored) setPlatformKey(stored);
-    setChecking(false);
+    fetch("/api/platform/auth")
+      .then((r) => r.json())
+      .then((json) => setAuthenticated(json.authenticated === true))
+      .catch(() => setAuthenticated(false));
   }, []);
 
-  const handleKeySubmit = async () => {
-    setKeyError("");
-    try {
-      const res = await fetch(`${API_BASE}/api/v1/platform/tenants`, {
-        headers: { "X-Platform-Key": keyInput }
-      });
-      if (res.ok) {
-        sessionStorage.setItem("hfp-platform-key", keyInput);
-        setPlatformKey(keyInput);
-      } else {
-        setKeyError("Invalid platform key.");
-      }
-    } catch {
-      setKeyError("Cannot reach API server.");
-    }
-  };
+  if (authenticated === null) return null;
 
-  if (checking) return null;
-
-  if (!platformKey) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#f8fafc]">
-        <div className="w-full max-w-sm rounded-3xl border border-slate-200 bg-white p-8 shadow-[0_10px_30px_rgba(0,0,0,0.03)]">
-          <div className="mb-6">
-            <h2 className="text-xl font-extrabold text-slate-900">Platform Authentication</h2>
-            <p className="mt-1.5 text-sm text-slate-500">
-              Enter your platform API key to access tenant management.
-            </p>
-          </div>
-
-          <input
-            type="password"
-            value={keyInput}
-            onChange={(e) => setKeyInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleKeySubmit()}
-            className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-            placeholder="Platform API key"
-          />
-
-          {keyError && <p className="mt-2 text-sm text-red-500">{keyError}</p>}
-
-          <button
-            onClick={handleKeySubmit}
-            disabled={!keyInput}
-            className="mt-4 w-full rounded-xl bg-emerald-500 px-4 py-3 text-sm font-bold text-white shadow-[0_4px_12px_rgba(16,185,129,0.25)] transition-colors hover:bg-emerald-600 disabled:opacity-50"
-          >
-            Authenticate
-          </button>
-        </div>
-      </div>
-    );
+  if (!authenticated) {
+    return <PlatformLoginGate onAuthenticated={() => setAuthenticated(true)} />;
   }
 
-  return <TenantList platformKey={platformKey} />;
+  return <TenantList />;
 }
 
 /* -------------------------------------------------------------------------- */
 
-function TenantList({ platformKey }: { platformKey: string }) {
+function TenantList() {
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/v1/platform/tenants`, {
-      headers: { "X-Platform-Key": platformKey }
-    })
+    fetch("/api/platform/tenants")
       .then((r) => r.json())
       .then((json) => setTenants(json.data ?? []))
       .finally(() => setLoading(false));
-  }, [platformKey]);
+  }, []);
 
   /* ---- Status badge ---- */
   const statusBadge = (status: string) => {
@@ -130,7 +78,7 @@ function TenantList({ platformKey }: { platformKey: string }) {
   /* ---- Skeleton cards (loading state) ---- */
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#f8fafc]">
+      <div className="min-h-full bg-[#f8fafc]">
         <div className="mx-auto max-w-5xl px-6 py-10">
           <div className="flex items-center justify-between">
             <div className="h-9 w-36 animate-pulse rounded-xl bg-slate-200" />
@@ -159,7 +107,7 @@ function TenantList({ platformKey }: { platformKey: string }) {
   /* ---- Empty state ---- */
   if (tenants.length === 0) {
     return (
-      <div className="min-h-screen bg-[#f8fafc]">
+      <div className="min-h-full bg-[#f8fafc]">
         <div className="mx-auto max-w-5xl px-6 py-10">
           {/* Header */}
           <div className="flex items-center justify-between">
@@ -190,7 +138,7 @@ function TenantList({ platformKey }: { platformKey: string }) {
 
   /* ---- Tenant list ---- */
   return (
-    <div className="min-h-screen bg-[#f8fafc]">
+    <div className="min-h-full bg-[#f8fafc]">
       <div className="mx-auto max-w-5xl px-6 py-10">
         {/* Header */}
         <div className="flex items-center justify-between">

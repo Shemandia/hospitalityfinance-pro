@@ -1,4 +1,5 @@
-import { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "../../db/client.js";
+import { applyBalanceDelta } from "../../db/balance-writer.js";
 import type {
   APInvoiceCreateInput,
   APInvoiceListQuery,
@@ -311,62 +312,30 @@ export class APRepository {
     });
   }
 
+  /**
+   * Update one account's period balance.
+   *
+   * Delegates to the canonical signed writer, which derives the sign from the
+   * account's own normal_balance. `accountType` is ignored and optional — see
+   * db/balance-writer.ts.
+   */
   async updateAccountBalance(
     entityId: string,
     accountId: string,
     periodId: string,
     debitFunctional: Prisma.Decimal,
     creditFunctional: Prisma.Decimal,
-    accountType: string
+    accountType?: string
   ) {
-    const isDebitNormal = ["ASSET", "EXPENSE", "CONTRA_REVENUE"].includes(accountType);
-
-    const existing = await this.db.accountPeriodBalance.findUnique({
-      where: {
-        entityId_accountId_periodId: {
-          entityId,
-          accountId,
-          periodId
-        }
-      }
-    });
-
-    if (!existing) {
-      const opening = new Prisma.Decimal(0);
-      const periodDebits = debitFunctional;
-      const periodCredits = creditFunctional;
-      const closing = isDebitNormal
-        ? opening.add(periodDebits).sub(periodCredits)
-        : opening.sub(periodDebits).add(periodCredits);
-
-      await this.db.accountPeriodBalance.create({
-        data: {
-          entityId,
-          accountId,
-          periodId,
-          openingBalance: opening,
-          periodDebits,
-          periodCredits,
-          closingBalance: closing
-        }
-      });
-      return;
-    }
-
-    const periodDebits = new Prisma.Decimal(existing.periodDebits).add(debitFunctional);
-    const periodCredits = new Prisma.Decimal(existing.periodCredits).add(creditFunctional);
-    const closing = isDebitNormal
-      ? new Prisma.Decimal(existing.openingBalance).add(periodDebits).sub(periodCredits)
-      : new Prisma.Decimal(existing.openingBalance).sub(periodDebits).add(periodCredits);
-
-    await this.db.accountPeriodBalance.update({
-      where: { id: existing.id },
-      data: {
-        periodDebits,
-        periodCredits,
-        closingBalance: closing
-      }
-    });
+    void accountType;
+    await applyBalanceDelta(
+      this.db,
+      entityId,
+      periodId,
+      accountId,
+      debitFunctional,
+      creditFunctional
+    );
   }
 
   findUserByIdOrKeycloak(subject: string) {

@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma } from "../../db/client.js";
 import { Document, Page, renderToBuffer, StyleSheet, Text, View } from "@react-pdf/renderer";
 import React from "react";
 import { amountToWords } from "./number-to-words.js";
@@ -189,11 +189,12 @@ const styles = StyleSheet.create({
     textAlign: "right"
   },
 
-  // Signature block
+  // Signature block — large top margin (~5.5cm) so the signatories sit near the
+  // bottom of the page with clear visual separation from the cheque stub above.
   signatureBlock: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginTop: 40
+    marginTop: 160
   },
   signatureColumn: {
     width: "22%",

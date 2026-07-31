@@ -1,0 +1,96 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "./generated/registry"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("REGISTRY_DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum LicenseType {
+  TRIAL
+  STANDARD
+  ENTERPRISE
+}
+
+enum ProvisioningStatus {
+  PENDING
+  PROVISIONING
+  ACTIVE
+  FAILED
+}
+
+enum ProvisioningStepStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+// ─── Tenant Registry ─────────────────────────────────────────────────────────
+// In production, this table lives in a shared registry database (REGISTRY_DATABASE_URL).
+// Each tenant's financial data lives in its own isolated database (tenant.databaseUrl).
+
+model Tenant {
+  id                 String             @id @default(uuid())
+  slug               String             @unique @db.VarChar(50) // URL-safe identifier, e.g. "marriott-me"
+  tenantCode         String             @unique @map("tenant_code") @db.VarChar(8) // Opaque 8-char hex for URLs: /t/{tenantCode}/...
+  name               String // Display name, e.g. "Marriott Middle East"
+  databaseUrl        String             @map("database_url") // PostgreSQL connection string for this tenant
+  domain             String?            @unique // Custom domain, e.g. "finance.marriott.com"
+  adminEmail         String             @map("admin_email") // Primary contact
+  countryCode        String             @default("") @map("country_code") @db.VarChar(2) // ISO 3166-1 alpha-2
+  plan               String             @default("standard") // standard, enterprise, trial
+  maxProperties      Int                @default(10) @map("max_properties")
+  isActive           Boolean            @default(true) @map("is_active")
+  provisionedAt      DateTime?          @map("provisioned_at") // Set when DB is created + migrated
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+  provisioningStatus ProvisioningStatus @default(PENDING) @map("provisioning_status")
+
+  // Relations
+  entitlement       TenantEntitlement?
+  provisioningSteps TenantProvisioningStep[]
+
+  @@map("tenants")
+}
+
+model TenantEntitlement {
+  id                    String      @id @default(uuid())
+  tenantId              String      @unique @map("tenant_id")
+  tenant                Tenant      @relation(fields: [tenantId], references: [id])
+  licenseType           LicenseType @map("license_type")
+  maxProperties         Int         @default(10) @map("max_properties")
+  maxUsers              Int         @default(50) @map("max_users")
+  enabledModules        String[]    @map("enabled_modules")
+  maxConcurrentSessions Int         @default(10) @map("max_concurrent_sessions")
+  subscriptionStartDate DateTime    @map("subscription_start_date") @db.Date
+  subscriptionEndDate   DateTime?   @map("subscription_end_date") @db.Date
+  isActive              Boolean     @default(true) @map("is_active")
+  createdBy             String?     @map("created_by") @db.VarChar(255)
+  updatedBy             String?     @map("updated_by") @db.VarChar(255)
+  createdAt             DateTime    @default(now()) @map("created_at")
+  updatedAt             DateTime    @updatedAt @map("updated_at")
+
+  @@map("tenant_entitlements")
+}
+
+model TenantProvisioningStep {
+  id           String                 @id @default(uuid())
+  tenantId     String                 @map("tenant_id")
+  tenant       Tenant                 @relation(fields: [tenantId], references: [id])
+  stepName     String                 @map("step_name") @db.VarChar(50)
+  stepOrder    Int                    @map("step_order")
+  status       ProvisioningStepStatus @default(PENDING)
+  errorMessage String?                @map("error_message")
+  startedAt    DateTime?              @map("started_at")
+  completedAt  DateTime?              @map("completed_at")
+  createdAt    DateTime               @default(now()) @map("created_at")
+  updatedAt    DateTime               @updatedAt @map("updated_at")
+
+  @@index([tenantId])
+  @@map("tenant_provisioning_steps")
+}

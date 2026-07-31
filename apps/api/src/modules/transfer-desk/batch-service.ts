@@ -36,17 +36,26 @@ export class BatchReviewService {
     });
   }
 
-  async getBatch(batchId: string) {
+  /**
+   * Every lookup below is scoped by entityId.
+   *
+   * These used to query on batch id alone, and the transfer batch tables carry
+   * no RLS policy, so a user in one property could fetch, reject, restore,
+   * commit or discard another property's staged batch simply by holding its
+   * id. Scoping the query makes a cross-entity id behave exactly like a
+   * non-existent one.
+   */
+  async getBatch(entityId: string, batchId: string) {
     const batch = await this.db.transferBatch.findFirst({
-      where: { id: batchId },
+      where: { id: batchId, entityId },
       include: { items: { orderBy: { itemIndex: "asc" } } }
     });
     if (!batch) throw new BatchReviewError("BATCH_NOT_FOUND", "Batch not found.", 404);
     return batch;
   }
 
-  private async assertReviewable(batchId: string) {
-    const batch = await this.db.transferBatch.findFirst({ where: { id: batchId } });
+  private async assertReviewable(entityId: string, batchId: string) {
+    const batch = await this.db.transferBatch.findFirst({ where: { id: batchId, entityId } });
     if (!batch) throw new BatchReviewError("BATCH_NOT_FOUND", "Batch not found.", 404);
     if (batch.status !== "PENDING_REVIEW") {
       throw new BatchReviewError(
@@ -58,8 +67,14 @@ export class BatchReviewService {
     return batch;
   }
 
-  async rejectItem(batchId: string, itemId: string, userId: string, reason?: string) {
-    await this.assertReviewable(batchId);
+  async rejectItem(
+    entityId: string,
+    batchId: string,
+    itemId: string,
+    userId: string,
+    reason?: string
+  ) {
+    await this.assertReviewable(entityId, batchId);
     const item = await this.db.transferBatchItem.findFirst({ where: { id: itemId, batchId } });
     if (!item) throw new BatchReviewError("ITEM_NOT_FOUND", "Batch item not found.", 404);
     if (item.status !== "HELD")
@@ -76,8 +91,8 @@ export class BatchReviewService {
     return { ok: true };
   }
 
-  async restoreItem(batchId: string, itemId: string) {
-    await this.assertReviewable(batchId);
+  async restoreItem(entityId: string, batchId: string, itemId: string) {
+    await this.assertReviewable(entityId, batchId);
     const item = await this.db.transferBatchItem.findFirst({ where: { id: itemId, batchId } });
     if (!item) throw new BatchReviewError("ITEM_NOT_FOUND", "Batch item not found.", 404);
     if (item.status !== "REJECTED")
@@ -94,8 +109,8 @@ export class BatchReviewService {
     return { ok: true };
   }
 
-  async discardBatch(batchId: string, userId: string) {
-    await this.assertReviewable(batchId);
+  async discardBatch(entityId: string, batchId: string, userId: string) {
+    await this.assertReviewable(entityId, batchId);
     await this.db.transferBatch.update({
       where: { id: batchId },
       data: { status: "DISCARDED", reviewedById: userId }
@@ -108,17 +123,42 @@ export class BatchReviewService {
    * GLService.createJournal (honouring approval rules); DRAFT results are
    * posted, PENDING_APPROVAL results are left for approvers. Idempotent.
    */
-  async commitBatch(batchId: string, userId: string) {
-    const batch = await this.db.transferBatch.findFirst({ where: { id: batchId } });
+  async commitBatch(entityId: string, batchId: string, userId: string) {
+    const batch = await this.db.transferBatch.findFirst({ where: { id: batchId, entityId } });
     if (!batch) throw new BatchReviewError("BATCH_NOT_FOUND", "Batch not found.", 404);
 
-    // Conditional flip — only one caller wins; prevents double-commit.
-    const flipped = await this.db.transferBatch.updateMany({
-      where: { id: batchId, status: "PENDING_REVIEW" },
-      data: { status: "COMMITTED", reviewedById: userId, committedAt: new Date() }
+    // Claim the batch by moving it to COMMITTING, not straight to COMMITTED.
+    //
+    // The flip previously went directly to COMMITTED before a single item had
+    // been posted. A crash, timeout or restart part-way through the loop below
+    // then left a batch marked COMMITTED with items still HELD and unposted —
+    // and because a re-run saw a non-PENDING_REVIEW status it returned
+    // "already committed" and did nothing, so those items were stranded
+    // silently and forever.
+    //
+    // COMMITTING still wins the race against a concurrent caller, but marks the
+    // work as in-flight so it can be picked up again. Only once every item has
+    // been processed does the batch become COMMITTED.
+    const claimed = await this.db.transferBatch.updateMany({
+      where: { id: batchId, entityId, status: "PENDING_REVIEW" },
+      data: { status: "COMMITTING", reviewedById: userId }
     });
-    if (flipped.count === 0) {
-      return { alreadyCommitted: true, committed: 0, pendingApproval: 0, rejected: 0, errors: 0 };
+
+    if (claimed.count === 0) {
+      // Not ours to claim. Resume only if a previous attempt was interrupted.
+      const current = await this.db.transferBatch.findFirst({ where: { id: batchId, entityId } });
+      if (current?.status !== "COMMITTING") {
+        return { alreadyCommitted: true, committed: 0, pendingApproval: 0, rejected: 0, errors: 0 };
+      }
+      const remaining = await this.db.transferBatchItem.count({
+        where: { batchId, status: "HELD", validationStatus: { not: "ERROR" } }
+      });
+      if (remaining === 0) {
+        // Interrupted after the last item but before the final flip.
+        await this.finaliseCommit(batchId);
+        return { alreadyCommitted: true, committed: 0, pendingApproval: 0, rejected: 0, errors: 0 };
+      }
+      // Fall through and post the remaining items.
     }
 
     const items = await this.db.transferBatchItem.findMany({
@@ -171,6 +211,9 @@ export class BatchReviewService {
       }
     });
 
+    // Only now is the batch genuinely committed.
+    await this.finaliseCommit(batchId);
+
     return {
       alreadyCommitted: false,
       committed,
@@ -178,5 +221,13 @@ export class BatchReviewService {
       rejected: batch.rejectedItems ?? 0,
       errors
     };
+  }
+
+  /** COMMITTING → COMMITTED, once every item has been processed. */
+  private async finaliseCommit(batchId: string) {
+    await this.db.transferBatch.updateMany({
+      where: { id: batchId, status: "COMMITTING" },
+      data: { status: "COMMITTED", committedAt: new Date() }
+    });
   }
 }

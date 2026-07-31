@@ -1,4 +1,4 @@
-import { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "../../../../db/client.js";
 import { sendEmail } from "../../../../shared/email.js";
 import { getOperaCloudCredentials, type OperaCloudCredentials } from "./opera-cloud-auth.js";
 import { OperaCloudClient } from "./opera-cloud-client.js";
@@ -8,7 +8,14 @@ import {
   extractOperaRevenueGroups,
   type SAFParseResult
 } from "./opera-sun-parser.js";
+import {
+  getOrCreateSuspenseAccount,
+  computeImbalance,
+  suspensePlugSides,
+  assertBalanced
+} from "../shared/suspense.js";
 
+import { applyBalanceDelta } from "../../../../db/balance-writer.js";
 // ── Shared types ──────────────────────────────────────────────────────────────
 
 type ImportResult = {
@@ -175,6 +182,26 @@ export async function importOperaSUNFile(
     let journalId: string | null = null;
 
     if (journalLines.length > 0) {
+      // F2: unmapped SAF codes are dropped above (counted in failedCount), which
+      // can unbalance the journal. Park any residual in Import Suspense so even a
+      // DRAFT is balanced and postable; finance clears it after mapping the codes.
+      const plug = suspensePlugSides(computeImbalance(journalLines));
+      if (plug) {
+        const suspense = await getOrCreateSuspenseAccount(prisma, input.entityId);
+        journalLines.push({
+          accountId: suspense.id,
+          debit: plug.debit,
+          credit: plug.credit,
+          currency: fileCurrency,
+          fxRate,
+          debitFunctional: plug.debit.mul(fxRate),
+          creditFunctional: plug.credit.mul(fxRate),
+          description: `Import suspense — ${failedCount} unmapped line(s)`,
+          lineNumber: lineNum++
+        });
+      }
+      assertBalanced(journalLines, `Opera .SUN journal ${input.filename}`);
+
       const dateStr = parsed.dateRange?.earliest ?? "";
       const businessDate =
         dateStr.length === 8
@@ -327,6 +354,16 @@ export async function runOperaCloudImport(
 
     let journalId: string | null = null;
 
+    // F14: revenue to post but no cash account → FAIL, don't silently report
+    // SUCCESS with recordsImported set while creating no journal. Caught below
+    // and recorded as FAILED with an actionable message.
+    if (mapped.length > 0 && !cashAccount) {
+      throw new Error(
+        "Cannot post Opera Cloud import: no cash account found " +
+          "(expected code 1000 with allowPosting=true). Create it before importing."
+      );
+    }
+
     if (mapped.length > 0 && cashAccount) {
       const totalRevenue = mapped.reduce(
         (sum, tx) => sum.add(new Prisma.Decimal(tx.amount)),
@@ -415,29 +452,16 @@ export async function runOperaCloudImport(
       journalId = journal.id;
 
       for (const line of lines) {
-        await prisma.accountPeriodBalance.upsert({
-          where: {
-            entityId_accountId_periodId: {
-              entityId: input.entityId,
-              accountId: line.accountId,
-              periodId: period.id
-            }
-          },
-          create: {
-            entityId: input.entityId,
-            accountId: line.accountId,
-            periodId: period.id,
-            openingBalance: new Prisma.Decimal(0),
-            periodDebits: line.debitFunctional,
-            periodCredits: line.creditFunctional,
-            closingBalance: line.debitFunctional.sub(line.creditFunctional)
-          },
-          update: {
-            periodDebits: { increment: line.debitFunctional },
-            periodCredits: { increment: line.creditFunctional },
-            closingBalance: { increment: line.debitFunctional.sub(line.creditFunctional) }
-          }
-        });
+        // Canonical signed writer — this used to write `debit - credit`
+        // unsigned, moving every credit-normal account the wrong way.
+        await applyBalanceDelta(
+          prisma,
+          input.entityId,
+          period.id,
+          line.accountId,
+          line.debitFunctional,
+          line.creditFunctional
+        );
       }
     }
 

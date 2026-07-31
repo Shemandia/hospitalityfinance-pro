@@ -4,7 +4,8 @@ import {
   type JournalStatus,
   type JournalApprovalStatus,
   type WorkflowModule
-} from "@prisma/client";
+} from "../../db/client.js";
+import { applyBalanceDelta, applyBalanceDeltas } from "../../db/balance-writer.js";
 import type {
   AccountCreateInput,
   AccountUpdateInput,
@@ -260,6 +261,28 @@ export class GLRepository {
     });
   }
 
+  /**
+   * Conditional status update — only succeeds if the journal is currently
+   * in one of the expected statuses. Returns the number of rows updated (0 or 1).
+   */
+  async setJournalStatusConditional(
+    entityId: string,
+    journalId: string,
+    newStatus: JournalStatus,
+    approvedById: string | null,
+    expectedStatuses: JournalStatus[]
+  ): Promise<number> {
+    const result = await this.db.journal.updateMany({
+      where: { entityId, id: journalId, status: { in: expectedStatuses } },
+      data: {
+        status: newStatus,
+        approvedById: approvedById ?? null,
+        postedAt: newStatus === "POSTED" ? new Date() : null
+      }
+    });
+    return result.count;
+  }
+
   getApprovalRuleForAmount(entityId: string, module: WorkflowModule, amount: Prisma.Decimal) {
     return this.db.approvalRule.findFirst({
       where: {
@@ -409,62 +432,94 @@ export class GLRepository {
     });
   }
 
+  /**
+   * Current balance of a single account, summed across all periods.
+   * For debit-normal accounts (ASSET, EXPENSE) returns positive when in
+   * surplus; for credit-normal (LIABILITY, EQUITY, REVENUE) likewise.
+   * Returns 0 if the account has never been posted to.
+   */
+  async getAccountCurrentBalance(
+    entityId: string,
+    accountId: string
+  ): Promise<{ balance: string; debits: string; credits: string }> {
+    const rows = await this.db.$queryRaw<Array<{ debits: string | null; credits: string | null }>>`
+      SELECT
+        COALESCE(SUM(period_debits),  0)::text AS debits,
+        COALESCE(SUM(period_credits), 0)::text AS credits
+      FROM account_period_balances
+      WHERE entity_id = ${entityId} AND account_id = ${accountId}
+    `;
+    const debits = new Prisma.Decimal(rows[0]?.debits ?? "0");
+    const credits = new Prisma.Decimal(rows[0]?.credits ?? "0");
+
+    // Sign from the account's declared normal balance — the same rule the
+    // canonical balance writer applies, so this read agrees with what was
+    // written. The old type-code list could not classify custom account types.
+    const account = await this.db.account.findFirst({
+      where: { entityId, id: accountId },
+      select: { normalBalance: true }
+    });
+    const isDebitNormal = account?.normalBalance === "DEBIT";
+    const balance = isDebitNormal ? debits.minus(credits) : credits.minus(debits);
+
+    return {
+      balance: balance.toFixed(2),
+      debits: debits.toFixed(2),
+      credits: credits.toFixed(2)
+    };
+  }
+
+  /**
+   * Update one account's period balance.
+   *
+   * Delegates to the canonical signed writer in db/balance-writer.ts, which
+   * derives the sign from the account's own normal_balance.
+   *
+   * @param accountType Ignored, and optional. Retained so existing call sites
+   *   still compile. The writer no longer trusts a caller-supplied type: it was
+   *   possible to pass the wrong one, and the hardcoded type-code list could
+   *   not classify custom account types at all.
+   */
   async updateAccountBalance(
     entityId: string,
     accountId: string,
     periodId: string,
     debitFunctional: Prisma.Decimal,
     creditFunctional: Prisma.Decimal,
-    accountType: string
+    accountType?: string
   ) {
-    const isDebitNormal = ["ASSET", "EXPENSE", "CONTRA_REVENUE"].includes(accountType);
+    void accountType;
+    await applyBalanceDelta(
+      this.db,
+      entityId,
+      periodId,
+      accountId,
+      debitFunctional,
+      creditFunctional
+    );
+  }
 
-    const existing = await this.db.accountPeriodBalance.findUnique({
-      where: {
-        entityId_accountId_periodId: {
-          entityId,
-          accountId,
-          periodId
-        }
-      }
-    });
-
-    if (!existing) {
-      const opening = new Prisma.Decimal(0);
-      const periodDebits = debitFunctional;
-      const periodCredits = creditFunctional;
-      const closing = isDebitNormal
-        ? opening.add(periodDebits).sub(periodCredits)
-        : opening.sub(periodDebits).add(periodCredits);
-
-      await this.db.accountPeriodBalance.create({
-        data: {
-          entityId,
-          accountId,
-          periodId,
-          openingBalance: opening,
-          periodDebits,
-          periodCredits,
-          closingBalance: closing
-        }
-      });
-      return;
-    }
-
-    const periodDebits = new Prisma.Decimal(existing.periodDebits).add(debitFunctional);
-    const periodCredits = new Prisma.Decimal(existing.periodCredits).add(creditFunctional);
-    const closing = isDebitNormal
-      ? new Prisma.Decimal(existing.openingBalance).add(periodDebits).sub(periodCredits)
-      : new Prisma.Decimal(existing.openingBalance).sub(periodDebits).add(periodCredits);
-
-    await this.db.accountPeriodBalance.update({
-      where: { id: existing.id },
-      data: {
-        periodDebits,
-        periodCredits,
-        closingBalance: closing
-      }
-    });
+  /**
+   * Update balances for many journal lines in a single statement.
+   *
+   * The writer aggregates by account first, so a journal posting two lines to
+   * the same GL account — an ordinary dimensional split — no longer fails with
+   * Postgres 21000 ("ON CONFLICT DO UPDATE cannot affect row a second time").
+   *
+   * `accountType` on each line is ignored; see updateAccountBalance above.
+   */
+  async batchUpdateAccountBalances(
+    entityId: string,
+    periodId: string,
+    lines: Array<{
+      accountId: string;
+      debitFunctional: Prisma.Decimal;
+      creditFunctional: Prisma.Decimal;
+      accountType?: string;
+    }>
+  ) {
+    if (lines.length === 0) return;
+    await applyBalanceDeltas(this.db, entityId, periodId, lines);
   }
 
   async runTrialBalanceQuery(
@@ -492,6 +547,8 @@ export class GLRepository {
          AND apb.period_id = ${periodId}
         WHERE a.entity_id = ${entityId}
           AND a.is_active = true
+          -- STATISTICAL (memo) accounts are non-financial and excluded from the trial balance
+          AND a.type <> 'STATISTICAL'
       ),
       comparative_balances AS (
         SELECT

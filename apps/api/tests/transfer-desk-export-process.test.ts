@@ -137,6 +137,7 @@ function makeExportProfile(overrides: Partial<ProfileWithRelations> = {}): Profi
       fsdXml: exportFsdJson,
       classification: "DELIMITED"
     },
+    transformation: null,
     ...overrides
   };
 }
@@ -267,7 +268,8 @@ describe("executeProcess — stub returns UNSUPPORTED_PROCESS", () => {
       targetParams: null,
       savePayload: "NONE",
       sourceFormat: null,
-      targetFormat: null
+      targetFormat: null,
+      transformation: null
     };
 
     const result = await executeProcess(ctx, "exec-proc-01", profile);

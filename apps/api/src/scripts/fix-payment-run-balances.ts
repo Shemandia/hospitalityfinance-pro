@@ -8,8 +8,9 @@
  * Usage: npx tsx src/scripts/fix-payment-run-balances.ts
  */
 
-import { PrismaClient, Prisma } from "@prisma/client";
+import { PrismaClient, Prisma } from "../db/client.js";
 
+import { applyBalanceDelta } from "../db/balance-writer.js";
 const ENTITY_ID = "00000000-0000-0000-0000-000000000002";
 
 async function main() {
@@ -170,31 +171,16 @@ async function main() {
 
       // Update account period balances
       for (const line of journal.lines) {
-        await prisma.accountPeriodBalance.upsert({
-          where: {
-            entityId_accountId_periodId: {
-              entityId: ENTITY_ID,
-              accountId: line.accountId,
-              periodId: openPeriod.id
-            }
-          },
-          create: {
-            entityId: ENTITY_ID,
-            accountId: line.accountId,
-            periodId: openPeriod.id,
-            openingBalance: new Prisma.Decimal(0),
-            periodDebits: line.debitFunctional,
-            periodCredits: line.creditFunctional,
-            closingBalance: line.debitFunctional.sub(line.creditFunctional)
-          },
-          update: {
-            periodDebits: { increment: line.debitFunctional },
-            periodCredits: { increment: line.creditFunctional },
-            closingBalance: {
-              increment: line.debitFunctional.sub(line.creditFunctional)
-            }
-          }
-        });
+        // Canonical signed writer — this used to write `debit - credit`
+        // unsigned, moving every credit-normal account the wrong way.
+        await applyBalanceDelta(
+          prisma,
+          ENTITY_ID,
+          openPeriod.id,
+          line.accountId,
+          line.debitFunctional,
+          line.creditFunctional
+        );
       }
 
       console.log(

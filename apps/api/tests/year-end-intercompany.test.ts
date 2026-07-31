@@ -46,12 +46,17 @@ const PERIOD_JUNE = {
 const ENTITY = { id: ENTITY_ID, functionalCurrency: "USD", isActive: true };
 const MIRROR_ENTITY = { id: MIRROR_ENTITY_ID, functionalCurrency: "EUR", isActive: true };
 
+// normalBalance is a required, non-null column on Account. Cleardown buckets
+// revenue vs expense by it (so custom INCOME types are classified correctly)
+// and cross-checks it against the posting engine's sign convention, so these
+// fixtures must carry it.
 const RE_ACCOUNT = {
   id: "acc-re",
   entityId: ENTITY_ID,
   code: "3100",
   name: "Retained Earnings",
   type: "EQUITY",
+  normalBalance: "CREDIT",
   isActive: true
 };
 
@@ -61,6 +66,7 @@ const REVENUE_ACCOUNT_1 = {
   code: "4000",
   name: "Room Revenue",
   type: "REVENUE",
+  normalBalance: "CREDIT",
   isActive: true
 };
 
@@ -70,6 +76,7 @@ const REVENUE_ACCOUNT_2 = {
   code: "4100",
   name: "F&B Revenue",
   type: "REVENUE",
+  normalBalance: "CREDIT",
   isActive: true
 };
 
@@ -79,6 +86,7 @@ const EXPENSE_ACCOUNT_1 = {
   code: "5000",
   name: "Salaries",
   type: "EXPENSE",
+  normalBalance: "DEBIT",
   isActive: true
 };
 
@@ -88,6 +96,7 @@ const EXPENSE_ACCOUNT_2 = {
   code: "5100",
   name: "Utilities",
   type: "EXPENSE",
+  normalBalance: "DEBIT",
   isActive: true
 };
 
@@ -139,6 +148,13 @@ const IC_PAY_ACCOUNT = {
 function createMockPrisma() {
   const mock: any = {
     $transaction: vi.fn().mockImplementation(async (fn: any) => fn(mock)),
+    // Cleardown re-runs the balance carry-forward into the following period so
+    // the next fiscal year cannot open holding un-swept P&L. Both helpers use
+    // raw SQL. Default to "no following period", which keeps these unit tests
+    // focused on the sweep itself; the carry-forward interaction is covered in
+    // tests/integration/year-end-cleardown.test.ts against real Postgres.
+    $queryRaw: vi.fn().mockResolvedValue([]),
+    $executeRaw: vi.fn().mockResolvedValue(0),
     entity: {
       findFirst: vi.fn().mockResolvedValue(ENTITY)
     },

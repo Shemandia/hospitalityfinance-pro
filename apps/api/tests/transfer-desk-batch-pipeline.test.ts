@@ -97,7 +97,10 @@ function makeDb(overrides: Record<string, any> = {}) {
     period: { findMany: vi.fn().mockResolvedValue([{ id: "p1", status: "OPEN" }]) },
     transferBatch: {
       create: vi.fn().mockResolvedValue({ id: "b1" }),
-      update: vi.fn().mockResolvedValue({})
+      update: vi.fn().mockResolvedValue({}),
+      // Import idempotency looks for a batch already staged from the same
+      // source content; null means this file has not been seen before.
+      findFirst: vi.fn().mockResolvedValue(null)
     },
     transferBatchItem: { createMany: vi.fn().mockResolvedValue({}) },
     ...overrides

@@ -3,6 +3,10 @@ node_modules/
 .turbo/
 dist/
 coverage/
+apps/api/src/db/generated/
+apps/api/payment-runs/
+apps/api/uploads/
+uploads/
 .next/
 .idea/
 .vscode/
@@ -18,3 +22,7 @@ coverage/
 # OS
 Thumbs.db
 Desktop.ini
+
+# Local tooling artifacts
+.claude/worktrees/
+dump.rdb

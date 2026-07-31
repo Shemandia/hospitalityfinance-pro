@@ -1,10 +1,10 @@
 import { z } from "zod";
 
-const decimalRegex = /^\d+(\.\d{1,8})?$/;
+const decimalRegex = /^-?\d+(\.\d{1,8})?$/;
 
 const decimalStringSchema = z
   .string()
-  .regex(decimalRegex, "Expected a positive decimal string.")
+  .regex(decimalRegex, "Expected a decimal string (e.g. '100.50' or '-50.25').")
   .transform((value) => value.trim());
 
 export const supplierCreateSchema = z.object({
