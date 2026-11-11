@@ -70,7 +70,7 @@ if (!process.env.TEST_DATABASE_URL) {
           data: { email: `fx-${unique}@example.test`, name: "FX Tester" }
         });
         await tx.entityUser.create({
-          data: { entityId: entity.id, userId: user.id, role: "ADMIN" }
+          data: { entityId: entity.id, userId: user.id }
         });
 
         const period = await tx.period.create({

@@ -331,6 +331,7 @@ model Entity {
   // Relations
   users                    EntityUser[]
   userRoles                UserRole[]
+  roleAssignments          RoleAssignment[]
   periods                  Period[]
   accounts                 Account[]
   journals                 Journal[]
@@ -418,6 +419,7 @@ model User {
 
   entities                     EntityUser[]
   roles                        UserRole[]
+  roleAssignments              RoleAssignment[]
   createdJournals              Journal[]                 @relation("JournalCreatedBy")
   approvedJournals             Journal[]                 @relation("JournalApprovedBy")
   journalApprovals             JournalApproval[]
@@ -477,6 +479,7 @@ model Role {
   updatedAt   DateTime         @updatedAt @map("updated_at")
   permissions RolePermission[]
   users       UserRole[]
+  assignments RoleAssignment[]
 
   @@map("roles")
 }
@@ -504,6 +507,38 @@ model RolePermission {
   @@map("role_permissions")
 }
 
+/// Scope of a role assignment: the whole tenant, or one node of the entity tree.
+enum AssignmentScope {
+  TENANT
+  ENTITY
+}
+
+/// The single source of "who holds which role where" (WP-A, AUT-01/AUT-03).
+/// - scopeType TENANT: entityId is null; the role applies tenant-wide.
+/// - scopeType ENTITY: the role applies at entityId and every entity below it.
+/// Read only through modules/access (AccessService). The database enforces the
+/// scope/entity pairing with a CHECK constraint and makes the unique index
+/// NULLS NOT DISTINCT so a tenant-wide grant cannot be duplicated; both live in
+/// migration 20261111000000_role_assignments because Prisma cannot express them.
+model RoleAssignment {
+  id        String          @id @default(uuid())
+  userId    String          @map("user_id")
+  roleId    String          @map("role_id")
+  scopeType AssignmentScope @map("scope_type")
+  entityId  String?         @map("entity_id")
+  createdAt DateTime        @default(now()) @map("created_at")
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role            @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  entity    Entity?         @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId, entityId])
+  @@index([entityId])
+  @@index([roleId])
+  @@map("role_assignments")
+}
+
+/// Deprecated by RoleAssignment (WP-A). Kept until every reader and writer has
+/// moved to AccessService; dropped by the follow-up contract migration.
 model UserRole {
   id        String   @id @default(uuid())
   userId    String   @map("user_id")
