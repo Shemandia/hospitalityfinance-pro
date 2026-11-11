@@ -4,7 +4,7 @@ type SqlExecutor = {
   $executeRawUnsafe(query: string): Promise<unknown>;
 };
 
-function splitSqlStatements(sql: string): string[] {
+export function splitSqlStatements(sql: string): string[] {
   const statements: string[] = [];
   let current = "";
   let inSingleQuote = false;
