@@ -3,10 +3,6 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 // ── Mock dependencies ──────────────────────────────────────────────────────
 
-vi.mock("../src/shared/rabbitmq.js", () => ({
-  publishEvent: vi.fn().mockResolvedValue(undefined)
-}));
-
 vi.mock("../src/jobs/mv-refresh-job.js", () => ({
   enqueueMVRefresh: vi.fn().mockResolvedValue(undefined)
 }));

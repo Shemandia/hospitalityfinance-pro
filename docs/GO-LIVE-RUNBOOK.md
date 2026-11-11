@@ -15,7 +15,6 @@ Before starting the cutover, confirm:
 - [ ] PM2 installed for process supervision
 - [ ] PostgreSQL 16+ installed locally, on a separate database server, or as a managed service
 - [ ] Redis 7+ installed locally, on WSL/Linux, on a separate Redis server, or as a managed service
-- [ ] RabbitMQ installed only if AMQP event delivery is required
 - [ ] API and web DNS records prepared
 - [ ] Reverse proxy configured for HTTPS termination
 - [ ] TLS certificates issued and renewable
@@ -45,7 +44,7 @@ Before starting the cutover, confirm:
 
 ### 1. Install and Verify Services
 
-Install Node.js, pnpm, PostgreSQL, Redis, PM2, and optional RabbitMQ directly on the server or use managed PostgreSQL/Redis services.
+Install Node.js, pnpm, PostgreSQL, Redis and PM2 directly on the server or use managed PostgreSQL/Redis services.
 
 ```bash
 node --version
@@ -58,8 +57,6 @@ pm2 --version
 psql "$REGISTRY_DATABASE_URL" -c "SELECT 1;"
 redis-cli -u "$REDIS_URL" ping
 
-# Optional, only when RabbitMQ is used
-rabbitmqctl status
 ```
 
 Redis is required in production for native auth sessions, refresh-token revocation, BullMQ jobs, and cached background work.
@@ -92,8 +89,6 @@ AWS_REGION=<region>
 TD_S3_BUCKET=<secure-transfer-desk-bucket>
 AWS_S3_BUCKET=<secure-report-bucket>
 ```
-
-Set `RABBITMQ_URL` only when RabbitMQ is intentionally deployed.
 
 ### 3. Verify Backup Plan
 

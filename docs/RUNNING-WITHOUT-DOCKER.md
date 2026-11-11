@@ -3,12 +3,10 @@
 The **application** (API + web) does not need Docker — `pnpm dev` runs both natively.
 Docker only provided four backing services, and you only need two of them:
 
-| Service      | Needed for a dev run?                                   | How to provide it without Docker                 |
-| ------------ | ------------------------------------------------------- | ------------------------------------------------ |
-| **Postgres** | **Required** (the database)                             | Native install or free cloud                     |
-| **Redis**    | **Required** (native-auth sessions + BullMQ job queues) | Memurai (Windows) / cloud                        |
-| **RabbitMQ** | Optional (event bus only)                               | Leave `RABBITMQ_URL` unset — it disables cleanly |
-| **Keycloak** | Not used (native auth replaced it)                      | Nothing — removed                                |
+| Service      | Needed for a dev run?                                   | How to provide it without Docker |
+| ------------ | ------------------------------------------------------- | -------------------------------- |
+| **Postgres** | **Required** (the database)                             | Native install or free cloud     |
+| **Redis**    | **Required** (native-auth sessions + BullMQ job queues) | Memurai (Windows) / cloud        |
 
 Pick **Path A (free cloud, zero installs)** or **Path B (native Windows installs)**. Both end at the same `.env` + `pnpm dev`.
 
@@ -20,7 +18,6 @@ Good when Docker won't run and you don't want to install database software local
 
 1. **Postgres** — create a free project at [Neon](https://neon.tech) or [Supabase](https://supabase.com). You need **two databases** on the same server: `hfp_db` and `hfp_registry`. In Neon, create the project (gives you `hfp_db`), then run `CREATE DATABASE hfp_registry;` from the SQL editor (or create a second database). Copy the two connection strings.
 2. **Redis** — create a free database at [Upstash](https://upstash.com) (serverless Redis). Copy the `redis://` (or `rediss://` for TLS) URL.
-3. **RabbitMQ** — skip it. Leave `RABBITMQ_URL` unset.
 
 Then fill in `apps/api/.env` (see [Env file](#env-file) below) with those URLs and go to [Run](#run).
 
@@ -45,10 +42,6 @@ Redis has no official Windows build. Use **Memurai** (free Developer edition), w
 - Download and install from <https://www.memurai.com/get-memurai>. It installs as a Windows service listening on `localhost:6379`.
 - (Alternatives: run Redis inside **WSL2** with `sudo apt install redis-server`, or use Upstash from Path A.)
 
-### 3. RabbitMQ
-
-Skip it for development — leave `RABBITMQ_URL` unset. (If you ever need the event bus: install Erlang/OTP, then the RabbitMQ Windows installer from <https://www.rabbitmq.com/install-windows.html>, and set `RABBITMQ_URL=amqp://guest:guest@localhost:5672`.)
-
 ---
 
 ## Env file
@@ -68,8 +61,6 @@ REGISTRY_DATABASE_URL=postgresql://hfp:your-password@localhost:5432/hfp_registry
 REDIS_URL=redis://localhost:6379
 # Upstash example: REDIS_URL=rediss://default:TOKEN@your-host.upstash.io:6379
 
-# RabbitMQ — OMITTED on purpose; the event bus disables cleanly when unset.
-# RABBITMQ_URL=
 
 # Auth — generate a real secret:
 #   node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
@@ -112,13 +103,11 @@ API → http://localhost:4000, web → http://localhost:3000 (Next dev default).
 
 ### Background workers (optional)
 
-The async workers (transfer-desk processing, dunning, scheduled reports) run on BullMQ over **Redis** — they do **not** need RabbitMQ. Start them only if you're exercising those features:
+The async workers (transfer-desk processing, dunning, scheduled reports) run on BullMQ over **Redis**. Start them only if you're exercising those features:
 
 ```powershell
 pnpm --filter @hfp/api run workers
 ```
-
-Without RabbitMQ, `publishEvent` is a quiet no-op (logged once at startup); nothing crashes.
 
 ---
 
@@ -126,6 +115,6 @@ Without RabbitMQ, `publishEvent` is a quiet no-op (logged once at startup); noth
 
 - **Docker / docker-compose** — not required to develop or run the app.
 - **Keycloak** — deleted; native auth (bcrypt + JWT + Redis sessions) replaces it.
-- **RabbitMQ** — optional; unset `RABBITMQ_URL` and the event bus disables cleanly.
+- **RabbitMQ** — deleted; nothing consumed the event bus.
 
 The only hard external services are **Postgres** and **Redis**, both available natively on Windows (EnterpriseDB + Memurai) or via free cloud tiers (Neon/Supabase + Upstash).

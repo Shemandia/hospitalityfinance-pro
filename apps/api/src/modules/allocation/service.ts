@@ -1,5 +1,4 @@
 import { Prisma, type PrismaClient } from "../../db/client.js";
-import { publishEvent } from "../../shared/rabbitmq.js";
 import { ProcessLockService, ProcessLockError } from "../process-lock/service.js";
 import { GLRepository } from "../gl/repository.js";
 import { AuditService } from "../audit/service.js";
@@ -718,15 +717,6 @@ export class AllocationService {
       });
 
       result.journalId = journal.id;
-
-      // Post-transaction events
-      await publishEvent("allocation.executed", {
-        entityId,
-        definitionId,
-        journalId: journal.id,
-        periodId: effectivePeriodId,
-        executedBy
-      }).catch(() => {});
 
       // Synchronous audit trail
       const auditService = new AuditService(this.prisma);

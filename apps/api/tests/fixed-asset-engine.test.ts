@@ -4,10 +4,6 @@ import { Prisma } from "../src/db/client.js";
 
 // ── Mock dependencies ──────────────────────────────────────────────────────
 
-vi.mock("../src/shared/rabbitmq.js", () => ({
-  publishEvent: vi.fn().mockResolvedValue(undefined)
-}));
-
 vi.mock("../src/jobs/mv-refresh-job.js", () => ({
   enqueueMVRefresh: vi.fn().mockResolvedValue(undefined)
 }));

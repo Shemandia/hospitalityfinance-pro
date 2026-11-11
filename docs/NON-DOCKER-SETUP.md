@@ -1,6 +1,6 @@
 # Non-Docker Setup and PM2 Deployment
 
-HospitalityFinance can run directly on Node.js, PostgreSQL, Redis, PM2, and optional RabbitMQ. Docker is not required for local development or production.
+HospitalityFinance can run directly on Node.js, PostgreSQL, Redis and PM2. Docker is not required for local development or production.
 
 ## Required Services
 
@@ -9,7 +9,6 @@ HospitalityFinance can run directly on Node.js, PostgreSQL, Redis, PM2, and opti
 - PostgreSQL 16+
 - Redis 7+
 - PM2 for production process supervision
-- RabbitMQ 3.12+ only if AMQP event delivery is required
 
 ## Local Development
 
@@ -79,26 +78,6 @@ Production options:
 - Managed Redis such as AWS ElastiCache, Azure Cache for Redis, or Redis Cloud
 
 Redis is required for native auth sessions, refresh token revocation, BullMQ jobs, and cached background work.
-
-## Optional RabbitMQ Without Docker
-
-RabbitMQ is optional for AMQP event delivery. If it is not running, the app logs dropped events and core API behavior continues.
-
-Linux install:
-
-```bash
-sudo apt update
-sudo apt install rabbitmq-server
-sudo systemctl enable --now rabbitmq-server
-sudo rabbitmqctl status
-```
-
-Set:
-
-```bash
-RABBITMQ_URL=amqp://guest:guest@localhost:5672
-RABBITMQ_EVENTS_EXCHANGE=hfp.events
-```
 
 ## Production Build
 
