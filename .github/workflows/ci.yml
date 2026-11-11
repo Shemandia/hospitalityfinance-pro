@@ -4,12 +4,45 @@ on:
   push:
     branches:
       - main
-      - "feature/**"
   pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: hfp
+          POSTGRES_PASSWORD: hfp_ci
+          POSTGRES_DB: hfp_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hfp -d hfp_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      NODE_ENV: test
+      TEST_DATABASE_URL: postgresql://hfp:hfp_ci@localhost:5432/hfp_test
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: ci-only-secret-not-used-outside-this-workflow
 
     steps:
       - name: Checkout
@@ -17,8 +50,6 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 9
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -27,7 +58,10 @@ jobs:
           cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma clients
+        run: pnpm --filter @hfp/api db:generate
 
       - name: Lint
         run: pnpm lint
@@ -35,8 +69,21 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Test
+      # The tenant migration chain cannot build an empty database yet (OPS-04).
+      # Until WP-2 replaces it with a clean baseline, the test database is built
+      # the same way provisioning builds a tenant. Replace with `migrate deploy`
+      # and add the migrate-from-empty check when WP-2 lands.
+      - name: Prepare test database
+        run: pnpm --filter @hfp/api db:setup:test
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+
+      - name: Unit tests
         run: pnpm test
+
+      # Run explicitly so a missing database fails the job instead of skipping.
+      - name: Integration tests
+        run: pnpm --filter @hfp/api test:integration
 
       - name: Build
         run: pnpm build
