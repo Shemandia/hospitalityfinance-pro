@@ -23,6 +23,12 @@ import { splitSqlStatements } from "../../src/db/sqlRunner.js";
 import { PrismaAccessDataSource } from "../../src/modules/access/prisma-source.js";
 import { RedisAccessCache } from "../../src/modules/access/redis-cache.js";
 import { AccessInfrastructureError, AccessService } from "../../src/modules/access/service.js";
+import {
+  ensureSystemCatalog,
+  grantRoleAtEntity,
+  grantTenantAdministrator
+} from "../../src/modules/access/setup.js";
+import { SYSTEM_PERMISSIONS, SYSTEM_ROLES } from "../../src/modules/access/system-catalog.js";
 import { disconnectTestPrisma, getTestPrisma } from "./helpers.js";
 
 type Tx = Prisma.TransactionClient;
@@ -173,12 +179,37 @@ if (!process.env.TEST_DATABASE_URL || !redisUrl) {
       ];
       expect(await assignments(schema)).toEqual(expected);
 
-      // Re-running (the contract migration repeats the copy) changes nothing.
+      // Re-running changes nothing.
       await migrate(schema);
       expect(await assignments(schema)).toEqual(expected);
     });
 
-    it("picks up grants written to the legacy tables after the first run", async () => {
+    it("copies once: a grant revoked afterwards is not brought back by a re-run", async () => {
+      const schema = await createLegacySchema("once");
+      await inSchema(schema, async (tx) => {
+        await seedRoles(tx);
+        await tx.$executeRawUnsafe(`INSERT INTO entities (id) VALUES ('e1')`);
+        await tx.$executeRawUnsafe(`INSERT INTO users (id) VALUES ('u1'), ('u2')`);
+        await tx.$executeRawUnsafe(
+          `INSERT INTO user_roles (id, user_id, role_id, entity_id) VALUES
+             ('ur1', 'u1', 'r-view', 'e1'), ('ur2', 'u2', 'r-ctrl', 'e1')`
+        );
+      });
+      await migrate(schema);
+
+      // An administrator revokes u1's grant; the legacy row is still there.
+      await inSchema(schema, async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'true', true)`;
+        await tx.$executeRawUnsafe(`DELETE FROM role_assignments WHERE user_id = 'u1'`);
+      });
+      await migrate(schema);
+
+      expect(await assignments(schema)).toEqual([
+        { user_id: "u2", role: "CONTROLLER", scope_type: "ENTITY", entity_id: "e1" }
+      ]);
+    });
+
+    it("ignores rows written to the legacy tables after the copy has run", async () => {
       const schema = await createLegacySchema("late");
       await inSchema(schema, async (tx) => {
         await seedRoles(tx);
@@ -192,9 +223,7 @@ if (!process.env.TEST_DATABASE_URL || !redisUrl) {
         )
       );
       await migrate(schema);
-      expect(await assignments(schema)).toEqual([
-        { user_id: "u1", role: "VIEWER", scope_type: "ENTITY", entity_id: "e1" }
-      ]);
+      expect(await assignments(schema)).toEqual([]);
     });
 
     it("stops, and leaves nothing behind, when a legacy role has no role row", async () => {
@@ -318,6 +347,7 @@ if (!process.env.TEST_DATABASE_URL || !redisUrl) {
         const userIds = [ids.alice, ids.bob].filter(Boolean);
         const roleIds = [ids.accountant, ids.viewer, ids.admin].filter(Boolean);
         await tx.roleAssignment.deleteMany({ where: { userId: { in: userIds } } });
+        await tx.entityUser.deleteMany({ where: { userId: { in: userIds } } });
         await tx.user.deleteMany({ where: { id: { in: userIds } } });
         await tx.rolePermission.deleteMany({ where: { roleId: { in: roleIds } } });
         await tx.role.deleteMany({ where: { id: { in: roleIds } } });
@@ -608,6 +638,51 @@ if (!process.env.TEST_DATABASE_URL || !redisUrl) {
         } finally {
           dead.disconnect();
         }
+      });
+    });
+
+    describe("the starting point written by provisioning and the seed", () => {
+      const catalogueCodes = SYSTEM_PERMISSIONS.map((permission) => permission.code).sort();
+      const viewerCodes = [
+        ...(SYSTEM_ROLES.find((role) => role.code === "VIEWER")?.permissions ?? [])
+      ].sort();
+
+      it("gives the first administrator every catalogue permission, tenant-wide", async () => {
+        await clearAssignments();
+        await ensureSystemCatalog(prisma);
+        await grantTenantAdministrator(prisma, ids.alice);
+        await grantTenantAdministrator(prisma, ids.alice); // provisioning retried
+
+        const rows = await bypass((tx) =>
+          tx.roleAssignment.findMany({ where: { userId: ids.alice } })
+        );
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({ scopeType: "TENANT", entityId: null });
+
+        const service = newService();
+        await service.invalidateUser(alice());
+        const access = await service.resolve(alice());
+        // The tenant administrator role may have gained permissions in this
+        // database; it must hold at least the whole catalogue.
+        expect(access.tenantPermissions).toEqual(expect.arrayContaining(catalogueCodes));
+        expect(access.entityPermissions[ids.propC]).toEqual(access.tenantPermissions);
+      });
+
+      it("gives a starting role at one entity, with the membership the token still needs", async () => {
+        await clearAssignments();
+        await grantRoleAtEntity(prisma, ids.bob, "VIEWER", ids.propA);
+
+        const service = newService();
+        await service.invalidateUser(bob());
+        const access = await service.resolve(bob());
+        expect(access.tenantPermissions).toEqual([]);
+        expect(Object.keys(access.entityPermissions)).toEqual([ids.propA]);
+        expect(access.entityPermissions[ids.propA]).toEqual(expect.arrayContaining(viewerCodes));
+
+        const membership = await bypass((tx) =>
+          tx.entityUser.count({ where: { userId: ids.bob, entityId: ids.propA } })
+        );
+        expect(membership).toBe(1);
       });
     });
   });

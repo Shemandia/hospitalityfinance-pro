@@ -9,6 +9,7 @@
 
 import { PrismaClient, Prisma } from "../db/client.js";
 import { randomUUID } from "node:crypto";
+import { ensureSystemCatalog, grantRoleAtEntity } from "../modules/access/setup.js";
 
 const prisma = new PrismaClient();
 
@@ -94,9 +95,12 @@ async function main() {
     await prisma.entityUser.upsert({
       where: { entityId_userId: { entityId, userId: ADMIN_USER_ID } },
       update: {},
-      create: { entityId, userId: ADMIN_USER_ID, role: "ADMIN" }
+      create: { entityId, userId: ADMIN_USER_ID }
     });
   }
+  // A grant on the group reaches both properties.
+  await ensureSystemCatalog(prisma);
+  await grantRoleAtEntity(prisma, ADMIN_USER_ID, "ADMIN", GROUP_ID);
 
   // ── 3. Chart of Accounts (USALI-compliant) ──────────────────────────────
 

@@ -5,10 +5,13 @@
 --   * entity_users.role  (deprecated enum: ADMIN, CONTROLLER, VIEWER, SUPERADMIN)
 --
 -- This is the EXPAND step. It creates the table and copies existing grants into
--- it. It does not drop user_roles, entity_users.role or the "EntityRole" enum:
--- the running code still reads them. The follow-up contract migration re-runs
--- the copy below (it is idempotent) and then drops them, once every reader and
--- writer has moved to AccessService.
+-- it, once. It does not drop user_roles, entity_users.role or the "EntityRole"
+-- enum; the follow-up contract migration drops them.
+--
+-- The copy runs once per database. From the moment it has run, role_assignments
+-- is the only place grants are written, so copying again would bring back
+-- grants an administrator has since revoked. The table comment records that
+-- the copy is done.
 --
 -- Every statement is safe to re-run. Tenant databases were created with
 -- `prisma db push` and carry no migration history (ARC-03), so until WP-2 this
@@ -149,6 +152,12 @@ DO $$
 DECLARE
   missing text;
 BEGIN
+  -- Already copied: role_assignments is now the source of truth.
+  IF coalesce(obj_description(to_regclass('role_assignments'), 'pg_class'), '')
+       LIKE 'legacy grants copied%' THEN
+    RETURN;
+  END IF;
+
   PERFORM set_config('app.bypass_rls', 'true', true);
 
   IF to_regclass('user_roles') IS NOT NULL THEN
@@ -228,4 +237,9 @@ BEGIN
 
     DROP TABLE "_legacy_entity_roles";
   END IF;
+
+  EXECUTE format(
+    'COMMENT ON TABLE "role_assignments" IS %L',
+    'legacy grants copied ' || to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SSOF')
+  );
 END $$;

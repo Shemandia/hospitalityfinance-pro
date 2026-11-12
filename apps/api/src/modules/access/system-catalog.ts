@@ -18,6 +18,9 @@ export type SystemRole = {
   permissions: string[];
 };
 
+/** The role provisioning gives a tenant's first administrator, tenant-wide. */
+export const TENANT_ADMIN_ROLE_CODE = "TENANT_ADMIN";
+
 export const SYSTEM_PERMISSIONS: ReadonlyArray<SystemPermission> = [
   // GL & Journals
   {
@@ -288,7 +291,7 @@ export const SYSTEM_ROLES: ReadonlyArray<SystemRole> = [
     permissions: SYSTEM_PERMISSIONS.filter((p) => p.code !== "PERIOD_REOPEN").map((p) => p.code)
   },
   {
-    code: "TENANT_ADMIN",
+    code: TENANT_ADMIN_ROLE_CODE,
     name: "Tenant Administrator",
     description: "Full system access — manages users, roles, entities, and all modules",
     isSystem: true,
