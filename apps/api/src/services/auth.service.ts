@@ -11,6 +11,7 @@ import crypto from "node:crypto";
 import { getRegistryClient, resolveTenantByCode } from "../db/tenantRegistry.js";
 import { getTenantClient } from "../db/tenantPool.js";
 import { withBypassRLS } from "../db/rls-bypass.js";
+import type { Prisma } from "../db/client.js";
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
@@ -57,8 +58,11 @@ type ClaimUserRole = {
 };
 
 /**
- * Build JWT role/permission claims from UserRole rows, honouring entity scope.
- * A row contributes iff it is a global grant (entityId null), or it is a
+ * Build JWT role/permission claims from the user's role grants (role_assignments),
+ * honouring entity scope. The API no longer authorises from these claims — the
+ * route guard asks AccessService — but the web client still draws its menus
+ * from them until the context endpoint replaces them.
+ * A row contributes iff it is a tenant-wide grant (entityId null), or it is a
  * non-cross-entity-admin role scoped to an entity the user can access.
  * A scoped SUPERADMIN/PLATFORM_ADMIN row must never become a global claim.
  */
@@ -181,7 +185,7 @@ export class AuthService {
       return tx.user.findUnique({
         where: { email: email.toLowerCase() },
         include: {
-          roles: {
+          roleAssignments: {
             include: {
               role: {
                 include: {
@@ -257,7 +261,7 @@ export class AuthService {
 
     // 8. Build roles & permissions (scope-aware — see buildScopedClaims)
     const entityIds = user.entities.map((eu: any) => eu.entityId);
-    const { roles, permissions } = buildScopedClaims(user.roles, entityIds);
+    const { roles, permissions } = buildScopedClaims(user.roleAssignments, entityIds);
 
     // 9. Generate session + tokens
     const sessionId = crypto.randomUUID();
@@ -375,29 +379,32 @@ export class AuthService {
 
     // Load fresh user claims from tenant DB
     const tenantPrisma = getTenantClient(tenant.slug, tenant.databaseUrl);
-    const user = await tenantPrisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        roles: {
-          include: {
-            role: {
-              include: {
-                permissions: {
-                  include: { permission: true }
+    // role_assignments is readable only with the RLS bypass set.
+    const user = await withBypassRLS(tenantPrisma, (tx: Prisma.TransactionClient) =>
+      tx.user.findUnique({
+        where: { id: userId },
+        include: {
+          roleAssignments: {
+            include: {
+              role: {
+                include: {
+                  permissions: {
+                    include: { permission: true }
+                  }
                 }
               }
             }
+          },
+          entities: {
+            select: { entityId: true }
           }
-        },
-        entities: {
-          select: { entityId: true }
         }
-      }
-    });
+      })
+    );
     if (!user || !user.isActive) throw new AuthError("User not found or disabled");
 
     const entityIds = user.entities.map((eu) => eu.entityId);
-    const { roles, permissions } = buildScopedClaims(user.roles, entityIds);
+    const { roles, permissions } = buildScopedClaims(user.roleAssignments, entityIds);
 
     // Generate new tokens
     const newAccessToken = jwt.sign(
@@ -620,7 +627,7 @@ export class AuthService {
       return tx.user.findUnique({
         where: { id: userId },
         include: {
-          roles: {
+          roleAssignments: {
             include: {
               role: {
                 include: {
@@ -647,10 +654,12 @@ export class AuthService {
       jobTitle: user.jobTitle,
       department: user.department,
       avatarUrl: user.avatarUrl,
-      roles: user.roles.map((ur: any) => ur.role.code),
+      roles: [...new Set<string>(user.roleAssignments.map((ra: any) => ra.role.code))],
       permissions: [
         ...new Set(
-          user.roles.flatMap((ur: any) => ur.role.permissions.map((rp: any) => rp.permission.code))
+          user.roleAssignments.flatMap((ra: any) =>
+            ra.role.permissions.map((rp: any) => rp.permission.code)
+          )
         )
       ],
       entities: user.entities.map((eu: any) => ({

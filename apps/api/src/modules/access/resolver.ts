@@ -151,3 +151,21 @@ export function hasTenantPermission(access: ResolvedAccess, permission: string):
 export function openableEntityIds(access: ResolvedAccess): string[] {
   return Object.keys(access.entityPermissions);
 }
+
+/**
+ * The entities at which the user holds at least one of `permissions`, or "all"
+ * when one is held tenant-wide. This is how far an administrator's authority
+ * reaches on routes that take no entity of their own.
+ */
+export function permittedEntityIds(
+  access: ResolvedAccess,
+  permissions: string | readonly string[]
+): string[] | "all" {
+  const wanted = (typeof permissions === "string" ? [permissions] : permissions).map(
+    normalizePermission
+  );
+  if (wanted.some((code) => access.tenantPermissions.includes(code))) return "all";
+  return Object.entries(access.entityPermissions)
+    .filter(([, held]) => wanted.some((code) => held.includes(code)))
+    .map(([entityId]) => entityId);
+}

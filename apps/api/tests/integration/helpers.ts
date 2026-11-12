@@ -89,3 +89,28 @@ export async function createTestPeriod(
   });
   return period.id;
 }
+
+/**
+ * Makes sure the catalogue permissions exist and returns code -> id.
+ *
+ * Test files run in parallel and several need the same real permission codes,
+ * so each code is inserted in its own statement that tolerates a concurrent
+ * insert, and the rows are left in place: they are catalogue data, not
+ * fixtures, and another file may be using them.
+ */
+export async function ensurePermissions<Code extends string>(
+  client: PrismaClient,
+  codes: readonly Code[]
+): Promise<Record<Code, string>> {
+  for (const code of codes) {
+    await client.$executeRaw`
+      INSERT INTO permissions (id, code, created_at, updated_at)
+      VALUES (gen_random_uuid()::text, ${code}, now(), now())
+      ON CONFLICT (code) DO NOTHING`;
+  }
+  const rows = await client.permission.findMany({
+    where: { code: { in: [...codes] } },
+    select: { id: true, code: true }
+  });
+  return Object.fromEntries(rows.map((row) => [row.code, row.id])) as Record<Code, string>;
+}

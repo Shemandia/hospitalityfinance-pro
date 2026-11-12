@@ -28,7 +28,7 @@ import { PrismaAccessDataSource } from "../../src/modules/access/prisma-source.j
 import { RedisAccessCache } from "../../src/modules/access/redis-cache.js";
 import { getAccessService, setAccessService } from "../../src/modules/access/runtime.js";
 import { AccessService } from "../../src/modules/access/service.js";
-import { disconnectTestPrisma, getTestPrisma } from "./helpers.js";
+import { disconnectTestPrisma, ensurePermissions, getTestPrisma } from "./helpers.js";
 
 type Tx = Prisma.TransactionClient;
 
@@ -81,8 +81,7 @@ if (!environmentReady || !redisUrl) {
     const ids = { group: "", propA: "", propB: "", propC: "", other: "" };
     const roles = { accountant: "", viewer: "", entityAdmin: "", tenantAdmin: "" };
     const users = { alice: "", gina: "", eve: "", tara: "", nobody: "" };
-    const permissionIds = {} as Record<Code, string>;
-    const createdPermissionIds: string[] = [];
+    let permissionIds = {} as Record<Code, string>;
     const tokens = {} as Record<keyof typeof users, string>;
 
     function bypass<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
@@ -162,6 +161,8 @@ if (!environmentReady || !redisUrl) {
       app = await createApp();
       await app.ready();
 
+      permissionIds = await ensurePermissions(prisma, CODES);
+
       await bypass(async (tx) => {
         const entity = (name: string, type: "GROUP" | "PROPERTY", parentId: string | null) =>
           tx.entity.create({
@@ -178,16 +179,6 @@ if (!environmentReady || !redisUrl) {
         ids.propB = (await entity("B", "PROPERTY", ids.group)).id;
         ids.propC = (await entity("C", "PROPERTY", ids.group)).id;
         ids.other = (await entity("O", "GROUP", null)).id;
-
-        for (const code of CODES) {
-          const existing = await tx.permission.findUnique({ where: { code } });
-          if (existing) {
-            permissionIds[code] = existing.id;
-          } else {
-            permissionIds[code] = (await tx.permission.create({ data: { code } })).id;
-            createdPermissionIds.push(permissionIds[code]);
-          }
-        }
 
         const role = async (name: string, codes: Code[], isSystem = false) =>
           (
@@ -245,7 +236,6 @@ if (!environmentReady || !redisUrl) {
         await tx.user.deleteMany({ where: { id: { in: userIds } } });
         await tx.rolePermission.deleteMany({ where: { roleId: { in: roleIds } } });
         await tx.role.deleteMany({ where: { id: { in: roleIds } } });
-        await tx.permission.deleteMany({ where: { id: { in: createdPermissionIds } } });
         await tx.entity.deleteMany({ where: { parentId: { in: [ids.group, ids.other] } } });
         await tx.entity.deleteMany({ where: { id: { in: [ids.group, ids.other] } } });
       });

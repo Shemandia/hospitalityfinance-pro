@@ -18,8 +18,10 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z, ZodError } from "zod";
 import { requireAuth } from "../../middleware/requireAuth.js";
-import { permittedEntityIds, requirePermission } from "../../middleware/requirePermission.js";
-import { getAccessService } from "../access/runtime.js";
+import { requirePermission } from "../../middleware/requirePermission.js";
+import { changeAccess } from "../access/invalidation.js";
+import { AccessInfrastructureError } from "../access/service.js";
+import { NO_ACCESS } from "../access/resolver.js";
 import {
   roleCreateSchema,
   roleUpdateSchema,
@@ -29,6 +31,18 @@ import {
   userCreateSchema
 } from "./types.js";
 import * as svc from "./service.js";
+
+const assignRoleSchema = z.object({
+  roleId: z.string().uuid(),
+  /** Grant at this entity; defaults to the entity selected for the request. */
+  entityId: z.string().uuid().optional(),
+  /** "TENANT" grants tenant-wide. */
+  scope: z.literal("TENANT").optional()
+});
+
+const revokeRoleQuerySchema = z.object({ entityId: z.string().uuid().optional() });
+
+const userStatusSchema = z.object({ isActive: z.boolean() });
 
 const assignScopeSchema = z.object({
   userId: z.string().uuid(),
@@ -43,6 +57,8 @@ const revokeScopeSchema = z.object({
 });
 
 function mapError(reply: FastifyReply, error: unknown) {
+  // Answered with 503 by the application's error handler, not with a 500 here.
+  if (error instanceof AccessInfrastructureError) throw error;
   if (error instanceof ZodError) {
     return reply.code(400).send({
       data: null,
@@ -60,74 +76,49 @@ function requireEntityId(entityId: string | undefined): string {
   return entityId;
 }
 
-function mapScopeError(
-  reply: FastifyReply,
-  error: "USER_NOT_FOUND" | "FORBIDDEN" | "ROLE_NOT_FOUND"
-) {
-  if (error === "USER_NOT_FOUND" || error === "ROLE_NOT_FOUND") {
-    const message = error === "USER_NOT_FOUND" ? "User not found." : "Role not found.";
-    return reply.code(404).send({ data: null, errors: [{ code: error, message }] });
+type ScopeError =
+  | "USER_NOT_FOUND"
+  | "ROLE_NOT_FOUND"
+  | "ENTITY_NOT_FOUND"
+  | "ENTITY_REQUIRED"
+  | "FORBIDDEN";
+
+const SCOPE_ERRORS: Record<ScopeError, { status: number; message: string }> = {
+  USER_NOT_FOUND: { status: 404, message: "User not found." },
+  ROLE_NOT_FOUND: { status: 404, message: "Role not found." },
+  ENTITY_NOT_FOUND: { status: 404, message: "Entity not found." },
+  ENTITY_REQUIRED: {
+    status: 400,
+    message: "Name the entity: send entityId, select an entity, or use scope TENANT."
+  },
+  FORBIDDEN: {
+    status: 403,
+    message:
+      "You cannot manage users or entities outside your own scope, or grant privileges exceeding your own."
   }
-  return reply.code(403).send({
-    data: null,
-    errors: [
-      {
-        code: error,
-        message:
-          "You cannot manage users outside your assigned entity scope or grant privileges exceeding your own."
-      }
-    ]
-  });
+};
+
+function mapScopeError(reply: FastifyReply, error: ScopeError) {
+  const { status, message } = SCOPE_ERRORS[error];
+  return reply.code(status).send({ data: null, errors: [{ code: error, message }] });
 }
 
-/**
- * Describes the caller to the admin service, from resolved access.
- *
- * The caller's reach is the set of entities at which they hold the permission
- * that admitted them to the route. The permissions used for the privilege
- * ceiling are those held tenant-wide, or at the selected entity, or — with no
- * entity selected — only those held at every entity within reach.
- */
+/** Describes the caller to the admin service: resolved access, not token claims. */
 function getActorContext(request: FastifyRequest): svc.AdminActorContext {
-  const userId = typeof request.user?.sub === "string" ? request.user.sub : undefined;
-  const access = request.access;
-  const admittedBy = request.admittedBy;
-  if (!access || !admittedBy) {
-    return {
-      userId,
-      tenantWide: false,
-      permissions: [],
-      entityIds: [],
-      entityId: request.entityId
-    };
-  }
-
-  const reach = permittedEntityIds(access, admittedBy);
-  if (reach === "all") {
-    return {
-      userId,
-      tenantWide: true,
-      permissions: access.tenantPermissions,
-      entityIds: [],
-      entityId: request.entityId
-    };
-  }
-
-  const selected = request.entityId;
-  const permissionSets =
-    selected && reach.includes(selected)
-      ? [access.entityPermissions[selected] ?? []]
-      : reach.map((entityId) => access.entityPermissions[entityId] ?? []);
-  const [first = [], ...rest] = permissionSets;
-  const permissions = first.filter((code) => rest.every((held) => held.includes(code)));
-
-  return { userId, tenantWide: false, permissions, entityIds: reach, entityId: selected };
+  return {
+    userId: typeof request.user?.sub === "string" ? request.user.sub : undefined,
+    // Without resolved access or an admitting guard the caller reaches nothing.
+    access: request.access ?? NO_ACCESS,
+    admittedBy: request.admittedBy ?? [],
+    entityId: request.entityId
+  };
 }
 
-/** Role definitions changed: every user holding the role is affected. */
-async function invalidateTenantAccess(request: FastifyRequest): Promise<void> {
+/** The guard has already refused a request whose session has no tenant. */
+function tenantIdOf(request: FastifyRequest): string {
   const tenantId = request.user?.tenantId;
-  if (tenantId) await getAccessService().invalidateTenant(tenantId);
+  if (!tenantId) throw new Error("Admin route reached without a tenant.");
+  return tenantId;
 }
 
 export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
@@ -144,9 +135,9 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
             requirePermission(["ADMIN_USERS", "ADMIN_ROLES_MANAGE"], { scope: "any-entity" })
           ]
         },
-        async (_request, reply) => {
+        async (request, reply) => {
           try {
-            const data = await svc.listRoles();
+            const data = await svc.listRoles(getActorContext(request));
             return reply.send({ data, errors: [] });
           } catch (error) {
             return mapError(reply, error);
@@ -163,7 +154,7 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
         },
         async (request, reply) => {
           try {
-            const data = await svc.getRoleById(request.params.id);
+            const data = await svc.getRoleById(request.params.id, getActorContext(request));
             if (!data)
               return reply
                 .code(404)
@@ -212,7 +203,9 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
         { preHandler: [requirePermission("ADMIN_ROLES_MANAGE", { scope: "tenant" })] },
         async (request, reply) => {
           try {
-            const result = await svc.deleteRole(request.params.id);
+            const result = await changeAccess(tenantIdOf(request), "tenant", () =>
+              svc.deleteRole(request.params.id)
+            );
             if ("error" in result) {
               if (result.error === "NOT_FOUND")
                 return reply.code(404).send({
@@ -235,7 +228,6 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
                   ]
                 });
             }
-            await invalidateTenantAccess(request);
             return reply.code(204).send();
           } catch (error) {
             return mapError(reply, error);
@@ -281,8 +273,9 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
         { preHandler: [requirePermission("ADMIN_ROLES_MANAGE", { scope: "tenant" })] },
         async (request, reply) => {
           try {
-            await svc.deletePermission(request.params.id);
-            await invalidateTenantAccess(request);
+            await changeAccess(tenantIdOf(request), "tenant", () =>
+              svc.deletePermission(request.params.id)
+            );
             return reply.code(204).send();
           } catch (error) {
             return mapError(reply, error);
@@ -303,8 +296,9 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
                 permissionId: rolePermissionSchema.shape.permissionId
               })
               .parse(request.body);
-            const data = await svc.bindPermissionToRole(request.params.id, permissionId);
-            await invalidateTenantAccess(request);
+            const data = await changeAccess(tenantIdOf(request), "tenant", () =>
+              svc.bindPermissionToRole(request.params.id, permissionId)
+            );
             return reply.code(201).send({ data, errors: [] });
           } catch (error) {
             return mapError(reply, error);
@@ -317,8 +311,9 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
         { preHandler: [requirePermission("ADMIN_ROLES_MANAGE", { scope: "tenant" })] },
         async (request, reply) => {
           try {
-            await svc.unbindPermissionFromRole(request.params.id, request.params.permissionId);
-            await invalidateTenantAccess(request);
+            await changeAccess(tenantIdOf(request), "tenant", () =>
+              svc.unbindPermissionFromRole(request.params.id, request.params.permissionId)
+            );
             return reply.code(204).send();
           } catch (error) {
             return mapError(reply, error);
@@ -368,13 +363,12 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
         { preHandler: [requirePermission("ADMIN_USERS", { scope: "any-entity" })] },
         async (request, reply) => {
           try {
-            const { roleId } = z.object({ roleId: z.string().uuid() }).parse(request.body);
-            const result = await svc.assignRoleToUser(
-              request.params.userId,
-              roleId,
-              getActorContext(request)
+            const { roleId, entityId, scope } = assignRoleSchema.parse(request.body);
+            const userId = request.params.userId;
+            const result = await changeAccess(tenantIdOf(request), { users: [userId] }, () =>
+              svc.assignRoleToUser(userId, roleId, { entityId, scope }, getActorContext(request))
             );
-            if ("error" in result && result.error) return mapScopeError(reply, result.error);
+            if ("error" in result) return mapScopeError(reply, result.error);
             return reply.code(201).send({ data: result.data, errors: [] });
           } catch (error) {
             return mapError(reply, error);
@@ -383,17 +377,20 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
       );
 
       // ── Revoke role from user ─────────────────────────────────────────────
-      router.delete<{ Params: { userId: string; roleId: string } }>(
+      router.delete<{
+        Params: { userId: string; roleId: string };
+        Querystring: { entityId?: string };
+      }>(
         "/users/:userId/roles/:roleId",
         { preHandler: [requirePermission("ADMIN_USERS", { scope: "any-entity" })] },
         async (request, reply) => {
           try {
-            const result = await svc.revokeRoleFromUser(
-              request.params.userId,
-              request.params.roleId,
-              getActorContext(request)
+            const { entityId } = revokeRoleQuerySchema.parse(request.query);
+            const { userId, roleId } = request.params;
+            const result = await changeAccess(tenantIdOf(request), { users: [userId] }, () =>
+              svc.revokeRoleFromUser(userId, roleId, { entityId }, getActorContext(request))
             );
-            if ("error" in result && result.error) return mapScopeError(reply, result.error);
+            if ("error" in result) return mapScopeError(reply, result.error);
             return reply.code(204).send();
           } catch (error) {
             return mapError(reply, error);
@@ -412,7 +409,7 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
         async (request, reply) => {
           try {
             const result = await svc.getUserRoles(request.params.userId, getActorContext(request));
-            if ("error" in result && result.error) return mapScopeError(reply, result.error);
+            if ("error" in result) return mapScopeError(reply, result.error);
             return reply.send({ data: result.data, errors: [] });
           } catch (error) {
             return mapError(reply, error);
@@ -426,7 +423,10 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
-            await svc.removeEntityUser(entityId, request.params.userId);
+            const userId = request.params.userId;
+            await changeAccess(tenantIdOf(request), { users: [userId] }, () =>
+              svc.removeEntityUser(entityId, userId)
+            );
             return reply.code(204).send();
           } catch (error) {
             return mapError(reply, error);
@@ -442,29 +442,26 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
         async (request, reply) => {
           try {
             const payload = userCreateSchema.parse(request.body);
-            const data = await svc.inviteUser(
-              payload,
-              request.entityId,
-              {
-                tenantSlug: request.tenantSlug,
-                tenantCode: (request.user as any)?.tenantCode,
-                tenantName: request.tenantSlug
-                  ?.replace(/-/g, " ")
-                  .replace(/\b\w/g, (c: string) => c.toUpperCase())
-              },
-              getActorContext(request)
+            // An invitation to an existing user changes that user's access.
+            const existingUserId = await svc.findUserIdByEmail(payload.email);
+            const data = await changeAccess(
+              tenantIdOf(request),
+              { users: existingUserId ? [existingUserId] : [] },
+              () =>
+                svc.inviteUser(
+                  payload,
+                  request.entityId,
+                  {
+                    tenantSlug: request.tenantSlug,
+                    tenantCode: request.user?.tenantCode,
+                    tenantName: request.tenantSlug
+                      ?.replace(/-/g, " ")
+                      .replace(/\b\w/g, (c: string) => c.toUpperCase())
+                  },
+                  getActorContext(request)
+                )
             );
-            if ("error" in data) {
-              const status = data.error === "FORBIDDEN" ? 403 : 404;
-              const msg =
-                data.error === "FORBIDDEN"
-                  ? "You cannot invite users into entities outside your assigned entity scope."
-                  : "Entity not found.";
-              return reply.code(status).send({
-                data: null,
-                errors: [{ code: data.error, message: msg }]
-              });
-            }
+            if ("error" in data) return mapScopeError(reply, data.error);
             return reply.code(201).send({ data, errors: [] });
           } catch (error) {
             return mapError(reply, error);
@@ -496,9 +493,9 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
             requirePermission(["ADMIN_USERS", "ADMIN_ENTITIES"], { scope: "any-entity" })
           ]
         },
-        async (_request, reply) => {
+        async (request, reply) => {
           try {
-            const data = await svc.getEntityTree();
+            const data = await svc.getEntityTree(getActorContext(request));
             return reply.send({ data, errors: [] });
           } catch (error) {
             return mapError(reply, error);
@@ -546,11 +543,8 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
         async (request, reply) => {
           try {
             const body = revokeScopeSchema.parse(request.body);
-            const result = await svc.revokeScope(
-              body.userId,
-              body.entityId,
-              body.cascade,
-              getActorContext(request)
+            const result = await changeAccess(tenantIdOf(request), { users: [body.userId] }, () =>
+              svc.revokeScope(body.userId, body.entityId, body.cascade, getActorContext(request))
             );
             if ("error" in result) {
               const status = result.error === "FORBIDDEN" ? 403 : 404;
@@ -579,8 +573,12 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
         },
         async (request, reply) => {
           try {
-            const data = await svc.getUserEntities(request.params.userId, getActorContext(request));
-            return reply.send({ data, errors: [] });
+            const result = await svc.getUserEntities(
+              request.params.userId,
+              getActorContext(request)
+            );
+            if ("error" in result) return mapScopeError(reply, result.error);
+            return reply.send({ data: result.data, errors: [] });
           } catch (error) {
             return mapError(reply, error);
           }
@@ -720,18 +718,13 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
         { preHandler: [requirePermission("ADMIN_USERS", { scope: "any-entity" })] },
         async (request, reply) => {
           try {
-            const body = request.body as { isActive: boolean };
-            const result = await svc.updateUserStatus(
-              request.params.userId,
-              body.isActive,
-              getActorContext(request)
-            );
-            if ("error" in result && result.error) return mapScopeError(reply, result.error);
+            const { isActive } = userStatusSchema.parse(request.body);
+            const userId = request.params.userId;
             // An inactive user holds no access; the change must apply at once.
-            const tenantId = request.user?.tenantId;
-            if (tenantId) {
-              await getAccessService().invalidateUser({ tenantId, userId: request.params.userId });
-            }
+            const result = await changeAccess(tenantIdOf(request), { users: [userId] }, () =>
+              svc.updateUserStatus(userId, isActive, getActorContext(request))
+            );
+            if ("error" in result) return mapScopeError(reply, result.error);
             return reply.send({ data: result.data, errors: [] });
           } catch (error) {
             return mapError(reply, error);

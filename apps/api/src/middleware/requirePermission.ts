@@ -27,10 +27,13 @@ import {
   hasEntityPermission,
   hasTenantPermission,
   normalizePermission,
+  permittedEntityIds,
   type ResolvedAccess
 } from "../modules/access/resolver.js";
 import { getAccessService } from "../modules/access/runtime.js";
 import { AccessInfrastructureError } from "../modules/access/service.js";
+
+export { permittedEntityIds };
 
 export type PermissionScope = "entity" | "tenant" | "any-entity";
 
@@ -96,23 +99,6 @@ export async function loadRequestAccess(
     }
     throw error;
   }
-}
-
-/**
- * The entities at which the caller holds at least one of `permissions`, or
- * "all" when one is held tenant-wide. For handlers behind an any-entity guard.
- */
-export function permittedEntityIds(
-  access: ResolvedAccess,
-  permissions: string | readonly string[]
-): string[] | "all" {
-  const wanted = (typeof permissions === "string" ? [permissions] : permissions).map(
-    normalizePermission
-  );
-  if (wanted.some((code) => access.tenantPermissions.includes(code))) return "all";
-  return Object.entries(access.entityPermissions)
-    .filter(([, held]) => wanted.some((code) => held.includes(code)))
-    .map(([entityId]) => entityId);
 }
 
 export function requirePermission(
