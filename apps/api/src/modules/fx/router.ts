@@ -2,7 +2,6 @@ import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "../../db/client.js";
 import { prisma } from "../../db/prisma.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
-import { requireRole } from "../../middleware/requireRole.js";
 import { requirePermission } from "../../middleware/requirePermission.js";
 import { FXService } from "./service.js";
 import { runLedgerRevaluation } from "./ledger-revaluation.js";
@@ -28,14 +27,18 @@ export async function registerFXRouter(app: FastifyInstance): Promise<void> {
       router.addHook("preHandler", requireAuth);
 
       // ── Currencies ─────────────────────────────────────────────────────────────
-      router.get("/currencies", async (_request, reply) => {
-        try {
-          const data = await fxService.listCurrencies();
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/currencies",
+        { preHandler: [requirePermission(["FX_READ", "GL_READ"])] },
+        async (_request, reply) => {
+          try {
+            const data = await fxService.listCurrencies();
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.post(
         "/currencies",
@@ -52,15 +55,19 @@ export async function registerFXRouter(app: FastifyInstance): Promise<void> {
       );
 
       // ── FX Rates ───────────────────────────────────────────────────────────────
-      router.get("/rates", async (request, reply) => {
-        try {
-          const query = fxRateQuerySchema.parse(request.query);
-          const data = await fxService.listRates(query);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/rates",
+        { preHandler: [requirePermission(["FX_READ", "GL_READ"])] },
+        async (request, reply) => {
+          try {
+            const query = fxRateQuerySchema.parse(request.query);
+            const data = await fxService.listRates(query);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.post(
         "/rates",
@@ -92,15 +99,19 @@ export async function registerFXRouter(app: FastifyInstance): Promise<void> {
       );
 
       // ── Convert ────────────────────────────────────────────────────────────────
-      router.get("/convert", async (request, reply) => {
-        try {
-          const query = convertQuerySchema.parse(request.query);
-          const data = await fxService.convert(query);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/convert",
+        { preHandler: [requirePermission(["FX_READ", "GL_READ"])] },
+        async (request, reply) => {
+          try {
+            const query = convertQuerySchema.parse(request.query);
+            const data = await fxService.convert(query);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       // ── ECB Import ─────────────────────────────────────────────────────────────
       router.post(
@@ -159,28 +170,33 @@ export async function registerFXRouter(app: FastifyInstance): Promise<void> {
       );
       // ── Revaluation Profiles ──────────────────────────────────────────────
 
-      router.get("/revaluation-profiles", async (request, reply) => {
-        try {
-          const entityId = request.entityId;
-          if (!entityId)
-            return reply.code(400).send({
-              data: null,
-              errors: [{ code: "MISSING_ENTITY", message: "X-Entity-ID required." }]
-            });
-          const data = await (prisma as unknown as PrismaClient as any).revaluationProfile.findMany(
-            {
+      router.get(
+        "/revaluation-profiles",
+        { preHandler: [requirePermission("FX_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = request.entityId;
+            if (!entityId)
+              return reply.code(400).send({
+                data: null,
+                errors: [{ code: "MISSING_ENTITY", message: "X-Entity-ID required." }]
+              });
+            const data = await (
+              prisma as unknown as PrismaClient as any
+            ).revaluationProfile.findMany({
               where: { entityId, isActive: true },
               orderBy: { name: "asc" }
-            }
-          );
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+            });
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.get<{ Params: { id: string } }>(
         "/revaluation-profiles/:id",
+        { preHandler: [requirePermission("FX_READ")] },
         async (request, reply) => {
           try {
             const entityId = request.entityId;

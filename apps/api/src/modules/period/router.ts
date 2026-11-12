@@ -2,7 +2,6 @@ import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "../../db/client.js";
 import { prisma } from "../../db/prisma.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
-import { requireRole } from "../../middleware/requireRole.js";
 import { requirePermission } from "../../middleware/requirePermission.js";
 import { periodListQuerySchema, periodCreateSchema } from "./types.js";
 import { PeriodService, PeriodServiceError } from "./service.js";
@@ -37,16 +36,20 @@ export async function registerPeriodRouter(app: FastifyInstance): Promise<void> 
         }
       );
 
-      router.get("/periods", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const query = periodListQuerySchema.parse(request.query);
-          const data = await periodService.listPeriods(entityId, query);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/periods",
+        { preHandler: [requirePermission(["PERIOD_READ", "GL_READ"])] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const query = periodListQuerySchema.parse(request.query);
+            const data = await periodService.listPeriods(entityId, query);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.post<{ Params: { id: string } }>(
         "/periods/:id/soft-close",

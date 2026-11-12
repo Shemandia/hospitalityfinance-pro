@@ -2,7 +2,6 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import type { PrismaClient } from "../../db/client.js";
 import { prisma } from "../../db/prisma.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
-import { requireRole } from "../../middleware/requireRole.js";
 import { requirePermission } from "../../middleware/requirePermission.js";
 import { ProcessLockService, ProcessLockError } from "./service.js";
 
@@ -26,69 +25,77 @@ export async function registerProcessLockRouter(app: FastifyInstance): Promise<v
   app.register(
     async (router) => {
       router.addHook("preHandler", requireAuth);
-      router.addHook("preHandler", requirePermission("ADMIN_SETTINGS"));
 
       // POST /process-locks/acquire
       router.post<{
         Body: { processType: string; ledger?: string; timeoutMinutes?: number };
-      }>("/process-locks/acquire", async (request, reply) => {
-        try {
-          const entityId = request.entityId;
-          if (!entityId) {
-            return reply.code(400).send({
-              data: null,
-              errors: [{ code: "ENTITY_REQUIRED", message: "X-Entity-ID header is required" }]
+      }>(
+        "/process-locks/acquire",
+        { preHandler: [requirePermission("ADMIN_SETTINGS")] },
+        async (request, reply) => {
+          try {
+            const entityId = request.entityId;
+            if (!entityId) {
+              return reply.code(400).send({
+                data: null,
+                errors: [{ code: "ENTITY_REQUIRED", message: "X-Entity-ID header is required" }]
+              });
+            }
+            const { processType, ledger, timeoutMinutes } = request.body ?? {};
+            if (!processType) {
+              return reply.code(400).send({
+                data: null,
+                errors: [{ code: "VALIDATION_ERROR", message: "processType is required" }]
+              });
+            }
+            const data = await lockService.acquireLock({
+              entityId,
+              processType,
+              ledger,
+              userId: request.user?.sub as string | undefined,
+              timeoutMinutes
             });
+            return reply.code(201).send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
           }
-          const { processType, ledger, timeoutMinutes } = request.body ?? {};
-          if (!processType) {
-            return reply.code(400).send({
-              data: null,
-              errors: [{ code: "VALIDATION_ERROR", message: "processType is required" }]
-            });
-          }
-          const data = await lockService.acquireLock({
-            entityId,
-            processType,
-            ledger,
-            userId: request.user?.sub as string | undefined,
-            timeoutMinutes
-          });
-          return reply.code(201).send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
         }
-      });
+      );
 
       // POST /process-locks/release
       router.post<{
         Body: { processType: string; ledger?: string };
-      }>("/process-locks/release", async (request, reply) => {
-        try {
-          const entityId = request.entityId;
-          if (!entityId) {
-            return reply.code(400).send({
-              data: null,
-              errors: [{ code: "ENTITY_REQUIRED", message: "X-Entity-ID header is required" }]
-            });
+      }>(
+        "/process-locks/release",
+        { preHandler: [requirePermission("ADMIN_SETTINGS")] },
+        async (request, reply) => {
+          try {
+            const entityId = request.entityId;
+            if (!entityId) {
+              return reply.code(400).send({
+                data: null,
+                errors: [{ code: "ENTITY_REQUIRED", message: "X-Entity-ID header is required" }]
+              });
+            }
+            const { processType, ledger } = request.body ?? {};
+            if (!processType) {
+              return reply.code(400).send({
+                data: null,
+                errors: [{ code: "VALIDATION_ERROR", message: "processType is required" }]
+              });
+            }
+            const data = await lockService.releaseLock({ entityId, processType, ledger });
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
           }
-          const { processType, ledger } = request.body ?? {};
-          if (!processType) {
-            return reply.code(400).send({
-              data: null,
-              errors: [{ code: "VALIDATION_ERROR", message: "processType is required" }]
-            });
-          }
-          const data = await lockService.releaseLock({ entityId, processType, ledger });
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
         }
-      });
+      );
 
       // GET /process-locks/status
       router.get<{ Querystring: { ledger?: string } }>(
         "/process-locks/status",
+        { preHandler: [requirePermission("ADMIN_SETTINGS")] },
         async (request, reply) => {
           try {
             const entityId = request.entityId;

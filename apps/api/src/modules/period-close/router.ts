@@ -3,7 +3,6 @@ import { ZodError } from "zod";
 import { prisma } from "../../db/prisma.js";
 import type { PrismaClient } from "../../db/client.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
-import { requireRole } from "../../middleware/requireRole.js";
 import { requirePermission } from "../../middleware/requirePermission.js";
 import { runYearEndCleardown, YearEndCleardownError } from "./year-end-cleardown.js";
 import {
@@ -36,22 +35,26 @@ export async function registerPeriodCloseRouter(app: FastifyInstance): Promise<v
 
       // ── Year-End Config ──────────────────────────────────────────────────
 
-      router.get("/year-end-config", async (request, reply) => {
-        try {
-          const entityId = request.entityId;
-          if (!entityId)
-            return reply.code(400).send({
-              data: null,
-              errors: [{ code: "MISSING_ENTITY", message: "X-Entity-ID required." }]
+      router.get(
+        "/year-end-config",
+        { preHandler: [requirePermission(["PERIOD_READ", "PERIOD_MANAGE"])] },
+        async (request, reply) => {
+          try {
+            const entityId = request.entityId;
+            if (!entityId)
+              return reply.code(400).send({
+                data: null,
+                errors: [{ code: "MISSING_ENTITY", message: "X-Entity-ID required." }]
+              });
+            const data = await (prisma as unknown as PrismaClient as any).yearEndConfig.findFirst({
+              where: { entityId }
             });
-          const data = await (prisma as unknown as PrismaClient as any).yearEndConfig.findFirst({
-            where: { entityId }
-          });
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.post(
         "/year-end-config",

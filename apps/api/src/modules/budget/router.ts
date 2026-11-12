@@ -19,25 +19,33 @@ export async function registerBudgetRouter(app: FastifyInstance): Promise<void> 
     async (router) => {
       router.addHook("preHandler", requireAuth);
 
-      router.get("/definitions", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await budgetService.listDefinitions(entityId);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/definitions",
+        { preHandler: [requirePermission("BUDGET_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await budgetService.listDefinitions(entityId);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.get<{ Params: { id: string } }>("/definitions/:id", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await budgetService.getDefinition(entityId, request.params.id);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get<{ Params: { id: string } }>(
+        "/definitions/:id",
+        { preHandler: [requirePermission("BUDGET_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await budgetService.getDefinition(entityId, request.params.id);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.post(
         "/definitions",
@@ -54,15 +62,19 @@ export async function registerBudgetRouter(app: FastifyInstance): Promise<void> 
         }
       );
 
-      router.get<{ Params: { id: string } }>("/definitions/:id/lines", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const def = await budgetService.getDefinition(entityId, request.params.id);
-          return reply.send({ data: def.lines, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get<{ Params: { id: string } }>(
+        "/definitions/:id/lines",
+        { preHandler: [requirePermission("BUDGET_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const def = await budgetService.getDefinition(entityId, request.params.id);
+            return reply.send({ data: def.lines, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.put<{ Params: { id: string } }>(
         "/definitions/:id/lines",
@@ -79,16 +91,20 @@ export async function registerBudgetRouter(app: FastifyInstance): Promise<void> 
         }
       );
 
-      router.get("/variance", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const query = budgetVarianceQuerySchema.parse(request.query);
-          const data = await budgetService.getVarianceReport(entityId, query);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/variance",
+        { preHandler: [requirePermission("BUDGET_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const query = budgetVarianceQuerySchema.parse(request.query);
+            const data = await budgetService.getVarianceReport(entityId, query);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       // ── Excel Import ─────────────────────────────────────────────────────────
 

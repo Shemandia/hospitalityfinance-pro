@@ -27,114 +27,152 @@ export async function registerKPIRouter(app: FastifyInstance): Promise<void> {
         });
       }
 
-      router.get("/revpar", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const { periodId } = periodQuerySchema.parse(request.query);
-          const data = await withKPI(entityId, (svc) => svc.getRevPAR({ entityId, periodId }));
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/revpar",
+        { preHandler: [requirePermission(["STATS_READ", "REPORT_READ"])] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const { periodId } = periodQuerySchema.parse(request.query);
+            const data = await withKPI(entityId, (svc) => svc.getRevPAR({ entityId, periodId }));
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.get("/balance-sheet", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const { periodId } = periodQuerySchema.parse(request.query);
-          const data = await withKPI(entityId, (svc) =>
-            svc.getBalanceSheet({ entityId, periodId })
-          );
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/balance-sheet",
+        { preHandler: [requirePermission("REPORT_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const { periodId } = periodQuerySchema.parse(request.query);
+            const data = await withKPI(entityId, (svc) =>
+              svc.getBalanceSheet({ entityId, periodId })
+            );
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.get("/cash-flow", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const { periodId } = periodQuerySchema.parse(request.query);
-          const data = await withKPI(entityId, (svc) => svc.getCashFlow({ entityId, periodId }));
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/cash-flow",
+        { preHandler: [requirePermission("REPORT_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const { periodId } = periodQuerySchema.parse(request.query);
+            const data = await withKPI(entityId, (svc) => svc.getCashFlow({ entityId, periodId }));
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.get("/usali", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const { periodId } = periodQuerySchema.parse(request.query);
-          const data = await withKPI(entityId, (svc) => svc.getUSALI({ entityId, periodId }));
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/usali",
+        { preHandler: [requirePermission("REPORT_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const { periodId } = periodQuerySchema.parse(request.query);
+            const data = await withKPI(entityId, (svc) => svc.getUSALI({ entityId, periodId }));
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.get("/usali-comparative", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const { periodId } = periodQuerySchema.parse(request.query);
-          const data = await withKPI(entityId, (svc) =>
-            svc.getUSALIComparative({ entityId, periodId })
-          );
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/usali-comparative",
+        { preHandler: [requirePermission("REPORT_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const { periodId } = periodQuerySchema.parse(request.query);
+            const data = await withKPI(entityId, (svc) =>
+              svc.getUSALIComparative({ entityId, periodId })
+            );
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.get("/currency-exposure", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await withKPI(entityId, (svc) => svc.getCurrencyExposure(entityId));
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/currency-exposure",
+        { preHandler: [requirePermission("REPORT_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await withKPI(entityId, (svc) => svc.getCurrencyExposure(entityId));
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.get("/entity-summary", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const { year, month } = z
-            .object({
-              year: z.coerce.number().int().min(2000).max(2100),
-              month: z.coerce.number().int().min(1).max(12)
-            })
-            .parse(request.query);
-          const data = await withKPI(entityId, (svc) =>
-            svc.getEntitySummary(entityId, year, month)
-          );
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/entity-summary",
+        { preHandler: [requirePermission("REPORT_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const { year, month } = z
+              .object({
+                year: z.coerce.number().int().min(2000).max(2100),
+                month: z.coerce.number().int().min(1).max(12)
+              })
+              .parse(request.query);
+            const data = await withKPI(entityId, (svc) =>
+              svc.getEntitySummary(entityId, year, month)
+            );
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.get("/revpar-trend", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const { periodId } = periodQuerySchema.parse(request.query);
-          const data = await withKPI(entityId, (svc) => svc.getRevPARTrend({ entityId, periodId }));
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/revpar-trend",
+        { preHandler: [requirePermission(["STATS_READ", "REPORT_READ"])] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const { periodId } = periodQuerySchema.parse(request.query);
+            const data = await withKPI(entityId, (svc) =>
+              svc.getRevPARTrend({ entityId, periodId })
+            );
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.get("/dashboard", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const { periodId } = periodQuerySchema.parse(request.query);
-          const data = await withKPI(entityId, (svc) => svc.getKPIDashboard(entityId, periodId));
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/dashboard",
+        { preHandler: [requirePermission("REPORT_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const { periodId } = periodQuerySchema.parse(request.query);
+            const data = await withKPI(entityId, (svc) => svc.getKPIDashboard(entityId, periodId));
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.get(
         "/usali-comparative/pdf",

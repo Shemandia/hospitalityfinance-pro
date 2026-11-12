@@ -44,16 +44,20 @@ export async function registerAuthorizationRouter(app: FastifyInstance): Promise
 
       // ── Stages ────────────────────────────────────────────────────────
 
-      router.get("/authorization/stages", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const { journalTypeId } = request.query as any;
-          const data = await authorizationService.listStages(entityId, journalTypeId);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/authorization/stages",
+        { preHandler: [requirePermission(["GL_READ", "GL_APPROVE"])] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const { journalTypeId } = request.query as any;
+            const data = await authorizationService.listStages(entityId, journalTypeId);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.post(
         "/authorization/stages",
@@ -105,15 +109,19 @@ export async function registerAuthorizationRouter(app: FastifyInstance): Promise
 
       // ── Teams ─────────────────────────────────────────────────────────
 
-      router.get("/authorization/teams", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await authorizationService.listTeams(entityId);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/authorization/teams",
+        { preHandler: [requirePermission(["GL_READ", "GL_APPROVE"])] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await authorizationService.listTeams(entityId);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.post(
         "/authorization/teams",
@@ -165,15 +173,19 @@ export async function registerAuthorizationRouter(app: FastifyInstance): Promise
 
       // ── Delegations ───────────────────────────────────────────────────
 
-      router.get("/authorization/delegations", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await authorizationService.listDelegations(entityId);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/authorization/delegations",
+        { preHandler: [requirePermission(["GL_READ", "GL_APPROVE"])] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await authorizationService.listDelegations(entityId);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.post(
         "/authorization/delegations",
@@ -206,15 +218,19 @@ export async function registerAuthorizationRouter(app: FastifyInstance): Promise
 
       // ── Rejection Codes ───────────────────────────────────────────────
 
-      router.get("/authorization/rejection-codes", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await authorizationService.listRejectionCodes(entityId);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/authorization/rejection-codes",
+        { preHandler: [requirePermission(["GL_READ", "GL_APPROVE"])] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await authorizationService.listRejectionCodes(entityId);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.post(
         "/authorization/rejection-codes",
@@ -233,17 +249,25 @@ export async function registerAuthorizationRouter(app: FastifyInstance): Promise
 
       // ── Authorization Queue ───────────────────────────────────────────
 
-      router.get("/authorization/queue", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const userId = requireUserId(request.user?.sub);
-          const filters = queueFilterSchema.parse(request.query);
-          const data = await authorizationService.getAuthorizationQueue(entityId, userId, filters);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/authorization/queue",
+        { preHandler: [requirePermission(["GL_READ", "GL_APPROVE"])] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const userId = requireUserId(request.user?.sub);
+            const filters = queueFilterSchema.parse(request.query);
+            const data = await authorizationService.getAuthorizationQueue(
+              entityId,
+              userId,
+              filters
+            );
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       // ── Workflow Actions ──────────────────────────────────────────────
 
@@ -398,15 +422,19 @@ export async function registerAuthorizationRouter(app: FastifyInstance): Promise
 
       // ── Authorization Sets ────────────────────────────────────────────
 
-      router.get("/authorization/sets", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await authorizationService.listSets(entityId);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/authorization/sets",
+        { preHandler: [requirePermission(["GL_READ", "GL_APPROVE"])] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await authorizationService.listSets(entityId);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.post(
         "/authorization/sets",
@@ -490,6 +518,7 @@ export async function registerAuthorizationRouter(app: FastifyInstance): Promise
 
       router.get<{ Params: { journalId: string } }>(
         "/authorization/history/:journalId",
+        { preHandler: [requirePermission(["GL_READ", "GL_APPROVE"])] },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
