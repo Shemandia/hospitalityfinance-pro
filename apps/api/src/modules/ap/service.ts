@@ -579,8 +579,10 @@ ${transactions
         }
 
         const apControl =
-          (await repository.getAccountByCode(entityId, "2000")) ??
-          (await repository.getFallbackAPControlAccount(entityId));
+          // The account the tenant flagged as control comes first; the literal
+          // code is only the fallback for charts that flag none (ACC-12).
+          (await repository.getFallbackAPControlAccount(entityId)) ??
+          (await repository.getAccountByCode(entityId, "2000"));
         if (!apControl) {
           throw new APServiceError(
             "AP_CONTROL_ACCOUNT_NOT_FOUND",
@@ -961,8 +963,10 @@ ${transactions
     }
 
     const apControl =
-      (await repository.getAccountByCode(entityId, "2000")) ??
-      (await repository.getFallbackAPControlAccount(entityId));
+      // The account the tenant flagged as control comes first; the literal
+      // code is only the fallback for charts that flag none (ACC-12).
+      (await repository.getFallbackAPControlAccount(entityId)) ??
+      (await repository.getAccountByCode(entityId, "2000"));
     if (!apControl) {
       throw new APServiceError(
         "AP_CONTROL_ACCOUNT_NOT_FOUND",
