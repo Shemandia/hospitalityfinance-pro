@@ -11,7 +11,6 @@ import type { PrismaClient } from "../../db/client.js";
 import { ZodError } from "zod";
 import { prisma } from "../../db/prisma.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
-import { requireRole } from "../../middleware/requireRole.js";
 import { requirePermission } from "../../middleware/requirePermission.js";
 import { lookupTableCreateSchema, lookupTableUpdateSchema } from "./lookup-types.js";
 import { LookupService, LookupServiceError } from "./lookup-service.js";
@@ -63,19 +62,24 @@ export async function registerLookupRouter(app: FastifyInstance): Promise<void> 
 
       // ── GET /transfer-desk/lookup-tables — list ─────────────────────────
 
-      router.get("/transfer-desk/lookup-tables", async (_request, reply) => {
-        try {
-          const data = await lookupService.list();
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/transfer-desk/lookup-tables",
+        { preHandler: [requirePermission("TRANSFER_DESK_READ")] },
+        async (_request, reply) => {
+          try {
+            const data = await lookupService.list();
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       // ── GET /transfer-desk/lookup-tables/:tableId — get with entries ────
 
       router.get<{ Params: { tableId: string } }>(
         "/transfer-desk/lookup-tables/:tableId",
+        { preHandler: [requirePermission("TRANSFER_DESK_READ")] },
         async (request, reply) => {
           try {
             const data = await lookupService.get(request.params.tableId);

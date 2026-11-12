@@ -51,26 +51,31 @@ export function registerBankRoutes(router: FastifyInstance) {
     }
   );
 
-  router.get("/bank/statements", async (request, reply) => {
-    try {
-      const entityId = requireEntityId(request.entityId);
-      const data = await (prisma as unknown as PrismaClient).bankStatement.findMany({
-        where: { entityId },
-        include: {
-          account: { select: { id: true, code: true, name: true } },
-          _count: { select: { transactions: true } }
-        },
-        orderBy: { createdAt: "desc" },
-        take: 50
-      });
-      return reply.send({ data, errors: [] });
-    } catch (error) {
-      return mapError(reply, error);
+  router.get(
+    "/bank/statements",
+    { preHandler: [requirePermission("INTEGRATION_READ")] },
+    async (request, reply) => {
+      try {
+        const entityId = requireEntityId(request.entityId);
+        const data = await (prisma as unknown as PrismaClient).bankStatement.findMany({
+          where: { entityId },
+          include: {
+            account: { select: { id: true, code: true, name: true } },
+            _count: { select: { transactions: true } }
+          },
+          orderBy: { createdAt: "desc" },
+          take: 50
+        });
+        return reply.send({ data, errors: [] });
+      } catch (error) {
+        return mapError(reply, error);
+      }
     }
-  });
+  );
 
   router.get<{ Params: { statementId: string } }>(
     "/bank/statements/:statementId/transactions",
+    { preHandler: [requirePermission("INTEGRATION_READ")] },
     async (request, reply) => {
       try {
         const entityId = requireEntityId(request.entityId);
@@ -92,6 +97,7 @@ export function registerBankRoutes(router: FastifyInstance) {
 
   router.get<{ Params: { statementId: string } }>(
     "/bank/statements/:statementId/reconciliation",
+    { preHandler: [requirePermission("INTEGRATION_READ")] },
     async (request, reply) => {
       try {
         const entityId = requireEntityId(request.entityId);
@@ -109,6 +115,7 @@ export function registerBankRoutes(router: FastifyInstance) {
 
   router.get<{ Params: { statementId: string } }>(
     "/bank/statements/:statementId/unreconciled",
+    { preHandler: [requirePermission("INTEGRATION_READ")] },
     async (request, reply) => {
       try {
         const entityId = requireEntityId(request.entityId);
@@ -126,6 +133,7 @@ export function registerBankRoutes(router: FastifyInstance) {
 
   router.get<{ Params: { transactionId: string } }>(
     "/bank/transactions/:transactionId/candidates",
+    { preHandler: [requirePermission("INTEGRATION_READ")] },
     async (request, reply) => {
       try {
         const entityId = requireEntityId(request.entityId);
@@ -205,20 +213,24 @@ export function registerBankRoutes(router: FastifyInstance) {
 
   // ── Connector Mappings ───────────────────────────────���──────────────────
 
-  router.get("/mappings", async (request, reply) => {
-    try {
-      const entityId = requireEntityId(request.entityId);
-      const { connectorType } = request.query as { connectorType?: string };
-      const data = await (prisma as unknown as PrismaClient).connectorMapping.findMany({
-        where: { entityId, ...(connectorType ? { connectorType } : {}) },
-        include: { glAccount: { select: { id: true, code: true, name: true } } },
-        orderBy: [{ connectorType: "asc" }, { sourceCode: "asc" }]
-      });
-      return reply.send({ data, errors: [] });
-    } catch (error) {
-      return mapError(reply, error);
+  router.get(
+    "/mappings",
+    { preHandler: [requirePermission("INTEGRATION_READ")] },
+    async (request, reply) => {
+      try {
+        const entityId = requireEntityId(request.entityId);
+        const { connectorType } = request.query as { connectorType?: string };
+        const data = await (prisma as unknown as PrismaClient).connectorMapping.findMany({
+          where: { entityId, ...(connectorType ? { connectorType } : {}) },
+          include: { glAccount: { select: { id: true, code: true, name: true } } },
+          orderBy: [{ connectorType: "asc" }, { sourceCode: "asc" }]
+        });
+        return reply.send({ data, errors: [] });
+      } catch (error) {
+        return mapError(reply, error);
+      }
     }
-  });
+  );
 
   router.post(
     "/mappings",

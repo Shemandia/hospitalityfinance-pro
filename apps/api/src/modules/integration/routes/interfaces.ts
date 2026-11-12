@@ -239,19 +239,23 @@ async function runPreviewEngine(
 // ── Routes ──────────────────────────────────────────────────────────────────
 
 export function registerInterfaceRoutes(router: FastifyInstance) {
-  router.get("/interfaces", async (request, reply) => {
-    try {
-      const entityId = requireEntityId(request.entityId);
-      const { connectorType } = request.query as { connectorType?: string };
-      const data = await (prisma as unknown as PrismaClient).interfaceDefinition.findMany({
-        where: { entityId, ...(connectorType ? { connectorType } : {}) },
-        orderBy: [{ connectorType: "asc" }, { name: "asc" }]
-      });
-      return reply.send({ data, errors: [] });
-    } catch (error) {
-      return mapError(reply, error);
+  router.get(
+    "/interfaces",
+    { preHandler: [requirePermission("INTEGRATION_READ")] },
+    async (request, reply) => {
+      try {
+        const entityId = requireEntityId(request.entityId);
+        const { connectorType } = request.query as { connectorType?: string };
+        const data = await (prisma as unknown as PrismaClient).interfaceDefinition.findMany({
+          where: { entityId, ...(connectorType ? { connectorType } : {}) },
+          orderBy: [{ connectorType: "asc" }, { name: "asc" }]
+        });
+        return reply.send({ data, errors: [] });
+      } catch (error) {
+        return mapError(reply, error);
+      }
     }
-  });
+  );
 
   router.post(
     "/interfaces",
@@ -283,22 +287,26 @@ export function registerInterfaceRoutes(router: FastifyInstance) {
     }
   );
 
-  router.get<{ Params: { id: string } }>("/interfaces/:id", async (request, reply) => {
-    try {
-      const entityId = requireEntityId(request.entityId);
-      const data = await (prisma as unknown as PrismaClient).interfaceDefinition.findFirst({
-        where: { entityId, id: request.params.id }
-      });
-      if (!data)
-        return reply.code(404).send({
-          data: null,
-          errors: [{ code: "NOT_FOUND", message: "Interface definition not found." }]
+  router.get<{ Params: { id: string } }>(
+    "/interfaces/:id",
+    { preHandler: [requirePermission("INTEGRATION_READ")] },
+    async (request, reply) => {
+      try {
+        const entityId = requireEntityId(request.entityId);
+        const data = await (prisma as unknown as PrismaClient).interfaceDefinition.findFirst({
+          where: { entityId, id: request.params.id }
         });
-      return reply.send({ data, errors: [] });
-    } catch (error) {
-      return mapError(reply, error);
+        if (!data)
+          return reply.code(404).send({
+            data: null,
+            errors: [{ code: "NOT_FOUND", message: "Interface definition not found." }]
+          });
+        return reply.send({ data, errors: [] });
+      } catch (error) {
+        return mapError(reply, error);
+      }
     }
-  });
+  );
 
   router.put<{ Params: { id: string } }>(
     "/interfaces/:id",

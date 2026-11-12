@@ -34,17 +34,21 @@ export function registerMewsRoutes(router: FastifyInstance) {
     }
   );
 
-  router.get("/mews/logs", async (request, reply) => {
-    try {
-      const entityId = requireEntityId(request.entityId);
-      const logs = await prisma.importLog.findMany({
-        where: { entityId, connectorType: "MEWS_PMS" },
-        orderBy: { createdAt: "desc" },
-        take: 200
-      });
-      return reply.send({ data: logs, errors: [] });
-    } catch (error) {
-      return mapError(reply, error);
+  router.get(
+    "/mews/logs",
+    { preHandler: [requirePermission("INTEGRATION_READ")] },
+    async (request, reply) => {
+      try {
+        const entityId = requireEntityId(request.entityId);
+        const logs = await prisma.importLog.findMany({
+          where: { entityId, connectorType: "MEWS_PMS" },
+          orderBy: { createdAt: "desc" },
+          take: 200
+        });
+        return reply.send({ data: logs, errors: [] });
+      } catch (error) {
+        return mapError(reply, error);
+      }
     }
-  });
+  );
 }

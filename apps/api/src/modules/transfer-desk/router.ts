@@ -3,7 +3,6 @@ import type { PrismaClient } from "../../db/client.js";
 import { ZodError } from "zod";
 import { prisma } from "../../db/prisma.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
-import { requireRole } from "../../middleware/requireRole.js";
 import { requirePermission } from "../../middleware/requirePermission.js";
 import {
   profileCreateSchema,
@@ -83,28 +82,33 @@ export async function registerTransferDeskProfileRouter(app: FastifyInstance): P
 
       // ── GET /transfer-desk/profiles — list (paginated, filterable) ──────
 
-      router.get("/transfer-desk/profiles", async (request, reply) => {
-        try {
-          const query = profileListQuerySchema.parse(request.query);
-          const result = await profileService.list(query);
-          return reply.send({
-            data: result.data,
-            meta: {
-              total: result.total,
-              limit: result.limit,
-              offset: result.offset
-            },
-            errors: []
-          });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/transfer-desk/profiles",
+        { preHandler: [requirePermission("TRANSFER_DESK_READ")] },
+        async (request, reply) => {
+          try {
+            const query = profileListQuerySchema.parse(request.query);
+            const result = await profileService.list(query);
+            return reply.send({
+              data: result.data,
+              meta: {
+                total: result.total,
+                limit: result.limit,
+                offset: result.offset
+              },
+              errors: []
+            });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       // ── GET /transfer-desk/profiles/:profileId — get detail ─────────────
 
       router.get<{ Params: { profileId: string } }>(
         "/transfer-desk/profiles/:profileId",
+        { preHandler: [requirePermission("TRANSFER_DESK_READ")] },
         async (request, reply) => {
           try {
             const data = await profileService.get(request.params.profileId);
@@ -173,6 +177,7 @@ export async function registerTransferDeskProfileRouter(app: FastifyInstance): P
 
       router.get<{ Params: { profileId: string } }>(
         "/transfer-desk/profiles/:profileId/versions",
+        { preHandler: [requirePermission("TRANSFER_DESK_READ")] },
         async (request, reply) => {
           try {
             const data = await profileService.listVersions(request.params.profileId);
@@ -187,6 +192,7 @@ export async function registerTransferDeskProfileRouter(app: FastifyInstance): P
 
       router.get<{ Params: { profileId: string; versionId: string } }>(
         "/transfer-desk/profiles/:profileId/versions/:versionId",
+        { preHandler: [requirePermission("TRANSFER_DESK_READ")] },
         async (request, reply) => {
           try {
             const data = await profileService.getVersion(
