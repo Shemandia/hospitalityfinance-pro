@@ -9,9 +9,27 @@
 
 import { PrismaClient, Prisma } from "../db/client.js";
 import { randomUUID } from "node:crypto";
-import { ensureSystemCatalog, grantRoleAtEntity } from "../modules/access/setup.js";
+import {
+  applyAccessMigration,
+  ensureSystemCatalog,
+  grantRoleAtEntity
+} from "../modules/access/setup.js";
+import { APService } from "../modules/ap/service.js";
+import { ARService } from "../modules/ar/service.js";
 
-const prisma = new PrismaClient();
+if (!process.env.DATABASE_URL) {
+  throw new Error("DATABASE_URL is required to seed.");
+}
+
+// The seed writes rows for several entities, so it runs with the row-level
+// security bypass set for its whole session. One connection only: a session
+// setting lives on the connection that set it.
+const seedUrl = new URL(process.env.DATABASE_URL);
+seedUrl.searchParams.set("connection_limit", "1");
+const prisma = new PrismaClient({ datasourceUrl: seedUrl.toString() });
+
+/** Tax code used on the seeded supplier invoices. */
+const UAT_TAX_CODE = "VAT5";
 
 // ── Fixed IDs (match dev-mode auth) ────────────────────────────────────────
 
@@ -22,6 +40,8 @@ const ADMIN_USER_ID = "a15c0667-e920-4e66-8b15-e1a561b965c4";
 
 async function main() {
   console.log("=== HospitalityFinance Pro — UAT Seed ===\n");
+  await prisma.$executeRaw`SELECT set_config('app.bypass_rls', 'true', false)`;
+  await applyAccessMigration(prisma);
 
   // ── 1. Entities ─────────────────────────────────────────────────────────
 
@@ -508,7 +528,33 @@ async function main() {
     }
   ] as const;
 
+  // What the payables and receivables services need from the chart until the
+  // unified ledger replaces them (WP-U): the two control accounts flagged, an
+  // input-tax account, and revenue account 4100, which the receivables service
+  // still names by code.
+  const CONTROL_ACCOUNT_CODES = new Set(["1100", "2001"]);
+  const serviceAccounts = [
+    { code: "1320", name: "Input VAT Recoverable", type: "ASSET", nb: "DEBIT" },
+    { code: "4100", name: "City Ledger Revenue", type: "REVENUE", nb: "CREDIT" }
+  ] as const;
+
   for (const entityId of [PROP_A_ID, PROP_B_ID]) {
+    for (const a of serviceAccounts) {
+      await prisma.account.upsert({
+        where: { entityId_code: { entityId, code: a.code } },
+        update: {},
+        create: {
+          entityId,
+          code: a.code,
+          name: a.name,
+          type: a.type,
+          normalBalance: a.nb,
+          allowPosting: true,
+          isActive: true,
+          level: 1
+        }
+      });
+    }
     for (const a of accounts) {
       const existing = await prisma.account.findFirst({
         where: { entityId, code: a.code }
@@ -523,10 +569,16 @@ async function main() {
             normalBalance: a.nb as any,
             usaliDepartment: a.dept,
             usaliCategory: a.cat,
+            isControlAccount: CONTROL_ACCOUNT_CODES.has(a.code),
             allowPosting: true,
             isActive: true,
             level: 1
           }
+        });
+      } else if (CONTROL_ACCOUNT_CODES.has(a.code) && !existing.isControlAccount) {
+        await prisma.account.update({
+          where: { id: existing.id },
+          data: { isControlAccount: true }
         });
       }
     }
@@ -769,10 +821,70 @@ async function main() {
 
   console.log("7. Seeding suppliers & AP invoices...");
   const suppliers = [
-    { code: "SUP-001", name: "Emirates Food Trading", currency: "AED", terms: 30 },
-    { code: "SUP-002", name: "Gulf Linen Services", currency: "AED", terms: 15 },
-    { code: "SUP-003", name: "Dubai Maintenance Co", currency: "AED", terms: 45 }
+    {
+      code: "SUP-001",
+      name: "Emirates Food Trading",
+      currency: "AED",
+      terms: 30,
+      net: "14250",
+      expenseAccount: "5101",
+      lineDescription: "Food supplies, March",
+      post: true
+    },
+    {
+      code: "SUP-002",
+      name: "Gulf Linen Services",
+      currency: "AED",
+      terms: 15,
+      net: "8075",
+      expenseAccount: "5020",
+      lineDescription: "Linen and laundry, March",
+      post: true
+    },
+    {
+      code: "SUP-003",
+      name: "Dubai Maintenance Co",
+      currency: "AED",
+      terms: 45,
+      net: "11400",
+      expenseAccount: "6210",
+      lineDescription: "Maintenance contract, March",
+      post: false
+    }
   ];
+
+  const apService = new APService(prisma);
+  const arService = new ARService(prisma);
+  // The services scope their own transactions to the entity; the fixture
+  // reads they make outside a transaction rely on the session bypass above.
+  const requireAccount = (code: string): string => {
+    const id = accountMap.get(code);
+    if (!id) throw new Error(`UAT seed: account ${code} is missing from the chart.`);
+    return id;
+  };
+
+  // 5% VAT: input tax to 1320, output tax to the chart's Sales Tax Payable.
+  const UAT_TAX_RATE = new Prisma.Decimal("0.05");
+  const taxCode = await prisma.taxCode.upsert({
+    where: { entityId_code: { entityId: PROP_A_ID, code: UAT_TAX_CODE } },
+    update: {},
+    create: {
+      entityId: PROP_A_ID,
+      code: UAT_TAX_CODE,
+      description: "VAT 5%",
+      taxType: "VAT",
+      inputTaxAccountId: requireAccount("1320"),
+      outputTaxAccountId: requireAccount("2100")
+    }
+  });
+  await prisma.taxRate.deleteMany({ where: { taxCodeId: taxCode.id } });
+  await prisma.taxRate.create({
+    data: {
+      taxCodeId: taxCode.id,
+      rate: UAT_TAX_RATE.mul(100),
+      effectiveFrom: new Date("2026-01-01")
+    }
+  });
 
   for (const s of suppliers) {
     const existing = await prisma.supplier.findFirst({
@@ -790,30 +902,38 @@ async function main() {
         }
       });
 
-      // Create sample invoice for each supplier
-      await prisma.aPInvoice.create({
-        data: {
-          entity: { connect: { id: PROP_A_ID } },
-          supplier: { connect: { id: supplier.id } },
-          period: { connect: { id: marchPeriodA } },
-          invoiceNumber: `INV-${s.code}-001`,
-          invoiceDate: new Date("2026-03-10"),
-          dueDate: new Date(new Date("2026-03-10").getTime() + s.terms * 86400000),
-          currency: s.currency,
-          grossAmount: new Prisma.Decimal(
-            s.terms === 30 ? "15000" : s.terms === 15 ? "8500" : "12000"
-          ),
-          taxAmount: new Prisma.Decimal(s.terms === 30 ? "750" : s.terms === 15 ? "425" : "600"),
-          netAmount: new Prisma.Decimal(
-            s.terms === 30 ? "14250" : s.terms === 15 ? "8075" : "11400"
-          ),
-          functionalAmount: new Prisma.Decimal(
-            s.terms === 30 ? "15000" : s.terms === 15 ? "8500" : "12000"
-          ),
-          fxRate: new Prisma.Decimal("1"),
-          status: "APPROVED"
-        }
+      // One invoice per supplier, created, approved and posted through the
+      // payables service so that it has a journal and balances behind it.
+      // The last supplier's invoice is left approved, awaiting posting.
+      const net = new Prisma.Decimal(s.net);
+      const tax = net.mul(UAT_TAX_RATE).toDecimalPlaces(2);
+      const gross = net.add(tax);
+      const invoiceDate = new Date("2026-03-10");
+      const invoice = await apService.createInvoice(PROP_A_ID, ADMIN_USER_ID, {
+        supplierId: supplier.id,
+        periodId: marchPeriodA,
+        invoiceNumber: `INV-${s.code}-001`,
+        invoiceDate,
+        dueDate: new Date(invoiceDate.getTime() + s.terms * 86400000),
+        currency: s.currency,
+        grossAmount: gross.toFixed(4),
+        taxAmount: tax.toFixed(4),
+        netAmount: net.toFixed(4),
+        functionalAmount: gross.toFixed(4),
+        fxRate: "1",
+        lines: [
+          {
+            description: s.lineDescription,
+            quantity: "1",
+            unitPrice: net.toFixed(4),
+            amount: net.toFixed(4),
+            glAccountId: requireAccount(s.expenseAccount),
+            taxCode: UAT_TAX_CODE
+          }
+        ]
       });
+      await apService.approveInvoice(PROP_A_ID, invoice.id, ADMIN_USER_ID);
+      if (s.post) await apService.postInvoice(PROP_A_ID, invoice.id, ADMIN_USER_ID);
     }
   }
 
@@ -842,22 +962,21 @@ async function main() {
         }
       });
 
+      // Created and posted through the receivables service, so the invoice
+      // has a journal: debit the receivables control account, credit revenue.
       const arAmount = c.type === "CORPORATE" ? "45000" : c.type === "OTA" ? "32000" : "18000";
-      await prisma.aRInvoice.create({
-        data: {
-          entityId: PROP_A_ID,
-          customerId: customer.id,
-          invoiceNumber: `AR-${c.code}-001`,
-          invoiceDate: new Date("2026-03-05"),
-          dueDate: new Date("2026-04-04"),
-          currency: "AED",
-          amount: new Prisma.Decimal(arAmount),
-          functionalAmount: new Prisma.Decimal(arAmount),
-          fxRate: new Prisma.Decimal("1"),
-          amountPaid: new Prisma.Decimal("0"),
-          status: "POSTED"
-        }
+      const invoice = await arService.createInvoice(PROP_A_ID, {
+        customerId: customer.id,
+        invoiceNumber: `AR-${c.code}-001`,
+        invoiceDate: new Date("2026-03-05"),
+        dueDate: new Date("2026-04-04"),
+        currency: "AED",
+        amount: arAmount,
+        functionalAmount: arAmount,
+        fxRate: "1",
+        origin: "MANUAL"
       });
+      await arService.postInvoice(PROP_A_ID, invoice.id, ADMIN_USER_ID);
     }
   }
 
