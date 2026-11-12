@@ -12,6 +12,12 @@ export type RequestContext = {
   tenantDbUrl: string | null;
   /** Depth counter for RLS context wrapping — >0 means inside a scope with RLS set */
   _rlsDepth: number;
+  /**
+   * True inside withBypassRLS. The RLS middleware and the entity-scope
+   * extension leave queries alone, so they stay on the bypass transaction and
+   * are not narrowed to the request's entity.
+   */
+  rlsBypass: boolean;
 };
 
 const storage = new AsyncLocalStorage<RequestContext>();
@@ -27,7 +33,8 @@ function defaultContext(): RequestContext {
     disableAudit: false,
     tenantSlug: null,
     tenantDbUrl: null,
-    _rlsDepth: 0
+    _rlsDepth: 0,
+    rlsBypass: false
   };
 }
 

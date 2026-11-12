@@ -14,6 +14,7 @@ import { redactSensitiveFields } from "../src/shared/log-redactor.js";
 
 const dbMocks = vi.hoisted(() => {
   const tx = {
+    $executeRaw: vi.fn(),
     $executeRawUnsafe: vi.fn(),
     entity: {
       findMany: vi.fn(),

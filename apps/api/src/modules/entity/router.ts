@@ -1,7 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Prisma } from "../../db/client.js";
 import { prisma } from "../../db/prisma.js";
-import { getRequestContext, runWithContext } from "../../db/requestContext.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
 import { loadRequestAccess, requirePermission } from "../../middleware/requirePermission.js";
 import { withBypassRLS } from "../../db/rls-bypass.js";
@@ -17,15 +16,9 @@ const MANAGE_ENTITIES = "ADMIN_ENTITIES";
 
 type EntityRef = { id: string; parentId: string | null };
 
-/**
- * Reads the entity table across the tenant, whatever entity the request has
- * selected. Clearing the entity for the duration keeps the RLS middleware from
- * moving the query to a second, entity-scoped transaction.
- */
-async function readAcrossEntities<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
-  return runWithContext({ ...getRequestContext(), entityId: null }, () =>
-    withBypassRLS(prisma, fn)
-  );
+/** Reads the entity table across the tenant, whatever entity the request has selected. */
+function readAcrossEntities<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  return withBypassRLS(prisma, fn);
 }
 
 /**

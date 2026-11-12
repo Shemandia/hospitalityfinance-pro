@@ -104,8 +104,8 @@ export function registerRLSMiddleware(
   client.$use(async (params, next) => {
     const context = getRequestContext();
 
-    // Already inside an RLS-wrapped scope — pass through
-    if (context._rlsDepth > 0) {
+    // Already inside an RLS-wrapped scope, or inside withBypassRLS — pass through
+    if (context._rlsDepth > 0 || context.rlsBypass) {
       return next(params);
     }
 

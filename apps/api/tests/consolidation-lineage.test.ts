@@ -54,6 +54,7 @@ function createMockPrisma() {
     $transaction: vi
       .fn()
       .mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => fn(mock)),
+    $executeRaw: vi.fn().mockResolvedValue(0),
     $executeRawUnsafe: vi.fn().mockResolvedValue(0),
     $queryRaw: vi.fn().mockResolvedValue([]),
     $queryRawUnsafe: vi.fn().mockImplementation(async (_sql: string, id: string) => {
