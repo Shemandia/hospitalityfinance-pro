@@ -10,7 +10,7 @@ import {
   openableEntityIds,
   type ResolvedAccess
 } from "../access/resolver.js";
-import { getAccessService } from "../access/runtime.js";
+import { changeAccess } from "../access/invalidation.js";
 
 const MANAGE_ENTITIES = "ADMIN_ENTITIES";
 
@@ -50,10 +50,14 @@ function notFound(reply: FastifyReply) {
     .send({ data: null, errors: [{ code: "NOT_FOUND", message: "Entity not found." }] });
 }
 
-/** The entity tree changed, which can change any user's access. */
-async function invalidateAccess(request: FastifyRequest): Promise<void> {
+/**
+ * Runs a change to the entity tree, which can change any user's access, with
+ * the tenant's access cache invalidated around it.
+ */
+function changeEntityTree<T>(request: FastifyRequest, write: () => Promise<T>): Promise<T> {
   const tenantId = request.user?.tenantId;
-  if (tenantId) await getAccessService().invalidateTenant(tenantId);
+  if (!tenantId) throw new Error("Entity route reached without a tenant.");
+  return changeAccess(tenantId, "tenant", write);
 }
 
 export async function registerEntityRouter(app: FastifyInstance): Promise<void> {
@@ -189,22 +193,24 @@ export async function registerEntityRouter(app: FastifyInstance): Promise<void> 
         }
       }
 
-      const entity = await (prisma.entity as any).create({
-        data: {
-          name: b.name,
-          code: b.code ?? null,
-          type: b.type,
-          parentId: b.parentId ?? null,
-          functionalCurrency: b.functionalCurrency ?? "USD",
-          reportingCurrency: b.reportingCurrency ?? "USD",
-          timezone: b.timezone ?? "UTC",
-          countryCode: b.countryCode,
-          address: b.address,
-          city: b.city,
-          postalCode: b.postalCode,
-          maxProperties: b.type === "GROUP" ? (b.maxProperties ?? 0) : 0
-        }
-      });
+      const entity = await changeEntityTree(request, () =>
+        prisma.entity.create({
+          data: {
+            name: b.name,
+            code: b.code ?? null,
+            type: b.type,
+            parentId: b.parentId ?? null,
+            functionalCurrency: b.functionalCurrency ?? "USD",
+            reportingCurrency: b.reportingCurrency ?? "USD",
+            timezone: b.timezone ?? "UTC",
+            countryCode: b.countryCode,
+            address: b.address,
+            city: b.city,
+            postalCode: b.postalCode,
+            maxProperties: b.type === "GROUP" ? (b.maxProperties ?? 0) : 0
+          }
+        })
+      );
 
       const userId =
         typeof (request.user as any)?.sub === "string"
@@ -235,7 +241,6 @@ export async function registerEntityRouter(app: FastifyInstance): Promise<void> 
           );
         }
       }
-      await invalidateAccess(request);
       reply.code(201);
       return { data: entity, errors: [] };
     }
@@ -291,25 +296,26 @@ export async function registerEntityRouter(app: FastifyInstance): Promise<void> 
         }
       }
 
-      const entity = await (prisma.entity as any).update({
-        where: { id: request.params.id },
-        data: {
-          ...(b.name !== undefined && { name: b.name }),
-          ...(b.code !== undefined && { code: b.code }),
-          ...(b.parentId !== undefined && { parentId: b.parentId }),
-          ...(b.functionalCurrency !== undefined && { functionalCurrency: b.functionalCurrency }),
-          ...(b.reportingCurrency !== undefined && { reportingCurrency: b.reportingCurrency }),
-          ...(b.timezone !== undefined && { timezone: b.timezone }),
-          ...(b.countryCode !== undefined && { countryCode: b.countryCode }),
-          ...(b.address !== undefined && { address: b.address }),
-          ...(b.city !== undefined && { city: b.city }),
-          ...(b.postalCode !== undefined && { postalCode: b.postalCode }),
-          ...(b.isActive !== undefined && { isActive: b.isActive }),
-          ...(b.maxProperties !== undefined &&
-            existing.type === "GROUP" && { maxProperties: b.maxProperties })
-        }
-      });
-      await invalidateAccess(request);
+      const entity = await changeEntityTree(request, () =>
+        prisma.entity.update({
+          where: { id: request.params.id },
+          data: {
+            ...(b.name !== undefined && { name: b.name }),
+            ...(b.code !== undefined && { code: b.code }),
+            ...(b.parentId !== undefined && { parentId: b.parentId }),
+            ...(b.functionalCurrency !== undefined && { functionalCurrency: b.functionalCurrency }),
+            ...(b.reportingCurrency !== undefined && { reportingCurrency: b.reportingCurrency }),
+            ...(b.timezone !== undefined && { timezone: b.timezone }),
+            ...(b.countryCode !== undefined && { countryCode: b.countryCode }),
+            ...(b.address !== undefined && { address: b.address }),
+            ...(b.city !== undefined && { city: b.city }),
+            ...(b.postalCode !== undefined && { postalCode: b.postalCode }),
+            ...(b.isActive !== undefined && { isActive: b.isActive }),
+            ...(b.maxProperties !== undefined &&
+              existing.type === "GROUP" && { maxProperties: b.maxProperties })
+          }
+        })
+      );
       return { data: entity, errors: [] };
     }
   );
@@ -353,9 +359,11 @@ export async function registerEntityRouter(app: FastifyInstance): Promise<void> 
           ]
         };
       }
-      await prisma.entityUser.deleteMany({ where: { entityId: request.params.id } });
-      await prisma.entity.delete({ where: { id: request.params.id } });
-      await invalidateAccess(request);
+      // Grants at the entity go with it (ON DELETE CASCADE).
+      await changeEntityTree(request, async () => {
+        await prisma.entityUser.deleteMany({ where: { entityId: request.params.id } });
+        await prisma.entity.delete({ where: { id: request.params.id } });
+      });
       reply.code(204);
       return;
     }

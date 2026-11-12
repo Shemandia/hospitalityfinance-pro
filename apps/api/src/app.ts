@@ -36,6 +36,7 @@ import { registerScheduleRouter } from "./modules/transfer-desk/schedule-router.
 import { registerIntercompanyRouter } from "./modules/intercompany/router.js";
 import authPlugin from "./plugins/auth.js";
 import { registerRouteAccessRegistry, type RouteAccess } from "./modules/access/route-access.js";
+import { AccessInfrastructureError } from "./modules/access/service.js";
 import { registerAuthRouter } from "./modules/auth/router.js";
 import { connectRedis } from "./db/redis.js";
 import { registerEntityRouter } from "./modules/entity/router.js";
@@ -54,6 +55,24 @@ export async function createApp(): Promise<FastifyInstance> {
       serializers: logSerializers
     },
     bodyLimit: 10 * 1024 * 1024 // 10 MB for file imports
+  });
+
+  // A database or cache fault while access is being checked or changed is an
+  // outage, not a denial and not a sign-out (AUT-10).
+  app.setErrorHandler((error, request, reply) => {
+    if (error instanceof AccessInfrastructureError) {
+      request.log.error({ err: error, dependency: error.dependency }, "Access service unavailable");
+      return reply.code(503).send({
+        data: null,
+        errors: [
+          {
+            code: "SERVICE_UNAVAILABLE",
+            message: "Access could not be checked or changed. Try again in a moment."
+          }
+        ]
+      });
+    }
+    return reply.send(error);
   });
 
   // Before any route: a route without an access classification fails startup.
