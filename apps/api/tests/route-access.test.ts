@@ -11,6 +11,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { RouteAccess } from "../src/modules/access/route-access.js";
+import { SYSTEM_PERMISSIONS, SYSTEM_ROLES } from "../src/modules/access/system-catalog.js";
 
 vi.hoisted(() => {
   process.env.JWT_SECRET ??= "route-access-test-secret-route-access-test-secret";
@@ -173,5 +174,98 @@ describe("route access table", () => {
     expectAccess("POST /api/v1/admin/roles/:id/permissions", "tenant", ["ADMIN_ROLES_MANAGE"]);
     expectAccess("PUT /api/v1/setup/steps/:step", "tenant", ["ADMIN_SETTINGS"]);
     expectAccess("POST /api/v1/entities", "any-entity", ["ADMIN_ENTITIES"]);
+  });
+
+  describe("the starting roles", () => {
+    // What a role cannot do, counting only what its permissions allow — where
+    // the role is assigned (one property, a group, the tenant) is a separate matter.
+    const deniedTo = (roleCode: string, onlyReads: boolean) => {
+      const role = SYSTEM_ROLES.find((candidate) => candidate.code === roleCode);
+      if (!role) throw new Error(`No starting role ${roleCode}`);
+      return table
+        .filter(
+          ([key, access]) =>
+            "anyOf" in access &&
+            (!onlyReads || key.startsWith("GET ")) &&
+            !access.anyOf.some((code) => role.permissions.includes(code))
+        )
+        .map(([key]) => key);
+    };
+
+    it("routes name only permission codes that exist in the catalogue", () => {
+      const catalogue = new Set(SYSTEM_PERMISSIONS.map((permission) => permission.code));
+      const unknown = table.flatMap(([key, access]) =>
+        "anyOf" in access
+          ? access.anyOf.filter((code) => !catalogue.has(code)).map((code) => `${key}: ${code}`)
+          : []
+      );
+      expect(unknown).toEqual([]);
+    });
+
+    // Every read route outside these lists is open to the role. None of the
+    // routes listed was open to the role before the read guards were added:
+    // each already required a permission the role does not hold.
+    const ADMIN_READS = [
+      "GET /api/v1/account-types/all",
+      "GET /api/v1/admin/all-users",
+      "GET /api/v1/admin/entity-tree",
+      "GET /api/v1/admin/login-audit",
+      "GET /api/v1/admin/permissions",
+      "GET /api/v1/admin/roles",
+      "GET /api/v1/admin/roles/:id"
+    ];
+    const PAYMENT_FILES = [
+      "GET /api/v1/ap/payment-runs/:id/download",
+      "GET /api/v1/ap/payment-runs/:runId/voucher/:supplierId"
+    ];
+    const INTERCOMPANY_READS = [
+      "GET /api/v1/intercompany/account-pairs",
+      "GET /api/v1/intercompany/journals",
+      "GET /api/v1/intercompany/v2/pairs",
+      "GET /api/v1/intercompany/v2/pairs/:id",
+      "GET /api/v1/intercompany/v2/pairs/:pairId/mappings",
+      "GET /api/v1/intercompany/v2/reconciliation",
+      "GET /api/v1/intercompany/v2/transactions",
+      "GET /api/v1/intercompany/v2/transactions/:id"
+    ];
+    const EXPORTS = [
+      "GET /api/v1/kpi/balance-sheet/pdf",
+      "GET /api/v1/kpi/cash-flow/pdf",
+      "GET /api/v1/kpi/usali-comparative/pdf",
+      "GET /api/v1/reports/runs/:id/download"
+    ];
+
+    it("VIEWER reads everything except administration, payment files, intercompany, exports and import batches", () => {
+      expect(deniedTo("VIEWER", true)).toEqual(
+        [
+          ...ADMIN_READS,
+          ...PAYMENT_FILES,
+          ...INTERCOMPANY_READS,
+          ...EXPORTS,
+          "GET /api/v1/process-locks/status",
+          "GET /api/v1/transfer-desk/batches",
+          "GET /api/v1/transfer-desk/batches/:id"
+        ].sort()
+      );
+    });
+
+    it("CONTROLLER reads everything except administration, payment files and intercompany", () => {
+      expect(deniedTo("CONTROLLER", true)).toEqual(
+        [
+          ...ADMIN_READS,
+          ...PAYMENT_FILES,
+          ...INTERCOMPANY_READS,
+          "GET /api/v1/process-locks/status"
+        ].sort()
+      );
+    });
+
+    it("ADMIN can do everything except reopen a locked period", () => {
+      expect(deniedTo("ADMIN", false)).toEqual(["POST /api/v1/periods/:id/reopen"]);
+    });
+
+    it("TENANT_ADMIN can do everything", () => {
+      expect(deniedTo("TENANT_ADMIN", false)).toEqual([]);
+    });
   });
 });
