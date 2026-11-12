@@ -27,12 +27,13 @@
 
 ### Redis (BullMQ queues)
 
-| Variable         | Description                       | Example                  |
-| ---------------- | --------------------------------- | ------------------------ |
-| `REDIS_URL`      | Full Redis URL (preferred)        | `redis://localhost:6379` |
-| `REDIS_HOST`     | Redis hostname (if not using URL) | `127.0.0.1`              |
-| `REDIS_PORT`     | Redis port                        | `6379`                   |
-| `REDIS_PASSWORD` | Redis password                    | `secret`                 |
+| Variable                   | Description                                                                  | Example                  |
+| -------------------------- | ---------------------------------------------------------------------------- | ------------------------ |
+| `REDIS_URL`                | Full Redis URL (preferred)                                                   | `redis://localhost:6379` |
+| `ACCESS_CACHE_TTL_SECONDS` | Lifetime of a cached access result (backstop; changes invalidate explicitly) | `300`                    |
+| `REDIS_HOST`               | Redis hostname (if not using URL)                                            | `127.0.0.1`              |
+| `REDIS_PORT`               | Redis port                                                                   | `6379`                   |
+| `REDIS_PASSWORD`           | Redis password                                                               | `secret`                 |
 
 ### Oracle OHIP (Opera Cloud / Simphony POS)
 
