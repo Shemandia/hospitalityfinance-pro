@@ -4,13 +4,32 @@ import { PrismaClient as RegistryPrismaClient } from "./registry-client.js";
 import { USALI_ACCOUNTS, SYSTEM_ACCOUNT_TYPES } from "../modules/setup/usali-template.js";
 import { seedTransferDeskSystemData } from "./seed-transfer-desk.js";
 import { SYSTEM_PERMISSIONS, SYSTEM_ROLES } from "../modules/access/system-catalog.js";
+import {
+  applyAccessMigration,
+  ensureSystemCatalog,
+  grantRoleAtEntity,
+  grantTenantAdministrator
+} from "../modules/access/setup.js";
 
-const prisma = new PrismaClient();
+if (!process.env.DATABASE_URL) {
+  throw new Error("DATABASE_URL is required to seed.");
+}
+
+// The seed writes rows for several entities and rows that belong to none, so
+// it runs with the row-level security bypass set for its whole session. One
+// connection only: a session setting lives on the connection that set it.
+const seedUrl = new URL(process.env.DATABASE_URL);
+seedUrl.searchParams.set("connection_limit", "1");
+const prisma = new PrismaClient({ datasourceUrl: seedUrl.toString() });
 const registryPrisma = new RegistryPrismaClient({
   datasourceUrl: process.env.REGISTRY_DATABASE_URL ?? process.env.DATABASE_URL
 });
 
 async function main(): Promise<void> {
+  await prisma.$executeRaw`SELECT set_config('app.bypass_rls', 'true', false)`;
+  // Idempotent; also makes the seed usable on a database built with `db push`.
+  await applyAccessMigration(prisma);
+
   // ── System Account Type Definitions ──────────────────────────────────────
   const typeDefMap = new Map<string, string>();
   for (const atd of SYSTEM_ACCOUNT_TYPES) {
@@ -140,29 +159,18 @@ async function main(): Promise<void> {
     }
   });
 
-  await prisma.entityUser.upsert({
-    where: { entityId_userId: { entityId: group.id, userId: admin.id } },
-    update: { role: "SUPERADMIN" },
-    create: { entityId: group.id, userId: admin.id, role: "SUPERADMIN" }
-  });
-
-  await prisma.entityUser.upsert({
-    where: {
-      entityId_userId: { entityId: propertyA.id, userId: controller.id }
-    },
-    update: { role: "CONTROLLER" },
-    create: {
-      entityId: propertyA.id,
-      userId: controller.id,
-      role: "CONTROLLER"
-    }
-  });
-
-  await prisma.entityUser.upsert({
-    where: { entityId_userId: { entityId: propertyB.id, userId: viewer.id } },
-    update: { role: "VIEWER" },
-    create: { entityId: propertyB.id, userId: viewer.id, role: "VIEWER" }
-  });
+  // Memberships only; the role grants follow once the roles are seeded.
+  for (const [entityId, userId] of [
+    [group.id, admin.id],
+    [propertyA.id, controller.id],
+    [propertyB.id, viewer.id]
+  ] as const) {
+    await prisma.entityUser.upsert({
+      where: { entityId_userId: { entityId, userId } },
+      update: {},
+      create: { entityId, userId }
+    });
+  }
 
   for (const entityId of [propertyA.id, propertyB.id]) {
     await prisma.supplier.upsert({
@@ -489,41 +497,16 @@ async function main(): Promise<void> {
   }
   // ── Seed System Roles & Permissions ──────────────────────────────────────
 
-  const permissionMap = new Map<string, string>();
-  for (const perm of SYSTEM_PERMISSIONS) {
-    const p = await prisma.permission.upsert({
-      where: { code: perm.code },
-      update: { description: perm.description, category: perm.category },
-      create: perm
-    });
-    permissionMap.set(p.code, p.id);
-  }
-
-  for (const roleDef of SYSTEM_ROLES) {
-    const role = await prisma.role.upsert({
-      where: { code: roleDef.code },
-      update: { name: roleDef.name, description: roleDef.description, isSystem: roleDef.isSystem },
-      create: {
-        code: roleDef.code,
-        name: roleDef.name,
-        description: roleDef.description,
-        isSystem: roleDef.isSystem
-      }
-    });
-
-    // Bind permissions
-    for (const permCode of roleDef.permissions) {
-      const permId = permissionMap.get(permCode);
-      if (!permId) continue;
-      await prisma.rolePermission.upsert({
-        where: { roleId_permissionId: { roleId: role.id, permissionId: permId } },
-        update: {},
-        create: { roleId: role.id, permissionId: permId }
-      });
-    }
-  }
-
+  await ensureSystemCatalog(prisma);
   console.log(`Seeded ${SYSTEM_PERMISSIONS.length} permissions, ${SYSTEM_ROLES.length} roles.`);
+
+  // ── Who holds which role where ───────────────────────────────────────────
+  // After the roles exist. The administrator is tenant-wide; the controller
+  // and the viewer each hold their role on one property.
+  await grantTenantAdministrator(prisma, admin.id);
+  await grantRoleAtEntity(prisma, controller.id, "CONTROLLER", propertyA.id);
+  await grantRoleAtEntity(prisma, viewer.id, "VIEWER", propertyB.id);
+  console.log("Seeded role grants for the demo users.");
 
   // ── Transfer Desk System Profiles ──────────────────────────────────────────
   await seedTransferDeskSystemData(prisma);
