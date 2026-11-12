@@ -101,8 +101,7 @@ export async function registerPeriodRouter(app: FastifyInstance): Promise<void> 
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
-            const userRoles = request.user?.roles ?? [];
-            const data = await periodService.reopenPeriod(entityId, request.params.id, userRoles);
+            const data = await periodService.reopenPeriod(entityId, request.params.id);
             return reply.send({ data, errors: [] });
           } catch (error) {
             return mapError(reply, error);

@@ -2,7 +2,6 @@ import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "../../db/client.js";
 import { prisma } from "../../db/prisma.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
-import { requireRole } from "../../middleware/requireRole.js";
 import { requirePermission } from "../../middleware/requirePermission.js";
 import { requireWriteAccess } from "../../middleware/requireWriteAccess.js";
 import {

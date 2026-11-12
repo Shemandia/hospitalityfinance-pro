@@ -376,21 +376,12 @@ export class PeriodService {
   }
 
   /**
-   * Reopen a locked period: LOCKED → OPEN (SUPERADMIN only).
+   * Reopen a locked period: LOCKED → OPEN. The route requires PERIOD_REOPEN.
    *
    * Acquires PERIOD_REOPEN process lock, resets PeriodCloseStatus run flags,
    * and updates LedgerSetup.currentPeriodId.
    */
-  async reopenPeriod(entityId: string, periodId: string, userRoles: string[]) {
-    const isSuperAdmin = userRoles.includes("SUPERADMIN");
-    if (!isSuperAdmin) {
-      throw new PeriodServiceError(
-        "PERIOD_REOPEN_FORBIDDEN",
-        "Only SUPERADMIN can reopen locked periods.",
-        403
-      );
-    }
-
+  async reopenPeriod(entityId: string, periodId: string) {
     try {
       await this.lockService.acquireLock({
         entityId,

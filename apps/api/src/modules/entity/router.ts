@@ -1,173 +1,133 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { Prisma } from "../../db/client.js";
 import { prisma } from "../../db/prisma.js";
+import { getRequestContext, runWithContext } from "../../db/requestContext.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
-import { requirePermission } from "../../middleware/requirePermission.js";
-import { requireRole } from "../../middleware/requireRole.js";
+import { loadRequestAccess, requirePermission } from "../../middleware/requirePermission.js";
 import { withBypassRLS } from "../../db/rls-bypass.js";
+import {
+  hasEntityPermission,
+  hasTenantPermission,
+  openableEntityIds,
+  type ResolvedAccess
+} from "../access/resolver.js";
+import { getAccessService } from "../access/runtime.js";
 
-type EntityActorContext = {
-  roles: string[];
-  entityIds: string[];
-};
+const MANAGE_ENTITIES = "ADMIN_ENTITIES";
 
-const CROSS_ENTITY_ADMIN_ROLES = new Set(["SUPERADMIN", "PLATFORM_ADMIN"]);
+type EntityRef = { id: string; parentId: string | null };
 
-function getActorContext(request: FastifyRequest): EntityActorContext {
-  const user = request.user as any;
-  return {
-    roles: Array.isArray(user?.roles) ? user.roles : [],
-    entityIds: Array.isArray(user?.entityIds) ? user.entityIds : []
-  };
+/**
+ * Reads the entity table across the tenant, whatever entity the request has
+ * selected. Clearing the entity for the duration keeps the RLS middleware from
+ * moving the query to a second, entity-scoped transaction.
+ */
+async function readAcrossEntities<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  return runWithContext({ ...getRequestContext(), entityId: null }, () =>
+    withBypassRLS(prisma, fn)
+  );
 }
 
-function hasCrossEntityAccess(actor: EntityActorContext): boolean {
-  return actor.roles.some((role) => CROSS_ENTITY_ADMIN_ROLES.has(role.toUpperCase()));
+/**
+ * True when the caller may manage this entity: ADMIN_ENTITIES tenant-wide, at
+ * the entity, or at its parent. The parent clause only matters for an inactive
+ * entity, which nobody can open but its administrators must be able to restore.
+ */
+export function canManageEntity(access: ResolvedAccess, entity: EntityRef): boolean {
+  return (
+    hasTenantPermission(access, MANAGE_ENTITIES) ||
+    hasEntityPermission(access, entity.id, MANAGE_ENTITIES) ||
+    (entity.parentId !== null && hasEntityPermission(access, entity.parentId, MANAGE_ENTITIES))
+  );
 }
 
-export function isEntityManageableByActor(
-  lineage: Array<{ id: string; parentId: string | null }>,
-  actor: EntityActorContext
-): boolean {
-  if (hasCrossEntityAccess(actor)) return true;
-  if (actor.entityIds.length === 0) return false;
-  const granted = new Set(actor.entityIds);
-  return lineage.some((entity) => granted.has(entity.id));
+/** A new or moved entity needs ADMIN_ENTITIES at the parent; a root needs it tenant-wide. */
+export function canPlaceEntityUnder(access: ResolvedAccess, parentId: string | null): boolean {
+  if (hasTenantPermission(access, MANAGE_ENTITIES)) return true;
+  return parentId !== null && hasEntityPermission(access, parentId, MANAGE_ENTITIES);
 }
 
-async function getEntityLineage(
-  entityId: string
-): Promise<Array<{ id: string; parentId: string | null }>> {
-  return withBypassRLS(prisma, async (tx: any) => {
-    const lineage: Array<{ id: string; parentId: string | null }> = [];
-    const visited = new Set<string>();
-    let currentId: string | null = entityId;
-
-    while (currentId && !visited.has(currentId)) {
-      visited.add(currentId);
-      const entity: { id: string; parentId: string | null } | null = await tx.entity.findUnique({
-        where: { id: currentId },
-        select: { id: true, parentId: true }
-      });
-      if (!entity) break;
-      lineage.push(entity);
-      currentId = entity.parentId;
-    }
-
-    return lineage;
-  });
+function forbidden(reply: FastifyReply, message: string) {
+  return reply.code(403).send({ data: null, errors: [{ code: "FORBIDDEN", message }] });
 }
 
-async function assertCanManageEntity(
-  actor: EntityActorContext,
-  entityId: string
-): Promise<{ allowed: true } | { allowed: false; error: "ENTITY_NOT_FOUND" | "FORBIDDEN" }> {
-  const lineage = await getEntityLineage(entityId);
-  if (lineage.length === 0) return { allowed: false, error: "ENTITY_NOT_FOUND" };
-  return isEntityManageableByActor(lineage, actor)
-    ? { allowed: true }
-    : { allowed: false, error: "FORBIDDEN" };
+function notFound(reply: FastifyReply) {
+  return reply
+    .code(404)
+    .send({ data: null, errors: [{ code: "NOT_FOUND", message: "Entity not found." }] });
 }
 
-function mapEntityScopeError(
-  reply: FastifyReply,
-  result: { allowed: false; error: "ENTITY_NOT_FOUND" | "FORBIDDEN" }
-) {
-  if (result.error === "ENTITY_NOT_FOUND") {
-    return reply
-      .code(404)
-      .send({ data: null, errors: [{ code: result.error, message: "Entity not found." }] });
-  }
-  return reply.code(403).send({
-    data: null,
-    errors: [{ code: result.error, message: "You do not have access to this entity tree." }]
-  });
+/** The entity tree changed, which can change any user's access. */
+async function invalidateAccess(request: FastifyRequest): Promise<void> {
+  const tenantId = request.user?.tenantId;
+  if (tenantId) await getAccessService().invalidateTenant(tenantId);
 }
 
 export async function registerEntityRouter(app: FastifyInstance): Promise<void> {
   // ── List entities ──────────────────────────────────────────────────────────
 
-  app.get("/api/v1/entities", { preHandler: [requireAuth] }, async (request) => {
-    const userEntityIds = (request.user as any)?.entityIds as string[] | undefined;
-    const isSuperAdmin = !userEntityIds || userEntityIds.length === 0;
-    const where = isSuperAdmin ? {} : { id: { in: userEntityIds } };
+  app.get(
+    "/api/v1/entities",
+    { preHandler: [requireAuth], config: { access: "session" } },
+    async (request, reply) => {
+      const access = await loadRequestAccess(request, reply);
+      if (!access) return reply;
 
-    const fetchEntities = async (db: any) => {
-      const entities = await db.entity.findMany({
-        where,
-        include: {
-          parent: { select: { id: true, name: true } },
-          _count: { select: { children: true, users: true } }
-        },
-        orderBy: { name: "asc" }
-      });
+      // Entity administrators also see inactive entities, so they can restore them.
+      const where = hasTenantPermission(access, MANAGE_ENTITIES)
+        ? {}
+        : { id: { in: openableEntityIds(access) } };
 
-      const grantedIds = new Set(entities.map((e: any) => e.id));
-      const childEntities = !isSuperAdmin
-        ? await db.entity.findMany({
-            where: { parentId: { in: userEntityIds! }, id: { notIn: [...grantedIds] } },
-            include: {
-              parent: { select: { id: true, name: true } },
-              _count: { select: { children: true, users: true } }
-            },
-            orderBy: { name: "asc" }
-          })
-        : [];
-
-      return [...entities, ...childEntities];
-    };
-
-    const allEntities = isSuperAdmin
-      ? await withBypassRLS(prisma, fetchEntities)
-      : await fetchEntities(prisma);
-
-    return { data: allEntities, errors: [] };
-  });
+      const data = await readAcrossEntities((tx) =>
+        tx.entity.findMany({
+          where,
+          include: {
+            parent: { select: { id: true, name: true } },
+            _count: { select: { children: true, users: true } }
+          },
+          orderBy: { name: "asc" }
+        })
+      );
+      return { data, errors: [] };
+    }
+  );
 
   // ── Get entity by ID ───────────────────────────────────────────────────────
 
   app.get<{ Params: { id: string } }>(
     "/api/v1/entities/:id",
-    { preHandler: [requireAuth] },
+    { preHandler: [requireAuth], config: { access: "session" } },
     async (request, reply) => {
-      const userEntityIds = (request.user as any)?.entityIds as string[] | undefined;
+      const access = await loadRequestAccess(request, reply);
+      if (!access) return reply;
       const requestedId = request.params.id;
 
-      if (userEntityIds && userEntityIds.length > 0) {
-        const entity = await prisma.entity.findFirst({
+      const entity = await readAcrossEntities((tx) =>
+        tx.entity.findFirst({
           where: { id: requestedId },
-          select: { id: true, parentId: true }
-        });
-        if (!entity)
-          return reply
-            .code(404)
-            .send({ data: null, errors: [{ code: "NOT_FOUND", message: "Entity not found." }] });
+          include: {
+            parent: { select: { id: true, name: true } },
+            children: {
+              select: { id: true, name: true, type: true, isActive: true, functionalCurrency: true }
+            },
+            _count: { select: { children: true, users: true, accounts: true, journals: true } }
+          }
+        })
+      );
+      const canSee =
+        openableEntityIds(access).includes(requestedId) ||
+        (entity !== null && canManageEntity(access, entity));
+      // Checked before the 404 so the response does not reveal which ids exist.
+      if (!canSee) return forbidden(reply, "You do not have access to this entity.");
+      if (!entity) return notFound(reply);
 
-        const hasAccess =
-          userEntityIds.includes(entity.id) ||
-          (entity.parentId && userEntityIds.includes(entity.parentId));
-        if (!hasAccess) {
-          return reply.code(403).send({
-            data: null,
-            errors: [{ code: "FORBIDDEN", message: "You do not have access to this entity." }]
-          });
-        }
-      }
-
-      const entity = await prisma.entity.findFirst({
-        where: { id: requestedId },
-        include: {
-          parent: { select: { id: true, name: true } },
-          children: {
-            select: { id: true, name: true, type: true, isActive: true, functionalCurrency: true }
-          },
-          _count: { select: { children: true, users: true, accounts: true, journals: true } }
-        }
-      });
-      if (!entity)
-        return reply
-          .code(404)
-          .send({ data: null, errors: [{ code: "NOT_FOUND", message: "Entity not found." }] });
-      return { data: entity, errors: [] };
+      // Children the caller cannot open are left out.
+      const visibleChildren = hasTenantPermission(access, MANAGE_ENTITIES)
+        ? entity.children
+        : entity.children.filter((child: { id: string }) =>
+            openableEntityIds(access).includes(child.id)
+          );
+      return { data: { ...entity, children: visibleChildren }, errors: [] };
     }
   );
 
@@ -191,26 +151,24 @@ export async function registerEntityRouter(app: FastifyInstance): Promise<void> 
   }>(
     "/api/v1/entities",
     {
-      preHandler: [
-        requireAuth,
-        requireRole(["ADMIN", "SUPERADMIN", "PLATFORM_ADMIN"]),
-        requirePermission("ADMIN_ENTITIES")
-      ]
+      // The entity acted on is in the body or the path, not the header, so
+      // the handler checks ADMIN_ENTITIES at that entity.
+      preHandler: [requireAuth, requirePermission(MANAGE_ENTITIES, { scope: "any-entity" })]
     },
     async (request, reply) => {
       const b = request.body;
-      const actor = getActorContext(request);
+      const access = await loadRequestAccess(request, reply);
+      if (!access) return reply;
 
-      if (!hasCrossEntityAccess(actor) && !b.parentId) {
-        return reply.code(403).send({
-          data: null,
-          errors: [{ code: "FORBIDDEN", message: "You do not have access to this entity tree." }]
-        });
+      if (!canPlaceEntityUnder(access, b.parentId ?? null)) {
+        return forbidden(reply, "You do not have access to this entity tree.");
       }
-
       if (b.parentId) {
-        const parentAccess = await assertCanManageEntity(actor, b.parentId);
-        if (!parentAccess.allowed) return mapEntityScopeError(reply, parentAccess);
+        const parentId = b.parentId;
+        const parent = await readAcrossEntities((tx) =>
+          tx.entity.findFirst({ where: { id: parentId }, select: { id: true } })
+        );
+        if (!parent) return notFound(reply);
       }
 
       if (b.type === "PROPERTY" && b.parentId) {
@@ -268,7 +226,7 @@ export async function registerEntityRouter(app: FastifyInstance): Promise<void> 
           if (userRow) {
             await prisma.entityUser.upsert({
               where: { entityId_userId: { entityId: entity.id, userId: userRow.id } },
-              create: { entityId: entity.id, userId: userRow.id, role: "ADMIN" },
+              create: { entityId: entity.id, userId: userRow.id },
               update: {}
             });
           } else {
@@ -284,6 +242,7 @@ export async function registerEntityRouter(app: FastifyInstance): Promise<void> 
           );
         }
       }
+      await invalidateAccess(request);
       reply.code(201);
       return { data: entity, errors: [] };
     }
@@ -310,36 +269,32 @@ export async function registerEntityRouter(app: FastifyInstance): Promise<void> 
   }>(
     "/api/v1/entities/:id",
     {
-      preHandler: [
-        requireAuth,
-        requireRole(["ADMIN", "SUPERADMIN", "PLATFORM_ADMIN"]),
-        requirePermission("ADMIN_ENTITIES")
-      ]
+      // The entity acted on is in the body or the path, not the header, so
+      // the handler checks ADMIN_ENTITIES at that entity.
+      preHandler: [requireAuth, requirePermission(MANAGE_ENTITIES, { scope: "any-entity" })]
     },
     async (request, reply) => {
-      const existing = await withBypassRLS(prisma, async (tx: any) => {
-        return tx.entity.findFirst({ where: { id: request.params.id } });
-      });
-      if (!existing)
-        return reply
-          .code(404)
-          .send({ data: null, errors: [{ code: "NOT_FOUND", message: "Entity not found." }] });
-
-      const actor = getActorContext(request);
-      const currentAccess = await assertCanManageEntity(actor, existing.id);
-      if (!currentAccess.allowed) return mapEntityScopeError(reply, currentAccess);
+      const access = await loadRequestAccess(request, reply);
+      if (!access) return reply;
+      const existing = await readAcrossEntities((tx) =>
+        tx.entity.findFirst({ where: { id: request.params.id } })
+      );
+      if (!existing) return notFound(reply);
+      if (!canManageEntity(access, existing)) {
+        return forbidden(reply, "You do not have access to this entity tree.");
+      }
       const b = request.body;
 
-      if (b.parentId !== undefined) {
-        if (!hasCrossEntityAccess(actor) && !b.parentId) {
-          return reply.code(403).send({
-            data: null,
-            errors: [{ code: "FORBIDDEN", message: "You do not have access to this entity tree." }]
-          });
+      if (b.parentId !== undefined && b.parentId !== existing.parentId) {
+        if (!canPlaceEntityUnder(access, b.parentId)) {
+          return forbidden(reply, "You do not have access to this entity tree.");
         }
         if (b.parentId) {
-          const parentAccess = await assertCanManageEntity(actor, b.parentId);
-          if (!parentAccess.allowed) return mapEntityScopeError(reply, parentAccess);
+          const parentId = b.parentId;
+          const parent = await readAcrossEntities((tx) =>
+            tx.entity.findFirst({ where: { id: parentId }, select: { id: true } })
+          );
+          if (!parent) return notFound(reply);
         }
       }
 
@@ -361,6 +316,7 @@ export async function registerEntityRouter(app: FastifyInstance): Promise<void> 
             existing.type === "GROUP" && { maxProperties: b.maxProperties })
         }
       });
+      await invalidateAccess(request);
       return { data: entity, errors: [] };
     }
   );
@@ -370,25 +326,23 @@ export async function registerEntityRouter(app: FastifyInstance): Promise<void> 
   app.delete<{ Params: { id: string } }>(
     "/api/v1/entities/:id",
     {
-      preHandler: [
-        requireAuth,
-        requireRole(["ADMIN", "SUPERADMIN", "PLATFORM_ADMIN"]),
-        requirePermission("ADMIN_ENTITIES")
-      ]
+      // The entity acted on is in the body or the path, not the header, so
+      // the handler checks ADMIN_ENTITIES at that entity.
+      preHandler: [requireAuth, requirePermission(MANAGE_ENTITIES, { scope: "any-entity" })]
     },
     async (request, reply) => {
-      const existing = await withBypassRLS(prisma, async (tx: any) => {
-        return tx.entity.findFirst({
+      const access = await loadRequestAccess(request, reply);
+      if (!access) return reply;
+      const existing = await readAcrossEntities((tx) =>
+        tx.entity.findFirst({
           where: { id: request.params.id },
           include: { _count: { select: { children: true, journals: true, accounts: true } } }
-        });
-      });
-      if (!existing)
-        return { data: null, errors: [{ code: "NOT_FOUND", message: "Entity not found." }] };
-
-      const actor = getActorContext(request);
-      const entityAccess = await assertCanManageEntity(actor, existing.id);
-      if (!entityAccess.allowed) return mapEntityScopeError(reply, entityAccess);
+        })
+      );
+      if (!existing) return notFound(reply);
+      if (!canManageEntity(access, existing)) {
+        return forbidden(reply, "You do not have access to this entity tree.");
+      }
 
       if (
         existing._count.children > 0 ||
@@ -408,6 +362,7 @@ export async function registerEntityRouter(app: FastifyInstance): Promise<void> 
       }
       await prisma.entityUser.deleteMany({ where: { entityId: request.params.id } });
       await prisma.entity.delete({ where: { id: request.params.id } });
+      await invalidateAccess(request);
       reply.code(204);
       return;
     }
@@ -415,42 +370,41 @@ export async function registerEntityRouter(app: FastifyInstance): Promise<void> 
 
   // ── License info ───────────────────────────────────────────────────────────
 
-  app.get("/api/v1/license", { preHandler: [requireAuth] }, async (request) => {
-    const userEntityIds = (request.user as any)?.entityIds as string[] | undefined;
-
-    const groups = await (prisma.entity as any).findMany({
-      where: {
-        type: "GROUP",
-        ...(userEntityIds && userEntityIds.length > 0 ? { id: { in: userEntityIds } } : {})
-      },
-      select: { id: true, name: true, maxProperties: true }
-    });
-
-    const result = [];
-    for (const group of groups) {
-      const propertyCount = await prisma.entity.count({
-        where: { parentId: group.id, type: "PROPERTY", isActive: true }
-      });
-      const maxProperties = (group as any).maxProperties ?? 0;
-      result.push({
-        groupId: group.id,
-        groupName: group.name,
-        maxProperties: maxProperties === 0 ? "unlimited" : maxProperties,
-        currentProperties: propertyCount,
-        remaining: maxProperties === 0 ? "unlimited" : Math.max(0, maxProperties - propertyCount)
-      });
-    }
-    return { data: result, errors: [] };
-  });
-
-  // ── Admin check ────────────────────────────────────────────────────────────
-
   app.get(
-    "/api/v1/admin",
-    { preHandler: [requireAuth, requireRole(["ADMIN", "SUPERADMIN"])] },
-    async () => ({
-      data: { message: "Role-gated endpoint is accessible." },
-      errors: []
-    })
+    "/api/v1/license",
+    { preHandler: [requireAuth], config: { access: "session" } },
+    async (request, reply) => {
+      const access = await loadRequestAccess(request, reply);
+      if (!access) return reply;
+
+      const groups: Array<{ id: string; name: string; maxProperties: number | null }> =
+        await readAcrossEntities((tx) =>
+          tx.entity.findMany({
+            where: {
+              type: "GROUP",
+              ...(hasTenantPermission(access, MANAGE_ENTITIES)
+                ? {}
+                : { id: { in: openableEntityIds(access) } })
+            },
+            select: { id: true, name: true, maxProperties: true }
+          })
+        );
+
+      const result = [];
+      for (const group of groups) {
+        const propertyCount: number = await readAcrossEntities((tx) =>
+          tx.entity.count({ where: { parentId: group.id, type: "PROPERTY", isActive: true } })
+        );
+        const maxProperties = group.maxProperties ?? 0;
+        result.push({
+          groupId: group.id,
+          groupName: group.name,
+          maxProperties: maxProperties === 0 ? "unlimited" : maxProperties,
+          currentProperties: propertyCount,
+          remaining: maxProperties === 0 ? "unlimited" : Math.max(0, maxProperties - propertyCount)
+        });
+      }
+      return { data: result, errors: [] };
+    }
   );
 }

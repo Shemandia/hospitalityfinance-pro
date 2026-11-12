@@ -5,6 +5,7 @@ import { prisma } from "../../db/prisma.js";
 import { setEntityDbContext } from "../../db/tenantContext.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
 import { requirePermission } from "../../middleware/requirePermission.js";
+import { hasEntityPermission } from "../access/resolver.js";
 import { GLService } from "./service.js";
 import { mapError, requireEntityId } from "../../shared/router-utils.js";
 import { ServiceError } from "../../shared/service-error.js";
@@ -279,17 +280,18 @@ export async function registerGLRouter(app: FastifyInstance): Promise<void> {
             const userId = requireUserId(request.user?.sub);
             const payload = journalCreateSchema.parse(request.body);
 
-            // Source override requires CONTROLLER or ADMIN role
+            // Overriding a source restriction is an approver's decision.
             if (payload.sourceOverrideReason) {
-              const userRoles = (request.user?.roles ?? []).map((r: string) => r.toUpperCase());
-              const allowed = ["CONTROLLER", "ADMIN", "SUPERADMIN"];
-              if (!allowed.some((r) => userRoles.includes(r))) {
+              const allowed =
+                request.access !== undefined &&
+                hasEntityPermission(request.access, entityId, "GL_APPROVE");
+              if (!allowed) {
                 return reply.code(403).send({
                   data: null,
                   errors: [
                     {
                       code: "GL_SOURCE_OVERRIDE_FORBIDDEN",
-                      message: "Only CONTROLLER or ADMIN can override source restrictions."
+                      message: "Overriding source restrictions requires the GL_APPROVE permission."
                     }
                   ]
                 });

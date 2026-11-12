@@ -6,7 +6,7 @@ const perm = (code: string) => ({ permission: { code } });
 function actor(overrides: Partial<AdminActorContext> = {}): AdminActorContext {
   return {
     userId: "actor-1",
-    roles: ["PROPERTY_ADMIN"],
+    tenantWide: false,
     permissions: ["ADMIN_USERS", "ADMIN_ROLES_MANAGE", "GL_READ", "GL_POST"],
     entityIds: ["entity-a"],
     entityId: "entity-a",
@@ -15,18 +15,20 @@ function actor(overrides: Partial<AdminActorContext> = {}): AdminActorContext {
 }
 
 describe("checkPrivilegeCeiling (NS2 — no self-escalation)", () => {
-  it("blocks a non-cross-entity admin from granting SUPERADMIN", () => {
-    expect(checkPrivilegeCeiling(actor(), { code: "SUPERADMIN", permissions: [] })).toBe(false);
+  it("blocks an entity-level admin from granting a system role, even an empty one", () => {
+    expect(checkPrivilegeCeiling(actor(), { isSystem: true, permissions: [] })).toBe(false);
   });
 
-  it("blocks granting PLATFORM_ADMIN (case-insensitive)", () => {
-    expect(checkPrivilegeCeiling(actor(), { code: "platform_admin", permissions: [] })).toBe(false);
+  it("compares permission codes case-insensitively", () => {
+    expect(
+      checkPrivilegeCeiling(actor(), { isSystem: false, permissions: [perm("gl_read")] })
+    ).toBe(true);
   });
 
   it("blocks granting a role whose permissions exceed the actor's own", () => {
     expect(
       checkPrivilegeCeiling(actor(), {
-        code: "CONTROLLER",
+        isSystem: false,
         permissions: [perm("GL_READ"), perm("PERIOD_REOPEN")]
       })
     ).toBe(false);
@@ -35,16 +37,16 @@ describe("checkPrivilegeCeiling (NS2 — no self-escalation)", () => {
   it("allows granting a role whose permissions are a subset of the actor's", () => {
     expect(
       checkPrivilegeCeiling(actor(), {
-        code: "CLERK",
+        isSystem: false,
         permissions: [perm("GL_READ"), perm("GL_POST")]
       })
     ).toBe(true);
   });
 
-  it("lets SUPERADMIN grant anything", () => {
+  it("lets an admin with tenant-wide reach grant anything", () => {
     expect(
-      checkPrivilegeCeiling(actor({ roles: ["SUPERADMIN"] }), {
-        code: "SUPERADMIN",
+      checkPrivilegeCeiling(actor({ tenantWide: true }), {
+        isSystem: true,
         permissions: [perm("ANYTHING")]
       })
     ).toBe(true);

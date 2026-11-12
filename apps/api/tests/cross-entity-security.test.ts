@@ -10,8 +10,6 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { applyEntityScope } from "../src/db/entityScope.js";
-import { requireRole } from "../src/middleware/requireRole.js";
-import { requireWriteAccess } from "../src/middleware/requireWriteAccess.js";
 import { redactSensitiveFields } from "../src/shared/log-redactor.js";
 
 const dbMocks = vi.hoisted(() => {
@@ -77,7 +75,8 @@ import {
   revokeRoleFromUser,
   updateUserStatus
 } from "../src/modules/admin/service.js";
-import { isEntityManageableByActor } from "../src/modules/entity/router.js";
+import { canManageEntity, canPlaceEntityUnder } from "../src/modules/entity/router.js";
+import type { ResolvedAccess } from "../src/modules/access/resolver.js";
 
 // ── Test Entities ──────────────────────────────────────────────────────────────
 
@@ -275,13 +274,13 @@ describe("Admin entity-scope actor checks", () => {
     expect(
       isEntityInActorLineage([{ id: ENTITY_B, parentId: null }], {
         permissions: [],
-        roles: ["SUPERADMIN"],
+        tenantWide: true,
         entityIds: []
       })
     ).toBe(true);
-    expect(
-      hasCrossEntityAdminAccess({ permissions: [], roles: ["PLATFORM_ADMIN"], entityIds: [] })
-    ).toBe(true);
+    expect(hasCrossEntityAdminAccess({ permissions: [], tenantWide: true, entityIds: [] })).toBe(
+      true
+    );
   });
 
   it("allows tenant admins to manage descendants of assigned entities", () => {
@@ -291,7 +290,7 @@ describe("Admin entity-scope actor checks", () => {
           { id: ENTITY_B, parentId: ENTITY_A },
           { id: ENTITY_A, parentId: null }
         ],
-        { permissions: [], roles: ["TENANT_ADMIN"], entityIds: [ENTITY_A] }
+        { permissions: [], tenantWide: false, entityIds: [ENTITY_A] }
       )
     ).toBe(true);
   });
@@ -303,7 +302,7 @@ describe("Admin entity-scope actor checks", () => {
           { id: ENTITY_B, parentId: "00000000-0000-0000-0000-000000000009" },
           { id: "00000000-0000-0000-0000-000000000009", parentId: null }
         ],
-        { permissions: [], roles: ["TENANT_ADMIN"], entityIds: [ENTITY_A] }
+        { permissions: [], tenantWide: false, entityIds: [ENTITY_A] }
       )
     ).toBe(false);
   });
@@ -334,7 +333,7 @@ describe("Admin entity-scope actor checks", () => {
 
     const users = await listAllUsers({
       permissions: [],
-      roles: ["TENANT_ADMIN"],
+      tenantWide: false,
       entityIds: [ENTITY_A],
       entityId: ENTITY_A
     });
@@ -361,7 +360,7 @@ describe("Admin entity-scope actor checks", () => {
 
     const users = await listAllUsers({
       permissions: [],
-      roles: ["PLATFORM_ADMIN"],
+      tenantWide: true,
       entityIds: [],
       entityId: undefined
     });
@@ -380,7 +379,7 @@ describe("Admin entity-scope actor checks", () => {
 
     const result = await assignRoleToUser(USER_INSIDE, ROLE_ID, {
       permissions: [],
-      roles: ["TENANT_ADMIN"],
+      tenantWide: false,
       entityIds: [ENTITY_A],
       entityId: ENTITY_A
     });
@@ -410,7 +409,7 @@ describe("Admin entity-scope actor checks", () => {
       { tenantSlug: "test-tenant", tenantCode: "tenant01", tenantName: "Test Tenant" },
       {
         permissions: [],
-        roles: ["TENANT_ADMIN"],
+        tenantWide: false,
         entityIds: [ENTITY_A],
         entityId: ENTITY_A
       }
@@ -430,7 +429,7 @@ describe("Admin entity-scope actor checks", () => {
 
     const result = await assignRoleToUser(USER_OUTSIDE, ROLE_ID, {
       permissions: [],
-      roles: ["TENANT_ADMIN"],
+      tenantWide: false,
       entityIds: [ENTITY_A],
       entityId: ENTITY_A
     });
@@ -450,7 +449,7 @@ describe("Admin entity-scope actor checks", () => {
 
     const result = await revokeRoleFromUser(USER_OUTSIDE, ROLE_ID, {
       permissions: [],
-      roles: ["TENANT_ADMIN"],
+      tenantWide: false,
       entityIds: [ENTITY_A],
       entityId: ENTITY_A
     });
@@ -464,7 +463,7 @@ describe("Admin entity-scope actor checks", () => {
 
     const result = await getUserRoles(USER_OUTSIDE, {
       permissions: [],
-      roles: ["TENANT_ADMIN"],
+      tenantWide: false,
       entityIds: [ENTITY_A],
       entityId: ENTITY_A
     });
@@ -478,7 +477,7 @@ describe("Admin entity-scope actor checks", () => {
 
     const result = await updateUserStatus(USER_OUTSIDE, false, {
       permissions: [],
-      roles: ["TENANT_ADMIN"],
+      tenantWide: false,
       entityIds: [ENTITY_A],
       entityId: ENTITY_A
     });
@@ -495,12 +494,12 @@ describe("Admin entity-scope actor checks", () => {
 
     const assignResult = await assignRoleToUser(USER_OUTSIDE, ROLE_ID, {
       permissions: [],
-      roles: ["SUPERADMIN"],
+      tenantWide: true,
       entityIds: []
     });
     const rolesResult = await getUserRoles(USER_OUTSIDE, {
       permissions: [],
-      roles: ["SUPERADMIN"],
+      tenantWide: true,
       entityIds: []
     });
 
@@ -517,7 +516,7 @@ describe("Admin entity-scope actor checks", () => {
   it("prevents exposed login audit list/create paths from crossing entity scope", async () => {
     const actor = {
       permissions: [],
-      roles: ["TENANT_ADMIN"],
+      tenantWide: false,
       entityIds: [ENTITY_A],
       entityId: ENTITY_A
     };
@@ -540,101 +539,50 @@ describe("Admin entity-scope actor checks", () => {
     expect(dbMocks.tx.loginAudit.create).not.toHaveBeenCalled();
   });
 
-  it("blocks tenant admins creating entities under an unassigned parent", () => {
-    expect(
-      isEntityManageableByActor([{ id: ENTITY_B, parentId: null }], {
-        roles: ["TENANT_ADMIN"],
-        entityIds: [ENTITY_A]
-      })
-    ).toBe(false);
+  const entityAdminAtA: ResolvedAccess = {
+    tenantPermissions: [],
+    entityPermissions: { [ENTITY_A]: ["ADMIN_ENTITIES"] }
+  };
+  const OTHER_PARENT = "00000000-0000-0000-0000-000000000009";
+
+  it("blocks entity admins creating entities under a parent they do not administer", () => {
+    expect(canPlaceEntityUnder(entityAdminAtA, ENTITY_B)).toBe(false);
+    expect(canPlaceEntityUnder(entityAdminAtA, ENTITY_A)).toBe(true);
   });
 
-  it("blocks tenant admins moving entities to an unassigned parent", () => {
-    expect(
-      isEntityManageableByActor(
-        [
-          { id: ENTITY_B, parentId: "00000000-0000-0000-0000-000000000009" },
-          { id: "00000000-0000-0000-0000-000000000009", parentId: null }
-        ],
-        { roles: ["TENANT_ADMIN"], entityIds: [ENTITY_A] }
-      )
-    ).toBe(false);
+  it("blocks entity admins creating or moving an entity to the root", () => {
+    expect(canPlaceEntityUnder(entityAdminAtA, null)).toBe(false);
   });
 
-  it("blocks tenant admins deleting entities outside the managed tree", () => {
-    expect(
-      isEntityManageableByActor([{ id: ENTITY_B, parentId: null }], {
-        roles: ["TENANT_ADMIN"],
-        entityIds: [ENTITY_A]
-      })
-    ).toBe(false);
-  });
-});
-
-describe("RBAC blocks unauthorized cross-entity operations", () => {
-  it("VIEWER cannot perform POST operations", async () => {
-    const req = mockRequest({
-      entityId: ENTITY_A,
-      roles: ["viewer"],
-      permissions: ["GL_READ"],
-      method: "POST"
-    });
-    const reply = mockReply();
-    await requireWriteAccess(req, reply);
-    expect(reply.statusCode).toBe(403);
-    expect((reply.body as any)?.errors?.[0]?.code).toBe("INSUFFICIENT_PERMISSIONS");
+  it("blocks entity admins moving entities to a parent they do not administer", () => {
+    expect(canPlaceEntityUnder(entityAdminAtA, OTHER_PARENT)).toBe(false);
   });
 
-  it("VIEWER cannot perform PUT operations", async () => {
-    const req = mockRequest({
-      entityId: ENTITY_A,
-      roles: ["viewer"],
-      permissions: ["GL_READ"],
-      method: "PUT"
-    });
-    const reply = mockReply();
-    await requireWriteAccess(req, reply);
-    expect(reply.statusCode).toBe(403);
+  it("blocks entity admins changing or deleting entities outside their tree", () => {
+    expect(canManageEntity(entityAdminAtA, { id: ENTITY_B, parentId: null })).toBe(false);
+    expect(canManageEntity(entityAdminAtA, { id: ENTITY_B, parentId: OTHER_PARENT })).toBe(false);
   });
 
-  it("VIEWER cannot perform DELETE operations", async () => {
-    const req = mockRequest({
-      entityId: ENTITY_A,
-      roles: ["viewer"],
-      permissions: ["GL_READ"],
-      method: "DELETE"
-    });
-    const reply = mockReply();
-    await requireWriteAccess(req, reply);
-    expect(reply.statusCode).toBe(403);
+  it("lets entity admins restore an inactive child of an entity they administer", () => {
+    // An inactive entity is absent from entityPermissions; the parent grant covers it.
+    expect(canManageEntity(entityAdminAtA, { id: ENTITY_B, parentId: ENTITY_A })).toBe(true);
   });
 
-  it("CONTROLLER can perform write operations", async () => {
-    const req = mockRequest({
-      entityId: ENTITY_A,
-      roles: ["controller"],
-      permissions: ["GL_READ", "GL_WRITE", "GL_POST"],
-      method: "POST"
-    });
-    const reply = mockReply();
-    await requireWriteAccess(req, reply);
-    expect(reply.body).toBeNull(); // no error = allowed
+  it("does not treat ADMIN_USERS as permission to manage entities", () => {
+    const userAdmin: ResolvedAccess = {
+      tenantPermissions: [],
+      entityPermissions: { [ENTITY_A]: ["ADMIN_USERS"] }
+    };
+    expect(canManageEntity(userAdmin, { id: ENTITY_A, parentId: null })).toBe(false);
   });
 
-  it("VIEWER cannot access ADMIN-only endpoints", async () => {
-    const handler = requireRole(["ADMIN", "SUPERADMIN"]);
-    const req = mockRequest({ entityId: ENTITY_A, roles: ["viewer"] });
-    const reply = mockReply();
-    await handler(req, reply);
-    expect(reply.statusCode).toBe(403);
-  });
-
-  it("CONTROLLER cannot access ADMIN-only endpoints", async () => {
-    const handler = requireRole(["ADMIN", "SUPERADMIN"]);
-    const req = mockRequest({ entityId: ENTITY_A, roles: ["controller"] });
-    const reply = mockReply();
-    await handler(req, reply);
-    expect(reply.statusCode).toBe(403);
+  it("lets a tenant-wide entity administrator manage any entity and the root", () => {
+    const tenantAdmin: ResolvedAccess = {
+      tenantPermissions: ["ADMIN_ENTITIES"],
+      entityPermissions: {}
+    };
+    expect(canManageEntity(tenantAdmin, { id: ENTITY_B, parentId: null })).toBe(true);
+    expect(canPlaceEntityUnder(tenantAdmin, null)).toBe(true);
   });
 });
 

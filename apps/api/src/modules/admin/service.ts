@@ -6,34 +6,36 @@ import { sendWelcomeEmail } from "../../shared/email.js";
 
 const db = prisma as unknown as PrismaClient;
 
+/** The caller of an admin operation, derived from resolved access by the router. */
 export type AdminActorContext = {
   userId?: string;
-  roles: string[];
+  /** Holds the admitting permission through a tenant-wide assignment. */
+  tenantWide: boolean;
+  /** Permissions the caller may pass on (see the router's getActorContext). */
   permissions: string[];
+  /** Entities at which the caller holds the admitting permission. */
   entityIds: string[];
   entityId?: string;
 };
 
-const CROSS_ENTITY_ADMIN_ROLES = new Set(["SUPERADMIN", "PLATFORM_ADMIN"]);
-
 export function hasCrossEntityAdminAccess(actor: AdminActorContext): boolean {
-  return actor.roles.some((role) => CROSS_ENTITY_ADMIN_ROLES.has(role.toUpperCase()));
+  return actor.tenantWide;
 }
 
 /**
  * Privilege ceiling: an actor may only grant roles that do not exceed their
- * own privileges. Cross-entity admin roles (SUPERADMIN/PLATFORM_ADMIN) can
- * only be granted by actors who already hold cross-entity admin access; any
- * other role requires its permission set to be a subset of the actor's.
+ * own privileges. System roles can only be granted by an actor with
+ * tenant-wide reach; any other role requires its permission set to be a
+ * subset of the actor's.
  */
 export function checkPrivilegeCeiling(
   actor: AdminActorContext,
-  role: { code: string; permissions: Array<{ permission: { code: string } }> }
+  role: { isSystem: boolean; permissions: Array<{ permission: { code: string } }> }
 ): boolean {
   if (hasCrossEntityAdminAccess(actor)) return true;
-  if (CROSS_ENTITY_ADMIN_ROLES.has(role.code.toUpperCase())) return false;
-  const actorPermissions = new Set(actor.permissions);
-  return role.permissions.every((rp) => actorPermissions.has(rp.permission.code));
+  if (role.isSystem) return false;
+  const actorPermissions = new Set(actor.permissions.map((code) => code.toUpperCase()));
+  return role.permissions.every((rp) => actorPermissions.has(rp.permission.code.toUpperCase()));
 }
 
 export function isEntityInActorLineage(
@@ -456,7 +458,7 @@ export async function inviteUser(
   };
 }
 
-// ── All Users (SUPERADMIN) ──────────────────────────────────────────────────
+// ── All users within the actor's reach ──────────────────────────────────────────────────
 
 export async function listAllUsers(actor?: AdminActorContext) {
   const managedEntityIds = actor ? await getActorManagedEntityIds(actor) : null;
