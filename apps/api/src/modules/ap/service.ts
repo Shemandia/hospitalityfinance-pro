@@ -442,7 +442,33 @@ ${transactions
     }
 
     this.validateInvoiceLineTotals(input);
-    return this.repository(this.prisma).createInvoice(entityId, actorUserId, input);
+    const taxCodeIds = await this.resolveLineTaxCodes(entityId, input.lines);
+    return this.repository(this.prisma).createInvoice(entityId, actorUserId, input, taxCodeIds);
+  }
+
+  /**
+   * Resolves each line's tax code to the tenant's TaxCode row. Posting takes
+   * the tax account from that row; a line that only carried the code as text
+   * could never be posted. Returns one id (or null) per line, in order.
+   */
+  private async resolveLineTaxCodes(
+    entityId: string,
+    lines: ReadonlyArray<{ taxCode?: string }>
+  ): Promise<Array<string | null>> {
+    const codes = [...new Set(lines.flatMap((line) => (line.taxCode ? [line.taxCode] : [])))];
+    if (codes.length === 0) return lines.map(() => null);
+
+    const found = await this.repository(this.prisma).findTaxCodesByCode(entityId, codes);
+    const idByCode = new Map(found.map((taxCode) => [taxCode.code, taxCode.id]));
+    const unknown = codes.filter((code) => !idByCode.has(code));
+    if (unknown.length > 0) {
+      throw new APServiceError(
+        "AP_TAX_CODE_NOT_FOUND",
+        `Tax code(s) not defined for this entity: ${unknown.join(", ")}.`,
+        422
+      );
+    }
+    return lines.map((line) => (line.taxCode ? (idByCode.get(line.taxCode) ?? null) : null));
   }
 
   async submitSupplierInvoice(entityId: string, input: APInvoiceCreateInput) {

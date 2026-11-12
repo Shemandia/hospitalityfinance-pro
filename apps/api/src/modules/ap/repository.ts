@@ -100,7 +100,19 @@ export class APRepository {
     });
   }
 
-  createInvoice(entityId: string, createdById: string | null, input: APInvoiceCreateInput) {
+  findTaxCodesByCode(entityId: string, codes: string[]) {
+    return this.db.taxCode.findMany({
+      where: { entityId, code: { in: codes }, isActive: true },
+      select: { id: true, code: true }
+    });
+  }
+
+  createInvoice(
+    entityId: string,
+    createdById: string | null,
+    input: APInvoiceCreateInput,
+    lineTaxCodeIds: ReadonlyArray<string | null> = []
+  ) {
     return (this.db.aPInvoice as any).create({
       data: {
         entityId,
@@ -120,13 +132,14 @@ export class APRepository {
         paymentTerms: input.paymentTerms,
         createdById,
         lines: {
-          create: input.lines.map((line) => ({
+          create: input.lines.map((line, index) => ({
             description: line.description,
             quantity: new Prisma.Decimal(line.quantity),
             unitPrice: new Prisma.Decimal(line.unitPrice),
             amount: new Prisma.Decimal(line.amount),
             glAccountId: line.glAccountId,
-            taxCode: line.taxCode
+            taxCode: line.taxCode,
+            taxCodeId: lineTaxCodeIds[index] ?? null
           }))
         }
       },

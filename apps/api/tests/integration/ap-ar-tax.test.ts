@@ -382,6 +382,67 @@ if (!process.env.TEST_DATABASE_URL) {
       expect(D(rev.credit).toFixed(2)).toBe("75000.00");
     });
 
+    it("posts an invoice created through the service with a tax code given by code", async () => {
+      const invoice = await apService.createInvoice(entityId, userId, {
+        supplierId,
+        periodId,
+        invoiceNumber: `INV-${Math.random().toString(36).slice(2, 10)}`,
+        invoiceDate: new Date(),
+        dueDate: new Date(),
+        currency: "TZS",
+        grossAmount: "118000",
+        taxAmount: "18000",
+        netAmount: "100000",
+        functionalAmount: "118000",
+        fxRate: "1",
+        lines: [
+          {
+            description: "Consumables",
+            quantity: "1",
+            unitPrice: "100000",
+            amount: "100000",
+            glAccountId: expenseAcc,
+            taxCode: "VAT18"
+          }
+        ]
+      });
+      await apService.approveInvoice(entityId, invoice.id, userId);
+      const posted = await apService.postInvoice(entityId, invoice.id, userId);
+
+      const lines = await journalLinesFor(posted!.glJournalId!);
+      const vat = lines.find((l: any) => l.accountId === inputVatAcc);
+      expect(vat, "input VAT line must exist").toBeDefined();
+      expect(D(vat.debit).toFixed(2)).toBe("18000.00");
+    });
+
+    it("refuses an invoice whose tax code is not defined for the entity", async () => {
+      await expect(
+        apService.createInvoice(entityId, userId, {
+          supplierId,
+          periodId,
+          invoiceNumber: `INV-${Math.random().toString(36).slice(2, 10)}`,
+          invoiceDate: new Date(),
+          dueDate: new Date(),
+          currency: "TZS",
+          grossAmount: "100",
+          taxAmount: "0",
+          netAmount: "100",
+          functionalAmount: "100",
+          fxRate: "1",
+          lines: [
+            {
+              description: "Line",
+              quantity: "1",
+              unitPrice: "100",
+              amount: "100",
+              glAccountId: expenseAcc,
+              taxCode: "NO-SUCH-CODE"
+            }
+          ]
+        })
+      ).rejects.toMatchObject({ code: "AP_TAX_CODE_NOT_FOUND" });
+    });
+
     describe("a chart where 1200 and 2000 are not the control accounts (ACC-12)", () => {
       let flaggedAp: string;
       let flaggedAr: string;
