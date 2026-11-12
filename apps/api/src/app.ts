@@ -3,7 +3,7 @@ import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyInstance } from "fastify";
 import { runWithContext, enterRequestContext, updateRequestContext } from "./db/requestContext.js";
-import { prisma, setActiveTenant } from "./db/prisma.js";
+import { prisma } from "./db/prisma.js";
 import { requireAuth } from "./middleware/requireAuth.js";
 import { logSerializers } from "./shared/log-redactor.js";
 import { registerGLRouter } from "./modules/gl/router.js";
@@ -122,9 +122,6 @@ export async function createApp(): Promise<FastifyInstance> {
   // Connect Redis for session management
   await connectRedis();
 
-  // Auth routes (/auth/login, /auth/refresh, /auth/logout, etc.)
-  await registerAuthRouter(app);
-
   app.addHook("onRequest", async (request, reply) => {
     // Generate or accept request ID for end-to-end tracing
     const requestId = (request.headers["x-request-id"] as string) || randomUUID();
@@ -140,6 +137,10 @@ export async function createApp(): Promise<FastifyInstance> {
     // Attach to Fastify logger for structured log correlation
     (request as any).requestId = requestId;
   });
+
+  // Auth routes (/auth/login, /auth/refresh, /auth/logout, etc.). Registered
+  // after the hook above so that they run inside a request context too.
+  await registerAuthRouter(app);
 
   // ── Health, Readiness & Version ───────────────────────────────────────────
 

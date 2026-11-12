@@ -7,10 +7,9 @@
  * itself is replaced — the test mints an access token and registers its
  * session in Redis, as /auth/login would.
  *
- * The token still carries the legacy entityIds claim, which the auth plugin
- * checks until the token is slimmed (step 5). Each test user's claim lists
- * every entity the test addresses, so a denial here is the guard's decision.
- * The token carries no roles and no permissions.
+ * The token carries only the user, the tenant and the session. One test user's
+ * token also carries the role, permission and entity claims the old code
+ * honoured; they must count for nothing.
  *
  * Covers section 10 acceptance checks 1, 2, 3 and 6 at API level. Checks 4, 5
  * and 7 need two tenant databases and the web client; they follow with the
@@ -50,6 +49,30 @@ const environmentReady = vi.hoisted(() => {
   }
   return ready;
 });
+
+// The tenant registry is the one stand-in: the session's tenant resolves to the
+// test database. Requests therefore run through the tenant client pool, with
+// its row-level-security middleware, exactly as in production. Tests with two
+// real tenant databases follow with the removal of the default-database fallback.
+vi.mock("../../src/db/tenantRegistry.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/db/tenantRegistry.js")>()),
+  resolveTenantById: async (id: string) =>
+    id.startsWith("it-guard-")
+      ? {
+          id,
+          slug: id,
+          tenantCode: "itguard1",
+          name: "Integration test tenant",
+          databaseUrl: process.env.TEST_DATABASE_URL as string,
+          domain: null,
+          adminEmail: "",
+          plan: "test",
+          maxProperties: 0,
+          isActive: true,
+          provisionedAt: null
+        }
+      : null
+}));
 
 if (!environmentReady || !redisUrl) {
   describe.skip("route guard against real Postgres and Redis", () => {
@@ -91,22 +114,12 @@ if (!environmentReady || !redisUrl) {
       });
     }
 
-    async function signIn(userId: string, entityIds: string[]): Promise<string> {
+    /** What /auth/login does: a session in Redis and a token naming it. */
+    async function signIn(userId: string, extraClaims: object = {}): Promise<string> {
       const sessionId = `s-${userId}`;
       await redis.set(`session:${tenantId}:${userId}:${sessionId}`, "1", "EX", 600);
       return jwt.sign(
-        {
-          sub: userId,
-          email: `${userId}@guard.test`,
-          tenantId,
-          tenantCode: "",
-          tenantSlug: "",
-          entityIds,
-          roles: [],
-          permissions: [],
-          sessionId,
-          type: "access"
-        },
+        { sub: userId, tenantId, sessionId, type: "access", ...extraClaims },
         process.env.JWT_SECRET as string,
         { algorithm: "HS256", expiresIn: 600 }
       );
@@ -207,12 +220,16 @@ if (!environmentReady || !redisUrl) {
         users.nobody = await user("nobody");
       });
 
-      const properties = [ids.propA, ids.propB, ids.propC];
-      tokens.alice = await signIn(users.alice, properties);
-      tokens.gina = await signIn(users.gina, [ids.group, ids.other]);
-      tokens.eve = await signIn(users.eve, properties);
-      tokens.tara = await signIn(users.tara, [ids.group, ids.other]);
-      tokens.nobody = await signIn(users.nobody, properties);
+      tokens.alice = await signIn(users.alice);
+      tokens.gina = await signIn(users.gina);
+      tokens.eve = await signIn(users.eve);
+      tokens.tara = await signIn(users.tara);
+      // A forged or stale token: claims the old code would have honoured.
+      tokens.nobody = await signIn(users.nobody, {
+        roles: ["SUPERADMIN", "TENANT_ADMIN"],
+        permissions: ["GL_READ", "GL_WRITE", "ADMIN_USERS"],
+        entityIds: [ids.propA, ids.propB, ids.propC]
+      });
 
       // Alice: accountant on A, viewer on B, nothing on C.
       await assign(users.alice, roles.accountant, ids.propA);
@@ -311,6 +328,67 @@ if (!environmentReady || !redisUrl) {
         expect(read).toMatchObject({ status: 403, code: "ENTITY_ACCESS_DENIED" });
         const list = await call({ method: "GET", url: "/api/v1/entities", as: "nobody" });
         expect(list.data).toEqual([]);
+      });
+    });
+
+    describe("the session decides who is calling, never what they may do", () => {
+      it("gives nothing to a token that claims roles, permissions and entities", async () => {
+        const write = await call({
+          method: "POST",
+          url: journals,
+          as: "nobody",
+          entityId: ids.propA
+        });
+        expect(write).toMatchObject({ status: 403, code: "ENTITY_ACCESS_DENIED" });
+        const roles = await call({ method: "POST", url: "/api/v1/admin/roles", as: "nobody" });
+        expect(roles.status).toBe(403);
+      });
+
+      it("lets a tenant-wide administrator in without any membership row", async () => {
+        const memberships = await bypass((tx) =>
+          tx.entityUser.count({ where: { userId: users.tara } })
+        );
+        expect(memberships).toBe(0);
+        const read = await call({ method: "GET", url: journals, as: "tara", entityId: ids.propB });
+        expect(read).toMatchObject({ status: 200 });
+      });
+
+      it("refuses a session used with another tenant's address (acceptance 4)", async () => {
+        const response = await app.inject({
+          method: "GET",
+          url: journals,
+          headers: {
+            authorization: `Bearer ${tokens.tara}`,
+            "x-entity-id": ids.propA,
+            "x-tenant-code": "0therten"
+          }
+        });
+        expect(response.statusCode).toBe(403);
+      });
+
+      it("refuses a token whose tenant the registry does not know", async () => {
+        const stray = jwt.sign(
+          { sub: users.tara, tenantId: "no-such-tenant", sessionId: "s", type: "access" },
+          process.env.JWT_SECRET as string,
+          { algorithm: "HS256", expiresIn: 600 }
+        );
+        const response = await app.inject({
+          method: "GET",
+          url: journals,
+          headers: { authorization: `Bearer ${stray}`, "x-entity-id": ids.propA }
+        });
+        expect(response.statusCode).toBe(401);
+      });
+
+      it("ends the session at once when it is revoked", async () => {
+        const token = await signIn(users.eve);
+        const headers = { authorization: `Bearer ${token}`, "x-entity-id": ids.propA };
+        const before = await app.inject({ method: "GET", url: "/api/v1/me", headers });
+        expect(before.statusCode).toBe(200);
+        await redis.del(`session:${tenantId}:${users.eve}:s-${users.eve}`);
+        const after = await app.inject({ method: "GET", url: "/api/v1/me", headers });
+        expect(after.statusCode).toBe(401);
+        tokens.eve = await signIn(users.eve);
       });
     });
 

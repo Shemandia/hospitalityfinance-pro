@@ -100,11 +100,6 @@ Use `docs/NON-DOCKER-SETUP.md` for direct Node.js, PostgreSQL, Redis and PM2 dep
 
 ---
 
-## Dev Mode
+## Signing in during development
 
-When `NODE_ENV !== 'production'` and `ENABLE_DEV_AUTH=true`, the API accepts:
-
-- Bearer token: `dev-<uuid>`
-- Header: `X-Entity-ID: 00000000-0000-0000-0000-000000000002`
-- Roles and permissions are hardcoded for local development only
-- No external identity provider required
+There is no development token. Sign in with a real user at `/t/<tenant code>/login`; `pnpm --filter @hfp/api db:seed` creates the demo users and gives them their roles. `ENABLE_DEV_AUTH` is no longer read.

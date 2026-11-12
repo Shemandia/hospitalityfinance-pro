@@ -11,6 +11,8 @@ import { AuthService, AuthError, ValidationError } from "../../services/auth.ser
 import { getRedisClient } from "../../db/redis.js";
 import { resolveTenantByCode } from "../../db/tenantRegistry.js";
 import { sendPasswordResetEmail } from "../../shared/email.js";
+import { requireAuth } from "../../middleware/requireAuth.js";
+import { AccessInfrastructureError } from "../access/service.js";
 
 const COOKIE_SECURE =
   process.env.NODE_ENV === "production" ? true : process.env.COOKIE_SECURE === "true";
@@ -27,6 +29,8 @@ function getAuthService(): AuthService {
 }
 
 function sendError(reply: FastifyReply, error: unknown) {
+  // An access-service outage is answered with 503 by the application's error handler.
+  if (error instanceof AccessInfrastructureError) throw error;
   if (error instanceof AuthError) {
     return reply.code(error.statusCode).send({
       data: null,
@@ -301,7 +305,7 @@ export async function registerAuthRouter(app: FastifyInstance): Promise<void> {
   // POST /auth/logout
   app.post(
     "/auth/logout",
-    { config: { access: "session" }, preHandler: [requireAuthLocal] },
+    { config: { access: "session" }, preHandler: [requireAuth] },
     async (request, reply) => {
       try {
         const user = request.user!;
@@ -324,7 +328,7 @@ export async function registerAuthRouter(app: FastifyInstance): Promise<void> {
   // POST /auth/logout-all
   app.post(
     "/auth/logout-all",
-    { config: { access: "session" }, preHandler: [requireAuthLocal] },
+    { config: { access: "session" }, preHandler: [requireAuth] },
     async (request, reply) => {
       try {
         const user = request.user!;
@@ -347,7 +351,7 @@ export async function registerAuthRouter(app: FastifyInstance): Promise<void> {
     "/auth/change-password",
     {
       config: { access: "session" },
-      preHandler: [requireAuthLocal],
+      preHandler: [requireAuth],
       schema: {
         body: {
           type: "object",
@@ -386,7 +390,7 @@ export async function registerAuthRouter(app: FastifyInstance): Promise<void> {
   // GET /auth/me
   app.get(
     "/auth/me",
-    { config: { access: "session" }, preHandler: [requireAuthLocal] },
+    { config: { access: "session" }, preHandler: [requireAuth] },
     async (request, reply) => {
       try {
         const user = request.user!;
@@ -395,6 +399,7 @@ export async function registerAuthRouter(app: FastifyInstance): Promise<void> {
 
         const profile = await getAuthService().getProfile(
           user.sub as string,
+          tenant.id,
           tenant.slug,
           tenant.databaseUrl
         );
@@ -410,7 +415,7 @@ export async function registerAuthRouter(app: FastifyInstance): Promise<void> {
   // GET /auth/sessions
   app.get(
     "/auth/sessions",
-    { config: { access: "session" }, preHandler: [requireAuthLocal] },
+    { config: { access: "session" }, preHandler: [requireAuth] },
     async (request, reply) => {
       try {
         const user = request.user!;
@@ -428,7 +433,7 @@ export async function registerAuthRouter(app: FastifyInstance): Promise<void> {
   // DELETE /auth/sessions/:sessionId
   app.delete<{ Params: { sessionId: string } }>(
     "/auth/sessions/:sessionId",
-    { config: { access: "session" }, preHandler: [requireAuthLocal] },
+    { config: { access: "session" }, preHandler: [requireAuth] },
     async (request, reply) => {
       try {
         const user = request.user!;
@@ -443,26 +448,4 @@ export async function registerAuthRouter(app: FastifyInstance): Promise<void> {
       }
     }
   );
-}
-
-// ── Inline auth check for protected auth routes ──────────────────────────────
-// (These routes can't use the global auth plugin since /auth/* is skipped)
-
-async function requireAuthLocal(request: FastifyRequest, reply: FastifyReply) {
-  try {
-    await request.server.verifyAccessToken(request);
-  } catch (error) {
-    const statusCode =
-      typeof error === "object" &&
-      error !== null &&
-      "statusCode" in error &&
-      typeof (error as { statusCode: unknown }).statusCode === "number"
-        ? (error as { statusCode: number }).statusCode
-        : 401;
-    const message = error instanceof Error ? error.message : "Authentication failed.";
-    return reply.code(statusCode).send({
-      data: null,
-      errors: [{ code: "AUTHENTICATION_FAILED", message }]
-    });
-  }
 }

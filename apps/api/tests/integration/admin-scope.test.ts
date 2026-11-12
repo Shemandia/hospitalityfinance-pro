@@ -82,6 +82,30 @@ const ANY_ENTITY_ROUTES = [
   "PUT /api/v1/entities/:id"
 ];
 
+// The tenant registry is the one stand-in: the session's tenant resolves to the
+// test database. Requests therefore run through the tenant client pool, with
+// its row-level-security middleware, exactly as in production. Tests with two
+// real tenant databases follow with the removal of the default-database fallback.
+vi.mock("../../src/db/tenantRegistry.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/db/tenantRegistry.js")>()),
+  resolveTenantById: async (id: string) =>
+    id.startsWith("it-admin-")
+      ? {
+          id,
+          slug: id,
+          tenantCode: "itadmin1",
+          name: "Integration test tenant",
+          databaseUrl: process.env.TEST_DATABASE_URL as string,
+          domain: null,
+          adminEmail: "",
+          plan: "test",
+          maxProperties: 0,
+          isActive: true,
+          provisionedAt: null
+        }
+      : null
+}));
+
 if (!environmentReady || !redisUrl) {
   describe.skip("admin scope against real Postgres and Redis", () => {
     it("requires TEST_DATABASE_URL and REDIS_URL in the environment; run pnpm test:integration", () => {
@@ -261,22 +285,8 @@ if (!environmentReady || !redisUrl) {
         const userId = users[name];
         const sessionId = `s-${userId}`;
         await redis.set(`session:${tenantId}:${userId}:${sessionId}`, "1", "EX", 600);
-        // The legacy entityIds claim names both roots, so the auth plugin lets
-        // every entity through and the decisions below are the guard's and the
-        // service's. No roles or permissions travel in the token.
         tokens[name] = jwt.sign(
-          {
-            sub: userId,
-            email: email(name),
-            tenantId,
-            tenantCode: "",
-            tenantSlug: "",
-            entityIds: [ent.G, ent.O],
-            roles: [],
-            permissions: [],
-            sessionId,
-            type: "access"
-          },
+          { sub: userId, tenantId, sessionId, type: "access" },
           process.env.JWT_SECRET as string,
           { algorithm: "HS256", expiresIn: 600 }
         );
@@ -821,7 +831,8 @@ if (!environmentReady || !redisUrl) {
         const { AuthService } = await import("../../src/services/auth.service.js");
         const profile = await new AuthService(redis).getProfile(
           users.pam,
-          `it-admin-${run}`,
+          tenantId,
+          tenantId,
           process.env.TEST_DATABASE_URL as string
         );
         const roleCodes = await bypass((tx) =>
@@ -832,6 +843,10 @@ if (!environmentReady || !redisUrl) {
         );
         expect([...profile.roles].sort()).toEqual(roleCodes.map((role) => role.code).sort());
         expect(profile.permissions).toEqual(expect.arrayContaining(["ADMIN_USERS", "GL_POST"]));
+        // The entities are the ones pam can open: A and A1 as administrator, B as poster.
+        expect(profile.entities.map((entity) => entity.entityId).sort()).toEqual(
+          [ent.A, ent.A1, ent.B].sort()
+        );
       });
 
       it("refuses to delete a role that is still granted to someone", async () => {

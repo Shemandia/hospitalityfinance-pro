@@ -66,8 +66,6 @@ REDIS_URL=redis://localhost:6379
 #   node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 JWT_SECRET=paste-a-64+-char-random-hex-string
 
-# Optional: dev auth bypass for quick local testing
-ENABLE_DEV_AUTH=true
 ```
 
 The web app reads `apps/web/.env` — set `NEXT_PUBLIC_API_BASE_URL=http://localhost:4000` (match the API `PORT`).
