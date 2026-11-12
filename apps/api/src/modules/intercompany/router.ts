@@ -3,7 +3,6 @@ import { prisma } from "../../db/prisma.js";
 import type { PrismaClient } from "../../db/client.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
 import { requirePermission } from "../../middleware/requirePermission.js";
-import { requireWriteAccess } from "../../middleware/requireWriteAccess.js";
 import { IntercompanyService } from "./service.js";
 import { mapError } from "../../shared/router-utils.js";
 import {
@@ -317,7 +316,7 @@ export async function registerIntercompanyRouter(app: FastifyInstance): Promise<
       });
 
       router.post("/account-pairs", {
-        preHandler: [requirePermission("IC_CONFIG"), requireWriteAccess],
+        preHandler: [requirePermission("IC_CONFIG")],
         handler: async (request, reply) => {
           try {
             const entityId = getEntityId(request, reply);
@@ -332,7 +331,7 @@ export async function registerIntercompanyRouter(app: FastifyInstance): Promise<
       });
 
       router.put<{ Params: { id: string } }>("/account-pairs/:id", {
-        preHandler: [requirePermission("IC_CONFIG"), requireWriteAccess],
+        preHandler: [requirePermission("IC_CONFIG")],
         handler: async (request, reply) => {
           try {
             const entityId = getEntityId(request, reply);
@@ -347,7 +346,7 @@ export async function registerIntercompanyRouter(app: FastifyInstance): Promise<
       });
 
       router.delete<{ Params: { id: string } }>("/account-pairs/:id", {
-        preHandler: [requirePermission("IC_CONFIG"), requireWriteAccess],
+        preHandler: [requirePermission("IC_CONFIG")],
         handler: async (request, reply) => {
           try {
             const entityId = getEntityId(request, reply);
@@ -382,7 +381,7 @@ export async function registerIntercompanyRouter(app: FastifyInstance): Promise<
       // GET /journals and POST /journals/:id/reject remain for read access and
       // cleanup of pre-existing legacy drafts.
       router.post("/journals", {
-        preHandler: [requirePermission("IC_CREATE"), requireWriteAccess],
+        preHandler: [requirePermission("IC_CREATE")],
         handler: async (_request, reply) => {
           return reply.code(410).send({
             data: null,
@@ -398,7 +397,7 @@ export async function registerIntercompanyRouter(app: FastifyInstance): Promise<
       });
 
       router.post<{ Params: { id: string } }>("/journals/:id/approve", {
-        preHandler: [requirePermission("IC_APPROVE"), requireWriteAccess],
+        preHandler: [requirePermission("IC_APPROVE")],
         handler: async (_request, reply) => {
           return reply.code(410).send({
             data: null,
@@ -414,7 +413,7 @@ export async function registerIntercompanyRouter(app: FastifyInstance): Promise<
       });
 
       router.post<{ Params: { id: string } }>("/journals/:id/reject", {
-        preHandler: [requirePermission("IC_APPROVE"), requireWriteAccess],
+        preHandler: [requirePermission("IC_APPROVE")],
         handler: async (request, reply) => {
           try {
             const entityId = getEntityId(request, reply);
