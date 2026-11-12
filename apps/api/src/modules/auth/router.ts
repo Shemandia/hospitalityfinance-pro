@@ -127,6 +127,7 @@ export async function registerAuthRouter(app: FastifyInstance): Promise<void> {
         }
       },
       config: {
+        access: "public",
         rateLimit: {
           max: 10,
           timeWindow: "15 minutes"
@@ -159,6 +160,7 @@ export async function registerAuthRouter(app: FastifyInstance): Promise<void> {
     "/auth/refresh",
     {
       config: {
+        access: "public",
         rateLimit: {
           max: 30,
           timeWindow: "15 minutes"
@@ -194,6 +196,7 @@ export async function registerAuthRouter(app: FastifyInstance): Promise<void> {
   // GET /auth/tenant/:tenantCode — validate tenant code exists (public)
   app.get<{ Params: { tenantCode: string } }>(
     "/auth/tenant/:tenantCode",
+    { config: { access: "public" } },
     async (request, reply) => {
       const result = await getAuthService().validateTenantCode(request.params.tenantCode);
       if (!result) {
@@ -223,6 +226,7 @@ export async function registerAuthRouter(app: FastifyInstance): Promise<void> {
         }
       },
       config: {
+        access: "public",
         rateLimit: {
           max: 3,
           timeWindow: "1 hour"
@@ -265,6 +269,7 @@ export async function registerAuthRouter(app: FastifyInstance): Promise<void> {
   }>(
     "/auth/reset-password",
     {
+      config: { access: "public" },
       schema: {
         body: {
           type: "object",
@@ -294,38 +299,46 @@ export async function registerAuthRouter(app: FastifyInstance): Promise<void> {
   // ── Protected routes (auth required) ────────────────────────────────────
 
   // POST /auth/logout
-  app.post("/auth/logout", { preHandler: [requireAuthLocal] }, async (request, reply) => {
-    try {
-      const user = request.user!;
-      const refreshToken = request.cookies?.hfp_refresh_token;
-      await getAuthService().logout(
-        user.sub as string,
-        user.tenantId as string,
-        refreshToken,
-        user.sessionId as string | undefined
-      );
-      clearCookies(reply);
-      return reply.send({ data: { message: "Logged out" }, errors: [] });
-    } catch (error) {
-      clearCookies(reply);
-      return sendError(reply, error);
+  app.post(
+    "/auth/logout",
+    { config: { access: "session" }, preHandler: [requireAuthLocal] },
+    async (request, reply) => {
+      try {
+        const user = request.user!;
+        const refreshToken = request.cookies?.hfp_refresh_token;
+        await getAuthService().logout(
+          user.sub as string,
+          user.tenantId as string,
+          refreshToken,
+          user.sessionId as string | undefined
+        );
+        clearCookies(reply);
+        return reply.send({ data: { message: "Logged out" }, errors: [] });
+      } catch (error) {
+        clearCookies(reply);
+        return sendError(reply, error);
+      }
     }
-  });
+  );
 
   // POST /auth/logout-all
-  app.post("/auth/logout-all", { preHandler: [requireAuthLocal] }, async (request, reply) => {
-    try {
-      const user = request.user!;
-      await getAuthService().logoutAll(user.sub as string, user.tenantId as string);
-      clearCookies(reply);
-      return reply.send({
-        data: { message: "All sessions terminated" },
-        errors: []
-      });
-    } catch (error) {
-      return sendError(reply, error);
+  app.post(
+    "/auth/logout-all",
+    { config: { access: "session" }, preHandler: [requireAuthLocal] },
+    async (request, reply) => {
+      try {
+        const user = request.user!;
+        await getAuthService().logoutAll(user.sub as string, user.tenantId as string);
+        clearCookies(reply);
+        return reply.send({
+          data: { message: "All sessions terminated" },
+          errors: []
+        });
+      } catch (error) {
+        return sendError(reply, error);
+      }
     }
-  });
+  );
 
   // POST /auth/change-password
   app.post<{
@@ -333,6 +346,7 @@ export async function registerAuthRouter(app: FastifyInstance): Promise<void> {
   }>(
     "/auth/change-password",
     {
+      config: { access: "session" },
       preHandler: [requireAuthLocal],
       schema: {
         body: {
@@ -370,43 +384,51 @@ export async function registerAuthRouter(app: FastifyInstance): Promise<void> {
   );
 
   // GET /auth/me
-  app.get("/auth/me", { preHandler: [requireAuthLocal] }, async (request, reply) => {
-    try {
-      const user = request.user!;
-      const tenant = await resolveTenantByCode(user.tenantCode as string);
-      if (!tenant) throw new AuthError("Invalid tenant");
+  app.get(
+    "/auth/me",
+    { config: { access: "session" }, preHandler: [requireAuthLocal] },
+    async (request, reply) => {
+      try {
+        const user = request.user!;
+        const tenant = await resolveTenantByCode(user.tenantCode as string);
+        if (!tenant) throw new AuthError("Invalid tenant");
 
-      const profile = await getAuthService().getProfile(
-        user.sub as string,
-        tenant.slug,
-        tenant.databaseUrl
-      );
+        const profile = await getAuthService().getProfile(
+          user.sub as string,
+          tenant.slug,
+          tenant.databaseUrl
+        );
 
-      return reply.send({ data: profile, errors: [] });
-    } catch (error) {
-      request.log.error({ err: error }, "GET /auth/me failed");
-      return sendError(reply, error);
+        return reply.send({ data: profile, errors: [] });
+      } catch (error) {
+        request.log.error({ err: error }, "GET /auth/me failed");
+        return sendError(reply, error);
+      }
     }
-  });
+  );
 
   // GET /auth/sessions
-  app.get("/auth/sessions", { preHandler: [requireAuthLocal] }, async (request, reply) => {
-    try {
-      const user = request.user!;
-      const sessions = await getAuthService().listSessions(
-        user.sub as string,
-        user.tenantId as string
-      );
-      return reply.send({ data: sessions, errors: [] });
-    } catch (error) {
-      return sendError(reply, error);
+  app.get(
+    "/auth/sessions",
+    { config: { access: "session" }, preHandler: [requireAuthLocal] },
+    async (request, reply) => {
+      try {
+        const user = request.user!;
+        const sessions = await getAuthService().listSessions(
+          user.sub as string,
+          user.tenantId as string
+        );
+        return reply.send({ data: sessions, errors: [] });
+      } catch (error) {
+        return sendError(reply, error);
+      }
     }
-  });
+  );
 
   // DELETE /auth/sessions/:sessionId
   app.delete<{ Params: { sessionId: string } }>(
     "/auth/sessions/:sessionId",
-    { preHandler: [requireAuthLocal] },
+    { config: { access: "session" }, preHandler: [requireAuthLocal] },
     async (request, reply) => {
       try {
         const user = request.user!;

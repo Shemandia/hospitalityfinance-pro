@@ -35,9 +35,17 @@ import { registerTestRouter } from "./modules/transfer-desk/test-router.js";
 import { registerScheduleRouter } from "./modules/transfer-desk/schedule-router.js";
 import { registerIntercompanyRouter } from "./modules/intercompany/router.js";
 import authPlugin from "./plugins/auth.js";
+import { registerRouteAccessRegistry, type RouteAccess } from "./modules/access/route-access.js";
 import { registerAuthRouter } from "./modules/auth/router.js";
 import { connectRedis } from "./db/redis.js";
 import { registerEntityRouter } from "./modules/entity/router.js";
+
+declare module "fastify" {
+  interface FastifyInstance {
+    /** "METHOD /url" -> how the route is protected. Filled as routes register. */
+    routeAccess: ReadonlyMap<string, RouteAccess>;
+  }
+}
 
 export async function createApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -47,6 +55,9 @@ export async function createApp(): Promise<FastifyInstance> {
     },
     bodyLimit: 10 * 1024 * 1024 // 10 MB for file imports
   });
+
+  // Before any route: a route without an access classification fails startup.
+  app.decorate("routeAccess", registerRouteAccessRegistry(app));
 
   const allowedOrigins = (
     process.env.ALLOWED_ORIGINS ?? "http://localhost:3000,http://localhost:3001"
@@ -115,7 +126,7 @@ export async function createApp(): Promise<FastifyInstance> {
 
   const startTime = Date.now();
 
-  app.get("/health", async () => {
+  app.get("/health", { config: { access: "public" } }, async () => {
     let dbOk = false;
     let redisOk = false;
 
@@ -151,7 +162,7 @@ export async function createApp(): Promise<FastifyInstance> {
     };
   });
 
-  app.get("/ready", async (_request, reply) => {
+  app.get("/ready", { config: { access: "public" } }, async (_request, reply) => {
     try {
       await prisma.$queryRaw`SELECT 1`;
       const { getRedisClient } = await import("./db/redis.js");
@@ -162,23 +173,27 @@ export async function createApp(): Promise<FastifyInstance> {
     }
   });
 
-  app.get("/api/v1/version", async () => ({
+  app.get("/api/v1/version", { config: { access: "public" } }, async () => ({
     version: process.env.APP_VERSION ?? "1.0.0",
     buildDate: process.env.BUILD_DATE ?? new Date().toISOString().split("T")[0],
     nodeVersion: process.version,
     environment: process.env.NODE_ENV ?? "development"
   }));
 
-  app.get("/api/v1/me", { preHandler: [requireAuth] }, async (request) => {
-    return {
-      data: {
-        user: request.user,
-        entityId: request.entityId,
-        chainId: request.chainId
-      },
-      errors: []
-    };
-  });
+  app.get(
+    "/api/v1/me",
+    { preHandler: [requireAuth], config: { access: "session" } },
+    async (request) => {
+      return {
+        data: {
+          user: request.user,
+          entityId: request.entityId,
+          chainId: request.chainId
+        },
+        errors: []
+      };
+    }
+  );
 
   await registerEntityRouter(app);
 

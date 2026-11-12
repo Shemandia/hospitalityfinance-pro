@@ -1,0 +1,395 @@
+DELETE /api/v1/account-types/:id  ->  entity  ADMIN_SETTINGS
+DELETE /api/v1/admin/permissions/:id  ->  tenant  ADMIN_ROLES_MANAGE
+DELETE /api/v1/admin/roles/:id  ->  tenant  ADMIN_ROLES_MANAGE
+DELETE /api/v1/admin/roles/:id/permissions/:permissionId  ->  tenant  ADMIN_ROLES_MANAGE
+DELETE /api/v1/admin/users/:userId  ->  entity  ADMIN_USERS
+DELETE /api/v1/admin/users/:userId/roles/:roleId  ->  any-entity  ADMIN_USERS
+DELETE /api/v1/allocations/:id  ->  entity  ADMIN_SETTINGS
+DELETE /api/v1/ap/invoices/:id  ->  entity  AP_WRITE
+DELETE /api/v1/ap/payment-profiles/:id  ->  entity  PAYMENT_RUN_CREATE
+DELETE /api/v1/ap/payment-runs/:id  ->  entity  PAYMENT_RUN_CREATE
+DELETE /api/v1/ap/suppliers/:id  ->  entity  AP_WRITE
+DELETE /api/v1/authorization/delegations/:id  ->  entity  ADMIN_SETTINGS
+DELETE /api/v1/authorization/stages/:id  ->  entity  ADMIN_SETTINGS
+DELETE /api/v1/authorization/teams/:id  ->  entity  ADMIN_SETTINGS
+DELETE /api/v1/entities/:id  ->  any-entity  ADMIN_ENTITIES
+DELETE /api/v1/fx/rates/:id  ->  entity  FX_WRITE
+DELETE /api/v1/fx/revaluation-profiles/:id  ->  entity  FX_WRITE
+DELETE /api/v1/gl/accounts/:id  ->  entity  COA_EDIT
+DELETE /api/v1/gl/approval-rules/:id  ->  entity  GL_APPROVE | ADMIN_SETTINGS
+DELETE /api/v1/gl/journal-types/:id  ->  entity  GL_WRITE | ADMIN_SETTINGS
+DELETE /api/v1/gl/recurring-journals/:id  ->  entity  GL_WRITE | ADMIN_SETTINGS
+DELETE /api/v1/integration/interfaces/:id  ->  entity  INTEGRATION_CONFIG
+DELETE /api/v1/integration/mappings/:id  ->  entity  INTEGRATION_CONFIG
+DELETE /api/v1/integration/transfer-desk/automations/:id  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
+DELETE /api/v1/integration/transfer-desk/filters/:id  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
+DELETE /api/v1/integration/transfer-desk/lookups/:id  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
+DELETE /api/v1/integration/transfer-desk/profiles/:id  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
+DELETE /api/v1/intercompany/account-pairs/:id  ->  entity  IC_CONFIG
+DELETE /api/v1/intercompany/v2/mappings/:id  ->  entity  IC_CONFIG
+DELETE /api/v1/intercompany/v2/pairs/:id  ->  entity  IC_CONFIG
+DELETE /api/v1/platform/tenants/:slug  ->  platform
+DELETE /api/v1/reports/definitions/:id  ->  entity  REPORT_WRITE
+DELETE /api/v1/reports/definitions/:id/schedule  ->  entity  REPORT_WRITE
+DELETE /api/v1/transfer-desk/profiles/:profileId  ->  entity  TRANSFER_DESK_CONFIG
+DELETE /api/v1/transfer-desk/profiles/:profileId/schedule  ->  entity  TRANSFER_DESK_CONFIG
+DELETE /auth/sessions/:sessionId  ->  session
+GET    /api/v1/account-types  ->  entity  COA_READ | GL_READ
+GET    /api/v1/account-types/all  ->  entity  ADMIN_SETTINGS
+GET    /api/v1/admin/all-users  ->  any-entity  ADMIN_ENTITIES
+GET    /api/v1/admin/entity-tree  ->  any-entity  ADMIN_USERS | ADMIN_ENTITIES
+GET    /api/v1/admin/login-audit  ->  any-entity  ADMIN_AUDIT_LOG | ADMIN_USERS
+GET    /api/v1/admin/permissions  ->  any-entity  ADMIN_USERS | ADMIN_ROLES_MANAGE
+GET    /api/v1/admin/profile  ->  session
+GET    /api/v1/admin/roles  ->  any-entity  ADMIN_USERS | ADMIN_ROLES_MANAGE
+GET    /api/v1/admin/roles/:id  ->  any-entity  ADMIN_USERS | ADMIN_ROLES_MANAGE
+GET    /api/v1/admin/users  ->  entity  ADMIN_USERS | ADMIN_USERS_READ
+GET    /api/v1/admin/users/:userId/detail  ->  any-entity  ADMIN_USERS | ADMIN_USERS_READ
+GET    /api/v1/admin/users/:userId/entities  ->  any-entity  ADMIN_USERS | ADMIN_USERS_READ
+GET    /api/v1/admin/users/:userId/roles  ->  any-entity  ADMIN_USERS | ADMIN_USERS_READ
+GET    /api/v1/allocations  ->  entity  GL_READ
+GET    /api/v1/allocations/:id  ->  entity  GL_READ
+GET    /api/v1/ap/invoices  ->  entity  AP_READ
+GET    /api/v1/ap/invoices/:id  ->  entity  AP_READ
+GET    /api/v1/ap/payment-profiles  ->  entity  AP_READ
+GET    /api/v1/ap/payment-profiles/:id  ->  entity  AP_READ
+GET    /api/v1/ap/payment-runs  ->  entity  PAYMENT_RUN_READ | AP_READ
+GET    /api/v1/ap/payment-runs/:id  ->  entity  PAYMENT_RUN_READ | AP_READ
+GET    /api/v1/ap/payment-runs/:id/download  ->  entity  AP_PAYMENT_CONFIRM
+GET    /api/v1/ap/payment-runs/:runId/voucher/:supplierId  ->  entity  AP_PAYMENT_CONFIRM
+GET    /api/v1/ap/suppliers  ->  entity  AP_READ
+GET    /api/v1/ap/suppliers/:id  ->  entity  AP_READ
+GET    /api/v1/ar/ageing  ->  entity  AR_READ
+GET    /api/v1/ar/customers  ->  entity  AR_READ
+GET    /api/v1/ar/customers/:id  ->  entity  AR_READ
+GET    /api/v1/ar/invoices  ->  entity  AR_READ
+GET    /api/v1/ar/invoices/:id  ->  entity  AR_READ
+GET    /api/v1/ar/receipts  ->  entity  AR_READ
+GET    /api/v1/asset-categories  ->  entity  GL_READ
+GET    /api/v1/audit  ->  entity  AUDIT_READ | ADMIN_AUDIT_LOG
+GET    /api/v1/authorization/delegations  ->  entity  GL_READ | GL_APPROVE
+GET    /api/v1/authorization/history/:journalId  ->  entity  GL_READ | GL_APPROVE
+GET    /api/v1/authorization/queue  ->  entity  GL_READ | GL_APPROVE
+GET    /api/v1/authorization/rejection-codes  ->  entity  GL_READ | GL_APPROVE
+GET    /api/v1/authorization/sets  ->  entity  GL_READ | GL_APPROVE
+GET    /api/v1/authorization/stages  ->  entity  GL_READ | GL_APPROVE
+GET    /api/v1/authorization/teams  ->  entity  GL_READ | GL_APPROVE
+GET    /api/v1/budget/definitions  ->  entity  BUDGET_READ
+GET    /api/v1/budget/definitions/:id  ->  entity  BUDGET_READ
+GET    /api/v1/budget/definitions/:id/lines  ->  entity  BUDGET_READ
+GET    /api/v1/budget/variance  ->  entity  BUDGET_READ
+GET    /api/v1/consolidation/:parentEntityId/runs  ->  entity  CONSOLIDATION_RUN | REPORT_READ
+GET    /api/v1/consolidation/:parentEntityId/runs/:runId  ->  entity  CONSOLIDATION_RUN | REPORT_READ
+GET    /api/v1/entities  ->  session
+GET    /api/v1/entities/:id  ->  session
+GET    /api/v1/fixed-assets  ->  entity  GL_READ
+GET    /api/v1/fixed-assets/:id  ->  entity  GL_READ
+GET    /api/v1/fx/convert  ->  entity  FX_READ | GL_READ
+GET    /api/v1/fx/currencies  ->  entity  FX_READ | GL_READ
+GET    /api/v1/fx/rates  ->  entity  FX_READ | GL_READ
+GET    /api/v1/fx/revaluation-profiles  ->  entity  FX_READ
+GET    /api/v1/fx/revaluation-profiles/:id  ->  entity  FX_READ
+GET    /api/v1/gl/accounts  ->  entity  COA_READ | GL_READ
+GET    /api/v1/gl/accounts/:id  ->  entity  COA_READ | GL_READ
+GET    /api/v1/gl/accounts/:id/balance  ->  entity  COA_READ | GL_READ
+GET    /api/v1/gl/accounts/:id/ledger  ->  entity  COA_READ | GL_READ
+GET    /api/v1/gl/approval-rules  ->  entity  GL_READ
+GET    /api/v1/gl/approval-rules/:id  ->  entity  GL_READ
+GET    /api/v1/gl/journal-types  ->  entity  GL_READ
+GET    /api/v1/gl/journal-types/:id  ->  entity  GL_READ
+GET    /api/v1/gl/journals  ->  entity  GL_READ
+GET    /api/v1/gl/journals/:id  ->  entity  GL_READ
+GET    /api/v1/gl/recurring-journals  ->  entity  GL_READ
+GET    /api/v1/gl/recurring-journals/:id  ->  entity  GL_READ
+GET    /api/v1/gl/trial-balance  ->  entity  GL_READ
+GET    /api/v1/gl/users  ->  entity  GL_READ
+GET    /api/v1/integration/bank/statements  ->  entity  INTEGRATION_READ
+GET    /api/v1/integration/bank/statements/:statementId/reconciliation  ->  entity  INTEGRATION_READ
+GET    /api/v1/integration/bank/statements/:statementId/transactions  ->  entity  INTEGRATION_READ
+GET    /api/v1/integration/bank/statements/:statementId/unreconciled  ->  entity  INTEGRATION_READ
+GET    /api/v1/integration/bank/transactions/:transactionId/candidates  ->  entity  INTEGRATION_READ
+GET    /api/v1/integration/imports/coverage  ->  entity  INTEGRATION_READ
+GET    /api/v1/integration/imports/ledger-reconciliation  ->  entity  INTEGRATION_READ
+GET    /api/v1/integration/interfaces  ->  entity  INTEGRATION_READ
+GET    /api/v1/integration/interfaces/:id  ->  entity  INTEGRATION_READ
+GET    /api/v1/integration/mappings  ->  entity  INTEGRATION_READ
+GET    /api/v1/integration/mews/logs  ->  entity  INTEGRATION_READ
+GET    /api/v1/integration/opera-cloud/cashier-report  ->  entity  INTEGRATION_READ
+GET    /api/v1/integration/opera-cloud/city-ledger  ->  entity  INTEGRATION_READ
+GET    /api/v1/integration/opera-cloud/logs  ->  entity  INTEGRATION_READ
+GET    /api/v1/integration/opera-cloud/statistics  ->  entity  STATS_READ | INTEGRATION_READ
+GET    /api/v1/integration/payroll/logs  ->  entity  INTEGRATION_READ
+GET    /api/v1/integration/simphony/logs  ->  entity  INTEGRATION_READ
+GET    /api/v1/integration/transfer-desk/automations  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/integration/transfer-desk/automations/:id  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/integration/transfer-desk/components  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/integration/transfer-desk/executions  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/integration/transfer-desk/executions/:id  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/integration/transfer-desk/executions/:id/logs  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/integration/transfer-desk/filters  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/integration/transfer-desk/formats  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/integration/transfer-desk/formats/:id  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/integration/transfer-desk/lookups  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/integration/transfer-desk/lookups/:id  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/integration/transfer-desk/metadata  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/integration/transfer-desk/profiles  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/integration/transfer-desk/profiles/:id  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/integration/transfer-desk/profiles/:id/versions  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/integration/transfer-desk/transformations  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/integration/transfer-desk/transformations/:id  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/intercompany/account-pairs  ->  entity  IC_READ
+GET    /api/v1/intercompany/journals  ->  entity  IC_READ
+GET    /api/v1/intercompany/v2/pairs  ->  entity  IC_READ | IC_CONFIG
+GET    /api/v1/intercompany/v2/pairs/:id  ->  entity  IC_READ | IC_CONFIG
+GET    /api/v1/intercompany/v2/pairs/:pairId/mappings  ->  entity  IC_READ | IC_CONFIG
+GET    /api/v1/intercompany/v2/reconciliation  ->  entity  IC_READ | IC_RECONCILE
+GET    /api/v1/intercompany/v2/transactions  ->  entity  IC_READ
+GET    /api/v1/intercompany/v2/transactions/:id  ->  entity  IC_READ
+GET    /api/v1/kpi/balance-sheet  ->  entity  REPORT_READ
+GET    /api/v1/kpi/balance-sheet/pdf  ->  entity  REPORT_EXPORT
+GET    /api/v1/kpi/cash-flow  ->  entity  REPORT_READ
+GET    /api/v1/kpi/cash-flow/pdf  ->  entity  REPORT_EXPORT
+GET    /api/v1/kpi/currency-exposure  ->  entity  REPORT_READ
+GET    /api/v1/kpi/dashboard  ->  entity  REPORT_READ
+GET    /api/v1/kpi/entity-summary  ->  entity  REPORT_READ
+GET    /api/v1/kpi/revpar  ->  entity  STATS_READ | REPORT_READ
+GET    /api/v1/kpi/revpar-trend  ->  entity  STATS_READ | REPORT_READ
+GET    /api/v1/kpi/usali  ->  entity  REPORT_READ
+GET    /api/v1/kpi/usali-comparative  ->  entity  REPORT_READ
+GET    /api/v1/kpi/usali-comparative/pdf  ->  entity  REPORT_EXPORT
+GET    /api/v1/license  ->  session
+GET    /api/v1/me  ->  session
+GET    /api/v1/period-close/year-end-config  ->  entity  PERIOD_READ | PERIOD_MANAGE
+GET    /api/v1/periods  ->  entity  PERIOD_READ | GL_READ
+GET    /api/v1/platform/tenants  ->  platform
+GET    /api/v1/platform/tenants/:slug  ->  platform
+GET    /api/v1/platform/tenants/:slug/provision-status  ->  platform
+GET    /api/v1/platform/tenants/active/cached  ->  platform
+GET    /api/v1/process-locks/status  ->  entity  ADMIN_SETTINGS
+GET    /api/v1/reports/definitions  ->  entity  REPORT_READ
+GET    /api/v1/reports/definitions/:id  ->  entity  REPORT_READ
+GET    /api/v1/reports/history  ->  entity  REPORT_READ
+GET    /api/v1/reports/runs/:id  ->  entity  REPORT_READ
+GET    /api/v1/reports/runs/:id/download  ->  entity  REPORT_EXPORT
+GET    /api/v1/reports/types  ->  entity  REPORT_READ
+GET    /api/v1/setup/progress  ->  session
+GET    /api/v1/transfer-desk/batches  ->  entity  TRANSFER_DESK_EXECUTE
+GET    /api/v1/transfer-desk/batches/:id  ->  entity  TRANSFER_DESK_EXECUTE
+GET    /api/v1/transfer-desk/lookup-tables  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/transfer-desk/lookup-tables/:tableId  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/transfer-desk/mappings/functions  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/transfer-desk/mappings/target-fields  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/transfer-desk/profiles  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/transfer-desk/profiles/:profileId  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/transfer-desk/profiles/:profileId/schedule  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/transfer-desk/profiles/:profileId/test/:testId/results  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/transfer-desk/profiles/:profileId/versions  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/transfer-desk/profiles/:profileId/versions/:versionId  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/version  ->  public
+GET    /auth/me  ->  session
+GET    /auth/sessions  ->  session
+GET    /auth/tenant/:tenantCode  ->  public
+GET    /health  ->  public
+GET    /ready  ->  public
+OPTIONS*  ->  public
+PATCH  /api/v1/transfer-desk/profiles/:profileId/status  ->  entity  TRANSFER_DESK_CONFIG
+POST   /api/v1/account-types  ->  entity  ADMIN_SETTINGS
+POST   /api/v1/admin/login-audit  ->  any-entity  ADMIN_USERS
+POST   /api/v1/admin/permissions  ->  tenant  ADMIN_ROLES_MANAGE
+POST   /api/v1/admin/roles  ->  tenant  ADMIN_ROLES_MANAGE
+POST   /api/v1/admin/roles/:id/permissions  ->  tenant  ADMIN_ROLES_MANAGE
+POST   /api/v1/admin/users  ->  entity  ADMIN_USERS
+POST   /api/v1/admin/users/:userId/roles  ->  any-entity  ADMIN_USERS
+POST   /api/v1/admin/users/assign-scope  ->  any-entity  ADMIN_ENTITIES
+POST   /api/v1/admin/users/invite  ->  any-entity  ADMIN_USERS
+POST   /api/v1/admin/users/revoke-scope  ->  any-entity  ADMIN_ENTITIES
+POST   /api/v1/allocations  ->  entity  GL_WRITE
+POST   /api/v1/allocations/:id/dry-run  ->  entity  GL_WRITE
+POST   /api/v1/allocations/:id/execute  ->  entity  ADMIN_SETTINGS
+POST   /api/v1/allocations/run-all  ->  entity  ADMIN_SETTINGS
+POST   /api/v1/ap/collection-runs  ->  entity  AR_WRITE
+POST   /api/v1/ap/invoices  ->  entity  AP_WRITE
+POST   /api/v1/ap/invoices/:id/approve  ->  entity  AP_APPROVE
+POST   /api/v1/ap/invoices/:id/post  ->  entity  AP_APPROVE
+POST   /api/v1/ap/payment-profiles  ->  entity  PAYMENT_RUN_CREATE
+POST   /api/v1/ap/payment-runs/:id/approve  ->  entity  PAYMENT_RUN_APPROVE
+POST   /api/v1/ap/payment-runs/:id/confirm  ->  entity  AP_PAYMENT_CONFIRM
+POST   /api/v1/ap/payment-runs/proposal  ->  entity  PAYMENT_RUN_CREATE
+POST   /api/v1/ap/portal/invoices  ->  entity  AP_WRITE
+POST   /api/v1/ap/suppliers  ->  entity  AP_WRITE
+POST   /api/v1/ar/allocations  ->  entity  AR_WRITE
+POST   /api/v1/ar/customers  ->  entity  AR_WRITE
+POST   /api/v1/ar/dunning/enqueue  ->  entity  AR_DUNNING
+POST   /api/v1/ar/dunning/run  ->  entity  AR_DUNNING
+POST   /api/v1/ar/invoices  ->  entity  AR_WRITE
+POST   /api/v1/ar/invoices/:id/post  ->  entity  AR_WRITE
+POST   /api/v1/ar/receipts  ->  entity  AR_WRITE
+POST   /api/v1/asset-categories  ->  entity  ADMIN_SETTINGS
+POST   /api/v1/authorization/approve/:journalId  ->  entity  GL_APPROVE
+POST   /api/v1/authorization/bulk-approve  ->  entity  GL_APPROVE
+POST   /api/v1/authorization/bulk-reject  ->  entity  GL_APPROVE
+POST   /api/v1/authorization/delegations  ->  entity  ADMIN_SETTINGS
+POST   /api/v1/authorization/reject/:journalId  ->  entity  GL_APPROVE
+POST   /api/v1/authorization/rejection-codes  ->  entity  ADMIN_SETTINGS
+POST   /api/v1/authorization/resubmit/:journalId  ->  entity  GL_WRITE
+POST   /api/v1/authorization/return/:journalId  ->  entity  GL_APPROVE
+POST   /api/v1/authorization/sets  ->  entity  GL_APPROVE
+POST   /api/v1/authorization/sets/:id/add  ->  entity  GL_APPROVE
+POST   /api/v1/authorization/sets/:id/approve  ->  entity  GL_APPROVE
+POST   /api/v1/authorization/sets/:id/reject  ->  entity  GL_APPROVE
+POST   /api/v1/authorization/stages  ->  entity  ADMIN_SETTINGS
+POST   /api/v1/authorization/teams  ->  entity  ADMIN_SETTINGS
+POST   /api/v1/authorization/void/:journalId  ->  entity  ADMIN_SETTINGS
+POST   /api/v1/budget/definitions  ->  entity  BUDGET_WRITE
+POST   /api/v1/budget/definitions/:id/import-excel/execute  ->  entity  BUDGET_WRITE
+POST   /api/v1/budget/definitions/:id/import-excel/preview  ->  entity  BUDGET_READ
+POST   /api/v1/consolidation/run  ->  entity  CONSOLIDATION_RUN
+POST   /api/v1/entities  ->  any-entity  ADMIN_ENTITIES
+POST   /api/v1/fixed-assets  ->  entity  GL_WRITE
+POST   /api/v1/fixed-assets/:id/dispose  ->  entity  ADMIN_SETTINGS
+POST   /api/v1/fixed-assets/:id/revalue  ->  entity  ADMIN_SETTINGS
+POST   /api/v1/fixed-assets/:id/transfer  ->  entity  GL_WRITE
+POST   /api/v1/fixed-assets/:id/write-off  ->  entity  ADMIN_SETTINGS
+POST   /api/v1/fixed-assets/depreciation/preview  ->  entity  GL_WRITE
+POST   /api/v1/fixed-assets/depreciation/run  ->  entity  ADMIN_SETTINGS
+POST   /api/v1/fx/currencies  ->  entity  FX_WRITE
+POST   /api/v1/fx/ecb-import  ->  entity  FX_WRITE
+POST   /api/v1/fx/ledger-revaluation  ->  entity  FX_WRITE
+POST   /api/v1/fx/rates  ->  entity  FX_WRITE
+POST   /api/v1/fx/revaluation  ->  entity  FX_WRITE
+POST   /api/v1/fx/revaluation-profiles  ->  entity  FX_WRITE
+POST   /api/v1/gl/accounts  ->  entity  COA_CREATE
+POST   /api/v1/gl/accounts/import/execute  ->  entity  COA_CREATE | COA_EDIT
+POST   /api/v1/gl/accounts/import/preview  ->  entity  COA_READ
+POST   /api/v1/gl/accounts/import/sheets  ->  entity  COA_READ
+POST   /api/v1/gl/approval-rules  ->  entity  GL_WRITE | ADMIN_SETTINGS
+POST   /api/v1/gl/journal-types  ->  entity  GL_WRITE | ADMIN_SETTINGS
+POST   /api/v1/gl/journals  ->  entity  GL_WRITE
+POST   /api/v1/gl/journals/:id/approve  ->  entity  GL_APPROVE
+POST   /api/v1/gl/journals/:id/post  ->  entity  GL_POST
+POST   /api/v1/gl/journals/:id/reject  ->  entity  GL_APPROVE
+POST   /api/v1/gl/journals/:id/reverse  ->  entity  GL_REVERSE
+POST   /api/v1/gl/recurring-journals  ->  entity  GL_WRITE
+POST   /api/v1/gl/recurring-journals/:id/generate  ->  entity  GL_WRITE | ADMIN_SETTINGS
+POST   /api/v1/integration/bank/import  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integration/bank/statements/:statementId/auto-match  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integration/bank/transactions/:transactionId/match  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integration/bank/transactions/:transactionId/unmatch  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integration/import/saf/account-mapping  ->  entity  INTEGRATION_READ
+POST   /api/v1/integration/import/saf/execute  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integration/import/saf/preview  ->  entity  INTEGRATION_READ
+POST   /api/v1/integration/imports/:id/reverse  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integration/inbound/file-import  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integration/inbound/invoices  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integration/inbound/journals  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integration/inbound/suppliers  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integration/interfaces  ->  entity  INTEGRATION_CONFIG
+POST   /api/v1/integration/interfaces/:id/execute  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integration/interfaces/:id/preview  ->  entity  INTEGRATION_READ
+POST   /api/v1/integration/interfaces/preview-draft  ->  entity  INTEGRATION_READ
+POST   /api/v1/integration/mappings  ->  entity  INTEGRATION_CONFIG
+POST   /api/v1/integration/mews/import  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integration/opera-cloud/import  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integration/opera-sun/import  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integration/payroll/import  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integration/payroll/import-file  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integration/simphony/import  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integration/sky-jana/sync  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integration/transfer-desk/automations  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
+POST   /api/v1/integration/transfer-desk/automations/:id/run  ->  entity  TRANSFER_DESK_EXECUTE | INTEGRATION_IMPORT
+POST   /api/v1/integration/transfer-desk/executions/:id/cancel  ->  entity  TRANSFER_DESK_EXECUTE | INTEGRATION_IMPORT
+POST   /api/v1/integration/transfer-desk/filters  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
+POST   /api/v1/integration/transfer-desk/formats  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
+POST   /api/v1/integration/transfer-desk/formats/detect  ->  entity  TRANSFER_DESK_READ | INTEGRATION_READ
+POST   /api/v1/integration/transfer-desk/lookups  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
+POST   /api/v1/integration/transfer-desk/lookups/:id/import-csv  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
+POST   /api/v1/integration/transfer-desk/lookups/:id/rows  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
+POST   /api/v1/integration/transfer-desk/profiles  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
+POST   /api/v1/integration/transfer-desk/profiles/:id/clone  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
+POST   /api/v1/integration/transfer-desk/profiles/:id/execute  ->  entity  TRANSFER_DESK_EXECUTE | INTEGRATION_IMPORT
+POST   /api/v1/integration/transfer-desk/profiles/:id/validate  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
+POST   /api/v1/integration/transfer-desk/transformations  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
+POST   /api/v1/intercompany/account-pairs  ->  entity  IC_CONFIG
+POST   /api/v1/intercompany/journals  ->  entity  IC_CREATE
+POST   /api/v1/intercompany/journals/:id/approve  ->  entity  IC_APPROVE
+POST   /api/v1/intercompany/journals/:id/reject  ->  entity  IC_APPROVE
+POST   /api/v1/intercompany/v2/mappings  ->  entity  IC_CONFIG
+POST   /api/v1/intercompany/v2/pairs  ->  entity  IC_CONFIG
+POST   /api/v1/intercompany/v2/reconciliation/snapshot  ->  entity  IC_RECONCILE
+POST   /api/v1/intercompany/v2/transactions  ->  entity  IC_CREATE
+POST   /api/v1/intercompany/v2/transactions/:id/approve  ->  entity  IC_APPROVE
+POST   /api/v1/intercompany/v2/transactions/:id/reject  ->  entity  IC_APPROVE
+POST   /api/v1/intercompany/v2/transactions/:id/reverse  ->  entity  IC_REVERSE
+POST   /api/v1/period-close/year-end-cleardown  ->  entity  PERIOD_MANAGE
+POST   /api/v1/period-close/year-end-config  ->  entity  PERIOD_MANAGE
+POST   /api/v1/periods  ->  entity  PERIOD_MANAGE
+POST   /api/v1/periods/:id/close  ->  entity  PERIOD_MANAGE
+POST   /api/v1/periods/:id/lock  ->  entity  PERIOD_MANAGE
+POST   /api/v1/periods/:id/reopen  ->  entity  PERIOD_REOPEN
+POST   /api/v1/periods/:id/soft-close  ->  entity  PERIOD_MANAGE
+POST   /api/v1/platform/tenants  ->  platform
+POST   /api/v1/platform/tenants/:slug/provision-retry  ->  platform
+POST   /api/v1/platform/tenants/provision  ->  platform
+POST   /api/v1/process-locks/acquire  ->  entity  ADMIN_SETTINGS
+POST   /api/v1/process-locks/release  ->  entity  ADMIN_SETTINGS
+POST   /api/v1/reports/definitions  ->  entity  REPORT_WRITE
+POST   /api/v1/reports/definitions/:id/clone  ->  entity  REPORT_WRITE
+POST   /api/v1/reports/definitions/:id/schedule  ->  entity  REPORT_WRITE
+POST   /api/v1/reports/drill-down  ->  entity  REPORT_READ
+POST   /api/v1/reports/execute  ->  entity  REPORT_WRITE
+POST   /api/v1/reports/runs  ->  entity  REPORT_WRITE
+POST   /api/v1/reports/seed-system  ->  entity  REPORT_WRITE
+POST   /api/v1/setup/complete  ->  tenant  ADMIN_SETTINGS
+POST   /api/v1/transfer-desk/batches/:id/commit  ->  entity  TRANSFER_DESK_EXECUTE
+POST   /api/v1/transfer-desk/batches/:id/discard  ->  entity  TRANSFER_DESK_EXECUTE
+POST   /api/v1/transfer-desk/batches/:id/items/:itemId/reject  ->  entity  TRANSFER_DESK_EXECUTE
+POST   /api/v1/transfer-desk/batches/:id/items/:itemId/restore  ->  entity  TRANSFER_DESK_EXECUTE
+POST   /api/v1/transfer-desk/fsd/auto-detect  ->  entity  TRANSFER_DESK_READ
+POST   /api/v1/transfer-desk/fsd/parse-preview  ->  entity  TRANSFER_DESK_READ
+POST   /api/v1/transfer-desk/fsd/validate-schema  ->  entity  TRANSFER_DESK_READ
+POST   /api/v1/transfer-desk/lookup-tables  ->  entity  TRANSFER_DESK_CONFIG
+POST   /api/v1/transfer-desk/profiles  ->  entity  TRANSFER_DESK_CONFIG
+POST   /api/v1/transfer-desk/profiles/:profileId/schedule  ->  entity  TRANSFER_DESK_CONFIG
+POST   /api/v1/transfer-desk/profiles/:profileId/test  ->  entity  TRANSFER_DESK_EXECUTE | TRANSFER_DESK_CONFIG
+POST   /auth/change-password  ->  session
+POST   /auth/forgot-password  ->  public
+POST   /auth/login  ->  public
+POST   /auth/logout  ->  session
+POST   /auth/logout-all  ->  session
+POST   /auth/refresh  ->  public
+POST   /auth/reset-password  ->  public
+PUT    /api/v1/account-types/:id  ->  entity  ADMIN_SETTINGS
+PUT    /api/v1/admin/profile  ->  session
+PUT    /api/v1/admin/roles/:id  ->  tenant  ADMIN_ROLES_MANAGE
+PUT    /api/v1/admin/users/:userId/status  ->  any-entity  ADMIN_USERS
+PUT    /api/v1/allocations/:id  ->  entity  GL_WRITE
+PUT    /api/v1/ap/invoices/:id  ->  entity  AP_WRITE
+PUT    /api/v1/ap/payment-profiles/:id  ->  entity  PAYMENT_RUN_CREATE
+PUT    /api/v1/ap/suppliers/:id  ->  entity  AP_WRITE
+PUT    /api/v1/ar/customers/:id  ->  entity  AR_WRITE
+PUT    /api/v1/ar/invoices/:id  ->  entity  AR_WRITE
+PUT    /api/v1/authorization/stages/:id  ->  entity  ADMIN_SETTINGS
+PUT    /api/v1/authorization/teams/:id  ->  entity  ADMIN_SETTINGS
+PUT    /api/v1/budget/definitions/:id/lines  ->  entity  BUDGET_WRITE
+PUT    /api/v1/entities/:id  ->  any-entity  ADMIN_ENTITIES
+PUT    /api/v1/fixed-assets/:id  ->  entity  GL_WRITE
+PUT    /api/v1/fx/revaluation-profiles/:id  ->  entity  FX_WRITE
+PUT    /api/v1/gl/accounts/:id  ->  entity  COA_EDIT
+PUT    /api/v1/gl/approval-rules/:id  ->  entity  GL_APPROVE | ADMIN_SETTINGS
+PUT    /api/v1/gl/journal-types/:id  ->  entity  GL_WRITE | ADMIN_SETTINGS
+PUT    /api/v1/gl/recurring-journals/:id  ->  entity  GL_WRITE
+PUT    /api/v1/integration/interfaces/:id  ->  entity  INTEGRATION_CONFIG
+PUT    /api/v1/integration/transfer-desk/automations/:id  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
+PUT    /api/v1/integration/transfer-desk/filters/:id  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
+PUT    /api/v1/integration/transfer-desk/formats/:id  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
+PUT    /api/v1/integration/transfer-desk/lookups/:id  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
+PUT    /api/v1/integration/transfer-desk/profiles/:id  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
+PUT    /api/v1/integration/transfer-desk/transformations/:id  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
+PUT    /api/v1/intercompany/account-pairs/:id  ->  entity  IC_CONFIG
+PUT    /api/v1/intercompany/v2/mappings/:id  ->  entity  IC_CONFIG
+PUT    /api/v1/intercompany/v2/pairs/:id  ->  entity  IC_CONFIG
+PUT    /api/v1/platform/tenants/:slug  ->  platform
+PUT    /api/v1/reports/definitions/:id  ->  entity  REPORT_WRITE
+PUT    /api/v1/setup/steps/:step  ->  tenant  ADMIN_SETTINGS
+PUT    /api/v1/transfer-desk/lookup-tables/:tableId  ->  entity  TRANSFER_DESK_CONFIG
+PUT    /api/v1/transfer-desk/profiles/:profileId  ->  entity  TRANSFER_DESK_CONFIG

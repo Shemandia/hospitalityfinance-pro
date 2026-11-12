@@ -11,7 +11,7 @@ export async function registerSetupRouter(app: FastifyInstance): Promise<void> {
     async (router) => {
       router.addHook("preHandler", requireAuth);
 
-      router.get("/progress", async (request, reply) => {
+      router.get("/progress", { config: { access: "session" } }, async (request, reply) => {
         const tenantSlug = request.tenantSlug ?? (request.user as any)?.tenantSlug;
         if (!tenantSlug) {
           return reply.code(400).send({
@@ -25,7 +25,7 @@ export async function registerSetupRouter(app: FastifyInstance): Promise<void> {
 
       router.put<{ Params: { step: string }; Querystring: { saveOnly?: string } }>(
         "/steps/:step",
-        { preHandler: [requirePermission("ADMIN_SETTINGS")] },
+        { preHandler: [requirePermission("ADMIN_SETTINGS", { scope: "tenant" })] },
         async (request, reply) => {
           const tenantSlug = request.tenantSlug ?? (request.user as any)?.tenantSlug;
           if (!tenantSlug) {
@@ -63,7 +63,7 @@ export async function registerSetupRouter(app: FastifyInstance): Promise<void> {
 
       router.post(
         "/complete",
-        { preHandler: [requirePermission("ADMIN_SETTINGS")] },
+        { preHandler: [requirePermission("ADMIN_SETTINGS", { scope: "tenant" })] },
         async (request, reply) => {
           const tenantSlug = request.tenantSlug ?? (request.user as any)?.tenantSlug;
           if (!tenantSlug) {
