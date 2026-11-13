@@ -101,7 +101,7 @@ API → http://localhost:4000, web → http://localhost:3000 (Next dev default).
 
 ### Background workers (optional)
 
-The async workers (transfer-desk processing, dunning, scheduled reports) run on BullMQ over **Redis**. Start them only if you're exercising those features:
+The async workers (Transfer Desk imports and exports, report generation, dunning, scheduled reports) run on BullMQ over **Redis**, in their own process. The API only queues the work: without this process a Transfer Desk run stays `QUEUED`. Start it when you use those features:
 
 ```powershell
 pnpm --filter @hfp/api run workers
@@ -113,10 +113,13 @@ The integration suite runs against two real tenant databases, so it can prove
 that one tenant's session never reaches the other's data. Create both once
 (any names; the role needs to own them):
 
+The worker tests also need a registry database of their own:
+
 ```powershell
-psql -c "CREATE DATABASE hfp_test" -c "CREATE DATABASE hfp_test_b"
+psql -c "CREATE DATABASE hfp_test" -c "CREATE DATABASE hfp_test_b" -c "CREATE DATABASE hfp_registry_test"
 $env:DATABASE_URL="postgresql://USER:PASS@localhost:5432/hfp_test";   pnpm --filter @hfp/api run db:setup:test
 $env:DATABASE_URL="postgresql://USER:PASS@localhost:5432/hfp_test_b"; pnpm --filter @hfp/api run db:setup:test
+$env:REGISTRY_DATABASE_URL="postgresql://USER:PASS@localhost:5432/hfp_registry_test"; pnpm --filter @hfp/api exec prisma db push --schema src/db/schema-registry.prisma --skip-generate
 ```
 
 Then add to `apps/api/.env`:
@@ -124,10 +127,13 @@ Then add to `apps/api/.env`:
 ```
 TEST_DATABASE_URL=postgresql://USER:PASS@localhost:5432/hfp_test
 TEST_SECOND_DATABASE_URL=postgresql://USER:PASS@localhost:5432/hfp_test_b
+TEST_REGISTRY_DATABASE_URL=postgresql://USER:PASS@localhost:5432/hfp_registry_test
 ```
 
 and run `pnpm --filter @hfp/api test:integration`. It refuses to start when
-either variable is missing.
+any of these variables is missing. The worker tests start the real worker
+processes against `REDIS_URL` for about ten seconds; on a shared development
+Redis they could pick up a job queued in that window.
 
 Background workers and scripts have no default database: each job names its
 tenant and runs with it bound (`src/db/tenantScope.ts`).

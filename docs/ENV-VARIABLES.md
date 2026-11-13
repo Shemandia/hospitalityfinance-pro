@@ -82,12 +82,23 @@ downloads are intentionally rejected.
 | -------------- | ----------------------------------- | ----------------------- |
 | `APP_BASE_URL` | Frontend base URL (for email links) | `https://app.hotel.com` |
 
+### Workers (`pnpm workers`, `workers:prod`)
+
+The API starts no background workers; it only enqueues. The worker process runs
+them all, Transfer Desk included (OPS-10).
+
+| Variable                       | Description                                                                                                                                 | Example |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| `WORKER_MAX_CLEAN_EXITS`       | A worker that exits cleanly this many times in a row is not restarted; the supervisor stops all workers and exits with code 1. Default `3`. | `3`     |
+| `TRANSFER_DESK_TENANT_POLL_MS` | How often the Transfer Desk process checks the registry for added or deactivated tenants. Default `60000`.                                  | `60000` |
+
 ### Tests
 
-| Variable                   | Description                                                            | Example                                           |
-| -------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------- |
-| `TEST_DATABASE_URL`        | Tenant database for integration tests; required by `test:integration`  | `postgresql://hfp:pass@localhost:5432/hfp_test`   |
-| `TEST_SECOND_DATABASE_URL` | A second tenant database, for the two-tenant isolation tests; required | `postgresql://hfp:pass@localhost:5432/hfp_test_b` |
+| Variable                     | Description                                                            | Example                                                  |
+| ---------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------- |
+| `TEST_DATABASE_URL`          | Tenant database for integration tests; required by `test:integration`  | `postgresql://hfp:pass@localhost:5432/hfp_test`          |
+| `TEST_SECOND_DATABASE_URL`   | A second tenant database, for the two-tenant isolation tests; required | `postgresql://hfp:pass@localhost:5432/hfp_test_b`        |
+| `TEST_REGISTRY_DATABASE_URL` | A registry database, for the worker entry-point tests; required        | `postgresql://hfp:pass@localhost:5432/hfp_registry_test` |
 
 `DATABASE_URL` is used by the setup scripts and as the registry fallback. It is
 not a default tenant: a query with no tenant bound fails (AUT-05).

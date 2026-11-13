@@ -8,7 +8,6 @@ import {
   enqueueTransferDeskExecution,
   cancelTransferDeskExecution
 } from "../../../jobs/transfer-desk-queue.js";
-import { ensureTransferDeskWorker } from "../../../jobs/transfer-desk-worker.js";
 import {
   ALL_SOURCE_FORMATS,
   ALL_CONNECTOR_TYPES,
@@ -2091,8 +2090,7 @@ export function registerTransferDeskRoutes(router: FastifyInstance) {
           });
         }
 
-        // 4. Ensure the worker is up and enqueue the job
-        ensureTransferDeskWorker(tenantSlug, tenantRecord.databaseUrl);
+        // 4. Enqueue the job; the transfer-desk worker process picks it up (OPS-10)
         const jobId = await enqueueTransferDeskExecution({
           tenantSlug,
           executionId: execution.id,

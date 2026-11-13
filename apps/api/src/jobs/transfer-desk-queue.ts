@@ -10,8 +10,9 @@
  * Queues are lazily created and cached per tenant. The first call to
  * `enqueueTransferDeskExecution(tenantSlug, ...)` instantiates the queue.
  *
- * The matching worker (transfer-desk-worker.ts) is also lazy-created so a
- * tenant that never uses Transfer Desk consumes no Redis resources.
+ * The matching workers run in their own process (transfer-desk-runner.ts,
+ * under the worker supervisor), one per active tenant. A job enqueued here
+ * waits in Redis until that process picks it up.
  */
 
 import { Queue } from "bullmq";

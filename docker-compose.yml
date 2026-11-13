@@ -54,6 +54,27 @@ services:
       redis:
         condition: service_healthy
 
+  # Background workers: reports, dunning, scheduled reports and Transfer Desk
+  # imports. The API only enqueues; without this service nothing runs (OPS-10).
+  workers:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile.workers
+    container_name: hfp-workers
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-hfp}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-hfp_db}
+      REGISTRY_DATABASE_URL: postgresql://${POSTGRES_USER:-hfp}:${POSTGRES_PASSWORD}@postgres:5432/hfp_registry
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3001}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   web:
     build:
       context: .

@@ -10,7 +10,7 @@
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --exclude 'tests/integration/**'",
-    "test:integration": "node --env-file-if-exists=.env -e \"for(const v of ['TEST_DATABASE_URL','TEST_SECOND_DATABASE_URL']){if(!process.env[v]){console.error(v+' is required for integration tests (see docs/RUNNING-WITHOUT-DOCKER.md)');process.exit(1)}}\" && node --env-file-if-exists=.env ./node_modules/vitest/vitest.mjs run tests/integration",
+    "test:integration": "node --env-file-if-exists=.env -e \"for(const v of ['TEST_DATABASE_URL','TEST_SECOND_DATABASE_URL','TEST_REGISTRY_DATABASE_URL']){if(!process.env[v]){console.error(v+' is required for integration tests (see docs/RUNNING-WITHOUT-DOCKER.md)');process.exit(1)}}\" && node --env-file-if-exists=.env ./node_modules/vitest/vitest.mjs run tests/integration",
     "db:generate": "prisma generate --schema src/db/schema-registry.prisma && prisma generate --schema src/db/schema-tenant.prisma",
     "db:generate:registry": "prisma generate --schema src/db/schema-registry.prisma",
     "db:generate:tenant": "prisma generate --schema src/db/schema-tenant.prisma",

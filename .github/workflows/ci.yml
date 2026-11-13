@@ -46,6 +46,8 @@ jobs:
       TEST_DATABASE_URL: postgresql://hfp:hfp_ci@localhost:5432/hfp_test
       # A second tenant database, for the two-tenant isolation tests (WP-A).
       TEST_SECOND_DATABASE_URL: postgresql://hfp:hfp_ci@localhost:5432/hfp_test_b
+      # A registry database, for the worker entry-point tests (OPS-10).
+      TEST_REGISTRY_DATABASE_URL: postgresql://hfp:hfp_ci@localhost:5432/hfp_registry_test
       REDIS_URL: redis://localhost:6379
       JWT_SECRET: ci-only-secret-not-used-outside-this-workflow
 
@@ -85,7 +87,8 @@ jobs:
           psql -h localhost -U postgres -v ON_ERROR_STOP=1 \
             -c "CREATE ROLE hfp LOGIN PASSWORD 'hfp_ci' NOSUPERUSER NOBYPASSRLS CREATEDB CREATEROLE" \
             -c "CREATE DATABASE hfp_test OWNER hfp" \
-            -c "CREATE DATABASE hfp_test_b OWNER hfp"
+            -c "CREATE DATABASE hfp_test_b OWNER hfp" \
+            -c "CREATE DATABASE hfp_registry_test OWNER hfp"
 
       - name: Prepare test database
         run: pnpm --filter @hfp/api db:setup:test
@@ -96,6 +99,11 @@ jobs:
         run: pnpm --filter @hfp/api db:setup:test
         env:
           DATABASE_URL: ${{ env.TEST_SECOND_DATABASE_URL }}
+
+      - name: Prepare test registry database
+        run: pnpm --filter @hfp/api exec prisma db push --schema src/db/schema-registry.prisma --skip-generate
+        env:
+          REGISTRY_DATABASE_URL: ${{ env.TEST_REGISTRY_DATABASE_URL }}
 
       - name: Unit tests
         run: pnpm test
