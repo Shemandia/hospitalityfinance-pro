@@ -26,13 +26,10 @@
 import { runWithContext, updateRequestContext } from "../db/requestContext.js";
 import { resolveTenant } from "../db/tenantRegistry.js";
 import { TenantUnavailableError } from "../db/tenantScope.js";
-import { Worker, type Job } from "bullmq";
+import type { Job, Worker } from "bullmq";
+import { createWorker } from "./queues.js";
 import { getTenantClient } from "../db/tenantPool.js";
-import {
-  getTransferDeskQueueName,
-  getTransferDeskRedisConnection,
-  type TransferDeskJobData
-} from "./transfer-desk-queue.js";
+import { getTransferDeskQueueName, type TransferDeskJobData } from "./transfer-desk-queue.js";
 import {
   executeImport,
   executeExport,
@@ -59,7 +56,7 @@ const workers = new Map<string, Worker<TransferDeskJobData>>();
 export function ensureTransferDeskWorker(tenantSlug: string, tenantDbUrl: string): void {
   if (workers.has(tenantSlug)) return;
 
-  const worker = new Worker<TransferDeskJobData>(
+  const worker = createWorker<TransferDeskJobData>(
     getTransferDeskQueueName(tenantSlug),
     // The job runs with its tenant bound, so anything that reaches the shared
     // prisma client lands in this tenant's database and no other.
@@ -71,7 +68,6 @@ export function ensureTransferDeskWorker(tenantSlug: string, tenantDbUrl: string
         return processJob(job, tenantSlug, tenantDbUrl);
       }),
     {
-      connection: getTransferDeskRedisConnection(),
       concurrency: 1, // TODO: read from license entitlements (Starter=1, Pro=3, Enterprise=10)
       autorun: true
     }

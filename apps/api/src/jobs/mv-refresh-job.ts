@@ -10,34 +10,24 @@
  * The CONCURRENTLY keyword allows reads during refresh (requires unique index).
  */
 
-import { Queue, Worker } from "bullmq";
+import { createQueue, createWorker } from "./queues.js";
 import { prisma } from "../db/prisma.js";
 import { currentTenantId, forEachActiveTenant, runForTenantId } from "../db/tenantScope.js";
 import { withBypassRLS } from "../db/rls-bypass.js";
 
 const QUEUE_NAME = "mv-refresh";
 
-// ── Redis connection ────────────────────────────────────────────────────────
-
-const redisUrl = process.env.REDIS_URL;
-const connection = redisUrl
-  ? (() => {
-      const parsed = new URL(redisUrl);
-      return {
-        host: parsed.hostname,
-        port: Number(parsed.port || 6379),
-        password: parsed.password || undefined
-      };
-    })()
-  : {
-      host: process.env.REDIS_HOST ?? "127.0.0.1",
-      port: Number(process.env.REDIS_PORT ?? 6379),
-      password: process.env.REDIS_PASSWORD ?? undefined
-    };
-
 // ── Queue (exported so other modules can enqueue refreshes) ─────────────────
 
-export const mvRefreshQueue = new Queue(QUEUE_NAME, { connection });
+type MVRefreshJob = { tenantId?: string; reason?: string; requestedAt?: string };
+
+let queue: ReturnType<typeof createQueue<MVRefreshJob>> | null = null;
+
+/** Built on first use, so importing this module opens no connection. */
+function mvRefreshQueue() {
+  queue ??= createQueue<MVRefreshJob>(QUEUE_NAME);
+  return queue;
+}
 
 /**
  * Enqueue a materialized view refresh.
@@ -46,7 +36,7 @@ export const mvRefreshQueue = new Queue(QUEUE_NAME, { connection });
 /** Enqueues a refresh of the bound tenant's view. One pending refresh per tenant. */
 export async function enqueueMVRefresh(reason: string): Promise<void> {
   const tenantId = currentTenantId();
-  await mvRefreshQueue.add(
+  await mvRefreshQueue().add(
     "refresh",
     { tenantId, reason, requestedAt: new Date().toISOString() },
     {
@@ -107,12 +97,12 @@ export async function refreshMaterializedView(): Promise<{ durationMs: number }>
 
 if (process.argv[1]?.includes("mv-refresh-job")) {
   async function setupRepeatable(): Promise<void> {
-    const existing = await mvRefreshQueue.getRepeatableJobs();
+    const existing = await mvRefreshQueue().getRepeatableJobs();
     for (const job of existing) {
-      await mvRefreshQueue.removeRepeatableByKey(job.key);
+      await mvRefreshQueue().removeRepeatableByKey(job.key);
     }
 
-    await mvRefreshQueue.add(
+    await mvRefreshQueue().add(
       "refresh-scheduled",
       { reason: "scheduled", requestedAt: new Date().toISOString() },
       {
@@ -127,7 +117,7 @@ if (process.argv[1]?.includes("mv-refresh-job")) {
     console.log("[MVRefreshWorker] Repeatable job registered: every 15 minutes.");
   }
 
-  const worker = new Worker(
+  const worker = createWorker<MVRefreshJob>(
     QUEUE_NAME,
     async (job) => {
       console.log(`[MVRefreshWorker] Refreshing MV — reason: ${job.data?.reason ?? "unknown"}`);
@@ -136,10 +126,7 @@ if (process.argv[1]?.includes("mv-refresh-job")) {
       if (tenantId) return runForTenantId(tenantId, () => refreshMaterializedView());
       return forEachActiveTenant(() => refreshMaterializedView());
     },
-    {
-      connection,
-      concurrency: 1
-    }
+    { concurrency: 1 }
   );
 
   worker.on("completed", (job, result) => {
