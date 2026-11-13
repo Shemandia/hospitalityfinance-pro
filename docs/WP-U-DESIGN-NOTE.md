@@ -16,7 +16,7 @@ Section 1 records the owner's decisions. Section 5 lists what this note found th
 
 ## 1. Decisions
 
-Approved by the owner on 12 November 2026; D10 and D11 added on 13 November 2026. Where section 11 of the brief says otherwise, these apply.
+Approved by the owner on 12 November 2026; D10 to D12 added on 13 November 2026. Where section 11 of the brief says otherwise, these apply.
 
 | #   | Decision                                                                                                                                                                                    |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -31,6 +31,7 @@ Approved by the owner on 12 November 2026; D10 and D11 added on 13 November 2026
 | D9  | A change to a supplier's or customer's bank details takes effect only after a second person approves it, and every request, approval and rejection is audited.                              |
 | D10 | Cross-currency settlement: an allocation nets to zero in transaction currency, and in base and reporting currency once its realised exchange difference is booked (section 2.5).            |
 | D11 | Withholding tax on supplier payments: the payment allocates the invoice in full; the withheld part posts to a tenant-chosen withholding-tax payable account, with a certificate reference.  |
+| D12 | The marker for a line whose payment is held back is `ON_HOLD`, not `WITHHELD`, so it cannot be confused with withholding tax (D11). Section 11 of the brief calls it "withheld".            |
 
 ---
 
@@ -86,7 +87,7 @@ Journal numbers are assigned inside the posting transaction, with the year taken
 | Add `reportingRate`, `debitReporting`, `creditReporting` | Third currency amount.                                                                                                                                                                                             |
 | Add `transactionDate`, `dueDate`                         | Dates. `dueDate` is required on a line on a counterparty account.                                                                                                                                                  |
 | Add `transactionReference`, `secondReference`            | Invoice number or payment reference; purchase order or remittance reference.                                                                                                                                       |
-| Add `allocationMarker`                                   | `UNALLOCATED`, `ALLOCATED`, `PAID`, `WITHHELD`, `IN_DISPUTE`. Null on accounts that are not allocation-enabled.                                                                                                    |
+| Add `allocationMarker`                                   | `UNALLOCATED`, `ALLOCATED`, `PAID`, `ON_HOLD`, `IN_DISPUTE`. Null on accounts that are not allocation-enabled.                                                                                                     |
 | Add `allocationId`, `allocationDate`, `allocatedById`    | `allocationId` is the allocation reference: a foreign key to `Allocation` (2.2).                                                                                                                                   |
 | Replace `dimension1` to `dimension10`                    | From free text to foreign keys to `AnalysisCode`.                                                                                                                                                                  |
 | Add `taxCodeId`, `taxBaseAmount`                         | Tax reporting from the ledger.                                                                                                                                                                                     |
@@ -101,7 +102,7 @@ Marker meanings:
 | `UNALLOCATED` | Open                                                                     | Yes                       |
 | `ALLOCATED`   | Matched by a user or a rule (credit note, contra, write-off)             | No                        |
 | `PAID`        | Matched to a payment or receipt line made by a payment or collection run | No                        |
-| `WITHHELD`    | Open, payment held back                                                  | No                        |
+| `ON_HOLD`     | Open, payment held back                                                  | No                        |
 | `IN_DISPUTE`  | Open, under query                                                        | No                        |
 
 **`AccountPeriodBalance`**
@@ -350,7 +351,7 @@ The supplier line and the invoice line form one allocation that nets to zero; th
 - **Currency.** The tax is computed in the invoice's currency. The payable line is posted in base currency at the payment date's rate, since that is the amount owed to the authority; the payment journal balances in base and reporting currency as any other.
 - **Remittance.** The withholding-tax payable account is allocation-enabled. The payment to the authority is allocated against the payable lines it covers, and each deduction records that allocation, so unremitted tax can be listed by certificate.
 - **Reversal.** Reversing the payment reverses its payable line and voids its deductions; the certificate reference is kept on the voided row and cannot be reused.
-- **Not the `WITHHELD` marker.** That marker means a payment is held back from a line. It has nothing to do with withholding tax (see section 5, item 7).
+- **Not the `ON_HOLD` marker.** That marker means a payment is held back from a line. It has nothing to do with withholding tax (D12).
 
 ---
 
@@ -591,7 +592,7 @@ On the current development database the script has little to prove: `hfp_db` hol
 | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | Receivables ageing                                     | `ar_invoices` joined to `customers`, buckets on `due_date`, balance from `amount - amount_paid`                   | Open lines on debtor accounts, buckets on the line's `dueDate`                                                                                                        | `ar/repository.ts:225`; route `GET /ar/ageing`; screens `ar/ageing`, `dashboard/ar` |
 | Dunning                                                | `ar_invoices` by status and due date; email from `customers.billing_contact`                                      | Open debtor lines past due; email from `AccountAddress`; level on the document                                                                                        | `ar/service.ts:543`                                                                 |
-| Payment run proposal                                   | `ap_invoices` with status approved or posted, grouped by supplier                                                 | Lines on creditor accounts with marker `UNALLOCATED`, by due date. Withheld and in-dispute lines are skipped.                                                         | `ap/service.ts:713`                                                                 |
+| Payment run proposal                                   | `ap_invoices` with status approved or posted, grouped by supplier                                                 | Lines on creditor accounts with marker `UNALLOCATED`, by due date. On-hold and in-dispute lines are skipped.                                                          | `ap/service.ts:713`                                                                 |
 | Payment run confirmation, voucher and bank file        | `suppliers.bank_details`; `ap_payments`, `ap_payment_allocations`                                                 | `AccountBankDetail`; payment document, lines and one allocation                                                                                                       | `ap/service.ts:936`, `ap/payment-voucher-pdf.ts`                                    |
 | Collection run                                         | `ar_invoices`, updating `amount_paid` directly                                                                    | Open debtor lines; receipt document and allocation                                                                                                                    | `ap/payment-profile-service.ts:170`                                                 |
 | FX revaluation of open items                           | `ap_invoices` and `ar_invoices`; posts to accounts `2100` and `1200`; rewrites `functional_amount` on the invoice | Open lines in foreign currency on counterparty accounts; posts adjustment lines on the same account tied to the revalued line; base and reporting revalued separately | `fx/repository.ts:173`, `:193`, `:317`; `fx/service.ts:343`                         |
@@ -680,7 +681,7 @@ Under section 11 these become producers of the canonical document in WP-4. Until
 
 6. **Held postings interact with allocation and payment.** A held line cannot be allocated, paid or revalued. Releasing it makes it open.
 
-7. **The `WITHHELD` marker and withholding tax share a word.** The marker (from section 11) means payment of a line is held back; withholding tax (D11) is unrelated. Proposed: rename the marker `ON_HOLD`. Owner to decide; the note keeps `WITHHELD` until then.
+7. **The held-back marker and withholding tax shared a word.** Section 11 calls the marker "withheld"; withholding tax (D11) is unrelated. Resolved by D12: the marker is `ON_HOLD`.
 
 ## 6. Not covered by this note
 
