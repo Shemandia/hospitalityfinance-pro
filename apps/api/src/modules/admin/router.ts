@@ -5,9 +5,9 @@
  *   /api/v1/admin/roles               — CRUD for roles
  *   /api/v1/admin/permissions          — CRUD for permissions
  *   /api/v1/admin/roles/:id/permissions — Bind/unbind permissions to roles
- *   /api/v1/admin/users                — List/create entity users
- *   /api/v1/admin/users/:userId/role   — Update user's entity role
- *   /api/v1/admin/user-roles           — Assign/revoke UserRole records
+ *   /api/v1/admin/users                — The users who can open the selected entity
+ *   /api/v1/admin/users/:userId/roles  — Grant / revoke a role (tenant, group or property)
+ *   /api/v1/admin/users/:userId/access — A user's grants and effective permissions
  *
  * Role and permission definitions are tenant-wide (ADMIN_ROLES_MANAGE held
  * through a tenant-wide assignment). User management is open to anyone holding
@@ -27,7 +27,6 @@ import {
   roleUpdateSchema,
   permissionCreateSchema,
   rolePermissionSchema,
-  entityUserCreateSchema,
   userCreateSchema
 } from "./types.js";
 import * as svc from "./service.js";
@@ -43,12 +42,6 @@ const assignRoleSchema = z.object({
 const revokeRoleQuerySchema = z.object({ entityId: z.string().uuid().optional() });
 
 const userStatusSchema = z.object({ isActive: z.boolean() });
-
-const assignScopeSchema = z.object({
-  userId: z.string().uuid(),
-  entityId: z.string().uuid(),
-  cascade: z.boolean().default(false)
-});
 
 const revokeScopeSchema = z.object({
   userId: z.string().uuid(),
@@ -321,7 +314,7 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
         }
       );
 
-      // ── Entity Users (per-entity role management) ─────────────────────────
+      // ── Users who can open the selected entity ────────────────────────────
 
       router.get(
         "/users",
@@ -331,26 +324,6 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
             const entityId = requireEntityId(request.entityId);
             const data = await svc.listEntityUsers(entityId);
             return reply.send({ data, errors: [] });
-          } catch (error) {
-            return mapError(reply, error);
-          }
-        }
-      );
-
-      router.post(
-        "/users",
-        { preHandler: [requirePermission("ADMIN_USERS")] },
-        async (request, reply) => {
-          try {
-            const entityId = requireEntityId(request.entityId);
-            const payload = entityUserCreateSchema.parse(request.body);
-            const result = await svc.addEntityUser(entityId, payload.userId);
-            if ("error" in result)
-              return reply.code(404).send({
-                data: null,
-                errors: [{ code: "USER_NOT_FOUND", message: "User not found." }]
-              });
-            return reply.code(201).send({ data: result.data, errors: [] });
           } catch (error) {
             return mapError(reply, error);
           }
@@ -503,39 +476,7 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
         }
       );
 
-      // ── Scope-aware user assignment ───────────────────────────────────────
-
-      router.post(
-        "/users/assign-scope",
-        { preHandler: [requirePermission("ADMIN_ENTITIES", { scope: "any-entity" })] },
-        async (request, reply) => {
-          try {
-            const body = assignScopeSchema.parse(request.body);
-            const result = await svc.assignScope(
-              body.userId,
-              body.entityId,
-              body.cascade,
-              getActorContext(request)
-            );
-            if ("error" in result) {
-              const status = result.error === "FORBIDDEN" ? 403 : 404;
-              const msg =
-                result.error === "USER_NOT_FOUND"
-                  ? "User not found."
-                  : result.error === "FORBIDDEN"
-                    ? "You cannot manage access outside your assigned entity scope."
-                    : "Entity not found.";
-              return reply.code(status).send({
-                data: null,
-                errors: [{ code: result.error, message: msg }]
-              });
-            }
-            return reply.code(201).send({ data: result.data, errors: [] });
-          } catch (error) {
-            return mapError(reply, error);
-          }
-        }
-      );
+      // ── Revoke every role at an entity (and below) ───────────────────────
 
       router.post(
         "/users/revoke-scope",
@@ -565,7 +506,7 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
       );
 
       router.get<{ Params: { userId: string } }>(
-        "/users/:userId/entities",
+        "/users/:userId/access",
         {
           preHandler: [
             requirePermission(["ADMIN_USERS", "ADMIN_USERS_READ"], { scope: "any-entity" })
@@ -573,8 +514,9 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
         },
         async (request, reply) => {
           try {
-            const result = await svc.getUserEntities(
+            const result = await svc.getUserAccess(
               request.params.userId,
+              tenantIdOf(request),
               getActorContext(request)
             );
             if ("error" in result) return mapScopeError(reply, result.error);
@@ -594,13 +536,14 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
             return reply
               .code(401)
               .send({ data: null, errors: [{ code: "NO_USER", message: "Not authenticated." }] });
-          const data = await svc.getUserProfile(userId);
-          if (!data)
+          const profile = await svc.getUserProfile(userId);
+          if (!profile)
             return reply.code(404).send({
               data: null,
               errors: [{ code: "USER_NOT_FOUND", message: "User not found." }]
             });
-          return reply.send({ data, errors: [] });
+          const assignments = await svc.getOwnAssignments(userId);
+          return reply.send({ data: { ...profile, assignments }, errors: [] });
         } catch (error) {
           return mapError(reply, error);
         }

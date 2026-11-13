@@ -82,6 +82,71 @@ export async function listGrants(tx: Tx, filter: GrantFilter): Promise<Grant[]> 
   });
 }
 
+/** The entity and its ancestors, nearest first. */
+export async function entityAndAncestors(tx: Tx, entityId: string): Promise<string[]> {
+  const entities = await tx.entity.findMany({ select: { id: true, parentId: true } });
+  const parentOf = new Map(entities.map((e) => [e.id, e.parentId]));
+  if (!parentOf.has(entityId)) return [];
+  const chain: string[] = [];
+  let current: string | null | undefined = entityId;
+  while (current && !chain.includes(current)) {
+    chain.push(current);
+    current = parentOf.get(current);
+  }
+  return chain;
+}
+
+export type GrantReachingEntity = {
+  userId: string;
+  scopeType: "TENANT" | "ENTITY";
+  entityId: string | null;
+  createdAt: Date;
+  user: { id: string; name: string | null; email: string; isActive: boolean };
+  role: { id: string; code: string; name: string };
+};
+
+/**
+ * The grants through which users can open `entityId`: tenant-wide grants and
+ * grants at the entity or any entity above it. This is who "belongs to" a
+ * property now that membership without a role no longer exists (AUT-03).
+ */
+export async function grantsReachingEntity(
+  tx: Tx,
+  entityId: string
+): Promise<GrantReachingEntity[]> {
+  const chain = await entityAndAncestors(tx, entityId);
+  if (chain.length === 0) return [];
+  return tx.roleAssignment.findMany({
+    where: {
+      OR: [{ scopeType: "TENANT" }, { scopeType: "ENTITY", entityId: { in: chain } }]
+    },
+    select: {
+      userId: true,
+      scopeType: true,
+      entityId: true,
+      createdAt: true,
+      user: { select: { id: true, name: true, email: true, isActive: true } },
+      role: { select: { id: true, code: true, name: true } }
+    },
+    orderBy: { createdAt: "asc" }
+  });
+}
+
+/**
+ * Interim: the user recorded as creator of rows an import writes for
+ * `entityId` — the active user with the oldest grant that reaches the entity,
+ * nearest grant first. Replaces "any entity_users row" (AUT-03). WP-4 replaces
+ * it with a named system user per import.
+ */
+export async function defaultActorForEntity(tx: Tx, entityId: string): Promise<string | null> {
+  const chain = await entityAndAncestors(tx, entityId);
+  const grants = (await grantsReachingEntity(tx, entityId)).filter((g) => g.user.isActive);
+  const distance = (g: GrantReachingEntity) =>
+    g.scopeType === "TENANT" ? chain.length : chain.indexOf(g.entityId as string);
+  grants.sort((a, b) => distance(a) - distance(b) || a.createdAt.getTime() - b.createdAt.getTime());
+  return grants[0]?.userId ?? null;
+}
+
 /** Removes the matching grants and returns the users who lost one. */
 export async function revokeGrants(tx: Tx, filter: GrantFilter): Promise<string[]> {
   const doomed = await tx.roleAssignment.findMany({

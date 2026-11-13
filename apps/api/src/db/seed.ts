@@ -192,19 +192,6 @@ async function main(): Promise<void> {
   const controller = await seedUser("controller@hfp.local", "kc-controller-001", "Demo Controller");
   const viewer = await seedUser("viewer@hfp.local", "kc-viewer-001", "Demo Viewer");
 
-  // Memberships only; the role grants follow once the roles are seeded.
-  for (const [entityId, userId] of [
-    [group.id, admin.id],
-    [propertyA.id, controller.id],
-    [propertyB.id, viewer.id]
-  ] as const) {
-    await prisma.entityUser.upsert({
-      where: { entityId_userId: { entityId, userId } },
-      update: {},
-      create: { entityId, userId }
-    });
-  }
-
   for (const entityId of [propertyA.id, propertyB.id]) {
     await prisma.supplier.upsert({
       where: {

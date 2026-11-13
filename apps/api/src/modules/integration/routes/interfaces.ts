@@ -19,6 +19,7 @@ import {
 } from "../connectors/shared/suspense.js";
 
 import { applyBalanceDelta } from "../../../db/balance-writer.js";
+import { entityActor } from "../../access/actor.js";
 // ── Interface Definition schemas ─────────────────────────────────────────────
 
 const ALL_TARGET_FIELDS = [
@@ -564,14 +565,12 @@ export function registerInterfaceRoutes(router: FastifyInstance) {
           });
         }
 
-        // Find entity user
-        const entityUser = await (prisma as unknown as PrismaClient).entityUser.findFirst({
-          where: { entityId }
-        });
-        if (!entityUser) {
+        // The user recorded as the journal's creator
+        const actor = await entityActor(prisma as unknown as PrismaClient, entityId);
+        if (!actor) {
           return reply.code(422).send({
             data: null,
-            errors: [{ code: "NO_USER", message: "No entity user found." }]
+            errors: [{ code: "NO_USER", message: "No user holds a role at this entity." }]
           });
         }
 
@@ -725,7 +724,7 @@ export function registerInterfaceRoutes(router: FastifyInstance) {
                 : "MANUAL") as any,
             status: status as any,
             postedAt: payload.autoPost ? new Date() : undefined,
-            createdById: entityUser.userId,
+            createdById: actor.userId,
             lines: { create: journalLines }
           },
           include: { lines: true }

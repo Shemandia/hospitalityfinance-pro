@@ -44,8 +44,8 @@ GET    /api/v1/admin/profile  ->  session
 GET    /api/v1/admin/roles  ->  any-entity  ADMIN_USERS | ADMIN_ROLES_MANAGE
 GET    /api/v1/admin/roles/:id  ->  any-entity  ADMIN_USERS | ADMIN_ROLES_MANAGE
 GET    /api/v1/admin/users  ->  entity  ADMIN_USERS | ADMIN_USERS_READ
+GET    /api/v1/admin/users/:userId/access  ->  any-entity  ADMIN_USERS | ADMIN_USERS_READ
 GET    /api/v1/admin/users/:userId/detail  ->  any-entity  ADMIN_USERS | ADMIN_USERS_READ
-GET    /api/v1/admin/users/:userId/entities  ->  any-entity  ADMIN_USERS | ADMIN_USERS_READ
 GET    /api/v1/admin/users/:userId/roles  ->  any-entity  ADMIN_USERS | ADMIN_USERS_READ
 GET    /api/v1/allocations  ->  entity  GL_READ
 GET    /api/v1/allocations/:id  ->  entity  GL_READ
@@ -198,9 +198,7 @@ POST   /api/v1/admin/login-audit  ->  any-entity  ADMIN_USERS
 POST   /api/v1/admin/permissions  ->  tenant  ADMIN_ROLES_MANAGE
 POST   /api/v1/admin/roles  ->  tenant  ADMIN_ROLES_MANAGE
 POST   /api/v1/admin/roles/:id/permissions  ->  tenant  ADMIN_ROLES_MANAGE
-POST   /api/v1/admin/users  ->  entity  ADMIN_USERS
 POST   /api/v1/admin/users/:userId/roles  ->  any-entity  ADMIN_USERS
-POST   /api/v1/admin/users/assign-scope  ->  any-entity  ADMIN_ENTITIES
 POST   /api/v1/admin/users/invite  ->  any-entity  ADMIN_USERS
 POST   /api/v1/admin/users/revoke-scope  ->  any-entity  ADMIN_ENTITIES
 POST   /api/v1/allocations  ->  entity  GL_WRITE

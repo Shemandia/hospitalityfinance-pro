@@ -1,11 +1,13 @@
 import type { FastifyInstance } from "fastify";
-import type { PrismaClient } from "../../db/client.js";
+import type { Prisma, PrismaClient } from "../../db/client.js";
 import { z } from "zod";
 import { prisma } from "../../db/prisma.js";
 import { setEntityDbContext } from "../../db/tenantContext.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
 import { requirePermission } from "../../middleware/requirePermission.js";
 import { hasEntityPermission } from "../access/resolver.js";
+import { grantsReachingEntity } from "../access/grants.js";
+import { withBypassRLS } from "../../db/rls-bypass.js";
 import { GLService } from "./service.js";
 import { mapError, requireEntityId } from "../../shared/router-utils.js";
 import { ServiceError } from "../../shared/service-error.js";
@@ -488,20 +490,25 @@ export async function registerGLRouter(app: FastifyInstance): Promise<void> {
         }
       );
 
-      // Lightweight users list for approver picker
+      // Lightweight users list for approver picker: the active users who can
+      // open this entity through a role assignment.
       router.get(
         "/users",
         { preHandler: [requirePermission("GL_READ")] },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
-            const users = await prisma.user.findMany({
-              where: {
-                entities: { some: { entityId } }
-              },
-              select: { id: true, name: true, email: true },
-              orderBy: { name: "asc" }
-            });
+            const grants = await withBypassRLS(prisma, (tx: Prisma.TransactionClient) =>
+              grantsReachingEntity(tx, entityId)
+            );
+            const byId = new Map<string, { id: string; name: string | null; email: string }>();
+            for (const { user } of grants) {
+              if (user.isActive)
+                byId.set(user.id, { id: user.id, name: user.name, email: user.email });
+            }
+            const users = [...byId.values()].sort((a, b) =>
+              (a.name ?? a.email).localeCompare(b.name ?? b.email)
+            );
             return reply.send({ data: users, errors: [] });
           } catch (error) {
             return mapError(reply, error);

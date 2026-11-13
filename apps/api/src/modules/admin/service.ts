@@ -20,7 +20,14 @@ import crypto from "node:crypto";
 import { prisma } from "../../db/prisma.js";
 import { withBypassRLS } from "../../db/rls-bypass.js";
 import { sendWelcomeEmail } from "../../shared/email.js";
-import { grantRole, listGrants, revokeGrants, type GrantTarget } from "../access/grants.js";
+import {
+  grantRole,
+  grantsReachingEntity,
+  listGrants,
+  revokeGrants,
+  type GrantTarget
+} from "../access/grants.js";
+import { getAccessService } from "../access/runtime.js";
 import {
   normalizePermission,
   permittedEntityIds,
@@ -113,9 +120,9 @@ type UserStanding =
   | { exists: false }
   | {
       exists: true;
-      /** The user belongs to, or holds a grant at, an entity within reach. */
+      /** The user holds a grant at an entity within reach. */
       withinReach: boolean;
-      /** Everything the user belongs to or holds is within reach. */
+      /** Every grant the user holds is within reach. */
       whollyWithinReach: boolean;
     };
 
@@ -125,15 +132,8 @@ async function userStanding(tx: Tx, reach: Reach, userId: string): Promise<UserS
   if (!user) return { exists: false };
   if (reach === "all") return { exists: true, withinReach: true, whollyWithinReach: true };
 
-  const memberships = await tx.entityUser.findMany({
-    where: { userId },
-    select: { entityId: true }
-  });
   const grants = await listGrants(tx, { userId, at: "all" });
-  const entityIds = [
-    ...memberships.map((row) => row.entityId),
-    ...grants.flatMap((grant) => (grant.entityId === null ? [] : [grant.entityId]))
-  ];
+  const entityIds = grants.flatMap((grant) => (grant.entityId === null ? [] : [grant.entityId]));
   const holdsTenantGrant = grants.some((grant) => grant.scopeType === "TENANT");
   return {
     exists: true,
@@ -265,33 +265,56 @@ export async function unbindPermissionFromRole(roleId: string, permissionId: str
   });
 }
 
-// ── Entity Users ────────────────────────────────────────────────────────────
+// ── Users of an entity ──────────────────────────────────────────────────────
 
+/**
+ * The users who can open the entity, each with the grants that give them
+ * access there: at the entity, at an entity above it, or tenant-wide.
+ */
 export async function listEntityUsers(entityId: string) {
-  return db.entityUser.findMany({
-    where: { entityId },
-    include: { user: { select: { id: true, name: true, email: true } } },
-    orderBy: { createdAt: "asc" }
-  });
+  const grants = await bypass((tx) => grantsReachingEntity(tx, entityId));
+  const users = new Map<
+    string,
+    {
+      userId: string;
+      user: { id: string; name: string | null; email: string; isActive: boolean };
+      createdAt: Date;
+      roles: Array<{
+        roleId: string;
+        code: string;
+        name: string;
+        scopeType: "TENANT" | "ENTITY";
+        entityId: string | null;
+      }>;
+    }
+  >();
+  for (const grant of grants) {
+    const row = users.get(grant.userId) ?? {
+      userId: grant.userId,
+      user: grant.user,
+      createdAt: grant.createdAt,
+      roles: []
+    };
+    row.roles.push({
+      roleId: grant.role.id,
+      code: grant.role.code,
+      name: grant.role.name,
+      scopeType: grant.scopeType,
+      entityId: grant.entityId
+    });
+    users.set(grant.userId, row);
+  }
+  return [...users.values()].sort((a, b) =>
+    (a.user.name ?? a.user.email).localeCompare(b.user.name ?? b.user.email)
+  );
 }
 
-export async function addEntityUser(entityId: string, userId: string) {
-  const user = await db.user.findUnique({ where: { id: userId } });
-  if (!user) return fail("USER_NOT_FOUND");
-
-  const data = await db.entityUser.create({
-    data: { entityId, userId },
-    include: { user: { select: { id: true, name: true, email: true } } }
-  });
-  return { data };
-}
-
-/** Takes the user off the entity: the membership and every grant held there. */
+/**
+ * Takes away the roles the user holds at this entity. Access through a role
+ * on a group above it, or a tenant-wide role, is not affected.
+ */
 export async function removeEntityUser(entityId: string, userId: string) {
-  await bypass(async (tx) => {
-    await revokeGrants(tx, { userId, at: [entityId] });
-    await tx.entityUser.deleteMany({ where: { entityId, userId } });
-  });
+  await bypass((tx) => revokeGrants(tx, { userId, at: [entityId] }));
 }
 
 // ── User Roles ──────────────────────────────────────────────────────────────
@@ -355,14 +378,6 @@ export async function assignRoleToUser(
     if (!checkPrivilegeCeiling(actor, role, target)) return fail("FORBIDDEN");
 
     await grantRole(tx, userId, roleId, target);
-    if (target.scope === "ENTITY") {
-      // Membership still feeds the token's entity list until the token is slimmed.
-      await tx.entityUser.upsert({
-        where: { entityId_userId: { entityId: target.entityId, userId } },
-        create: { entityId: target.entityId, userId },
-        update: {}
-      });
-    }
     return {
       data: {
         userId,
@@ -433,7 +448,7 @@ export async function findUserIdByEmail(email: string): Promise<string | null> {
 }
 
 export async function inviteUser(
-  payload: { email: string; name: string; roleId?: string; entityIds?: string[] },
+  payload: { email: string; name: string; roleId: string; entityIds?: string[] },
   currentEntityId: string | undefined,
   tenantContext: { tenantSlug?: string; tenantCode?: string; tenantName?: string } | undefined,
   actor: AdminActorContext
@@ -459,23 +474,23 @@ export async function inviteUser(
   const passwordHash = await bcrypt.default.hash(tempPassword, 12);
 
   // Every check, then every write, in one transaction: a refused invitation
-  // leaves no user, membership or grant behind.
+  // leaves no user or grant behind.
   const outcome = await bypass(async (tx) => {
     for (const target of targets) {
       const forbiddenTarget = await targetError(tx, reach, target);
       if (forbiddenTarget) return fail(forbiddenTarget);
     }
 
-    if (payload.roleId) {
-      const role = await tx.role.findUnique({
-        where: { id: payload.roleId },
-        include: { permissions: { include: { permission: true } } }
-      });
-      if (!role) return fail("ROLE_NOT_FOUND");
-      for (const target of targets) {
-        if (!checkPrivilegeCeiling(actor, role, target)) {
-          return fail("FORBIDDEN");
-        }
+    // A user always arrives with a role: without one they could open nothing,
+    // and nobody but a tenant-wide administrator could see them (AUT-03).
+    const role = await tx.role.findUnique({
+      where: { id: payload.roleId },
+      include: { permissions: { include: { permission: true } } }
+    });
+    if (!role) return fail("ROLE_NOT_FOUND");
+    for (const target of targets) {
+      if (!checkPrivilegeCeiling(actor, role, target)) {
+        return fail("FORBIDDEN");
       }
     }
 
@@ -490,16 +505,7 @@ export async function inviteUser(
       update: { name: payload.name }
     });
 
-    for (const entityId of targetEntityIds) {
-      await tx.entityUser.upsert({
-        where: { entityId_userId: { entityId, userId: user.id } },
-        create: { entityId, userId: user.id },
-        update: {}
-      });
-    }
-    if (payload.roleId) {
-      for (const target of targets) await grantRole(tx, user.id, payload.roleId, target);
-    }
+    for (const target of targets) await grantRole(tx, user.id, payload.roleId, target);
     return { user };
   });
   if ("error" in outcome) return fail(outcome.error);
@@ -532,15 +538,11 @@ export async function inviteUser(
 
 // ── All users within the caller's reach ─────────────────────────────────────
 
-/** Narrows a user query to users who belong to, or hold a grant at, an entity within reach. */
+/** Narrows a user query to users who hold a grant at an entity within reach. */
 function usersWithin(reach: Reach): Prisma.UserWhereInput {
   if (reach === "all") return {};
-  const entityIds = [...reach];
   return {
-    OR: [
-      { entities: { some: { entityId: { in: entityIds } } } },
-      { roleAssignments: { some: { scopeType: "ENTITY", entityId: { in: entityIds } } } }
-    ]
+    roleAssignments: { some: { scopeType: "ENTITY", entityId: { in: [...reach] } } }
   };
 }
 
@@ -571,10 +573,17 @@ export async function getEntityTree(actor: AdminActorContext) {
         parentId: true,
         isActive: true,
         functionalCurrency: true,
-        _count: { select: { children: true, users: true } }
+        roleAssignments: { select: { userId: true } },
+        _count: { select: { children: true } }
       },
       orderBy: [{ type: "asc" }, { name: "asc" }]
     })
+  ).then((rows) =>
+    // `users`: distinct users holding a role directly at the entity.
+    rows.map(({ roleAssignments, _count, ...entity }) => ({
+      ...entity,
+      _count: { ..._count, users: new Set(roleAssignments.map((a) => a.userId)).size }
+    }))
   );
 
   type Node = (typeof allEntities)[number] & { children: Node[] };
@@ -592,56 +601,21 @@ export async function getEntityTree(actor: AdminActorContext) {
   return { flat: allEntities, tree: roots };
 }
 
-// ── Scope Assignment ────────────────────────────────────────────────────────
+// ── Revoking access below an entity ─────────────────────────────────────────
 
-type ScopeError = "USER_NOT_FOUND" | "ENTITY_NOT_FOUND" | "FORBIDDEN";
-
-/**
- * Makes the user a member of the entity (and, with `cascade`, of everything
- * below it). Membership alone gives no permissions; a role grant does.
- */
-export async function assignScope(
-  userId: string,
-  entityId: string,
-  cascade: boolean,
-  actor: AdminActorContext
-) {
-  const reach = actorReach(actor);
-  if (!reaches(reach, entityId)) return fail("FORBIDDEN");
-
-  return bypass(async (tx) => {
-    const user = await tx.user.findUnique({ where: { id: userId }, select: { id: true } });
-    if (!user) return fail("USER_NOT_FOUND");
-    const targetEntity = await tx.entity.findUnique({
-      where: { id: entityId },
-      select: { id: true, type: true }
-    });
-    if (!targetEntity) return fail("ENTITY_NOT_FOUND");
-
-    const entityIds = cascade ? await subtreeIds(tx, entityId) : [entityId];
-    for (const eid of entityIds) {
-      await tx.entityUser.upsert({
-        where: { entityId_userId: { entityId: eid, userId } },
-        create: { entityId: eid, userId },
-        update: {}
-      });
-    }
-    return {
-      data: { userId, assignedEntities: entityIds.length, scope: targetEntity.type, cascade }
-    };
-  });
-}
+type ScopeError = "ENTITY_NOT_FOUND" | "FORBIDDEN";
 
 /**
- * Takes the user off the entity (and, with `cascade`, off everything below
- * it): the memberships and every grant held at those entities.
+ * Takes away every role the user holds at the entity (and, with `cascade`, at
+ * every entity below it). Roles held on a group above it, or tenant-wide,
+ * remain.
  */
 export async function revokeScope(
   userId: string,
   entityId: string,
   cascade: boolean,
   actor: AdminActorContext
-) {
+): Promise<{ error: ScopeError } | { data: { entities: number; cascade: boolean } }> {
   const reach = actorReach(actor);
   if (!reaches(reach, entityId)) return fail("FORBIDDEN");
 
@@ -653,31 +627,88 @@ export async function revokeScope(
     if (!targetEntity) return fail("ENTITY_NOT_FOUND");
 
     const entityIds = cascade ? await subtreeIds(tx, entityId) : [entityId];
-    await revokeGrants(tx, { userId, at: entityIds });
-    const removed = await tx.entityUser.deleteMany({
-      where: { userId, entityId: { in: entityIds } }
-    });
-    return { data: { removedFrom: removed.count, cascade } };
+    // Within reach only: a cascade never reaches past the caller's own scope.
+    const allowed = entityIds.filter((id) => reaches(reach, id));
+    await revokeGrants(tx, { userId, at: allowed });
+    return { data: { entities: allowed.length, cascade } };
   });
 }
 
-export async function getUserEntities(userId: string, actor: AdminActorContext) {
+// ── A user's access, as an administrator sees it ────────────────────────────
+
+export type UserAccessView = {
+  /** The user's grants within the caller's reach. */
+  assignments: Array<{
+    roleId: string;
+    roleCode: string;
+    roleName: string;
+    scopeType: "TENANT" | "ENTITY";
+    entity: { id: string; name: string; code: string | null; type: string } | null;
+  }>;
+  /** Permissions held through tenant-wide grants. */
+  tenantPermissions: string[];
+  /** What the user can do at each entity within the caller's reach, from the resolver. */
+  effective: Array<{
+    entity: {
+      id: string;
+      name: string;
+      code: string | null;
+      type: string;
+      parentId: string | null;
+    };
+    permissions: string[];
+  }>;
+};
+
+/**
+ * The user's grants and their effective permissions per entity, limited to
+ * what the caller can manage. The permissions come from the access resolver,
+ * so they are exactly what the API will allow.
+ */
+export async function getUserAccess(
+  userId: string,
+  tenantId: string,
+  actor: AdminActorContext
+): Promise<{ error: UserAccessError } | { data: UserAccessView }> {
   const reach = actorReach(actor);
-  return bypass(async (tx) => {
+  const loaded = await bypass(async (tx) => {
     const userError = standingError(await userStanding(tx, reach, userId));
     if (userError) return fail(userError);
-
-    const data = await tx.entityUser.findMany({
-      where: { userId, ...(reach === "all" ? {} : { entityId: { in: [...reach] } }) },
-      include: {
-        entity: {
-          select: { id: true, name: true, code: true, type: true, parentId: true, isActive: true }
-        }
+    const grants = await tx.roleAssignment.findMany({
+      where: { userId, ...grantsWithin(reach) },
+      select: {
+        scopeType: true,
+        role: { select: { id: true, code: true, name: true } },
+        entity: { select: { id: true, name: true, code: true, type: true } }
       },
       orderBy: { createdAt: "asc" }
     });
-    return { data };
+    const entities = await tx.entity.findMany({
+      select: { id: true, name: true, code: true, type: true, parentId: true },
+      orderBy: [{ type: "asc" }, { name: "asc" }]
+    });
+    return { grants, entities };
   });
+  if ("error" in loaded) return loaded;
+
+  const access = await getAccessService().resolve({ tenantId, userId });
+  const effective = loaded.entities
+    .filter((entity) => reaches(reach, entity.id) && access.entityPermissions[entity.id])
+    .map((entity) => ({ entity, permissions: access.entityPermissions[entity.id] }));
+
+  return {
+    data: {
+      assignments: loaded.grants.map((grant) => ({
+        roleId: grant.role.id,
+        roleCode: grant.role.code,
+        roleName: grant.role.name,
+        scopeType: grant.scopeType,
+        entity: grant.entity
+      })),
+      tenantPermissions: access.tenantPermissions,
+      effective
+    }
+  };
 }
 
 // ── User Profile ────────────────────────────────────────────────────────────
@@ -696,12 +727,24 @@ export async function getUserProfile(userId: string) {
       isActive: true,
       lastLoginAt: true,
       loginCount: true,
-      createdAt: true,
-      entities: {
-        include: { entity: { select: { id: true, name: true, type: true } } }
-      }
+      createdAt: true
     }
   });
+}
+
+/** The caller's own role assignments, for their profile page. */
+export async function getOwnAssignments(userId: string) {
+  return bypass((tx) =>
+    tx.roleAssignment.findMany({
+      where: { userId },
+      select: {
+        scopeType: true,
+        role: { select: { code: true, name: true } },
+        entity: { select: { id: true, name: true, type: true } }
+      },
+      orderBy: { createdAt: "asc" }
+    })
+  );
 }
 
 export async function updateUserProfile(
@@ -825,6 +868,7 @@ export async function updateUserStatus(
 export async function getUserDetail(userId: string, actor: AdminActorContext) {
   const reach = actorReach(actor);
   const withinReach = reach === "all" ? {} : { where: { entityId: { in: [...reach] } } };
+  const grantsInReach = { where: grantsWithin(reach) };
   return bypass(async (tx) => {
     const userError = standingError(await userStanding(tx, reach, userId));
     if (userError === "USER_NOT_FOUND") return null;
@@ -843,9 +887,13 @@ export async function getUserDetail(userId: string, actor: AdminActorContext) {
         lastLoginAt: true,
         loginCount: true,
         createdAt: true,
-        entities: {
-          ...withinReach,
-          include: { entity: { select: { id: true, name: true, type: true } } }
+        roleAssignments: {
+          ...grantsInReach,
+          select: {
+            scopeType: true,
+            role: { select: { code: true, name: true } },
+            entity: { select: { id: true, name: true, type: true } }
+          }
         },
         loginAudits: {
           ...withinReach,

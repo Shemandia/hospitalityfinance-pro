@@ -359,13 +359,6 @@ export class APRepository {
     });
   }
 
-  findAnyEntityUser(entityId: string) {
-    return this.db.entityUser.findFirst({
-      where: { entityId },
-      orderBy: [{ createdAt: "asc" }]
-    });
-  }
-
   listInvoicesForPaymentRun(
     entityId: string,
     startDate: Date,

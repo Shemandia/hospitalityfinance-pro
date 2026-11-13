@@ -347,7 +347,6 @@ if (!process.env.TEST_DATABASE_URL || !redisUrl) {
         const userIds = [ids.alice, ids.bob].filter(Boolean);
         const roleIds = [ids.accountant, ids.viewer, ids.admin].filter(Boolean);
         await tx.roleAssignment.deleteMany({ where: { userId: { in: userIds } } });
-        await tx.entityUser.deleteMany({ where: { userId: { in: userIds } } });
         await tx.user.deleteMany({ where: { id: { in: userIds } } });
         await tx.rolePermission.deleteMany({ where: { roleId: { in: roleIds } } });
         await tx.role.deleteMany({ where: { id: { in: roleIds } } });
@@ -668,7 +667,7 @@ if (!process.env.TEST_DATABASE_URL || !redisUrl) {
         expect(access.entityPermissions[ids.propC]).toEqual(access.tenantPermissions);
       });
 
-      it("gives a starting role at one entity, with the membership the token still needs", async () => {
+      it("gives a starting role at one entity", async () => {
         await clearAssignments();
         await grantRoleAtEntity(prisma, ids.bob, "VIEWER", ids.propA);
 
@@ -678,11 +677,6 @@ if (!process.env.TEST_DATABASE_URL || !redisUrl) {
         expect(access.tenantPermissions).toEqual([]);
         expect(Object.keys(access.entityPermissions)).toEqual([ids.propA]);
         expect(access.entityPermissions[ids.propA]).toEqual(expect.arrayContaining(viewerCodes));
-
-        const membership = await bypass((tx) =>
-          tx.entityUser.count({ where: { userId: ids.bob, entityId: ids.propA } })
-        );
-        expect(membership).toBe(1);
       });
     });
   });

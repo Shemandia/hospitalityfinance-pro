@@ -2,8 +2,6 @@ import { Prisma } from "./client.js";
 import { getRequestContext } from "./requestContext.js";
 
 export const MODELS_WITH_ENTITY_ID = new Set([
-  "EntityUser",
-  "UserRole",
   "Period",
   "Account",
   "JournalType",

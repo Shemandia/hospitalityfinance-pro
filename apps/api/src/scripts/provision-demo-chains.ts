@@ -248,12 +248,7 @@ async function provisionChain(chain: (typeof chains)[0]) {
     });
     console.log(`  ✓ Property created: ${prop.name} (${property.id})`);
 
-    // Assign admin to property
-    await tenantDb.entityUser.upsert({
-      where: { entityId_userId: { entityId: property.id, userId: adminUser.id } },
-      update: {},
-      create: { entityId: property.id, userId: adminUser.id }
-    });
+    // The admin's grant on the group reaches this property.
 
     // Create basic COA for each property
     const accounts = [

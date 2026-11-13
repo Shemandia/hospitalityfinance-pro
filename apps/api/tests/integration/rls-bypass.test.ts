@@ -91,12 +91,6 @@ if (!process.env.TEST_DATABASE_URL) {
         ids.user = (
           await tx.user.create({ data: { email: `bypass-${run}@bypass.test`, name: "Bypass IT" } })
         ).id;
-        await tx.entityUser.createMany({
-          data: [
-            { entityId: ids.entityA, userId: ids.user },
-            { entityId: ids.entityB, userId: ids.user }
-          ]
-        });
         // accounts is under FORCE row-level security, so even the owning role is filtered.
         await tx.account.createMany({
           data: [ids.entityA, ids.entityB].map((entityId) => ({
@@ -113,7 +107,6 @@ if (!process.env.TEST_DATABASE_URL) {
     afterAll(async () => {
       await fixture(async (tx) => {
         await tx.account.deleteMany({ where: { name: `Bypass IT cash ${run}` } });
-        await tx.entityUser.deleteMany({ where: { userId: ids.user } });
         await tx.user.deleteMany({ where: { id: ids.user } });
         // Every entity this file creates is named "Bypass IT … <run>".
         await tx.entity.deleteMany({
@@ -200,7 +193,9 @@ if (!process.env.TEST_DATABASE_URL) {
             await tx.entity.create({
               data: { name, code: `BPR${run}`.slice(0, 20), type: "PROPERTY", countryCode: "TZ" }
             });
-            await tx.entityUser.deleteMany({ where: { userId: ids.user, entityId: ids.entityB } });
+            await tx.account.deleteMany({
+              where: { entityId: ids.entityB, name: `Bypass IT cash ${run}` }
+            });
             throw new Rollback();
           })
         )
@@ -208,9 +203,9 @@ if (!process.env.TEST_DATABASE_URL) {
 
       const after = await fixture(async (tx) => ({
         created: await tx.entity.count({ where: { name } }),
-        memberships: await tx.entityUser.count({ where: { userId: ids.user } })
+        accounts: await tx.account.count({ where: { name: `Bypass IT cash ${run}` } })
       }));
-      expect(after).toEqual({ created: 0, memberships: 2 });
+      expect(after).toEqual({ created: 0, accounts: 2 });
     });
 
     it("ends with the callback: the rest of the request is scoped as before", async () => {

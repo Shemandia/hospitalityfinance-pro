@@ -23,6 +23,7 @@ import * as XLSX from "xlsx";
 import type { PayrollBatch, PayrollImportResult, PayrollRun } from "./payroll-types.js";
 
 import { applyBalanceDelta } from "../../../../db/balance-writer.js";
+import { entityActor } from "../../../access/actor.js";
 export class PayrollServiceError extends Error {
   constructor(
     public readonly code: string,
@@ -51,11 +52,8 @@ export async function importPayrollBatch(
   };
 
   // Get entity user for journal creation
-  const entityUser = await prisma.entityUser.findFirst({
-    where: { entityId },
-    include: { user: true }
-  });
-  if (!entityUser) {
+  const actor = await entityActor(prisma, entityId);
+  if (!actor) {
     throw new PayrollServiceError("PAYROLL_NO_USER", "No entity user found.", 422);
   }
 
@@ -71,7 +69,7 @@ export async function importPayrollBatch(
       const journalId = await processPayrollRun(
         prisma,
         entityId,
-        entityUser.userId,
+        actor.userId,
         entity.functionalCurrency,
         run,
         batch.sourceSystem,

@@ -19,6 +19,7 @@ import { withBypassRLS } from "../../src/db/rls-bypass.js";
 import { APService } from "../../src/modules/ap/service.js";
 import { ARService } from "../../src/modules/ar/service.js";
 import { TaxPostingError } from "../../src/modules/tax/tax-posting.js";
+import { grantRole } from "../../src/modules/access/grants.js";
 
 const D = (v: string | number) => new Prisma.Decimal(v);
 
@@ -80,9 +81,11 @@ if (!process.env.TEST_DATABASE_URL) {
         const user = await tx.user.create({
           data: { email: `tax-${unique}@example.test`, name: "Tax Tester" }
         });
-        await tx.entityUser.create({
-          data: { entityId: entity.id, userId: user.id }
+        // A role at the entity makes the user its recorded actor (access/actor.ts).
+        const role = await tx.role.create({
+          data: { code: `IT_TAX_${unique}`, name: "Integration test role" }
         });
+        await grantRole(tx, user.id, role.id, { scope: "ENTITY", entityId: entity.id });
 
         const period = await tx.period.create({
           data: {

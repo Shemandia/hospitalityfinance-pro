@@ -24,8 +24,6 @@ export const RLS_MODELS = new Set([
   // so any prisma.entity.* call needs the context set, otherwise it
   // returns zero rows and findUniqueOrThrow throws "No Entity found".
   "Entity",
-  "EntityUser",
-  "UserRole",
   "Period",
   "Account",
   "JournalType",

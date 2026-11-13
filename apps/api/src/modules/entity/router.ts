@@ -12,6 +12,21 @@ import {
 } from "../access/resolver.js";
 import { changeAccess } from "../access/invalidation.js";
 
+/**
+ * `_count.users`: the users who hold a role directly at the entity (role
+ * assignments, AUT-03). Users reaching it through a group or a tenant-wide
+ * role are not counted here.
+ */
+function withUserCount<
+  T extends { roleAssignments: Array<{ userId: string }>; _count: Record<string, number> }
+>(entity: T) {
+  const { roleAssignments, ...rest } = entity;
+  return {
+    ...rest,
+    _count: { ...rest._count, users: new Set(roleAssignments.map((a) => a.userId)).size }
+  };
+}
+
 const MANAGE_ENTITIES = "ADMIN_ENTITIES";
 
 type EntityRef = { id: string; parentId: string | null };
@@ -80,12 +95,13 @@ export async function registerEntityRouter(app: FastifyInstance): Promise<void> 
           where,
           include: {
             parent: { select: { id: true, name: true } },
-            _count: { select: { children: true, users: true } }
+            roleAssignments: { select: { userId: true } },
+            _count: { select: { children: true } }
           },
           orderBy: { name: "asc" }
         })
       );
-      return { data, errors: [] };
+      return { data: data.map(withUserCount), errors: [] };
     }
   );
 
@@ -107,7 +123,8 @@ export async function registerEntityRouter(app: FastifyInstance): Promise<void> 
             children: {
               select: { id: true, name: true, type: true, isActive: true, functionalCurrency: true }
             },
-            _count: { select: { children: true, users: true, accounts: true, journals: true } }
+            roleAssignments: { select: { userId: true } },
+            _count: { select: { children: true, accounts: true, journals: true } }
           }
         })
       );
@@ -124,7 +141,7 @@ export async function registerEntityRouter(app: FastifyInstance): Promise<void> 
         : entity.children.filter((child: { id: string }) =>
             openableEntityIds(access).includes(child.id)
           );
-      return { data: { ...entity, children: visibleChildren }, errors: [] };
+      return { data: { ...withUserCount(entity), children: visibleChildren }, errors: [] };
     }
   );
 
@@ -212,35 +229,8 @@ export async function registerEntityRouter(app: FastifyInstance): Promise<void> 
         })
       );
 
-      const userId =
-        typeof (request.user as any)?.sub === "string"
-          ? ((request.user as any).sub as string)
-          : null;
-      if (userId) {
-        try {
-          const userRow = await prisma.user.findUnique({
-            where: { id: userId },
-            select: { id: true }
-          });
-          if (userRow) {
-            await prisma.entityUser.upsert({
-              where: { entityId_userId: { entityId: entity.id, userId: userRow.id } },
-              create: { entityId: entity.id, userId: userRow.id },
-              update: {}
-            });
-          } else {
-            request.log.warn(
-              { userId, entityId: entity.id },
-              "Entity created but no User row matches the JWT sub — entity_users link skipped"
-            );
-          }
-        } catch (err) {
-          request.log.error(
-            { err, entityId: entity.id },
-            "Failed to auto-link requesting user to new entity"
-          );
-        }
-      }
+      // No membership to record: the creator already holds ADMIN_ENTITIES at
+      // the parent (or tenant-wide), and that grant reaches the new entity.
       reply.code(201);
       return { data: entity, errors: [] };
     }
@@ -361,7 +351,6 @@ export async function registerEntityRouter(app: FastifyInstance): Promise<void> 
       }
       // Grants at the entity go with it (ON DELETE CASCADE).
       await changeEntityTree(request, async () => {
-        await prisma.entityUser.deleteMany({ where: { entityId: request.params.id } });
         await prisma.entity.delete({ where: { id: request.params.id } });
       });
       reply.code(204);

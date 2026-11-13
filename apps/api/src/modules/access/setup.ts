@@ -116,10 +116,5 @@ export async function grantRoleAtEntity(
     const role = await tx.role.findUnique({ where: { code: roleCode }, select: { id: true } });
     if (!role) throw new Error(`Role ${roleCode} is missing; run ensureSystemCatalog first.`);
     await grantRole(tx, userId, role.id, { scope: "ENTITY", entityId });
-    await tx.entityUser.upsert({
-      where: { entityId_userId: { entityId, userId } },
-      create: { entityId, userId },
-      update: {}
-    });
   });
 }

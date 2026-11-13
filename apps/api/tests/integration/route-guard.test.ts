@@ -249,7 +249,6 @@ if (!environmentReady || !redisUrl) {
         const userIds = Object.values(users).filter(Boolean);
         const roleIds = Object.values(roles).filter(Boolean);
         await tx.roleAssignment.deleteMany({ where: { userId: { in: userIds } } });
-        await tx.entityUser.deleteMany({ where: { userId: { in: userIds } } });
         await tx.user.deleteMany({ where: { id: { in: userIds } } });
         await tx.rolePermission.deleteMany({ where: { roleId: { in: roleIds } } });
         await tx.role.deleteMany({ where: { id: { in: roleIds } } });
@@ -383,11 +382,11 @@ if (!environmentReady || !redisUrl) {
         expect(roles.status).toBe(403);
       });
 
-      it("lets a tenant-wide administrator in without any membership row", async () => {
-        const memberships = await bypass((tx) =>
-          tx.entityUser.count({ where: { userId: users.tara } })
+      it("lets a tenant-wide administrator in without any grant at the property", async () => {
+        const entityGrants = await bypass((tx) =>
+          tx.roleAssignment.count({ where: { userId: users.tara, scopeType: "ENTITY" } })
         );
-        expect(memberships).toBe(0);
+        expect(entityGrants).toBe(0);
         const read = await call({ method: "GET", url: journals, as: "tara", entityId: ids.propB });
         expect(read).toMatchObject({ status: 200 });
       });

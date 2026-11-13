@@ -27,6 +27,7 @@ import {
 } from "../shared/suspense.js";
 
 import { applyBalanceDelta } from "../../../../db/balance-writer.js";
+import { entityActor } from "../../../access/actor.js";
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type AccountMappingEntry = {
@@ -339,11 +340,8 @@ export async function executeSAFImport(
     if (!period) throw new Error(`No matching period for ${periodKey}`);
 
     // Find user for journal creation
-    const entityUser = await prisma.entityUser.findFirst({
-      where: { entityId: opts.entityId },
-      include: { user: true }
-    });
-    if (!entityUser) throw new Error("No entity user found");
+    const actor = await entityActor(prisma, opts.entityId);
+    if (!actor) throw new Error("No user holds a role at this entity");
 
     // Determine file currency and entity functional currency for FX conversion
     const fileCurrency = (parsed.currency ?? "USD").toUpperCase();
@@ -499,7 +497,7 @@ export async function executeSAFImport(
           source: journalSource as any,
           status: opts.autoPost ? "POSTED" : "DRAFT",
           postedAt: opts.autoPost ? journalDate : undefined,
-          createdById: entityUser.userId,
+          createdById: actor.userId,
           lines: {
             create: journalLines.map((l) => ({
               accountId: l.accountId,
@@ -644,8 +642,8 @@ export async function executeSAFImport(
               fxRate,
               status: "POSTED",
               glJournalId: journal.id,
-              createdById: entityUser.userId,
-              approvedById: entityUser.userId,
+              createdById: actor.userId,
+              approvedById: actor.userId,
               lines: {
                 create: invoiceLines
               }

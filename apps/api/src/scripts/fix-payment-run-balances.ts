@@ -11,6 +11,7 @@
 import { PrismaClient, Prisma } from "../db/client.js";
 
 import { applyBalanceDelta } from "../db/balance-writer.js";
+import { entityActor } from "../modules/access/actor.js";
 const ENTITY_ID = "00000000-0000-0000-0000-000000000002";
 
 async function main() {
@@ -40,10 +41,8 @@ async function main() {
     console.log(`Found ${paymentJournals.length} payment run journals`);
 
     // Find entity user for journal creation
-    const entityUser = await prisma.entityUser.findFirst({
-      where: { entityId: ENTITY_ID }
-    });
-    if (!entityUser) throw new Error("No entity user found");
+    const actor = await entityActor(prisma, ENTITY_ID);
+    if (!actor) throw new Error("No user holds a role at this entity");
 
     // Find the open period
     const openPeriod = await prisma.period.findFirst({
@@ -137,7 +136,7 @@ async function main() {
           source: "AP",
           status: "POSTED",
           functionalCurrency: "TZS",
-          createdById: entityUser.userId,
+          createdById: actor.userId,
           postedAt: new Date(),
           lines: {
             create: [

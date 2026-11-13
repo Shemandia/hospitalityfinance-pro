@@ -20,6 +20,7 @@ import type {
   SupplierCreateInput,
   SupplierUpdateInput
 } from "./types.js";
+import { entityActor } from "../access/actor.js";
 
 // PO matching removed — handled by external Material Management system
 
@@ -514,9 +515,9 @@ ${transactions
       return directUser.id;
     }
 
-    const entityUser = await this.repository(this.prisma).findAnyEntityUser(entityId);
-    if (entityUser) {
-      return entityUser.userId;
+    const actor = await entityActor(this.prisma, entityId);
+    if (actor) {
+      return actor.userId;
     }
 
     throw new APServiceError(

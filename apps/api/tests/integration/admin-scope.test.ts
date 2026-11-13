@@ -69,12 +69,11 @@ const ANY_ENTITY_ROUTES = [
   "GET /api/v1/admin/permissions",
   "GET /api/v1/admin/roles",
   "GET /api/v1/admin/roles/:id",
+  "GET /api/v1/admin/users/:userId/access",
   "GET /api/v1/admin/users/:userId/detail",
-  "GET /api/v1/admin/users/:userId/entities",
   "GET /api/v1/admin/users/:userId/roles",
   "POST /api/v1/admin/login-audit",
   "POST /api/v1/admin/users/:userId/roles",
-  "POST /api/v1/admin/users/assign-scope",
   "POST /api/v1/admin/users/invite",
   "POST /api/v1/admin/users/revoke-scope",
   "POST /api/v1/entities",
@@ -192,11 +191,6 @@ if (!environmentReady || !redisUrl) {
       return rows.map((row) => `${roleName(row.role.id)}@${entityName(row.entityId)}`).sort();
     }
 
-    const membershipsOf = async (userId: string) =>
-      (await bypass((tx) => tx.entityUser.findMany({ where: { userId } })))
-        .map((row) => Object.entries(ent).find(([, id]) => id === row.entityId)?.[0])
-        .sort();
-
     const email = (name: string) => `${name}-${run}@admin-scope.test`;
 
     beforeAll(async () => {
@@ -264,13 +258,6 @@ if (!environmentReady || !redisUrl) {
             roleId,
             entityId ? { scope: "ENTITY", entityId } : { scope: "TENANT" }
           );
-          if (entityId) {
-            await tx.entityUser.upsert({
-              where: { entityId_userId: { entityId, userId: users[user] } },
-              create: { entityId, userId: users[user] },
-              update: {}
-            });
-          }
         };
         await give("pam", roles.propAdmin, ent.A);
         await give("pam", roles.poster, ent.B);
@@ -305,7 +292,6 @@ if (!environmentReady || !redisUrl) {
         const roleIds = Object.values(roles).filter(Boolean);
         await tx.loginAudit.deleteMany({ where: { userId: { in: userIds } } });
         await tx.roleAssignment.deleteMany({ where: { userId: { in: userIds } } });
-        await tx.entityUser.deleteMany({ where: { userId: { in: userIds } } });
         await tx.user.deleteMany({ where: { id: { in: userIds } } });
         await tx.rolePermission.deleteMany({ where: { roleId: { in: roleIds } } });
         await tx.role.deleteMany({ where: { id: { in: roleIds } } });
@@ -385,7 +371,6 @@ if (!environmentReady || !redisUrl) {
         expect(result.status).toBe(201);
         const nina = await userByEmail("nina");
         expect(await grantsOf(nina!.id)).toEqual(["clerk@A"]);
-        expect(await membershipsOf(nina!.id)).toEqual(["A"]);
       });
 
       it("refuses an invitation naming a role that does not exist, and creates nothing", async () => {
@@ -565,7 +550,7 @@ if (!environmentReady || !redisUrl) {
       });
 
       it("POST /admin/users/invite refuses an entity outside the reach", async () => {
-        const result = await invite("pam", "oscar", { entityIds: [ent.O] });
+        const result = await invite("pam", "oscar", { roleId: roles.clerk, entityIds: [ent.O] });
         expect(result).toMatchObject({ status: 403, code: "FORBIDDEN" });
         expect(await userByEmail("oscar")).toBeNull();
       });
@@ -578,21 +563,32 @@ if (!environmentReady || !redisUrl) {
         expect(idsIn(tree.tree)).toEqual([ent.A]);
       });
 
-      it("GET /admin/users/:userId/entities refuses an outside user and hides outside memberships", async () => {
+      it("GET /admin/users/:userId/access refuses an outside user and hides outside grants", async () => {
         const outside = await call({
           method: "GET",
-          url: `/api/v1/admin/users/${users.olga}/entities`,
+          url: `/api/v1/admin/users/${users.olga}/access`,
           as: "pam"
         });
         expect(outside).toMatchObject({ status: 403, code: "FORBIDDEN" });
 
+        // ivan holds roles at A and at B; pam reaches A and A1 only.
         const inside = await call({
           method: "GET",
-          url: `/api/v1/admin/users/${users.ivan}/entities`,
+          url: `/api/v1/admin/users/${users.ivan}/access`,
           as: "pam"
         });
-        const memberships = (inside.data as Array<{ entityId: string }>).map((m) => m.entityId);
-        expect(memberships.sort()).toEqual([ent.A, ent.A1].sort());
+        expect(inside.status).toBe(200);
+        const view = inside.data as {
+          assignments: Array<{ roleId: string; entity: { id: string } | null }>;
+          effective: Array<{ entity: { id: string }; permissions: string[] }>;
+        };
+        // Earlier tests change which roles ivan holds at A; none outside the reach is shown.
+        expect(view.assignments.length).toBeGreaterThan(0);
+        for (const grant of view.assignments) expect(grant.entity?.id).toBe(ent.A);
+        // Effective access comes from the resolver: the grant at A reaches A1.
+        expect(view.effective.map((e) => e.entity.id).sort()).toEqual([ent.A, ent.A1].sort());
+        const atA = view.effective.find((e) => e.entity.id === ent.A)?.permissions;
+        expect(view.effective.find((e) => e.entity.id === ent.A1)?.permissions).toEqual(atA);
       });
 
       it("POST /admin/login-audit refuses an entity outside the reach, and a missing one", async () => {
@@ -665,7 +661,7 @@ if (!environmentReady || !redisUrl) {
         expect((await status("ana", true)).status).toBe(200);
       });
 
-      it("GET /admin/users/:userId/detail refuses an outside user and hides outside memberships", async () => {
+      it("GET /admin/users/:userId/detail refuses an outside user and hides outside grants", async () => {
         const outside = await call({
           method: "GET",
           url: `/api/v1/admin/users/${users.olga}/detail`,
@@ -679,9 +675,12 @@ if (!environmentReady || !redisUrl) {
           as: "pam"
         });
         expect(inside.status).toBe(200);
-        const detail = inside.data as { entities: Array<{ entityId: string }> };
-        for (const membership of detail.entities) {
-          expect([ent.A, ent.A1]).toContain(membership.entityId);
+        const detail = inside.data as {
+          roleAssignments: Array<{ scopeType: string; entity: { id: string } | null }>;
+        };
+        expect(detail.roleAssignments.length).toBeGreaterThan(0);
+        for (const grant of detail.roleAssignments) {
+          expect([ent.A, ent.A1]).toContain(grant.entity?.id);
         }
       });
 
@@ -694,19 +693,6 @@ if (!environmentReady || !redisUrl) {
         expect(listed).not.toContain(users.tara);
       });
 
-      it("POST /admin/users/assign-scope refuses an entity outside the reach", async () => {
-        for (const entityId of [ent.B, ent.G]) {
-          const result = await call({
-            method: "POST",
-            url: "/api/v1/admin/users/assign-scope",
-            as: "pam",
-            body: { userId: users.ana, entityId, cascade: true }
-          });
-          expect(result).toMatchObject({ status: 403, code: "FORBIDDEN" });
-        }
-        expect(await membershipsOf(users.ana)).toEqual(["A", "A1"]);
-      });
-
       it("POST /admin/users/revoke-scope refuses an entity outside the reach", async () => {
         const result = await call({
           method: "POST",
@@ -716,10 +702,9 @@ if (!environmentReady || !redisUrl) {
         });
         expect(result).toMatchObject({ status: 403, code: "FORBIDDEN" });
         expect(await grantsOf(users.ivan)).toContain("clerk@B");
-        expect(await membershipsOf(users.ivan)).toContain("B");
       });
 
-      it("POST /admin/users/revoke-scope removes grants as well as memberships, to any depth", async () => {
+      it("POST /admin/users/revoke-scope removes the grants, to any depth", async () => {
         const result = await call({
           method: "POST",
           url: "/api/v1/admin/users/revoke-scope",
@@ -728,7 +713,6 @@ if (!environmentReady || !redisUrl) {
         });
         expect(result.status).toBe(200);
         expect(await grantsOf(users.ana)).toEqual([]);
-        expect(await membershipsOf(users.ana)).toEqual([]);
       });
 
       it("POST /entities refuses a parent outside the reach, and the root", async () => {

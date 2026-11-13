@@ -7,6 +7,7 @@ import {
   type SAFParseResult
 } from "./sky-jana-parser.js";
 import { getSkyJanaSftpConfig, SkyJanaSftpClientWrapper } from "./sky-jana-sftp-client.js";
+import { entityActor } from "../../../access/actor.js";
 
 export type SkyJanaSyncResult = {
   filesProcessed: number;
@@ -188,10 +189,9 @@ async function processSAFFile(
       : new Date();
 
     // Find an entity user for the createdById field
-    const entityUser = await prisma.entityUser.findFirst({
-      where: { entityId }
-    });
-    if (!entityUser) throw new Error("No entity user found for journal creation");
+    const actor = await entityActor(prisma, entityId);
+    if (!actor)
+      throw new Error("No user holds a role at this entity to record as the journal's creator");
 
     await prisma.journal.create({
       data: {
@@ -202,7 +202,7 @@ async function processSAFFile(
         functionalCurrency: voucher.currency,
         source: "PMS",
         status: "DRAFT",
-        createdById: entityUser.userId,
+        createdById: actor.userId,
         lines: {
           create: journalLines.map((jl) => ({
             ...jl,

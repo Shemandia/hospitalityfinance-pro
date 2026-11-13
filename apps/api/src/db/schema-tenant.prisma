@@ -17,13 +17,6 @@ enum EntityType {
   PROPERTY // Individual hotel/resort
 }
 
-enum EntityRole {
-  ADMIN
-  CONTROLLER
-  VIEWER
-  SUPERADMIN
-}
-
 enum AccountTypeCategory {
   BALANCE_SHEET
   INCOME
@@ -329,8 +322,6 @@ model Entity {
   updatedAt          DateTime   @updatedAt @map("updated_at")
 
   // Relations
-  users                    EntityUser[]
-  userRoles                UserRole[]
   roleAssignments          RoleAssignment[]
   periods                  Period[]
   accounts                 Account[]
@@ -417,8 +408,6 @@ model User {
   passwordResetToken   String?   @map("password_reset_token") @db.VarChar(255)
   passwordResetExpires DateTime? @map("password_reset_expires")
 
-  entities                     EntityUser[]
-  roles                        UserRole[]
   roleAssignments              RoleAssignment[]
   createdJournals              Journal[]                 @relation("JournalCreatedBy")
   approvedJournals             Journal[]                 @relation("JournalApprovedBy")
@@ -456,19 +445,6 @@ model LoginAudit {
   @@map("login_audits")
 }
 
-model EntityUser {
-  entityId  String     @map("entity_id")
-  userId    String     @map("user_id")
-  role      EntityRole? // Deprecated: roles now assigned via UserRole table
-  createdAt DateTime    @default(now()) @map("created_at")
-  entity    Entity     @relation(fields: [entityId], references: [id])
-  user      User       @relation(fields: [userId], references: [id])
-
-  @@id([entityId, userId])
-  @@index([userId])
-  @@map("entity_users")
-}
-
 model Role {
   id          String           @id @default(uuid())
   code        String           @unique
@@ -478,7 +454,6 @@ model Role {
   createdAt   DateTime         @default(now()) @map("created_at")
   updatedAt   DateTime         @updatedAt @map("updated_at")
   permissions RolePermission[]
-  users       UserRole[]
   assignments RoleAssignment[]
 
   @@map("roles")
@@ -535,23 +510,6 @@ model RoleAssignment {
   @@index([entityId])
   @@index([roleId])
   @@map("role_assignments")
-}
-
-/// Deprecated by RoleAssignment (WP-A). Kept until every reader and writer has
-/// moved to AccessService; dropped by the follow-up contract migration.
-model UserRole {
-  id        String   @id @default(uuid())
-  userId    String   @map("user_id")
-  roleId    String   @map("role_id")
-  entityId  String?  @map("entity_id")
-  createdAt DateTime @default(now()) @map("created_at")
-  user      User     @relation(fields: [userId], references: [id])
-  role      Role     @relation(fields: [roleId], references: [id])
-  entity    Entity?  @relation(fields: [entityId], references: [id])
-
-  @@unique([userId, roleId, entityId])
-  @@index([entityId])
-  @@map("user_roles")
 }
 
 // ─── Period Management ────────────────────────────────────────────────────────

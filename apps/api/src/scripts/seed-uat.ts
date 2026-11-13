@@ -111,13 +111,6 @@ async function main() {
     }
   });
 
-  for (const entityId of [GROUP_ID, PROP_A_ID, PROP_B_ID]) {
-    await prisma.entityUser.upsert({
-      where: { entityId_userId: { entityId, userId: ADMIN_USER_ID } },
-      update: {},
-      create: { entityId, userId: ADMIN_USER_ID }
-    });
-  }
   // A grant on the group reaches both properties.
   await ensureSystemCatalog(prisma);
   await grantRoleAtEntity(prisma, ADMIN_USER_ID, "ADMIN", GROUP_ID);
