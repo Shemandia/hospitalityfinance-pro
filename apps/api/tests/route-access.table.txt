@@ -80,6 +80,7 @@ GET    /api/v1/budget/definitions/:id/lines  ->  entity  BUDGET_READ
 GET    /api/v1/budget/variance  ->  entity  BUDGET_READ
 GET    /api/v1/consolidation/:parentEntityId/runs  ->  entity  CONSOLIDATION_RUN | REPORT_READ
 GET    /api/v1/consolidation/:parentEntityId/runs/:runId  ->  entity  CONSOLIDATION_RUN | REPORT_READ
+GET    /api/v1/context  ->  session
 GET    /api/v1/entities  ->  session
 GET    /api/v1/entities/:id  ->  session
 GET    /api/v1/fixed-assets  ->  entity  GL_READ

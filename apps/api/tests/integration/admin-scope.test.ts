@@ -826,27 +826,32 @@ if (!environmentReady || !redisUrl) {
         expect(await grantsOf(users.olga)).toEqual([]);
       });
 
-      it("feeds the profile the web client reads from the same grants", async () => {
-        // Until the context endpoint replaces it, /auth/me is what the menus use.
-        const { AuthService } = await import("../../src/services/auth.service.js");
-        const profile = await new AuthService(redis).getProfile(
-          users.pam,
-          tenantId,
-          tenantId,
-          process.env.TEST_DATABASE_URL as string
-        );
-        const roleCodes = await bypass((tx) =>
-          tx.role.findMany({
-            where: { id: { in: [roles.propAdmin, roles.poster] } },
-            select: { code: true }
-          })
-        );
-        expect([...profile.roles].sort()).toEqual(roleCodes.map((role) => role.code).sort());
-        expect(profile.permissions).toEqual(expect.arrayContaining(["ADMIN_USERS", "GL_POST"]));
+      it("feeds the context the web client reads from the same grants", async () => {
+        const context = await call({ method: "GET", url: "/api/v1/context", as: "pam" });
+        expect(context.status).toBe(200);
+        const data = context.data as {
+          tenantPermissions: string[];
+          entities: Array<{ id: string; parentId: string | null; permissions: string[] }>;
+        };
+        expect(data.tenantPermissions).toEqual([]);
         // The entities are the ones pam can open: A and A1 as administrator, B as poster.
-        expect(profile.entities.map((entity) => entity.entityId).sort()).toEqual(
-          [ent.A, ent.A1, ent.B].sort()
-        );
+        const byId = new Map(data.entities.map((entity) => [entity.id, entity]));
+        expect([...byId.keys()].sort()).toEqual([ent.A, ent.A1, ent.B].sort());
+        expect(byId.get(ent.A)!.permissions).toContain("ADMIN_USERS");
+        expect(byId.get(ent.A)!.permissions).not.toContain("GL_POST");
+        expect(byId.get(ent.B)!.permissions).toEqual(["GL_POST", "GL_READ"]);
+        // A1 hangs under A; A and B have no parent pam can open.
+        expect(byId.get(ent.A1)!.parentId).toBe(ent.A);
+        expect(byId.get(ent.A)!.parentId).toBeNull();
+        expect(byId.get(ent.B)!.parentId).toBeNull();
+      });
+
+      it("keeps /auth/me to identity: no roles, permissions or entities", async () => {
+        const me = await call({ method: "GET", url: "/auth/me", as: "pam" });
+        expect(me.status).toBe(200);
+        expect(me.data).not.toHaveProperty("roles");
+        expect(me.data).not.toHaveProperty("permissions");
+        expect(me.data).not.toHaveProperty("entities");
       });
 
       it("refuses to delete a role that is still granted to someone", async () => {

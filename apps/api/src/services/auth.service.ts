@@ -12,8 +12,6 @@ import { getRegistryClient, resolveTenantByCode } from "../db/tenantRegistry.js"
 import { getTenantClient } from "../db/tenantPool.js";
 import { withBypassRLS } from "../db/rls-bypass.js";
 import type { Prisma } from "../db/client.js";
-import { openableEntityIds } from "../modules/access/resolver.js";
-import { getAccessService } from "../modules/access/runtime.js";
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
@@ -522,31 +520,14 @@ export class AuthService {
   }
 
   /**
-   * The signed-in user's profile, with what they can do and open today.
-   *
-   * `roles` and `permissions` are the union over the user's grants; the web
-   * client draws its menus from them until the context endpoint gives it
-   * permissions per entity. `entities` are the entities the user can open,
-   * as AccessService resolves them — the same answer the route guard uses.
+   * The signed-in user's profile: who they are, nothing about what they may
+   * do. Permissions and entities come only from GET /api/v1/context, so there
+   * is one answer to "what can this user do" (AUT-02).
    */
-  async getProfile(userId: string, tenantId: string, tenantSlug: string, tenantDbUrl: string) {
+  async getProfile(userId: string, tenantSlug: string, tenantDbUrl: string) {
     const tenantPrisma = getTenantClient(tenantSlug, tenantDbUrl);
-    const access = await getAccessService().resolve({ tenantId, userId });
-    const openable = openableEntityIds(access);
-
-    const { user, entities } = await withBypassRLS(
-      tenantPrisma,
-      async (tx: Prisma.TransactionClient) => ({
-        user: await tx.user.findUnique({
-          where: { id: userId },
-          include: { roleAssignments: { select: { role: { select: { code: true } } } } }
-        }),
-        entities: await tx.entity.findMany({
-          where: { id: { in: openable } },
-          select: { id: true, name: true, type: true },
-          orderBy: { name: "asc" }
-        })
-      })
+    const user = await withBypassRLS(tenantPrisma, (tx: Prisma.TransactionClient) =>
+      tx.user.findUnique({ where: { id: userId } })
     );
     if (!user) throw new AuthError("User not found", 404, "USER_NOT_FOUND");
 
@@ -558,15 +539,6 @@ export class AuthService {
       jobTitle: user.jobTitle,
       department: user.department,
       avatarUrl: user.avatarUrl,
-      roles: [...new Set(user.roleAssignments.map((grant) => grant.role.code))],
-      permissions: [
-        ...new Set([...access.tenantPermissions, ...Object.values(access.entityPermissions).flat()])
-      ].sort(),
-      entities: entities.map((entity) => ({
-        entityId: entity.id,
-        name: entity.name,
-        type: entity.type
-      })),
       lastLoginAt: user.lastLoginAt,
       mustChangePassword: user.mustChangePassword
     };

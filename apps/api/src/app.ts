@@ -45,6 +45,7 @@ import { AccessInfrastructureError } from "./modules/access/service.js";
 import { registerAuthRouter } from "./modules/auth/router.js";
 import { connectRedis } from "./db/redis.js";
 import { resolveChainEntityId } from "./modules/entity/chain.js";
+import { registerContextRouter } from "./modules/access/context.js";
 import { registerEntityRouter } from "./modules/entity/router.js";
 
 declare module "fastify" {
@@ -223,6 +224,7 @@ export async function createApp(): Promise<FastifyInstance> {
     }
   );
 
+  await registerContextRouter(app);
   await registerEntityRouter(app);
 
   await registerGLRouter(app);

@@ -32,6 +32,7 @@ vi.mock("../src/db/redis.js", () => ({
 const SESSION_ROUTES = [
   "DELETE /auth/sessions/:sessionId",
   "GET /api/v1/admin/profile",
+  "GET /api/v1/context",
   "GET /api/v1/entities",
   "GET /api/v1/entities/:id",
   "GET /api/v1/license",

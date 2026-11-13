@@ -9,7 +9,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { AuthService, AuthError, ValidationError } from "../../services/auth.service.js";
 import { getRedisClient } from "../../db/redis.js";
-import { resolveTenantByCode } from "../../db/tenantRegistry.js";
+import { resolveTenantByCode, resolveTenantById } from "../../db/tenantRegistry.js";
 import { sendPasswordResetEmail } from "../../shared/email.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
 import { AccessInfrastructureError } from "../access/service.js";
@@ -366,7 +366,7 @@ export async function registerAuthRouter(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       try {
         const user = request.user!;
-        const tenant = await resolveTenantByCode(user.tenantCode as string);
+        const tenant = await resolveTenantById(user.tenantId);
         if (!tenant) throw new AuthError("Invalid tenant");
 
         await getAuthService().changePassword(
@@ -394,12 +394,11 @@ export async function registerAuthRouter(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       try {
         const user = request.user!;
-        const tenant = await resolveTenantByCode(user.tenantCode as string);
+        const tenant = await resolveTenantById(user.tenantId);
         if (!tenant) throw new AuthError("Invalid tenant");
 
         const profile = await getAuthService().getProfile(
-          user.sub as string,
-          tenant.id,
+          user.sub,
           tenant.slug,
           tenant.databaseUrl
         );
