@@ -14,7 +14,8 @@ import {
 } from "../../../../components/ui/card";
 import { Building2, Lock, CheckCircle2, ArrowLeft } from "lucide-react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4500";
+// Same origin: the web app proxies the API (lib/server/api-proxy.ts).
+const API_BASE = "";
 
 export default function ResetPasswordPage() {
   const params = useParams();

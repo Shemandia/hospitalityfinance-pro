@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4500";
+import { apiInternalUrl } from "../../../lib/server/api-proxy";
 
 export default async function TenantLayout({
   children,
@@ -26,7 +25,7 @@ async function validateTenantCode(code: string): Promise<boolean> {
   }
 
   try {
-    const res = await fetch(`${API_BASE}/auth/tenant/${code}`, {
+    const res = await fetch(`${apiInternalUrl()}/auth/tenant/${code}`, {
       next: { revalidate: 60 }
     });
     return res.ok;

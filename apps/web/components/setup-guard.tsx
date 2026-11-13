@@ -1,58 +1,65 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useSession } from "./auth-provider";
-import { useRouter } from "next/navigation";
+import { useEffect, type ReactNode } from "react";
+import { useParams, useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
-import { useTenantSlug } from "../hooks/use-tenant-slug";
+import { useAuth } from "./auth-provider";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4500";
-
-export function SetupGuard({ children }: { children: React.ReactNode }) {
-  const { data: session, status } = useSession();
+/**
+ * Decides, before any of the dashboard is drawn, whether the user may see it.
+ *
+ * The decision uses the access context the app loads once at sign-in
+ * (GET /api/v1/context): no extra request, and nothing of the dashboard
+ * flashes on screen while it is made.
+ *
+ *   loading          a loader, nothing else
+ *   signed out       to the sign-in page
+ *   unavailable      a message and a retry; never the dashboard
+ *   setup unfinished to the setup wizard, at the step it stopped
+ *   otherwise        the dashboard
+ */
+export function SetupGuard({ children }: { children: ReactNode }) {
+  const { status, context, error, reloadContext } = useAuth();
   const router = useRouter();
-  const tenantSlug = useTenantSlug();
-  const [checked, setChecked] = useState(false);
+  const params = useParams();
+  const code = typeof params?.code === "string" ? params.code : "";
+
+  const setupPending = status === "authenticated" && context !== null && !context.setup.isCompleted;
 
   useEffect(() => {
-    if (status !== "authenticated" || !session) return;
-
-    const token = (session as any).accessToken ?? "";
-    // Prefer tenant slug from URL, fall back to session
-    const slug = tenantSlug ?? (session as any).user?.tenantSlug ?? "";
-
-    // Skip check if no tenant context (e.g., platform admin)
-    if (!slug) {
-      setChecked(true);
-      return;
+    if (!code) return;
+    if (status === "unauthenticated") {
+      router.replace(`/t/${code}/login`);
+    } else if (setupPending && context) {
+      router.replace(`/t/${code}/setup?step=${context.setup.currentStep}`);
     }
+  }, [code, status, setupPending, context, router]);
 
-    fetch(`${API_BASE}/api/v1/setup/progress`, {
-      credentials: "include",
-      headers: {
-        "X-Tenant-Slug": slug
-      }
-    })
-      .then((r) => r.json())
-      .then((json) => {
-        if (json.data && !json.data.isCompleted) {
-          router.replace(`/t/${slug}/setup?step=${json.data.currentStep}`);
-        } else {
-          setChecked(true);
-        }
-      })
-      .catch(() => {
-        // If check fails, allow access (don't block on network errors)
-        setChecked(true);
-      });
-  }, [session, status, router, tenantSlug]);
-
-  if (!checked) {
+  if (status === "unavailable") {
     return (
-      <div className="flex h-[60vh] items-center justify-center">
+      <div className="flex h-screen items-center justify-center bg-slate-50 p-8">
+        <div className="max-w-md rounded-lg border border-amber-200 bg-white p-6 text-center shadow-sm">
+          <p className="text-sm text-slate-700">{error ?? "Your access could not be loaded."}</p>
+          <button
+            type="button"
+            onClick={() => void reloadContext()}
+            className="mt-4 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+          >
+            Try again
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (status !== "authenticated" || setupPending) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-slate-50">
         <div className="flex flex-col items-center gap-3">
           <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
-          <p className="text-sm font-medium text-slate-400">Checking setup status...</p>
+          <p className="text-sm font-medium text-slate-400">
+            {setupPending ? "Opening the setup wizard..." : "Loading..."}
+          </p>
         </div>
       </div>
     );

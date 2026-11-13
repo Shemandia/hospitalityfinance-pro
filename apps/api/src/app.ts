@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
-import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyInstance } from "fastify";
 import { runWithContext, getRequestContext, updateRequestContext } from "./db/requestContext.js";
 import { registryPrisma } from "./db/prisma.js";
 import { requireAuth } from "./middleware/requireAuth.js";
+import { crossSiteRefusal } from "./middleware/csrf.js";
 import { logSerializers } from "./shared/log-redactor.js";
 import { registerGLRouter } from "./modules/gl/router.js";
 import { registerPeriodRouter } from "./modules/period/router.js";
@@ -56,7 +56,12 @@ export async function createApp(): Promise<FastifyInstance> {
       level: process.env.LOG_LEVEL ?? "info",
       serializers: logSerializers
     },
-    bodyLimit: 10 * 1024 * 1024 // 10 MB for file imports
+    bodyLimit: 10 * 1024 * 1024, // 10 MB for file imports
+    // The browser reaches the API through the web app's proxy (AUT-13). Its
+    // X-Forwarded-* headers are believed only from these addresses, so the
+    // client IP (rate limits, audit) and the host (cross-site check) are the
+    // browser's. Default: the proxy runs on the same machine.
+    trustProxy: process.env.TRUST_PROXY ?? "loopback"
   });
 
   // A database or cache fault while access is being checked or changed is an
@@ -80,36 +85,20 @@ export async function createApp(): Promise<FastifyInstance> {
   // Before any route: a route without an access classification fails startup.
   app.decorate("routeAccess", registerRouteAccessRegistry(app));
 
-  const allowedOrigins = (
-    process.env.ALLOWED_ORIGINS ?? "http://localhost:3000,http://localhost:3001"
-  )
-    .split(",")
-    .map((o) => o.trim());
-
-  await app.register(cors, {
-    origin: allowedOrigins,
-    credentials: true
-  });
-
-  // CSRF protection: validate Origin header on state-mutating requests
+  // No CORS: the browser calls the API on the web app's own origin, through
+  // its proxy, so no other origin is allowed and none needs configuring.
+  // Cross-site protection for cookie-authenticated changes (middleware/csrf.ts).
   app.addHook("onRequest", async (request, reply) => {
-    const method = request.method.toUpperCase();
-    if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
-      const origin = request.headers.origin;
-      // Require Origin header on all mutations — reject if missing or not allowed
-      // Exception: internal health-check and webhook paths that may lack a browser Origin
-      const path = request.url;
-      const isInternalPath = path === "/health" || path.startsWith("/webhooks/");
-      if (!isInternalPath) {
-        if (!origin) {
-          reply.code(403);
-          throw new Error("Origin header is required for state-mutating requests");
-        }
-        if (!allowedOrigins.includes(origin)) {
-          reply.code(403);
-          throw new Error(`Origin ${origin} not allowed`);
-        }
-      }
+    const refusal = crossSiteRefusal({
+      method: request.method,
+      cookieHeader: request.headers.cookie,
+      origin: request.headers.origin,
+      host: request.hostname
+    });
+    if (refusal) {
+      return reply
+        .code(403)
+        .send({ data: null, errors: [{ code: "CROSS_SITE_REFUSED", message: refusal }] });
     }
   });
 

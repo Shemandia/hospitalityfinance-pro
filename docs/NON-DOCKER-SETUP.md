@@ -152,16 +152,22 @@ Use Nginx, Caddy, IIS ARR, Apache, or a cloud load balancer to terminate HTTPS.
 
 Recommended public routing:
 
-- `https://app.example.com` -> `127.0.0.1:3001`
-- `https://api.example.com` -> `127.0.0.1:4000`
+- `https://app.example.com` -> `127.0.0.1:3001` (the web app)
+
+The API is not published: the web app proxies `/api/v1/*` and `/auth/*` to it
+on `API_INTERNAL_URL`. Keep its port closed to the outside.
+
+The reverse proxy must **overwrite** `X-Forwarded-For` with the client's
+address (Nginx: `proxy_set_header X-Forwarded-For $remote_addr;`), not append
+to what the client sent. The web app passes that header on to the API, which
+uses it for rate limiting and the audit trail.
 
 Production API environment:
 
 ```bash
 NODE_ENV=production
 COOKIE_SECURE=true
-COOKIE_DOMAIN=.example.com
-ALLOWED_ORIGINS=https://app.example.com
+TRUST_PROXY=loopback
 APP_BASE_URL=https://app.example.com
 ```
 

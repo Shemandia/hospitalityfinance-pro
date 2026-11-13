@@ -192,7 +192,6 @@ GET    /auth/sessions  ->  session
 GET    /auth/tenant/:tenantCode  ->  public
 GET    /health  ->  public
 GET    /ready  ->  public
-OPTIONS*  ->  public
 PATCH  /api/v1/transfer-desk/profiles/:profileId/status  ->  entity  TRANSFER_DESK_CONFIG
 POST   /api/v1/account-types  ->  entity  ADMIN_SETTINGS
 POST   /api/v1/admin/login-audit  ->  any-entity  ADMIN_USERS

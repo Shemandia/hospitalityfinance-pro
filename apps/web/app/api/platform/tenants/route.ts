@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { apiInternalUrl } from "../../../../lib/server/api-proxy";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4500";
 const COOKIE_NAME = "hfp_platform_key";
 
 /**
@@ -16,7 +16,7 @@ export async function GET() {
   }
 
   try {
-    const res = await fetch(`${API_BASE}/api/v1/platform/tenants`, {
+    const res = await fetch(`${apiInternalUrl()}/api/v1/platform/tenants`, {
       headers: { "X-Platform-Key": key }
     });
     if (!res.ok) {

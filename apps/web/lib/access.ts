@@ -35,6 +35,8 @@ export type AccessContext = {
   tenant: { id: string; slug: string; code: string; name: string };
   user: { id: string; email: string; name: string | null; mustChangePassword: boolean };
   tenantPermissions: string[];
+  /** Whether the tenant's setup wizard is finished. */
+  setup: { isCompleted: boolean; currentStep: number };
   entities: ContextEntity[];
 };
 

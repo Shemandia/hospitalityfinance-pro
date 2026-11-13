@@ -269,6 +269,45 @@ if (!environmentReady || !redisUrl) {
 
     const journals = "/api/v1/gl/journals";
 
+    describe("cookie sessions through the web app's proxy (AUT-13)", () => {
+      // What the browser sends through the same-origin proxy: the session in a
+      // cookie, the page's Origin, and the proxy's X-Forwarded-Host. inject()
+      // comes from 127.0.0.1, the trusted proxy address.
+      const viaProxy = (origin: string, forwardedHost?: string) =>
+        app.inject({
+          method: "POST",
+          url: journals,
+          headers: {
+            // Runs before any test changes alice's grants (accountant on A).
+            cookie: `hfp_access_token=${tokens.alice}`,
+            origin,
+            ...(forwardedHost ? { "x-forwarded-host": forwardedHost } : {}),
+            "x-entity-id": ids.propA,
+            "content-type": "application/json"
+          },
+          payload: "{}"
+        });
+
+      it("accepts a change whose Origin is the page's own origin", async () => {
+        const response = await viaProxy("http://hfp.example:3005", "hfp.example:3005");
+        // Past the cross-site check and the guard; refused only by validation.
+        expect(response.statusCode).toBe(400);
+        expect(response.json().errors[0].code).toBe("VALIDATION_ERROR");
+      });
+
+      it("refuses a change from another origin", async () => {
+        const response = await viaProxy("https://evil.example", "hfp.example:3005");
+        expect(response.statusCode).toBe(403);
+        expect(response.json().errors[0].code).toBe("CROSS_SITE_REFUSED");
+      });
+
+      it("refuses a browser posting to the API's own address from the web origin", async () => {
+        // No proxy in between: the request is addressed to the API's host.
+        const response = await viaProxy("http://hfp.example:3005");
+        expect(response.statusCode).toBe(403);
+      });
+    });
+
     describe("acceptance 1: different roles on different properties", () => {
       it("lets the accountant on A read and write there", async () => {
         const read = await call({ method: "GET", url: journals, as: "alice", entityId: ids.propA });

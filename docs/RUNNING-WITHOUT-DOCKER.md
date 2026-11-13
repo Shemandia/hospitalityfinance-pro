@@ -68,7 +68,7 @@ JWT_SECRET=paste-a-64+-char-random-hex-string
 
 ```
 
-The web app reads `apps/web/.env` — set `NEXT_PUBLIC_API_BASE_URL=http://localhost:4000` (match the API `PORT`).
+The web app reads `apps/web/.env.local`. Set `API_INTERNAL_URL=http://127.0.0.1:4000` (match the API `PORT`). The browser only ever talks to the web app, which proxies `/api/v1/*` and `/auth/*` to the API, so no origin or CORS settings are needed and the web app can run on any port.
 
 > See `docs/ENV-VARIABLES.md` for the full list. Only the DB + Redis + JWT vars above are required to boot.
 

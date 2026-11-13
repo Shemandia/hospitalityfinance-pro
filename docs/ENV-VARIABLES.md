@@ -4,26 +4,26 @@
 
 ### Required
 
-| Variable          | Description                                                 | Example                                     |
-| ----------------- | ----------------------------------------------------------- | ------------------------------------------- |
-| `DATABASE_URL`    | PostgreSQL connection string                                | `postgresql://user:pass@localhost:5432/hfp` |
-| `NODE_ENV`        | Environment mode                                            | `development` / `production`                |
-| `PORT`            | API server port                                             | `4000`                                      |
-| `ALLOWED_ORIGINS` | Comma-separated browser origins allowed by CORS/CSRF checks | `https://app.example.com`                   |
-| `APP_BASE_URL`    | Frontend base URL for emails and links                      | `https://app.example.com`                   |
+| Variable       | Description                            | Example                                     |
+| -------------- | -------------------------------------- | ------------------------------------------- |
+| `DATABASE_URL` | PostgreSQL connection string           | `postgresql://user:pass@localhost:5432/hfp` |
+| `NODE_ENV`     | Environment mode                       | `development` / `production`                |
+| `PORT`         | API server port                        | `4000`                                      |
+| `APP_BASE_URL` | Frontend base URL for emails and links | `https://app.example.com`                   |
 
 ### Authentication (Native JWT)
 
-| Variable                   | Description                                 | Example                    |
-| -------------------------- | ------------------------------------------- | -------------------------- |
-| `JWT_SECRET`               | HS256 signing secret, 32+ random bytes      | `openssl-random-hex-value` |
-| `JWT_ACCESS_EXPIRY`        | Access token lifetime in seconds            | `900`                      |
-| `JWT_REFRESH_EXPIRY`       | Refresh token/session lifetime in seconds   | `604800`                   |
-| `BCRYPT_SALT_ROUNDS`       | Password hashing cost                       | `12`                       |
-| `MAX_FAILED_ATTEMPTS`      | Failed login attempts before lockout        | `5`                        |
-| `LOCKOUT_DURATION_MINUTES` | Account lockout duration                    | `15`                       |
-| `COOKIE_SECURE`            | Require HTTPS cookies in production         | `true`                     |
-| `COOKIE_DOMAIN`            | Cookie domain when needed across subdomains | `hotel.com`                |
+| Variable                   | Description                                                                                        | Example                    |
+| -------------------------- | -------------------------------------------------------------------------------------------------- | -------------------------- |
+| `JWT_SECRET`               | HS256 signing secret, 32+ random bytes                                                             | `openssl-random-hex-value` |
+| `JWT_ACCESS_EXPIRY`        | Access token lifetime in seconds                                                                   | `900`                      |
+| `JWT_REFRESH_EXPIRY`       | Refresh token/session lifetime in seconds                                                          | `604800`                   |
+| `BCRYPT_SALT_ROUNDS`       | Password hashing cost                                                                              | `12`                       |
+| `MAX_FAILED_ATTEMPTS`      | Failed login attempts before lockout                                                               | `5`                        |
+| `LOCKOUT_DURATION_MINUTES` | Account lockout duration                                                                           | `15`                       |
+| `COOKIE_SECURE`            | Require HTTPS cookies in production                                                                | `true`                     |
+| `COOKIE_DOMAIN`            | Leave unset: cookies belong to the web app's origin (same-origin proxy)                            |                            |
+| `TRUST_PROXY`              | Addresses whose `X-Forwarded-*` headers the API believes: the web app's server. Default `loopback` | `loopback` / `10.0.0.5`    |
 
 ### Redis (BullMQ queues)
 
@@ -96,11 +96,11 @@ not a default tenant: a query with no tenant bound fails (AUT-05).
 
 ## Web (`apps/web/.env.local`)
 
-| Variable                   | Description                  | Example                   |
-| -------------------------- | ---------------------------- | ------------------------- |
-| `API_BASE_URL`             | Server-side API base URL     | `http://localhost:4500`   |
-| `NEXT_PUBLIC_API_BASE_URL` | Browser-visible API base URL | `http://localhost:4500`   |
-| `NEXT_PUBLIC_APP_URL`      | Public web application URL   | `https://app.example.com` |
+| Variable           | Description                                                                                      | Example                 |
+| ------------------ | ------------------------------------------------------------------------------------------------ | ----------------------- |
+| `API_INTERNAL_URL` | The API as the web server reaches it; read at request time. Required. Never sent to the browser. | `http://127.0.0.1:4500` |
+
+The browser calls `/api/v1/*` and `/auth/*` on the web app itself, which proxies them to `API_INTERNAL_URL` (`lib/server/api-proxy.ts`). There is no browser-visible API address, no allowed-origin list and no CORS. `NEXT_PUBLIC_API_BASE_URL`, `API_BASE_URL` and `NEXT_PUBLIC_APP_URL` are no longer read.
 
 ---
 

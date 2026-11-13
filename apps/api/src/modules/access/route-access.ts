@@ -67,10 +67,7 @@ export function registerRouteAccessRegistry(app: FastifyInstance): Map<string, R
     const label = routeKeys(route).join(", ");
 
     let access: RouteAccess;
-    if (routeKeys(route).every((key) => key.startsWith("OPTIONS "))) {
-      // CORS preflight, registered by @fastify/cors. It carries no credentials.
-      access = { scope: "public" };
-    } else if (declared !== undefined && guards.length > 0) {
+    if (declared !== undefined && guards.length > 0) {
       throw new Error(`Route ${label} is declared "${declared}" but also has a permission guard.`);
     } else if (declared === "public" || declared === "platform") {
       access = { scope: declared };

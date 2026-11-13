@@ -52,7 +52,6 @@ const PUBLIC_ROUTES = [
   "GET /auth/tenant/:tenantCode",
   "GET /health",
   "GET /ready",
-  "OPTIONS *",
   "POST /auth/forgot-password",
   "POST /auth/login",
   "POST /auth/refresh",

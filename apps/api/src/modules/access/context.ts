@@ -41,6 +41,12 @@ export type AccessContext = {
   user: { id: string; email: string; name: string | null; mustChangePassword: boolean };
   /** Permission codes held through tenant-wide assignments, sorted. */
   tenantPermissions: string[];
+  /**
+   * Whether the tenant's setup wizard is finished. The web app checks this
+   * before it draws the dashboard, so an unconfigured tenant goes straight to
+   * the wizard.
+   */
+  setup: { isCompleted: boolean; currentStep: number };
   /** Higher levels of the tree first (corporate and group, cluster, property), each by name. */
   entities: ContextEntity[];
 };
@@ -54,6 +60,7 @@ export function buildAccessContext(input: {
   access: ResolvedAccess;
   tenant: AccessContext["tenant"];
   user: AccessContext["user"];
+  setup: AccessContext["setup"];
   entities: EntityRow[];
 }): AccessContext {
   const { access } = input;
@@ -70,6 +77,7 @@ export function buildAccessContext(input: {
     tenant: input.tenant,
     user: input.user,
     tenantPermissions: [...access.tenantPermissions].sort(),
+    setup: input.setup,
     entities
   };
 }
@@ -94,7 +102,7 @@ export async function registerContextRouter(app: FastifyInstance): Promise<void>
       }
 
       const openable = openableEntityIds(access);
-      const { user, entities } = await withBypassRLS(
+      const { user, entities, setup } = await withBypassRLS(
         prisma,
         async (tx: Prisma.TransactionClient) => ({
           user: await tx.user.findUnique({
@@ -115,6 +123,11 @@ export async function registerContextRouter(app: FastifyInstance): Promise<void>
               countryCode: true,
               isActive: true
             }
+          }),
+          // Keyed by tenant slug, as the setup service keys it. No row yet: not started.
+          setup: await tx.tenantSetupProgress.findFirst({
+            where: { tenantId: tenant.slug },
+            select: { isCompleted: true, currentStep: true }
           })
         })
       );
@@ -129,6 +142,7 @@ export async function registerContextRouter(app: FastifyInstance): Promise<void>
         access,
         tenant: { id: tenant.id, slug: tenant.slug, code: tenant.tenantCode, name: tenant.name },
         user,
+        setup: { isCompleted: setup?.isCompleted ?? false, currentStep: setup?.currentStep ?? 1 },
         entities
       });
       return reply.send({ data: context, errors: [] });

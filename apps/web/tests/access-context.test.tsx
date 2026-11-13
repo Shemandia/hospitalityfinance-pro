@@ -50,6 +50,7 @@ function contextFor(
     tenant: { id: tenantId, slug: `slug-${tenantId}`, code: `code-${tenantId}`, name: tenantId },
     user: { id: "user-1", email: "u@test", name: "U", mustChangePassword: false },
     tenantPermissions,
+    setup: { isCompleted: true, currentStep: 7 },
     entities
   };
 }

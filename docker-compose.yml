@@ -64,7 +64,8 @@ services:
       - "127.0.0.1:3001:3001"
     environment:
       NODE_ENV: production
-      NEXT_PUBLIC_API_BASE_URL: http://api:4500
+      # The browser calls the web app; it proxies the API on the internal network.
+      API_INTERNAL_URL: http://api:4500
     depends_on:
       - api
 
