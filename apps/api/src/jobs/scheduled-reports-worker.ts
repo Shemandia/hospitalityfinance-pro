@@ -9,6 +9,7 @@
  */
 
 import { Queue, Worker } from "bullmq";
+import { forEachActiveTenant } from "../db/tenantScope.js";
 import { checkAndRunScheduledReports } from "./scheduled-reports.js";
 
 const QUEUE_NAME = "scheduled-reports";
@@ -62,8 +63,8 @@ async function setupRepeatable(): Promise<void> {
 const worker = new Worker(
   QUEUE_NAME,
   async (_job) => {
-    const count = await checkAndRunScheduledReports();
-    return { enqueuedCount: count };
+    const perTenant = await forEachActiveTenant(() => checkAndRunScheduledReports());
+    return { enqueuedCount: perTenant.reduce((sum, t) => sum + t.result, 0) };
   },
   {
     connection,

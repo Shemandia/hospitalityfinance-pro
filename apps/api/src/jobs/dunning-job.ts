@@ -4,11 +4,15 @@ import type { PrismaClient } from "../db/client.js";
 
 const arService = new ARService(prisma as unknown as PrismaClient);
 
-export interface DunningJobData {
-  entityId: string;
-}
+/**
+ * A dunning job names its tenant: either one entity of one tenant, or the
+ * daily sweep over every entity of every active tenant.
+ */
+export type DunningJobData =
+  | { scope: "entity"; tenantId: string; entityId: string }
+  | { scope: "all" };
 
-export async function processDunningJob(data: DunningJobData): Promise<{
+export async function processDunningJob(data: { entityId: string }): Promise<{
   entityId: string;
   dunningEmailsSent: number;
   invoiceIds: string[];

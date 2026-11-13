@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from "../../db/client.js";
 import { getReportQueue } from "./queue.js";
+import { currentTenantId } from "../../db/tenantScope.js";
 import type { CreateReportRunInput } from "./types.js";
 
 import { ServiceError } from "../../shared/service-error.js";
@@ -40,7 +41,7 @@ export class ReportingService {
     const queue = getReportQueue();
     await queue.add(
       "generate-report",
-      { reportRunId: run.id },
+      { reportRunId: run.id, tenantId: currentTenantId() },
       {
         attempts: 3,
         backoff: {

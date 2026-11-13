@@ -23,6 +23,9 @@
  *     graceful shutdown.
  */
 
+import { runWithContext, updateRequestContext } from "../db/requestContext.js";
+import { resolveTenant } from "../db/tenantRegistry.js";
+import { TenantUnavailableError } from "../db/tenantScope.js";
 import { Worker, type Job } from "bullmq";
 import { getTenantClient } from "../db/tenantPool.js";
 import {
@@ -58,7 +61,15 @@ export function ensureTransferDeskWorker(tenantSlug: string, tenantDbUrl: string
 
   const worker = new Worker<TransferDeskJobData>(
     getTransferDeskQueueName(tenantSlug),
-    (job) => processJob(job, tenantSlug, tenantDbUrl),
+    // The job runs with its tenant bound, so anything that reaches the shared
+    // prisma client lands in this tenant's database and no other.
+    (job) =>
+      runWithContext({ tenantSlug, tenantDbUrl }, async () => {
+        const tenant = await resolveTenant(tenantSlug);
+        if (!tenant || !tenant.isActive) throw new TenantUnavailableError(tenantSlug);
+        updateRequestContext({ tenantId: tenant.id });
+        return processJob(job, tenantSlug, tenantDbUrl);
+      }),
     {
       connection: getTransferDeskRedisConnection(),
       concurrency: 1, // TODO: read from license entitlements (Starter=1, Pro=3, Enterprise=10)

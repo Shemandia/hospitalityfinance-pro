@@ -10,7 +10,7 @@
 
 import { PrismaClient } from "./registry-client.js";
 
-type TenantRecord = {
+export type TenantRecord = {
   id: string;
   slug: string;
   tenantCode: string;

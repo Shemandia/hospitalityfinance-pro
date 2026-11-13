@@ -2,6 +2,7 @@ import { Worker } from "bullmq";
 import { getDunningQueueName } from "./dunning-queue.js";
 import { processDunningJob, processDunningForAllEntities } from "./dunning-job.js";
 import type { DunningJobData } from "./dunning-job.js";
+import { forEachActiveTenant, runForTenantId } from "../db/tenantScope.js";
 
 const redisUrl = process.env.REDIS_URL;
 const connection = redisUrl
@@ -22,10 +23,12 @@ const connection = redisUrl
 const worker = new Worker<DunningJobData>(
   getDunningQueueName(),
   async (job) => {
-    if (job.data.entityId === "__ALL__") {
-      return processDunningForAllEntities();
+    // Each tenant's work runs with that tenant bound; there is no default database.
+    if (job.data.scope === "all") {
+      return forEachActiveTenant(() => processDunningForAllEntities());
     }
-    return processDunningJob(job.data);
+    const { tenantId, entityId } = job.data;
+    return runForTenantId(tenantId, () => processDunningJob({ entityId }));
   },
   {
     connection,

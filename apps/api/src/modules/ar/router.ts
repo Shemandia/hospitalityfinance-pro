@@ -258,7 +258,7 @@ export async function registerARRouter(app: FastifyInstance): Promise<void> {
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
-            const jobId = await enqueueDunningRun(entityId);
+            const jobId = await enqueueDunningRun(request.user!.tenantId, entityId);
             return reply.code(202).send({
               data: { jobId, message: "Dunning job enqueued. Emails will be sent in background." },
               errors: []

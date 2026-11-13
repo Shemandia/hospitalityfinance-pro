@@ -1,5 +1,9 @@
 import { join } from "node:path";
-import { prisma } from "./prisma.js";
+import { PrismaClient } from "./client.js";
+
+// A setup script works on the one database DATABASE_URL names, explicitly:
+// the shared tenant-aware client has no default database.
+const prisma = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
 import { executeSqlFile } from "./sqlRunner.js";
 
 async function main() {
