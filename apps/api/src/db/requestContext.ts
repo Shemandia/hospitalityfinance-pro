@@ -3,7 +3,6 @@ import { AsyncLocalStorage } from "node:async_hooks";
 export type RequestContext = {
   requestId: string | null;
   entityId: string | null;
-  chainId: string | null;
   userId: string | null;
   ipAddress: string | null;
   userAgent: string | null;
@@ -26,7 +25,6 @@ function defaultContext(): RequestContext {
   return {
     requestId: null,
     entityId: null,
-    chainId: null,
     userId: null,
     ipAddress: null,
     userAgent: null,

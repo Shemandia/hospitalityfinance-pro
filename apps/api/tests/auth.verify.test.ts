@@ -14,25 +14,19 @@ const SECRET = vi.hoisted(() => {
 
 const stubs = vi.hoisted(() => ({
   resolveTenantById: vi.fn(),
-  sessionExists: vi.fn(),
-  findEntity: vi.fn()
+  sessionExists: vi.fn()
 }));
 
 vi.mock("../src/db/tenantRegistry.js", () => ({ resolveTenantById: stubs.resolveTenantById }));
 vi.mock("../src/db/redis.js", () => ({
   getRedisClient: () => ({ exists: stubs.sessionExists })
 }));
-vi.mock("../src/db/prisma.js", () => ({
-  prisma: {
-    $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
-      fn({ $executeRaw: async () => 0, entity: { findUnique: stubs.findEntity } })
-  }
-}));
-
 import authPlugin from "../src/plugins/auth.js";
+import { enterRequestContext, getRequestContext } from "../src/db/requestContext.js";
 import { requireAuth } from "../src/middleware/requireAuth.js";
 import { setAccessService } from "../src/modules/access/runtime.js";
 import { staticAccessService } from "./helpers/access.js";
+import { AccessService } from "../src/modules/access/service.js";
 
 const TENANT = {
   id: "tenant-1",
@@ -54,14 +48,15 @@ describe("verifyAccessToken", () => {
   beforeEach(async () => {
     stubs.resolveTenantById.mockReset().mockResolvedValue(TENANT);
     stubs.sessionExists.mockReset().mockResolvedValue(1);
-    stubs.findEntity.mockReset().mockResolvedValue(null);
 
     app = Fastify({ logger: false });
+    // As app.ts does: every request gets its own context before auth runs.
+    app.addHook("onRequest", async () => enterRequestContext({}));
     await app.register(authPlugin);
     app.get("/whoami", { preHandler: [requireAuth] }, async (request) => ({
       user: request.user,
       entityId: request.entityId ?? null,
-      chainId: request.chainId ?? null
+      boundEntityId: getRequestContext().entityId
     }));
     await app.ready();
   });
@@ -104,25 +99,19 @@ describe("verifyAccessToken", () => {
 
   describe("the entity in X-Entity-ID (AUT-15)", () => {
     beforeEach(() => {
-      stubs.findEntity.mockImplementation(async ({ where }: { where: { id: string } }) =>
-        where.id === "prop-a"
-          ? { id: "prop-a", parentId: "group" }
-          : { id: "group", parentId: null }
-      );
       setAccessService(
         staticAccessService({ tenantPermissions: [], entityPermissions: { "prop-a": ["GL_READ"] } })
       );
     });
 
-    it("resolves the chain of an entity the caller can open", async () => {
+    it("binds an entity the caller can open to the request context", async () => {
       const response = await call({ ...bearer(token(VALID)), "x-entity-id": "prop-a" });
-      expect(response.json()).toMatchObject({ entityId: "prop-a", chainId: "group" });
+      expect(response.json()).toMatchObject({ entityId: "prop-a", boundEntityId: "prop-a" });
     });
 
-    it("does not look up an entity the caller cannot open", async () => {
+    it("records but does not bind an entity the caller cannot open", async () => {
       const response = await call({ ...bearer(token(VALID)), "x-entity-id": "prop-b" });
-      expect(response.json()).toMatchObject({ entityId: "prop-b", chainId: null });
-      expect(stubs.findEntity).not.toHaveBeenCalled();
+      expect(response.json()).toMatchObject({ entityId: "prop-b", boundEntityId: null });
     });
   });
 
@@ -182,10 +171,19 @@ describe("verifyAccessToken", () => {
       expect((await call(bearer(token(VALID)))).statusCode).toBe(503);
     });
 
-    it("the tenant database", async () => {
-      stubs.findEntity.mockRejectedValue(new Error("connection terminated"));
+    it("the access check, when the request names an entity", async () => {
+      const down = async () => {
+        throw new Error("ECONNREFUSED");
+      };
+      setAccessService(
+        new AccessService(
+          { loadSnapshot: down },
+          { read: down, write: down, invalidateUser: down, invalidateTenant: down }
+        )
+      );
       const response = await call({ ...bearer(token(VALID)), "x-entity-id": "prop-a" });
       expect(response.statusCode).toBe(503);
+      expect(response.json().errors[0].code).toBe("SERVICE_UNAVAILABLE");
     });
 
     it("does not reveal the cause to the caller", async () => {

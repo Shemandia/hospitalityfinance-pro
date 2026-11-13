@@ -63,7 +63,7 @@ vi.mock("../../src/db/tenantRegistry.js", async (importOriginal) => ({
       : null
 }));
 
-type Probe = { contextEntityId: string | null; chainId: string | null; visible: string[] };
+type Probe = { contextEntityId: string | null; visible: string[] };
 
 if (!environmentReady || !redisUrl) {
   describe.skip("entity context binding (AUT-15)", () => {
@@ -125,7 +125,6 @@ if (!environmentReady || !redisUrl) {
         });
         return {
           contextEntityId: context.entityId,
-          chainId: context.chainId,
           visible: rows.map((row) => row.entityId).sort()
         };
       };
@@ -221,28 +220,23 @@ if (!environmentReady || !redisUrl) {
     });
 
     describe.each(["session", "any-entity"] as const)("on a %s route", (path) => {
-      it("binds the property the caller can open, and its chain", async () => {
+      it("binds the property the caller can open", async () => {
         const { status, body } = await probe(path, ids.propA);
         expect(status).toBe(200);
-        expect(body).toEqual({
-          contextEntityId: ids.propA,
-          chainId: ids.groupA,
-          visible: [ids.propA]
-        });
+        expect(body).toEqual({ contextEntityId: ids.propA, visible: [ids.propA] });
       });
 
       it("binds nothing when the header names a property the caller cannot open", async () => {
         const { status, body } = await probe(path, ids.propB);
         expect(status).toBe(200);
-        // Neither the context nor the database may be scoped to property B,
-        // and B's chain is not looked up.
-        expect(body).toEqual({ contextEntityId: null, chainId: null, visible: [] });
+        // Neither the context nor the database may be scoped to property B.
+        expect(body).toEqual({ contextEntityId: null, visible: [] });
       });
 
       it("binds nothing when the header names an entity that does not exist", async () => {
         const { status, body } = await probe(path, "00000000-0000-4000-8000-000000000000");
         expect(status).toBe(200);
-        expect(body).toEqual({ contextEntityId: null, chainId: null, visible: [] });
+        expect(body).toEqual({ contextEntityId: null, visible: [] });
       });
     });
 
@@ -256,14 +250,18 @@ if (!environmentReady || !redisUrl) {
       expect(response.json().errors[0].code).toBe("ENTITY_ACCESS_DENIED");
     });
 
-    it("does not echo another property's chain on /api/v1/me", async () => {
-      const response = await app.inject({
-        method: "GET",
-        url: "/api/v1/me",
-        headers: { authorization: `Bearer ${token}`, "x-entity-id": ids.propB }
-      });
-      expect(response.statusCode).toBe(200);
-      expect(response.json().data).toMatchObject({ entityId: null, chainId: null });
+    it("reports the chain on /api/v1/me only for a property the caller can open", async () => {
+      const me = async (entityId: string) => {
+        const response = await app.inject({
+          method: "GET",
+          url: "/api/v1/me",
+          headers: { authorization: `Bearer ${token}`, "x-entity-id": entityId }
+        });
+        expect(response.statusCode).toBe(200);
+        return response.json().data as { entityId: string | null; chainId: string | null };
+      };
+      expect(await me(ids.propA)).toMatchObject({ entityId: ids.propA, chainId: ids.groupA });
+      expect(await me(ids.propB)).toMatchObject({ entityId: null, chainId: null });
     });
   });
 }

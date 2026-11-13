@@ -41,8 +41,6 @@ declare module "fastify" {
     user?: AuthenticatedUser;
     /** The entity the request names (X-Entity-ID). Access to it is the guard's decision. */
     entityId?: string;
-    /** The chain of the entity, set only when the caller can open the entity (AUT-15). */
-    chainId?: string;
     tenantSlug?: string;
   }
 

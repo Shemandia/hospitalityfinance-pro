@@ -44,6 +44,7 @@ import { registerRouteAccessRegistry, type RouteAccess } from "./modules/access/
 import { AccessInfrastructureError } from "./modules/access/service.js";
 import { registerAuthRouter } from "./modules/auth/router.js";
 import { connectRedis } from "./db/redis.js";
+import { resolveChainEntityId } from "./modules/entity/chain.js";
 import { registerEntityRouter } from "./modules/entity/router.js";
 
 declare module "fastify" {
@@ -209,12 +210,13 @@ export async function createApp(): Promise<FastifyInstance> {
     "/api/v1/me",
     { preHandler: [requireAuth], config: { access: "session" } },
     async (request) => {
+      // The entity bound to the request: null unless the caller can open it (AUT-15).
+      const entityId = getRequestContext().entityId;
       return {
         data: {
           user: request.user,
-          // The entity bound to the request: null unless the caller can open it (AUT-15).
-          entityId: getRequestContext().entityId,
-          chainId: getRequestContext().chainId
+          entityId,
+          chainId: entityId ? await resolveChainEntityId(entityId) : null
         },
         errors: []
       };
