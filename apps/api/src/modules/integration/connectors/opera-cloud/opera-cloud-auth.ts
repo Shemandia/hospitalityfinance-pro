@@ -1,3 +1,5 @@
+import { config } from "../../../../config.js";
+
 type TokenCache = {
   accessToken: string;
   expiresAt: number;
@@ -13,10 +15,11 @@ export type OperaCloudCredentials = {
 };
 
 export function getOperaCloudCredentials(): OperaCloudCredentials {
-  const clientId = process.env.OHIP_CLIENT_ID ?? "";
-  const clientSecret = process.env.OHIP_CLIENT_SECRET ?? "";
-  const enterpriseId = process.env.OHIP_ENTERPRISE_ID ?? "";
-  const hostname = process.env.OHIP_HOSTNAME ?? "https://ohipapi.oraclecloud.com";
+  const cfg = config();
+  const clientId = cfg.OHIP_CLIENT_ID ?? "";
+  const clientSecret = cfg.OHIP_CLIENT_SECRET ?? "";
+  const enterpriseId = cfg.OHIP_ENTERPRISE_ID ?? "";
+  const hostname = cfg.OHIP_HOSTNAME;
 
   return { clientId, clientSecret, enterpriseId, hostname };
 }

@@ -3,8 +3,7 @@ import { Prisma, PrismaClient } from "./client.js";
 import { PrismaClient as RegistryPrismaClient } from "./registry-client.js";
 import { USALI_ACCOUNTS, SYSTEM_ACCOUNT_TYPES } from "../modules/setup/usali-template.js";
 import { seedTransferDeskSystemData } from "./seed-transfer-desk.js";
-import { hashPassword } from "../services/auth.service.js";
-import { passwordPolicyErrors } from "../services/password-policy.js";
+import { hashPassword, passwordPolicyErrors } from "../services/password-policy.js";
 import { SYSTEM_PERMISSIONS, SYSTEM_ROLES } from "../modules/access/system-catalog.js";
 import {
   applyAccessMigration,
@@ -12,26 +11,20 @@ import {
   grantRoleAtEntity,
   grantTenantAdministrator
 } from "../modules/access/setup.js";
+import { config, registryDatabaseUrl, requireConfig } from "../config.js";
 
 // Demo data and demo users with a known password. Never on a live system:
 // production tenants get their roles and permissions from tenant provisioning.
-if (process.env.NODE_ENV === "production") {
+if (config().NODE_ENV === "production") {
   throw new Error("The demo seed does not run with NODE_ENV=production.");
 }
 
-function required(name: string, why: string): string {
-  const value = process.env[name];
-  if (!value) throw new Error(`${name} is required to seed. ${why}`);
-  return value;
-}
-
-const databaseUrl = required("DATABASE_URL", "It is the demo tenant's database.");
-
-// The demo users' password. Never a value in the code: it comes from the
-// environment, and must meet the same rules as any password a user sets.
-const seedPassword = required(
-  "SEED_USER_PASSWORD",
-  "It becomes the password of the demo users (admin@hfp.local, controller@hfp.local, viewer@hfp.local)."
+// DATABASE_URL is the demo tenant's database. SEED_USER_PASSWORD becomes the
+// demo users' password: never a value in the code, and it must meet the same
+// rules as any password a user sets.
+const { DATABASE_URL: databaseUrl, SEED_USER_PASSWORD: seedPassword } = requireConfig(
+  ["DATABASE_URL", "SEED_USER_PASSWORD"],
+  "the seed"
 );
 const passwordProblems = passwordPolicyErrors(seedPassword);
 if (passwordProblems.length > 0) {
@@ -47,7 +40,7 @@ const seedUrl = new URL(databaseUrl);
 seedUrl.searchParams.set("connection_limit", "1");
 const prisma = new PrismaClient({ datasourceUrl: seedUrl.toString() });
 const registryPrisma = new RegistryPrismaClient({
-  datasourceUrl: process.env.REGISTRY_DATABASE_URL ?? process.env.DATABASE_URL
+  datasourceUrl: registryDatabaseUrl()
 });
 
 const DEMO_TENANT_SLUG = "demo-hotels";

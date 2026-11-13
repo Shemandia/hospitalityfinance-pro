@@ -27,15 +27,12 @@ import {
   ensureSystemCatalog,
   grantRoleAtEntity
 } from "../modules/access/setup.js";
+import { childProcessEnv, registryDatabaseUrl } from "../config.js";
 
 /** The demo administrator holds this starting role on the chain's group. */
 const DEMO_ADMIN_ROLE = "ADMIN";
 
-const registryUrl = process.env.REGISTRY_DATABASE_URL ?? process.env.DATABASE_URL;
-if (!registryUrl) {
-  console.error("DATABASE_URL or REGISTRY_DATABASE_URL must be set.");
-  process.exit(1);
-}
+const registryUrl = registryDatabaseUrl();
 
 const registry = new RegistryPrismaClient({ datasourceUrl: registryUrl });
 
@@ -148,7 +145,7 @@ async function provisionChain(chain: (typeof chains)[0]) {
   console.log(`  Running migrations...`);
   execSync(`npx prisma db push --schema src/db/schema-tenant.prisma --skip-generate`, {
     cwd: apiRoot,
-    env: { ...process.env, DATABASE_URL: tenantDbUrl },
+    env: childProcessEnv({ DATABASE_URL: tenantDbUrl }),
     stdio: "pipe"
   });
   console.log(`  ✓ Migrations applied`);

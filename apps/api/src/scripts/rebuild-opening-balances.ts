@@ -24,6 +24,7 @@
 
 import { PrismaClient, Prisma } from "../db/client.js";
 import { rebuildOpeningBalances } from "../modules/period/carry-forward.js";
+import { requireConfig } from "../config.js";
 
 type BalanceSnapshot = {
   entity_id: string;
@@ -99,11 +100,9 @@ async function main() {
   const entityArgIndex = args.indexOf("--entity");
   const onlyEntityId = entityArgIndex >= 0 ? args[entityArgIndex + 1] : undefined;
 
-  if (!process.env.DATABASE_URL) {
-    throw new Error("DATABASE_URL is required.");
-  }
-
-  const prisma = new PrismaClient();
+  const prisma = new PrismaClient({
+    datasourceUrl: requireConfig(["DATABASE_URL"], "rebuild-opening-balances").DATABASE_URL
+  });
 
   try {
     const entities = await prisma.$queryRaw<Array<{ id: string; name: string }>>`

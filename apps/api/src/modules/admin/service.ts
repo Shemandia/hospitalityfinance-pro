@@ -33,6 +33,7 @@ import {
   permittedEntityIds,
   type ResolvedAccess
 } from "../access/resolver.js";
+import { hashPassword } from "../../services/password-policy.js";
 
 const db = prisma as unknown as PrismaClient;
 
@@ -471,9 +472,8 @@ export async function inviteUser(
     return fail("ENTITY_REQUIRED");
   }
 
-  const bcrypt = await import("bcrypt");
   const tempPassword = crypto.randomBytes(24).toString("base64url");
-  const passwordHash = await bcrypt.default.hash(tempPassword, 12);
+  const passwordHash = await hashPassword(tempPassword);
 
   // Every check, then every write, in one transaction: a refused invitation
   // leaves no user or grant behind.

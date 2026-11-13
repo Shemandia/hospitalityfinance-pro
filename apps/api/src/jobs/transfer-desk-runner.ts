@@ -27,13 +27,9 @@ import {
   runningTransferDeskWorkers,
   stopTransferDeskWorker
 } from "./transfer-desk-worker.js";
+import { startupConfig } from "../config.js";
 
-const raw = process.env.TRANSFER_DESK_TENANT_POLL_MS;
-const POLL_MS = raw ? Number(raw) : 60_000;
-if (!Number.isInteger(POLL_MS) || POLL_MS < 1) {
-  console.error(`[TransferDeskRunner] TRANSFER_DESK_TENANT_POLL_MS must be a positive integer.`);
-  process.exit(1);
-}
+const { TRANSFER_DESK_TENANT_POLL_MS: POLL_MS } = startupConfig("workers");
 
 async function startTenant(tenant: TenantRecord): Promise<void> {
   ensureTransferDeskWorker(tenant.slug, tenant.databaseUrl);

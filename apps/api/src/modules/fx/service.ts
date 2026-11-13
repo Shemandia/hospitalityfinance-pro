@@ -12,6 +12,7 @@ import type {
 
 import { ServiceError } from "../../shared/service-error.js";
 import { entityActor } from "../access/actor.js";
+import { config } from "../../config.js";
 
 export class FXServiceError extends ServiceError {}
 
@@ -96,8 +97,7 @@ export class FXService {
   // ── ECB Import ────────────────────────────────────────────────────────────────
 
   async importEcbRates(): Promise<{ imported: number; date: string }> {
-    const ecbUrl =
-      process.env.ECB_RATES_URL ?? "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml";
+    const ecbUrl = config().ECB_RATES_URL;
 
     let xml: string;
     try {

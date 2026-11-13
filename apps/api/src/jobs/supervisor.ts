@@ -19,6 +19,7 @@
 import { fork, type ChildProcess } from "node:child_process";
 import { dirname, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { childProcessEnv } from "../config.js";
 
 const here = fileURLToPath(import.meta.url);
 
@@ -74,7 +75,7 @@ export function createSupervisor(options: SupervisorOptions) {
   const log = options.log ?? console;
   const start =
     options.start ??
-    ((script: string) => fork(script, [], { stdio: "inherit", env: { ...process.env } }));
+    ((script: string) => fork(script, [], { stdio: "inherit", env: childProcessEnv() }));
   const states: WorkerState[] = options.workers.map((entry) => ({
     entry,
     process: null,

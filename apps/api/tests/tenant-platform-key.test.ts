@@ -1,6 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { reloadConfig } from "../src/config.js";
 
 describe("Platform API key security", () => {
+  const saved = process.env.PLATFORM_API_KEY;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.PLATFORM_API_KEY;
+    else process.env.PLATFORM_API_KEY = saved;
+    reloadConfig();
+  });
+
   it("does not use a hardcoded default key", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
@@ -8,8 +16,18 @@ describe("Platform API key security", () => {
       "utf-8"
     );
     expect(source).not.toContain("hfp-platform-dev-key");
-    expect(source).toContain("throw new Error");
-    expect(source).toContain("PLATFORM_API_KEY");
+  });
+
+  it("refuses to load the tenant routes without PLATFORM_API_KEY, naming it", async () => {
+    // Empty, not deleted: the Prisma client loads apps/api/.env on import but
+    // never overwrites a variable that is set. The config treats empty as unset.
+    process.env.PLATFORM_API_KEY = "";
+    reloadConfig();
+    vi.resetModules();
+    const loading = import("../src/modules/tenant/router.js");
+    // A fresh module graph has its own ConfigError class, so compare by name.
+    await expect(loading).rejects.toMatchObject({ name: "ConfigError" });
+    await expect(loading).rejects.toThrow(/PLATFORM_API_KEY is required by the tenant routes/);
   });
 
   it("frontend route does not use a hardcoded default key", async () => {

@@ -1,4 +1,5 @@
 import { Prisma } from "../../../../db/client.js";
+import { config } from "../../../../config.js";
 
 /**
  * Mews PMS — REST API Client
@@ -90,9 +91,10 @@ export type MewsDailySummary = {
 // ── Credentials helper ────────────────────────────────────────────────────────
 
 export function getMewsCredentials(): MewsCredentials {
-  const clientToken = process.env.MEWS_CLIENT_TOKEN;
-  const accessToken = process.env.MEWS_ACCESS_TOKEN;
-  const hostname = process.env.MEWS_HOSTNAME ?? "https://api.mews.com";
+  const cfg = config();
+  const clientToken = cfg.MEWS_CLIENT_TOKEN;
+  const accessToken = cfg.MEWS_ACCESS_TOKEN;
+  const hostname = cfg.MEWS_HOSTNAME;
 
   if (!clientToken) throw new Error("MEWS_CLIENT_TOKEN env var is required");
   if (!accessToken) throw new Error("MEWS_ACCESS_TOKEN env var is required");

@@ -11,23 +11,21 @@ import crypto from "node:crypto";
 import { getRegistryClient, resolveTenantByCode } from "../db/tenantRegistry.js";
 import { getTenantClient } from "../db/tenantPool.js";
 import { withBypassRLS } from "../db/rls-bypass.js";
-import { passwordPolicyErrors } from "./password-policy.js";
+import { hashPassword, passwordPolicyErrors } from "./password-policy.js";
 import type { Prisma } from "../db/client.js";
+import { requireConfig } from "../config.js";
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
-if (!process.env.JWT_SECRET) {
-  throw new Error(
-    "FATAL: JWT_SECRET environment variable is not set. Refusing to start with an insecure default."
-  );
-}
-const JWT_SECRET = process.env.JWT_SECRET;
+// Throws at load when JWT_SECRET is unset: never an insecure default.
+const {
+  JWT_SECRET,
+  JWT_ACCESS_EXPIRY: ACCESS_EXPIRY,
+  JWT_REFRESH_EXPIRY: REFRESH_EXPIRY,
+  MAX_FAILED_ATTEMPTS: MAX_FAILED,
+  LOCKOUT_DURATION_MINUTES: LOCKOUT_MIN
+} = requireConfig(["JWT_SECRET"], "the auth service");
 const JWT_ALGORITHM = "HS256" as const;
-const ACCESS_EXPIRY = parseInt(process.env.JWT_ACCESS_EXPIRY ?? "900", 10); // 15 min
-const REFRESH_EXPIRY = parseInt(process.env.JWT_REFRESH_EXPIRY ?? "604800", 10); // 7 days
-const SALT_ROUNDS = parseInt(process.env.BCRYPT_SALT_ROUNDS ?? "12", 10);
-const MAX_FAILED = parseInt(process.env.MAX_FAILED_ATTEMPTS ?? "5", 10);
-const LOCKOUT_MIN = parseInt(process.env.LOCKOUT_DURATION_MINUTES ?? "15", 10);
 
 // ── Error Types ──────────────────────────────────────────────────────────────
 
@@ -407,7 +405,7 @@ export class AuthService {
 
     validatePasswordPolicy(newPassword);
 
-    const hash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+    const hash = await hashPassword(newPassword);
     await tenantPrisma.user.update({
       where: { id: userId },
       data: {
@@ -472,7 +470,7 @@ export class AuthService {
     const user = users[0];
     validatePasswordPolicy(newPassword);
 
-    const hash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+    const hash = await hashPassword(newPassword);
     await tenantPrisma.user.update({
       where: { id: user.id },
       data: {
@@ -555,6 +553,4 @@ function validatePasswordPolicy(password: string): void {
 
 // ── Utility: hash a password (for seeding / admin reset) ─────────────────────
 
-export async function hashPassword(plaintext: string): Promise<string> {
-  return bcrypt.hash(plaintext, SALT_ROUNDS);
-}
+export { hashPassword } from "./password-policy.js";

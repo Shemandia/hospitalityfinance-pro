@@ -13,11 +13,11 @@ import { resolveTenantByCode, resolveTenantById } from "../../db/tenantRegistry.
 import { sendPasswordResetEmail } from "../../shared/email.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
 import { AccessInfrastructureError } from "../access/service.js";
+import { config } from "../../config.js";
 
-const COOKIE_SECURE =
-  process.env.NODE_ENV === "production" ? true : process.env.COOKIE_SECURE === "true";
-const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN?.trim() || undefined;
-const REFRESH_EXPIRY = parseInt(process.env.JWT_REFRESH_EXPIRY ?? "604800", 10);
+const COOKIE_SECURE = config().NODE_ENV === "production" ? true : config().COOKIE_SECURE;
+const COOKIE_DOMAIN = config().COOKIE_DOMAIN;
+const REFRESH_EXPIRY = config().JWT_REFRESH_EXPIRY;
 
 let authService: AuthService | null = null;
 
