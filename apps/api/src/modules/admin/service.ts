@@ -391,16 +391,18 @@ export async function assignRoleToUser(
 
 /**
  * Removes the user's grants of the role within the caller's reach — at one
- * entity when `entityId` is given. Grants outside the reach are left alone.
+ * entity when `entityId` is given, the tenant-wide grant only when `scope` is
+ * "TENANT". Grants outside the reach are left alone.
  */
 export async function revokeRoleFromUser(
   userId: string,
   roleId: string,
-  request: { entityId?: string },
+  request: { entityId?: string; scope?: "TENANT" },
   actor: AdminActorContext
 ): Promise<{ error: UserAccessError } | { data: true }> {
   const reach = actorReach(actor);
   if (request.entityId && !reaches(reach, request.entityId)) return fail("FORBIDDEN");
+  if (request.scope === "TENANT" && reach !== "all") return fail("FORBIDDEN");
 
   return bypass(async (tx) => {
     const userError = standingError(await userStanding(tx, reach, userId));
@@ -409,7 +411,7 @@ export async function revokeRoleFromUser(
     await revokeGrants(tx, {
       userId,
       roleId,
-      at: request.entityId ? [request.entityId] : reach
+      at: request.entityId ? [request.entityId] : request.scope === "TENANT" ? "tenant" : reach
     });
     return { data: true as const };
   });

@@ -186,14 +186,14 @@
 
 ## Module 14: Administration
 
-| #    | Test             | Steps                                              | Expected Result                                            | Status | Comments |
-| ---- | ---------------- | -------------------------------------------------- | ---------------------------------------------------------- | ------ | -------- |
-| 14.1 | User management  | Settings → Users                                   | List of entity users with roles                            |        |          |
-| 14.2 | Invite user      | Click "Invite", enter email + role                 | User created and assigned to entity                        |        |          |
-| 14.3 | Change user role | Edit user → change role to CONTROLLER              | Role updated, permissions change immediately               |        |          |
-| 14.4 | Deactivate user  | Click "Deactivate" on user                         | User cannot log in, isActive=false                         |        |          |
-| 14.5 | Audit trail      | Audit → filter by resource type                    | All changes tracked with before/after state, IP, timestamp |        |          |
-| 14.6 | Scope assignment | Admin → User Assignments → assign at CLUSTER level | User cascaded to all child properties                      |        |          |
+| #    | Test             | Steps                                              | Expected Result                                             | Status | Comments |
+| ---- | ---------------- | -------------------------------------------------- | ----------------------------------------------------------- | ------ | -------- |
+| 14.1 | User management  | Settings → Users                                   | List of entity users with roles                             |        |          |
+| 14.2 | Invite user      | Click "Invite", enter email + role                 | User created and assigned to entity                         |        |          |
+| 14.3 | Change user role | Edit user → change role to CONTROLLER              | Role updated, permissions change immediately                |        |          |
+| 14.4 | Deactivate user  | Click "Deactivate" on user                         | User cannot log in, isActive=false                          |        |          |
+| 14.5 | Audit trail      | Audit → filter by resource type                    | All changes tracked with before/after state, IP, timestamp  |        |          |
+| 14.6 | Role at a group  | Admin → Roles & Access → grant a role at a cluster | Effective permissions show the role at every child property |        |          |
 
 ---
 

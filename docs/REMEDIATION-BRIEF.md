@@ -524,17 +524,17 @@ Added 11 November 2026 after bringing the project up on the development server. 
 
 ### Work items
 
-- [ ] Migration: new assignment table; migrate `UserRole` rows and `EntityUser.role` values; drop the enum and the old column.
-- [ ] Access service with unit tests for inheritance down the property tree, tenant-wide grants and revocation.
-- [ ] Redis cache with invalidation on every write to assignments, roles, permissions and entities.
-- [ ] Replace `requirePermission`, `requireRole` and `requireWriteAccess` with the single property-aware check; remove role-name constants.
-- [ ] Slim the token; remove claims handling from `plugins/auth.ts`; fix the error mapping.
-- [ ] Context endpoint; rewrite `auth-provider.tsx`, `entity-provider.tsx` and `use-user-role.ts` to consume it.
-- [ ] Remove the default-database fallback in `db/prisma.ts`; switch to `runWithContext`.
-- [ ] Same-origin proxy in the web app; remove hard-coded ports from the middleware.
-- [ ] Fix the seed order, give seeded users a password from an environment variable, assign roles; one `dev:setup` command.
-- [ ] Admin screens: assign a role to a user at tenant, group or property level; show effective permissions per property.
-- [ ] Remove the development bypass and its permission list.
+- [x] Migration: new assignment table; migrate `UserRole` rows and `EntityUser.role` values; drop the enum and the old column.
+- [x] Access service with unit tests for inheritance down the property tree, tenant-wide grants and revocation.
+- [x] Redis cache with invalidation on every write to assignments, roles, permissions and entities.
+- [x] Replace `requirePermission`, `requireRole` and `requireWriteAccess` with the single property-aware check; remove role-name constants.
+- [x] Slim the token; remove claims handling from `plugins/auth.ts`; fix the error mapping.
+- [x] Context endpoint; rewrite `auth-provider.tsx`, `entity-provider.tsx` and `use-user-role.ts` to consume it.
+- [x] Remove the default-database fallback in `db/prisma.ts`; switch to `runWithContext`.
+- [x] Same-origin proxy in the web app; remove hard-coded ports from the middleware.
+- [x] Fix the seed order, give seeded users a password from an environment variable, assign roles; one `dev:setup` command.
+- [x] Admin screens: assign a role to a user at tenant, group or property level; show effective permissions per property.
+- [x] Remove the development bypass and its permission list.
 
 **Accepted when:** these tests pass against a real database with two tenants and a group of three properties.
 
@@ -557,6 +557,8 @@ Added 11 November 2026 after bringing the project up on the development server. 
 | 5     | Passing in CI | `tests/integration/two-tenants.test.ts`, two real tenant databases                                                                 |
 | 6     | Passing in CI | `route-guard.test.ts`, "acceptance 6"                                                                                              |
 | 7     | Passing in CI | `tests/integration/dev-setup.test.ts`: `pnpm dev:setup` on two databases that do not exist, then sign-in with `SEED_USER_PASSWORD` |
+
+All work items are done on `wp-a/access-control` (step 10, 14 November 2026): the contract migration drops `user_roles`, `entity_users` and the `EntityRole` enum, and **Settings → Roles & Access** grants a role tenant-wide or at a group, cluster or property and shows the user's effective permissions per property, taken from the resolver.
 
 Browser check by the owner on the development server, at step 6: sign-in answered 200, `GET /api/v1/context` answered 200, the dashboard loaded, and the unconfigured demo tenant was sent to the setup wizard. `db:migrate:access` is applied to the development database `hfp_db`.
 

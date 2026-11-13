@@ -693,6 +693,22 @@ if (!environmentReady || !redisUrl) {
         expect(listed).not.toContain(users.tara);
       });
 
+      it("DELETE /admin/users/:userId/roles/:roleId?scope=TENANT revokes only the tenant-wide grant", async () => {
+        await bypass((tx) => grantRole(tx, users.ivan, roles.clerk, { scope: "TENANT" }));
+        await getAccessService().invalidateUser({ tenantId, userId: users.ivan });
+        const url = `/api/v1/admin/users/${users.ivan}/roles/${roles.clerk}?scope=TENANT`;
+
+        const refused = await call({ method: "DELETE", url, as: "pam" });
+        expect(refused).toMatchObject({ status: 403, code: "FORBIDDEN" });
+        expect(await grantsOf(users.ivan)).toContain("clerk@TENANT");
+
+        const done = await call({ method: "DELETE", url, as: "tara" });
+        expect(done.status).toBe(204);
+        const after = await grantsOf(users.ivan);
+        expect(after).not.toContain("clerk@TENANT");
+        expect(after).toContain("clerk@B");
+      });
+
       it("POST /admin/users/revoke-scope refuses an entity outside the reach", async () => {
         const result = await call({
           method: "POST",

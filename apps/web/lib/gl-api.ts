@@ -105,6 +105,9 @@ async function request<T>(
     }
   });
 
+  // 204 No Content (DELETE) has no body to parse.
+  if (response.status === 204) return { data: null as T, errors: [] };
+
   const payload = (await response.json()) as Envelope<T>;
   if (!response.ok) {
     const message = payload.errors?.[0]?.message ?? `Request failed (${response.status})`;
@@ -1991,13 +1994,30 @@ export async function removeRolePermission(
   });
 }
 
+/** A role assignment: tenant-wide (entityId null) or at one entity and everything below it. */
+export type RoleGrant = {
+  roleId: string;
+  code: string;
+  name: string;
+  scopeType: "TENANT" | "ENTITY";
+  entityId: string | null;
+};
+
+/** A user who can open the selected entity, with the grants that give them access there. */
+export type EntityUserRow = {
+  userId: string;
+  user: { id: string; name: string | null; email: string; isActive: boolean };
+  createdAt: string;
+  roles: RoleGrant[];
+};
+
 export async function getAdminEntityUsers(context: ApiContext) {
-  return request<Array<Record<string, unknown>>>(context, "/api/v1/admin/users");
+  return request<EntityUserRow[]>(context, "/api/v1/admin/users");
 }
 
 export async function inviteEntityUser(
   context: ApiContext,
-  payload: { email: string; name: string; roleId?: string; entityIds?: string[] }
+  payload: { email: string; name: string; roleId: string; entityIds?: string[] }
 ) {
   return request<Record<string, unknown>>(context, "/api/v1/admin/users/invite", {
     method: "POST",
@@ -2005,18 +2025,11 @@ export async function inviteEntityUser(
   });
 }
 
-export async function updateEntityUserRole(context: ApiContext, userId: string, role: string) {
-  return request<Record<string, unknown>>(context, `/api/v1/admin/users/${userId}/role`, {
-    method: "PUT",
-    body: JSON.stringify({ role })
-  });
-}
-
 export async function removeEntityUser(context: ApiContext, userId: string) {
   return request<null>(context, `/api/v1/admin/users/${userId}`, { method: "DELETE" });
 }
 
-// ── Entity Hierarchy & Scope Assignment ───────────────────────────────────────
+// ── Entity Hierarchy & Role Assignment ────────────────────────────────────────
 
 export async function getEntityTree(context: ApiContext) {
   return request<{
@@ -2033,41 +2046,55 @@ export async function getEntityTree(context: ApiContext) {
   }>(context, "/api/v1/admin/entity-tree");
 }
 
-export async function assignUserScope(
+/** Grants a role tenant-wide, or at a group, cluster or property (and everything below it). */
+export async function assignUserRole(
   context: ApiContext,
-  payload: { userId: string; entityId: string; role?: string; cascade: boolean }
+  userId: string,
+  grant: { roleId: string } & ({ scope: "TENANT" } | { entityId: string })
 ) {
-  return request<Record<string, unknown>>(context, "/api/v1/admin/users/assign-scope", {
+  return request<Record<string, unknown>>(context, `/api/v1/admin/users/${userId}/roles`, {
     method: "POST",
-    body: JSON.stringify(payload)
+    body: JSON.stringify(grant)
   });
 }
 
-export async function revokeUserScope(
+/** Revokes one grant: tenant-wide when entityId is null. */
+export async function revokeUserRole(
   context: ApiContext,
-  payload: { userId: string; entityId: string; cascade: boolean }
+  userId: string,
+  roleId: string,
+  entityId: string | null
 ) {
-  return request<Record<string, unknown>>(context, "/api/v1/admin/users/revoke-scope", {
-    method: "POST",
-    body: JSON.stringify(payload)
+  const query = entityId ? `?entityId=${encodeURIComponent(entityId)}` : "?scope=TENANT";
+  return request<null>(context, `/api/v1/admin/users/${userId}/roles/${roleId}${query}`, {
+    method: "DELETE"
   });
 }
 
-export async function getUserEntityAssignments(context: ApiContext, userId: string) {
-  return request<
-    Array<{
-      entityId: string;
-      userId: string;
-      role: string;
-      entity: {
-        id: string;
-        name: string;
-        code: string | null;
-        type: string;
-        parentId: string | null;
-      };
-    }>
-  >(context, `/api/v1/admin/users/${userId}/entities`);
+export type UserAccessView = {
+  assignments: Array<{
+    roleId: string;
+    roleCode: string;
+    roleName: string;
+    scopeType: "TENANT" | "ENTITY";
+    entity: { id: string; name: string; code: string | null; type: string } | null;
+  }>;
+  tenantPermissions: string[];
+  effective: Array<{
+    entity: {
+      id: string;
+      name: string;
+      code: string | null;
+      type: string;
+      parentId: string | null;
+    };
+    permissions: string[];
+  }>;
+};
+
+/** The user's grants and effective permissions per entity, within the caller's reach. */
+export async function getUserAccess(context: ApiContext, userId: string) {
+  return request<UserAccessView>(context, `/api/v1/admin/users/${userId}/access`);
 }
 
 // ── User Profile & Login Audit ────────────────────────────────────────────────
@@ -2084,9 +2111,11 @@ export type UserProfile = {
   lastLoginAt: string | null;
   loginCount: number;
   createdAt: string;
-  entities: Array<{
-    role: string;
-    entity: { id: string; name: string; type: string };
+  /** The user's role assignments; entity null means tenant-wide. */
+  assignments: Array<{
+    scopeType: "TENANT" | "ENTITY";
+    role: { code: string; name: string };
+    entity: { id: string; name: string; type: string } | null;
   }>;
 };
 

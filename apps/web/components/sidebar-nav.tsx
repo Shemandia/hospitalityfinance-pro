@@ -121,7 +121,7 @@ const navGroups: NavGroup[] = [
       { href: "/settings/profile", label: "My Profile", icon: Users },
       { href: "/settings/properties", label: "Properties", icon: Building2 },
       { href: "/settings/users", label: "User Management", icon: Users },
-      { href: "/settings/user-assignments", label: "User Assignments", icon: Building2 },
+      { href: "/settings/user-assignments", label: "Roles & Access", icon: Building2 },
       { href: "/settings/roles", label: "Roles & Permissions", icon: ShieldCheck },
       { href: "/periods", label: "Periods", icon: CalendarDays },
       { href: "/periods/year-end", label: "Year-End Cleardown", icon: CalendarDays },

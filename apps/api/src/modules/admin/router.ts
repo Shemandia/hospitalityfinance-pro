@@ -39,7 +39,14 @@ const assignRoleSchema = z.object({
   scope: z.literal("TENANT").optional()
 });
 
-const revokeRoleQuerySchema = z.object({ entityId: z.string().uuid().optional() });
+const revokeRoleQuerySchema = z
+  .object({
+    /** Revoke the grant at this entity only. */
+    entityId: z.string().uuid().optional(),
+    /** "TENANT" revokes the tenant-wide grant only; needs tenant-wide reach. */
+    scope: z.literal("TENANT").optional()
+  })
+  .refine((q) => !(q.entityId && q.scope), { message: "Give entityId or scope, not both." });
 
 const userStatusSchema = z.object({ isActive: z.boolean() });
 
@@ -358,10 +365,10 @@ export async function registerAdminRouter(app: FastifyInstance): Promise<void> {
         { preHandler: [requirePermission("ADMIN_USERS", { scope: "any-entity" })] },
         async (request, reply) => {
           try {
-            const { entityId } = revokeRoleQuerySchema.parse(request.query);
+            const { entityId, scope } = revokeRoleQuerySchema.parse(request.query);
             const { userId, roleId } = request.params;
             const result = await changeAccess(tenantIdOf(request), { users: [userId] }, () =>
-              svc.revokeRoleFromUser(userId, roleId, { entityId }, getActorContext(request))
+              svc.revokeRoleFromUser(userId, roleId, { entityId, scope }, getActorContext(request))
             );
             if ("error" in result) return mapScopeError(reply, result.error);
             return reply.code(204).send();
