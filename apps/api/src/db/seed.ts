@@ -3,13 +3,88 @@ import { Prisma, PrismaClient } from "./client.js";
 import { PrismaClient as RegistryPrismaClient } from "./registry-client.js";
 import { USALI_ACCOUNTS, SYSTEM_ACCOUNT_TYPES } from "../modules/setup/usali-template.js";
 import { seedTransferDeskSystemData } from "./seed-transfer-desk.js";
+import { hashPassword } from "../services/auth.service.js";
+import { passwordPolicyErrors } from "../services/password-policy.js";
+import { SYSTEM_PERMISSIONS, SYSTEM_ROLES } from "../modules/access/system-catalog.js";
+import {
+  applyAccessMigration,
+  ensureSystemCatalog,
+  grantRoleAtEntity,
+  grantTenantAdministrator
+} from "../modules/access/setup.js";
 
-const prisma = new PrismaClient();
+// Demo data and demo users with a known password. Never on a live system:
+// production tenants get their roles and permissions from tenant provisioning.
+if (process.env.NODE_ENV === "production") {
+  throw new Error("The demo seed does not run with NODE_ENV=production.");
+}
+
+function required(name: string, why: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required to seed. ${why}`);
+  return value;
+}
+
+const databaseUrl = required("DATABASE_URL", "It is the demo tenant's database.");
+
+// The demo users' password. Never a value in the code: it comes from the
+// environment, and must meet the same rules as any password a user sets.
+const seedPassword = required(
+  "SEED_USER_PASSWORD",
+  "It becomes the password of the demo users (admin@hfp.local, controller@hfp.local, viewer@hfp.local)."
+);
+const passwordProblems = passwordPolicyErrors(seedPassword);
+if (passwordProblems.length > 0) {
+  throw new Error(
+    `SEED_USER_PASSWORD does not meet the password rules: ${passwordProblems.join("; ")}.`
+  );
+}
+
+// The seed writes rows for several entities and rows that belong to none, so
+// it runs with the row-level security bypass set for its whole session. One
+// connection only: a session setting lives on the connection that set it.
+const seedUrl = new URL(databaseUrl);
+seedUrl.searchParams.set("connection_limit", "1");
+const prisma = new PrismaClient({ datasourceUrl: seedUrl.toString() });
 const registryPrisma = new RegistryPrismaClient({
   datasourceUrl: process.env.REGISTRY_DATABASE_URL ?? process.env.DATABASE_URL
 });
 
+const DEMO_TENANT_SLUG = "demo-hotels";
+
+/**
+ * A demo user who can sign in. A new user gets SEED_USER_PASSWORD. A user who
+ * already has a password keeps it: running the seed again never resets a
+ * password someone has changed.
+ */
+async function seedUser(email: string, keycloakId: string, name: string) {
+  const existing = await prisma.user.findUnique({ where: { email } });
+  if (existing?.passwordHash) {
+    console.log(`${email}: exists with a password; password kept.`);
+    return existing;
+  }
+  const passwordHash = await hashPassword(seedPassword);
+  const user = await prisma.user.upsert({
+    where: { email },
+    update: { passwordHash, passwordChangedAt: new Date(), mustChangePassword: false },
+    create: {
+      email,
+      keycloakId,
+      name,
+      passwordHash,
+      passwordChangedAt: new Date(),
+      mustChangePassword: false
+    }
+  });
+  console.log(`${email}: password set from SEED_USER_PASSWORD.`);
+  return user;
+}
+
 async function main(): Promise<void> {
+  await prisma.$executeRaw`SELECT set_config('app.bypass_rls', 'true', false)`;
+  // Idempotent; also makes the seed usable on a database built with `db push`.
+  await applyAccessMigration(prisma);
+
   // ── System Account Type Definitions ──────────────────────────────────────
   const typeDefMap = new Map<string, string>();
   for (const atd of SYSTEM_ACCOUNT_TYPES) {
@@ -48,13 +123,17 @@ async function main(): Promise<void> {
 
   // ── Demo Tenant ─────────────────────────────────────────────────────────
   await registryPrisma.tenant.upsert({
-    where: { slug: "demo-hotels" },
+    where: { slug: DEMO_TENANT_SLUG },
     update: {},
     create: {
-      slug: "demo-hotels",
+      slug: DEMO_TENANT_SLUG,
       name: "HFP Demo Hotels",
-      tenantCode: crypto.createHash("sha256").update("demo-hotels").digest("hex").substring(0, 8),
-      databaseUrl: process.env.DATABASE_URL ?? "postgresql://hfp:password@localhost:5432/hfp_db",
+      tenantCode: crypto
+        .createHash("sha256")
+        .update(DEMO_TENANT_SLUG)
+        .digest("hex")
+        .substring(0, 8),
+      databaseUrl,
       adminEmail: "admin@hfp.local",
       plan: "enterprise",
       maxProperties: 10,
@@ -109,59 +188,9 @@ async function main(): Promise<void> {
     }
   });
 
-  const admin = await prisma.user.upsert({
-    where: { email: "admin@hfp.local" },
-    update: {},
-    create: {
-      email: "admin@hfp.local",
-      keycloakId: "kc-admin-001",
-      name: "Demo Admin"
-    }
-  });
-
-  const controller = await prisma.user.upsert({
-    where: { email: "controller@hfp.local" },
-    update: {},
-    create: {
-      email: "controller@hfp.local",
-      keycloakId: "kc-controller-001",
-      name: "Demo Controller"
-    }
-  });
-
-  const viewer = await prisma.user.upsert({
-    where: { email: "viewer@hfp.local" },
-    update: {},
-    create: {
-      email: "viewer@hfp.local",
-      keycloakId: "kc-viewer-001",
-      name: "Demo Viewer"
-    }
-  });
-
-  await prisma.entityUser.upsert({
-    where: { entityId_userId: { entityId: group.id, userId: admin.id } },
-    update: { role: "SUPERADMIN" },
-    create: { entityId: group.id, userId: admin.id, role: "SUPERADMIN" }
-  });
-
-  await prisma.entityUser.upsert({
-    where: {
-      entityId_userId: { entityId: propertyA.id, userId: controller.id }
-    },
-    update: { role: "CONTROLLER" },
-    create: {
-      entityId: propertyA.id,
-      userId: controller.id,
-      role: "CONTROLLER"
-    }
-  });
-
-  await prisma.entityUser.upsert({
-    where: { entityId_userId: { entityId: propertyB.id, userId: viewer.id } },
-    update: { role: "VIEWER" },
-    create: { entityId: propertyB.id, userId: viewer.id, role: "VIEWER" }
-  });
+  const admin = await seedUser("admin@hfp.local", "kc-admin-001", "Demo Admin");
+  const controller = await seedUser("controller@hfp.local", "kc-controller-001", "Demo Controller");
+  const viewer = await seedUser("viewer@hfp.local", "kc-viewer-001", "Demo Viewer");
 
   for (const entityId of [propertyA.id, propertyB.id]) {
     await prisma.supplier.upsert({
@@ -488,334 +517,57 @@ async function main(): Promise<void> {
   }
   // ── Seed System Roles & Permissions ──────────────────────────────────────
 
-  const SYSTEM_PERMISSIONS: Array<{ code: string; description: string; category: string }> = [
-    // GL & Journals
-    {
-      code: "GL_READ",
-      description: "View chart of accounts, journals, trial balance",
-      category: "General Ledger"
-    },
-    {
-      code: "GL_WRITE",
-      description: "Create and edit journals, accounts",
-      category: "General Ledger"
-    },
-    { code: "GL_POST", description: "Post journals", category: "General Ledger" },
-    { code: "GL_REVERSE", description: "Reverse posted journals", category: "General Ledger" },
-    { code: "GL_APPROVE", description: "Approve journal entries", category: "General Ledger" },
-    // Chart of Accounts
-    { code: "COA_READ", description: "View chart of accounts", category: "Chart of Accounts" },
-    { code: "COA_CREATE", description: "Create new accounts", category: "Chart of Accounts" },
-    { code: "COA_EDIT", description: "Edit existing accounts", category: "Chart of Accounts" },
-    // Accounts Payable
-    {
-      code: "AP_READ",
-      description: "View suppliers, invoices, payment runs",
-      category: "Accounts Payable"
-    },
-    {
-      code: "AP_WRITE",
-      description: "Create invoices, manage suppliers",
-      category: "Accounts Payable"
-    },
-    { code: "AP_APPROVE", description: "Approve AP invoices", category: "Accounts Payable" },
-    {
-      code: "AP_PAYMENT_CONFIRM",
-      description: "Confirm and process payment runs",
-      category: "Accounts Payable"
-    },
-    // Payment Runs
-    { code: "PAYMENT_RUN_READ", description: "View payment runs", category: "Payment Runs" },
-    { code: "PAYMENT_RUN_CREATE", description: "Create payment runs", category: "Payment Runs" },
-    { code: "PAYMENT_RUN_APPROVE", description: "Approve payment runs", category: "Payment Runs" },
-    // Accounts Receivable
-    {
-      code: "AR_READ",
-      description: "View customers, invoices, ageing",
-      category: "Accounts Receivable"
-    },
-    {
-      code: "AR_WRITE",
-      description: "Create AR invoices, receipts, allocations",
-      category: "Accounts Receivable"
-    },
-    { code: "AR_DUNNING", description: "Run dunning process", category: "Accounts Receivable" },
-    // Budget
-    {
-      code: "BUDGET_READ",
-      description: "View budget definitions and variance",
-      category: "Budget"
-    },
-    {
-      code: "BUDGET_WRITE",
-      description: "Create and edit budgets, import Excel",
-      category: "Budget"
-    },
-    { code: "BUDGET_APPROVE", description: "Approve budgets", category: "Budget" },
-    // FX & Currencies
-    { code: "FX_READ", description: "View FX rates and currencies", category: "FX & Currencies" },
-    {
-      code: "FX_WRITE",
-      description: "Manage FX rates, run revaluation",
-      category: "FX & Currencies"
-    },
-    // Reporting
-    { code: "REPORT_READ", description: "View and download reports", category: "Reporting" },
-    {
-      code: "REPORT_WRITE",
-      description: "Create report definitions, run reports",
-      category: "Reporting"
-    },
-    { code: "REPORT_EXPORT", description: "Export reports to PDF/Excel", category: "Reporting" },
-    {
-      code: "REPORT_CREATE_CUSTOM",
-      description: "Create custom report templates",
-      category: "Reporting"
-    },
-    // Period Management
-    { code: "PERIOD_READ", description: "View accounting periods", category: "Period Management" },
-    {
-      code: "PERIOD_MANAGE",
-      description: "Open, close, lock periods",
-      category: "Period Management"
-    },
-    { code: "PERIOD_REOPEN", description: "Reopen locked periods", category: "Period Management" },
-    // Transfer Desk
-    {
-      code: "TRANSFER_DESK_READ",
-      description: "View import profiles and execution history",
-      category: "Transfer Desk"
-    },
-    {
-      code: "TRANSFER_DESK_EXECUTE",
-      description: "Execute import profiles",
-      category: "Transfer Desk"
-    },
-    {
-      code: "TRANSFER_DESK_CONFIG",
-      description: "Configure profiles, formats, transformations",
-      category: "Transfer Desk"
-    },
-    // Integrations
-    {
-      code: "INTEGRATION_READ",
-      description: "View import logs and connector mappings",
-      category: "Integrations"
-    },
-    {
-      code: "INTEGRATION_IMPORT",
-      description: "Run PMS/POS/payroll imports",
-      category: "Integrations"
-    },
-    {
-      code: "INTEGRATION_CONFIG",
-      description: "Configure connectors and mappings",
-      category: "Integrations"
-    },
-    // Intercompany
-    {
-      code: "IC_READ",
-      description: "View intercompany transactions and balances",
-      category: "Intercompany"
-    },
-    {
-      code: "IC_CREATE",
-      description: "Create intercompany transactions",
-      category: "Intercompany"
-    },
-    {
-      code: "IC_APPROVE",
-      description: "Approve intercompany transactions",
-      category: "Intercompany"
-    },
-    {
-      code: "IC_REVERSE",
-      description: "Reverse posted intercompany transactions",
-      category: "Intercompany"
-    },
-    {
-      code: "IC_CONFIG",
-      description: "Configure IC entity pairs and account mappings",
-      category: "Intercompany"
-    },
-    {
-      code: "IC_RECONCILE",
-      description: "Run IC reconciliation and create snapshots",
-      category: "Intercompany"
-    },
-    // Consolidation
-    {
-      code: "CONSOLIDATION_RUN",
-      description: "Run multi-entity consolidation",
-      category: "Consolidation"
-    },
-    // Statistics
-    { code: "STATS_READ", description: "View operational statistics", category: "Statistics" },
-    { code: "STATS_IMPORT", description: "Import statistics from PMS", category: "Statistics" },
-    // Audit
-    { code: "AUDIT_READ", description: "View audit log", category: "Audit" },
-    // User Management
-    {
-      code: "ADMIN_USERS_READ",
-      description: "View users and role assignments",
-      category: "User Management"
-    },
-    {
-      code: "ADMIN_USERS",
-      description: "Create, edit, and manage users",
-      category: "User Management"
-    },
-    {
-      code: "ADMIN_ROLES_MANAGE",
-      description: "Create, edit, and delete roles and permissions",
-      category: "User Management"
-    },
-    // System Administration
-    {
-      code: "ADMIN_SETTINGS",
-      description: "Manage entity settings, properties, journal types",
-      category: "System Administration"
-    },
-    {
-      code: "ADMIN_ENTITIES",
-      description: "Manage entity hierarchy and assignments",
-      category: "System Administration"
-    },
-    {
-      code: "ADMIN_AUDIT_LOG",
-      description: "Access full system audit log",
-      category: "System Administration"
-    }
-  ];
-
-  const permissionMap = new Map<string, string>();
-  for (const perm of SYSTEM_PERMISSIONS) {
-    const p = await prisma.permission.upsert({
-      where: { code: perm.code },
-      update: { description: perm.description, category: perm.category },
-      create: perm
-    });
-    permissionMap.set(p.code, p.id);
-  }
-
-  const SYSTEM_ROLES: Array<{
-    code: string;
-    name: string;
-    description: string;
-    isSystem: boolean;
-    permissions: string[];
-  }> = [
-    {
-      code: "VIEWER",
-      name: "Viewer",
-      description: "Read-only access to dashboards, reports, and financial data",
-      isSystem: false,
-      permissions: [
-        "GL_READ",
-        "COA_READ",
-        "AP_READ",
-        "AR_READ",
-        "BUDGET_READ",
-        "FX_READ",
-        "REPORT_READ",
-        "PERIOD_READ",
-        "AUDIT_READ",
-        "INTEGRATION_READ",
-        "TRANSFER_DESK_READ",
-        "STATS_READ",
-        "PAYMENT_RUN_READ",
-        "ADMIN_USERS_READ"
-      ]
-    },
-    {
-      code: "CONTROLLER",
-      name: "Controller",
-      description: "Can post journals, approve invoices, close periods, and run reports",
-      isSystem: false,
-      permissions: [
-        "GL_READ",
-        "GL_WRITE",
-        "GL_POST",
-        "GL_APPROVE",
-        "COA_READ",
-        "COA_CREATE",
-        "COA_EDIT",
-        "AP_READ",
-        "AP_WRITE",
-        "AP_APPROVE",
-        "PAYMENT_RUN_READ",
-        "PAYMENT_RUN_CREATE",
-        "AR_READ",
-        "AR_WRITE",
-        "AR_DUNNING",
-        "BUDGET_READ",
-        "BUDGET_WRITE",
-        "FX_READ",
-        "FX_WRITE",
-        "REPORT_READ",
-        "REPORT_WRITE",
-        "REPORT_EXPORT",
-        "PERIOD_READ",
-        "PERIOD_MANAGE",
-        "AUDIT_READ",
-        "INTEGRATION_READ",
-        "TRANSFER_DESK_READ",
-        "TRANSFER_DESK_EXECUTE",
-        "STATS_READ",
-        "STATS_IMPORT",
-        "ADMIN_USERS_READ"
-      ]
-    },
-    {
-      code: "ADMIN",
-      name: "Administrator",
-      description: "Full module access including imports, payment runs, user management",
-      isSystem: false,
-      permissions: SYSTEM_PERMISSIONS.filter((p) => p.code !== "PERIOD_REOPEN").map((p) => p.code)
-    },
-    {
-      code: "TENANT_ADMIN",
-      name: "Tenant Administrator",
-      description: "Full system access — manages users, roles, entities, and all modules",
-      isSystem: true,
-      permissions: SYSTEM_PERMISSIONS.map((p) => p.code)
-    }
-  ];
-
-  for (const roleDef of SYSTEM_ROLES) {
-    const role = await prisma.role.upsert({
-      where: { code: roleDef.code },
-      update: { name: roleDef.name, description: roleDef.description, isSystem: roleDef.isSystem },
-      create: {
-        code: roleDef.code,
-        name: roleDef.name,
-        description: roleDef.description,
-        isSystem: roleDef.isSystem
-      }
-    });
-
-    // Bind permissions
-    for (const permCode of roleDef.permissions) {
-      const permId = permissionMap.get(permCode);
-      if (!permId) continue;
-      await prisma.rolePermission.upsert({
-        where: { roleId_permissionId: { roleId: role.id, permissionId: permId } },
-        update: {},
-        create: { roleId: role.id, permissionId: permId }
-      });
-    }
-  }
-
+  await ensureSystemCatalog(prisma);
   console.log(`Seeded ${SYSTEM_PERMISSIONS.length} permissions, ${SYSTEM_ROLES.length} roles.`);
+
+  // ── Who holds which role where ───────────────────────────────────────────
+  // After the roles exist. The administrator is tenant-wide; the controller
+  // and the viewer each hold their role on one property.
+  await grantTenantAdministrator(prisma, admin.id);
+  await grantRoleAtEntity(prisma, controller.id, "CONTROLLER", propertyA.id);
+  await grantRoleAtEntity(prisma, viewer.id, "VIEWER", propertyB.id);
+  console.log("Seeded role grants for the demo users.");
 
   // ── Transfer Desk System Profiles ──────────────────────────────────────────
   await seedTransferDeskSystemData(prisma);
+
+  // ── Setup wizard ─────────────────────────────────────────────────────────
+  // The seed has created what the wizard would: properties, a chart of
+  // accounts and an open period. Mark the tenant set up, so sign-in goes to
+  // the dashboard rather than the wizard.
+  const progress = await prisma.tenantSetupProgress.findFirst({
+    where: { tenantId: DEMO_TENANT_SLUG }
+  });
+  if (!progress) {
+    await prisma.tenantSetupProgress.create({
+      data: {
+        tenantId: DEMO_TENANT_SLUG,
+        currentStep: 7,
+        isCompleted: true,
+        completedSteps: [1, 2, 3, 4, 5, 6],
+        completedAt: new Date()
+      }
+    });
+  } else if (!progress.isCompleted) {
+    await prisma.tenantSetupProgress.update({
+      where: { id: progress.id },
+      data: {
+        currentStep: 7,
+        isCompleted: true,
+        completedSteps: [1, 2, 3, 4, 5, 6],
+        completedAt: new Date()
+      }
+    });
+  }
+  console.log("Marked the demo tenant's setup complete.");
 }
 
 main()
-  .then(async () => prisma.$disconnect())
+  .then(async () => {
+    await Promise.all([prisma.$disconnect(), registryPrisma.$disconnect()]);
+  })
   .catch(async (error) => {
     console.error(error);
-    await prisma.$disconnect();
+    await Promise.all([prisma.$disconnect(), registryPrisma.$disconnect()]);
     process.exit(1);
   });

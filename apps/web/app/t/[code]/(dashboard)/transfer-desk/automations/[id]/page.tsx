@@ -16,7 +16,7 @@ import { useParams } from "next/navigation";
 import { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useApiContext } from "../../../../../../../components/use-api-context";
-import { useUserRole } from "../../../../../../../components/use-user-role";
+import { usePermissions } from "../../../../../../../components/use-permissions";
 import { useTenantHref } from "../../../../../../../hooks/use-tenant-router";
 import {
   getTransferAutomation,
@@ -64,7 +64,7 @@ const CRON_PRESETS = [
 export default function AutomationDetailPage() {
   const params = useParams<{ id: string }>();
   const apiCtx = useApiContext();
-  const { canTransferDeskDesigner } = useUserRole();
+  const { canTransferDeskDesigner } = usePermissions();
   const href = useTenantHref();
   const queryClient = useQueryClient();
 

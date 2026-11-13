@@ -11,6 +11,7 @@ import type {
 } from "./types.js";
 
 import { ServiceError } from "../../shared/service-error.js";
+import { entityActor } from "../access/actor.js";
 
 export class FXServiceError extends ServiceError {}
 
@@ -320,11 +321,11 @@ export class FXService {
       };
     }
 
-    const entityUser = await repository.findUser(request.entityId);
-    if (!entityUser) {
+    const actor = await entityActor(this.prisma, request.entityId);
+    if (!actor) {
       throw new FXServiceError("FX_NO_USER", "No user found for entity to create journal.", 422);
     }
-    const actorId = entityUser.userId;
+    const actorId = actor.userId;
     const functionalCurrency = period.entity?.functionalCurrency ?? "USD";
 
     // Get FX P&L account (account code 7000 or first available)

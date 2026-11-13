@@ -22,6 +22,14 @@ import { PrismaClient, Prisma } from "../db/client.js";
 import { PrismaClient as RegistryPrismaClient } from "../db/registry-client.js";
 import { execSync } from "node:child_process";
 import { resolve } from "node:path";
+import {
+  applyAccessMigration,
+  ensureSystemCatalog,
+  grantRoleAtEntity
+} from "../modules/access/setup.js";
+
+/** The demo administrator holds this starting role on the chain's group. */
+const DEMO_ADMIN_ROLE = "ADMIN";
 
 const registryUrl = process.env.REGISTRY_DATABASE_URL ?? process.env.DATABASE_URL;
 if (!registryUrl) {
@@ -171,6 +179,8 @@ async function provisionChain(chain: (typeof chains)[0]) {
 
   // 4. Seed data in tenant database
   const tenantDb = new PrismaClient({ datasourceUrl: tenantDbUrl });
+  await applyAccessMigration(tenantDb);
+  await ensureSystemCatalog(tenantDb);
 
   // Admin user
   const adminUser = await tenantDb.user.upsert({
@@ -209,11 +219,8 @@ async function provisionChain(chain: (typeof chains)[0]) {
   }
 
   // Assign admin to group
-  await tenantDb.entityUser.upsert({
-    where: { entityId_userId: { entityId: groupId, userId: adminUser.id } },
-    update: {},
-    create: { entityId: groupId, userId: adminUser.id, role: "ADMIN" }
-  });
+  // A grant on the group reaches every property below it.
+  await grantRoleAtEntity(tenantDb, adminUser.id, DEMO_ADMIN_ROLE, groupId);
 
   // Properties
   for (const prop of chain.properties) {
@@ -241,12 +248,7 @@ async function provisionChain(chain: (typeof chains)[0]) {
     });
     console.log(`  ✓ Property created: ${prop.name} (${property.id})`);
 
-    // Assign admin to property
-    await tenantDb.entityUser.upsert({
-      where: { entityId_userId: { entityId: property.id, userId: adminUser.id } },
-      update: {},
-      create: { entityId: property.id, userId: adminUser.id, role: "ADMIN" }
-    });
+    // The admin's grant on the group reaches this property.
 
     // Create basic COA for each property
     const accounts = [

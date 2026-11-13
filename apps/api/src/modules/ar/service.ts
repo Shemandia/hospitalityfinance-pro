@@ -127,8 +127,10 @@ export class ARService {
         }
 
         const arControl =
-          (await repository.getAccountByCode(entityId, "1200")) ??
-          (await repository.getFallbackARControlAccount(entityId));
+          // The account the tenant flagged as control comes first; the literal
+          // code is only the fallback for charts that flag none (ACC-12).
+          (await repository.getFallbackARControlAccount(entityId)) ??
+          (await repository.getAccountByCode(entityId, "1200"));
         if (!arControl) {
           throw new ARServiceError(
             "AR_CONTROL_ACCOUNT_NOT_FOUND",
@@ -334,8 +336,10 @@ export class ARService {
         }
 
         const arControl =
-          (await repository.getAccountByCode(entityId, "1200")) ??
-          (await repository.getFallbackARControlAccount(entityId));
+          // The account the tenant flagged as control comes first; the literal
+          // code is only the fallback for charts that flag none (ACC-12).
+          (await repository.getFallbackARControlAccount(entityId)) ??
+          (await repository.getAccountByCode(entityId, "1200"));
         if (!arControl) {
           throw new ARServiceError(
             "AR_CONTROL_ACCOUNT_NOT_FOUND",

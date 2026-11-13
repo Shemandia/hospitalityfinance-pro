@@ -2,9 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "../../db/client.js";
 import { prisma } from "../../db/prisma.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
-import { requireRole } from "../../middleware/requireRole.js";
 import { requirePermission } from "../../middleware/requirePermission.js";
-import { requireWriteAccess } from "../../middleware/requireWriteAccess.js";
 import {
   allocationCreateSchema,
   allocationUpdateSchema,
@@ -31,30 +29,37 @@ export async function registerAllocationRouter(app: FastifyInstance): Promise<vo
   app.register(
     async (router) => {
       router.addHook("preHandler", requireAuth);
-      router.addHook("preHandler", requireWriteAccess);
 
       // ── CRUD ─────────────────────────────────────────────────────────────
 
-      router.get("/allocations", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const query = allocationListQuerySchema.parse(request.query);
-          const data = await allocationService.listDefinitions(entityId, query);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/allocations",
+        { preHandler: [requirePermission("GL_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const query = allocationListQuerySchema.parse(request.query);
+            const data = await allocationService.listDefinitions(entityId, query);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.get<{ Params: { id: string } }>("/allocations/:id", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await allocationService.getDefinition(entityId, request.params.id);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get<{ Params: { id: string } }>(
+        "/allocations/:id",
+        { preHandler: [requirePermission("GL_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await allocationService.getDefinition(entityId, request.params.id);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.post(
         "/allocations",

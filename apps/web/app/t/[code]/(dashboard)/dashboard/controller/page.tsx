@@ -4,7 +4,6 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useTenantRouter } from "../../../../../../hooks/use-tenant-router";
 import { useApiContext } from "../../../../../../components/use-api-context";
-import { useUserRole } from "../../../../../../components/use-user-role";
 import {
   getRevPAR,
   getBalanceSheet,
@@ -119,7 +118,6 @@ function SectionHeader({ title }: { title: string }) {
 export default function ControllerDashboard() {
   const router = useTenantRouter();
   const apiContext = useApiContext();
-  const { role } = useUserRole();
 
   // Periods
   const periodsQ = useQuery({

@@ -1,15 +1,27 @@
 "use client";
 
+/**
+ * Roles & access (WP-A step 10).
+ *
+ * Who holds which role where. A role is granted to a user tenant-wide, or at a
+ * group, cluster or property, from where it reaches everything below. The
+ * effective permissions per property come from the server's access resolver,
+ * so they are exactly what the API allows that user.
+ */
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useApiContext } from "../../../../../../components/use-api-context";
-import { useUserRole } from "../../../../../../components/use-user-role";
+import { usePermissions } from "../../../../../../components/use-permissions";
 import {
-  getEntityTree,
+  assignUserRole,
   getAdminEntityUsers,
-  assignUserScope,
-  revokeUserScope,
-  getUserEntityAssignments
+  getAdminRoles,
+  getEntityTree,
+  getUserAccess,
+  revokeUserRole,
+  type EntityUserRow,
+  type UserAccessView
 } from "../../../../../../lib/gl-api";
 import { Button } from "../../../../../../components/ui/button";
 import { Badge } from "../../../../../../components/ui/badge";
@@ -32,14 +44,14 @@ import {
 } from "../../../../../../components/ui/dialog";
 import {
   Building2,
-  Users,
-  Shield,
-  ChevronRight,
-  Plus,
-  Trash2,
-  Network,
+  Globe2,
   Hotel,
-  Landmark
+  Landmark,
+  Network,
+  Plus,
+  Shield,
+  Trash2,
+  Users
 } from "lucide-react";
 
 const TYPE_ICONS: Record<string, React.ReactNode> = {
@@ -51,317 +63,300 @@ const TYPE_ICONS: Record<string, React.ReactNode> = {
 
 const TYPE_LABELS: Record<string, string> = {
   CORPORATE: "Corporate",
-  GROUP: "Corporate",
+  GROUP: "Group",
   CLUSTER: "Cluster",
   PROPERTY: "Property"
 };
 
-type EntityFlat = {
+const TENANT = "__tenant__";
+
+type TreeEntity = {
   id: string;
   name: string;
   code: string | null;
   type: string;
   parentId: string | null;
   isActive: boolean;
-  _count: { children: number; users: number };
 };
 
-type UserAssignment = {
-  entityId: string;
-  userId: string;
-  role?: string;
-  entity: {
-    id: string;
-    name: string;
-    code: string | null;
-    type: string;
-    parentId: string | null;
+type RoleSummary = { id: string; code: string; name: string };
+
+/** Entities in tree order (each parent before its children), with their depth. */
+function inTreeOrder(entities: TreeEntity[]): Array<TreeEntity & { depth: number }> {
+  const ids = new Set(entities.map((e) => e.id));
+  const children = new Map<string | null, TreeEntity[]>();
+  for (const entity of entities) {
+    // A parent outside the caller's reach is shown as a root.
+    const parent = entity.parentId && ids.has(entity.parentId) ? entity.parentId : null;
+    children.set(parent, [...(children.get(parent) ?? []), entity]);
+  }
+  const out: Array<TreeEntity & { depth: number }> = [];
+  const walk = (parent: string | null, depth: number) => {
+    for (const entity of (children.get(parent) ?? []).sort((a, b) =>
+      a.name.localeCompare(b.name)
+    )) {
+      out.push({ ...entity, depth });
+      walk(entity.id, depth + 1);
+    }
   };
-};
+  walk(null, 0);
+  return out;
+}
 
-type EntityUser = {
-  entityId: string;
-  userId: string;
-  role?: string;
-  user: { id: string; name: string; email: string };
-};
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : "The change could not be made.";
+}
 
-export default function UserAssignmentsPage() {
+export default function RolesAndAccessPage() {
   const apiContext = useApiContext();
   const qc = useQueryClient();
-  const { isSuperAdmin } = useUserRole();
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-  const [showAssign, setShowAssign] = useState(false);
-  const [assignEntityId, setAssignEntityId] = useState("");
-  const [assignCascade, setAssignCascade] = useState(true);
-  const [feedback, setFeedback] = useState("");
+  const { can } = usePermissions();
+  const canManage = can("ADMIN_USERS", "any-entity");
+  const canGrantTenantWide = can("ADMIN_USERS", "tenant");
 
-  // Fetch entity hierarchy
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [showGrant, setShowGrant] = useState(false);
+  const [grantRoleId, setGrantRoleId] = useState("");
+  const [grantWhere, setGrantWhere] = useState("");
+  const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
+
   const treeQ = useQuery({
-    queryKey: ["entity-tree"],
-    queryFn: () =>
-      apiContext
-        ? getEntityTree(apiContext)
-        : Promise.resolve({
-            data: { flat: [] as EntityFlat[], tree: [] }
-          }),
+    queryKey: ["entity-tree", apiContext?.tenantSlug],
+    queryFn: () => getEntityTree(apiContext!),
     enabled: Boolean(apiContext),
-    select: (r: { data: { flat: EntityFlat[]; tree: unknown[] } }) => r.data?.flat ?? []
+    select: (r) => r.data?.flat ?? []
   });
 
-  // Fetch entity users for current entity
   const usersQ = useQuery({
     queryKey: ["admin-users", apiContext?.tenantSlug, apiContext?.entityId],
-    queryFn: () => (apiContext ? getAdminEntityUsers(apiContext) : Promise.resolve({ data: [] })),
+    queryFn: () => getAdminEntityUsers(apiContext!),
     enabled: Boolean(apiContext),
-    select: (r: { data: unknown }) => (r.data as EntityUser[]) ?? []
+    select: (r) => r.data ?? ([] as EntityUserRow[])
   });
 
-  // Fetch selected user's entity assignments
-  const assignmentsQ = useQuery({
-    queryKey: ["user-assignments", selectedUserId],
-    queryFn: () =>
-      apiContext && selectedUserId
-        ? getUserEntityAssignments(apiContext, selectedUserId)
-        : Promise.resolve({ data: [] as UserAssignment[] }),
+  const rolesQ = useQuery({
+    queryKey: ["admin-roles"],
+    queryFn: () => getAdminRoles(apiContext!),
+    enabled: Boolean(apiContext),
+    select: (r) => (r.data as RoleSummary[] | undefined) ?? []
+  });
+
+  const accessQ = useQuery({
+    queryKey: ["user-access", apiContext?.tenantSlug, selectedUserId],
+    queryFn: () => getUserAccess(apiContext!, selectedUserId!),
     enabled: Boolean(apiContext && selectedUserId),
-    select: (r: { data: UserAssignment[] }) => r.data ?? []
+    select: (r) => r.data as UserAccessView
   });
 
-  const assignMut = useMutation({
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["user-access"] });
+    qc.invalidateQueries({ queryKey: ["admin-users"] });
+    qc.invalidateQueries({ queryKey: ["entity-tree"] });
+  };
+
+  const grantMut = useMutation({
     mutationFn: () =>
-      assignUserScope(apiContext!, {
-        userId: selectedUserId!,
-        entityId: assignEntityId,
-        cascade: assignCascade
-      }),
-    onSuccess: (result) => {
-      qc.invalidateQueries({ queryKey: ["user-assignments"] });
-      qc.invalidateQueries({ queryKey: ["admin-users"] });
-      setShowAssign(false);
-      const data = (result as any).data;
-      setFeedback(
-        `Assigned to ${data?.assignedEntities ?? 1} entities (${data?.scope}, cascade: ${data?.cascade}).`
-      );
+      assignUserRole(
+        apiContext!,
+        selectedUserId!,
+        grantWhere === TENANT
+          ? { roleId: grantRoleId, scope: "TENANT" }
+          : { roleId: grantRoleId, entityId: grantWhere }
+      ),
+    onSuccess: () => {
+      refresh();
+      setShowGrant(false);
+      setFeedback({ ok: true, text: "Role granted. It applies from the user's next request." });
     },
-    onError: (e) => setFeedback((e as Error).message)
+    onError: (e) => setFeedback({ ok: false, text: errorText(e) })
   });
 
   const revokeMut = useMutation({
-    mutationFn: (params: { entityId: string; cascade: boolean }) =>
-      revokeUserScope(apiContext!, {
-        userId: selectedUserId!,
-        entityId: params.entityId,
-        cascade: params.cascade
-      }),
+    mutationFn: (grant: { roleId: string; entityId: string | null }) =>
+      revokeUserRole(apiContext!, selectedUserId!, grant.roleId, grant.entityId),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["user-assignments"] });
-      qc.invalidateQueries({ queryKey: ["admin-users"] });
-      setFeedback("Access revoked.");
-    }
+      refresh();
+      setFeedback({
+        ok: true,
+        text: "Role revoked. It stops applying on the user's next request."
+      });
+    },
+    onError: (e) => setFeedback({ ok: false, text: errorText(e) })
   });
 
-  const entities = treeQ.data ?? [];
+  const entities = useMemo(() => inTreeOrder(treeQ.data ?? []), [treeQ.data]);
   const users = usersQ.data ?? [];
-  const assignments = assignmentsQ.data ?? [];
-  const selectedUser = users.find((u) => u.userId === selectedUserId);
-
-  // Group entities by level for the hierarchy display
-  const corporates = entities.filter((e) => e.type === "CORPORATE" || e.type === "GROUP");
-  const clusters = entities.filter((e) => e.type === "CLUSTER");
-  const properties = entities.filter((e) => e.type === "PROPERTY");
+  const roles = rolesQ.data ?? [];
+  const access = accessQ.data;
+  const selected = users.find((u) => u.userId === selectedUserId);
 
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-2xl font-bold text-primary">User & Property Assignments</h1>
+        <h1 className="text-2xl font-bold text-primary">Roles &amp; Access</h1>
         <p className="text-sm text-muted-foreground">
-          Assign users to properties, clusters, or corporate level. Cascade assignments flow down
-          the hierarchy.
+          Grant a role for the whole tenant, or at a group, cluster or property. A role on a group
+          applies to every property under it.
         </p>
       </div>
 
       {feedback && (
-        <p
-          className={`text-sm ${feedback.includes("error") || feedback.includes("Error") ? "text-destructive" : "text-emerald-700"}`}
-        >
-          {feedback}
+        <p className={`text-sm ${feedback.ok ? "text-emerald-700" : "text-destructive"}`}>
+          {feedback.text}
         </p>
       )}
 
-      {/* Scope Level Legend */}
-      <div className="flex gap-4 text-xs">
-        <div className="flex items-center gap-1.5">
-          <Landmark className="h-3.5 w-3.5 text-purple-600" />
-          <span className="text-muted-foreground">
-            Corporate — access to all clusters & properties
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <Network className="h-3.5 w-3.5 text-blue-600" />
-          <span className="text-muted-foreground">
-            Cluster — access to all properties in region
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <Hotel className="h-3.5 w-3.5 text-emerald-600" />
-          <span className="text-muted-foreground">Property — access to single hotel</span>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Left: User List */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <Users className="h-4 w-4" /> Entity Users
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <Users className="h-4 w-4" /> Users with access here
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-1">
             {users.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">
-                No users in this entity.
+              <p className="py-4 text-center text-sm text-muted-foreground">
+                No user can open this property.
               </p>
             ) : (
-              users.map((eu) => (
+              users.map((row) => (
                 <button
-                  key={eu.userId}
-                  onClick={() => setSelectedUserId(eu.userId)}
-                  className={`w-full text-left p-2.5 rounded-lg border transition-colors ${
-                    selectedUserId === eu.userId
+                  key={row.userId}
+                  type="button"
+                  onClick={() => {
+                    setSelectedUserId(row.userId);
+                    setFeedback(null);
+                  }}
+                  className={`w-full rounded-lg border p-2.5 text-left transition-colors ${
+                    selectedUserId === row.userId
                       ? "border-primary bg-primary/5"
                       : "border-border hover:border-primary/30"
                   }`}
                 >
-                  <div>
-                    <p className="text-sm font-medium">{eu.user.name}</p>
-                    <p className="text-xs text-muted-foreground">{eu.user.email}</p>
-                  </div>
+                  <p className="text-sm font-medium">
+                    {row.user.name ?? row.user.email}
+                    {!row.user.isActive && (
+                      <Badge variant="outline" className="ml-2 text-[10px]">
+                        Inactive
+                      </Badge>
+                    )}
+                  </p>
+                  <p className="text-xs text-muted-foreground">{row.user.email}</p>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    {row.roles.map((r) => r.name).join(", ")}
+                  </p>
                 </button>
               ))
             )}
           </CardContent>
         </Card>
 
-        {/* Right: Entity Assignments */}
-        <div className="lg:col-span-2 space-y-4">
+        <div className="space-y-4 lg:col-span-2">
           {!selectedUserId ? (
             <Card>
               <CardContent className="py-12 text-center text-muted-foreground">
-                <Users className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                <p className="text-sm">Select a user to view their entity assignments</p>
+                <Users className="mx-auto mb-2 h-8 w-8 opacity-30" />
+                <p className="text-sm">Select a user to see their roles and what they can do.</p>
               </CardContent>
             </Card>
           ) : (
             <>
-              {/* User Header */}
               <Card>
-                <CardContent className="pt-4 flex items-center justify-between">
+                <CardContent className="flex items-center justify-between pt-4">
                   <div>
-                    <p className="font-semibold">{selectedUser?.user.name}</p>
-                    <p className="text-sm text-muted-foreground">{selectedUser?.user.email}</p>
+                    <p className="font-semibold">{selected?.user.name ?? selected?.user.email}</p>
+                    <p className="text-sm text-muted-foreground">{selected?.user.email}</p>
                   </div>
-                  {isSuperAdmin && (
+                  {canManage && (
                     <Button
                       size="sm"
                       variant="teal"
                       onClick={() => {
-                        setShowAssign(true);
-                        setAssignEntityId("");
-                        setAssignCascade(true);
+                        setGrantRoleId("");
+                        setGrantWhere("");
+                        setShowGrant(true);
                       }}
                     >
-                      <Plus className="mr-1 h-3 w-3" /> Assign to Entity
+                      <Plus className="mr-1 h-3 w-3" /> Grant role
                     </Button>
                   )}
                 </CardContent>
               </Card>
 
-              {/* Assignments Table */}
               <Card>
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm flex items-center gap-2">
-                    <Shield className="h-4 w-4" /> Entity Assignments ({assignments.length})
+                  <CardTitle className="flex items-center gap-2 text-sm">
+                    <Shield className="h-4 w-4" /> Roles ({access?.assignments.length ?? 0})
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {assignments.length === 0 ? (
-                    <p className="text-sm text-muted-foreground py-4 text-center">
-                      User has no entity assignments.
+                  {accessQ.isError ? (
+                    <p className="py-4 text-center text-sm text-destructive">
+                      {errorText(accessQ.error)}
+                    </p>
+                  ) : !access || access.assignments.length === 0 ? (
+                    <p className="py-4 text-center text-sm text-muted-foreground">
+                      No roles you can manage.
                     </p>
                   ) : (
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>Entity</TableHead>
-                          <TableHead>Scope Level</TableHead>
-                          {isSuperAdmin && <TableHead className="text-right">Actions</TableHead>}
+                          <TableHead>Role</TableHead>
+                          <TableHead>Where</TableHead>
+                          {canManage && <TableHead className="text-right">Revoke</TableHead>}
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {assignments.map((a) => (
-                          <TableRow key={a.entityId}>
+                        {access.assignments.map((grant) => (
+                          <TableRow key={`${grant.roleId}@${grant.entity?.id ?? TENANT}`}>
+                            <TableCell>
+                              <p className="text-sm font-medium">{grant.roleName}</p>
+                              <p className="font-mono text-[10px] text-muted-foreground">
+                                {grant.roleCode}
+                              </p>
+                            </TableCell>
                             <TableCell>
                               <div className="flex items-center gap-2">
-                                {TYPE_ICONS[a.entity.type] ?? <Building2 className="h-4 w-4" />}
-                                <div>
-                                  <p className="text-sm font-medium">{a.entity.name}</p>
-                                  {a.entity.code && (
-                                    <p className="text-[10px] text-muted-foreground font-mono">
-                                      {a.entity.code}
-                                    </p>
-                                  )}
-                                </div>
+                                {grant.entity ? (
+                                  (TYPE_ICONS[grant.entity.type] ?? (
+                                    <Building2 className="h-4 w-4" />
+                                  ))
+                                ) : (
+                                  <Globe2 className="h-4 w-4 text-slate-600" />
+                                )}
+                                <span className="text-sm">
+                                  {grant.entity ? grant.entity.name : "Whole tenant"}
+                                </span>
+                                {grant.entity && (
+                                  <Badge variant="outline" className="text-[10px]">
+                                    {TYPE_LABELS[grant.entity.type] ?? grant.entity.type}
+                                  </Badge>
+                                )}
                               </div>
                             </TableCell>
-                            <TableCell>
-                              <Badge variant="outline" className="text-[10px]">
-                                {TYPE_LABELS[a.entity.type] ?? a.entity.type}
-                              </Badge>
-                            </TableCell>
-                            {isSuperAdmin && (
+                            {canManage && (
                               <TableCell className="text-right">
-                                <div className="flex items-center justify-end gap-1">
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    className="text-destructive hover:text-destructive text-xs"
-                                    onClick={() =>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="text-destructive hover:text-destructive"
+                                  disabled={revokeMut.isPending}
+                                  aria-label={`Revoke ${grant.roleName}`}
+                                  onClick={() => {
+                                    const where = grant.entity
+                                      ? grant.entity.name
+                                      : "the whole tenant";
+                                    if (confirm(`Revoke ${grant.roleName} at ${where}?`)) {
                                       revokeMut.mutate({
-                                        entityId: a.entityId,
-                                        cascade: false
-                                      })
+                                        roleId: grant.roleId,
+                                        entityId: grant.entity?.id ?? null
+                                      });
                                     }
-                                    title="Remove from this entity only"
-                                  >
-                                    <Trash2 className="h-3 w-3" />
-                                  </Button>
-                                  {(a.entity.type === "CORPORATE" ||
-                                    a.entity.type === "GROUP" ||
-                                    a.entity.type === "CLUSTER") && (
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      className="text-destructive hover:text-destructive text-xs"
-                                      onClick={() => {
-                                        if (
-                                          confirm(
-                                            `Remove ${selectedUser?.user.name} from ${a.entity.name} and ALL its child entities?`
-                                          )
-                                        ) {
-                                          revokeMut.mutate({
-                                            entityId: a.entityId,
-                                            cascade: true
-                                          });
-                                        }
-                                      }}
-                                      title="Remove from this entity and all children"
-                                    >
-                                      <Trash2 className="h-3 w-3 mr-0.5" />
-                                      <ChevronRight className="h-3 w-3" />
-                                    </Button>
-                                  )}
-                                </div>
+                                  }}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
                               </TableCell>
                             )}
                           </TableRow>
@@ -372,93 +367,45 @@ export default function UserAssignmentsPage() {
                 </CardContent>
               </Card>
 
-              {/* Entity Hierarchy Overview */}
               <Card>
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm text-muted-foreground">Entity Hierarchy</CardTitle>
+                  <CardTitle className="text-sm">Effective permissions per property</CardTitle>
+                  <p className="text-xs text-muted-foreground">
+                    What this user can do at each entity you manage, from every role that reaches
+                    it.
+                  </p>
                 </CardHeader>
-                <CardContent>
-                  <div className="space-y-1">
-                    {corporates.map((corp) => {
-                      const assignedHere = assignments.some((a) => a.entityId === corp.id);
-                      const corpClusters = clusters.filter((c) => c.parentId === corp.id);
-                      const corpProperties = properties.filter((p) => p.parentId === corp.id);
-                      return (
-                        <div key={corp.id}>
-                          <div
-                            className={`flex items-center gap-2 p-2 rounded ${assignedHere ? "bg-purple-50 border border-purple-200" : ""}`}
-                          >
-                            <Landmark className="h-4 w-4 text-purple-600" />
-                            <span className="text-sm font-semibold">{corp.name}</span>
-                            {assignedHere && (
-                              <Badge className="bg-purple-100 text-purple-800 text-[10px]">
-                                Assigned
-                              </Badge>
-                            )}
-                          </div>
-                          {corpClusters.map((cluster) => {
-                            const clusterAssigned = assignments.some(
-                              (a) => a.entityId === cluster.id
-                            );
-                            const clusterProps = properties.filter(
-                              (p) => p.parentId === cluster.id
-                            );
-                            return (
-                              <div key={cluster.id} className="ml-6">
-                                <div
-                                  className={`flex items-center gap-2 p-1.5 rounded ${clusterAssigned ? "bg-blue-50 border border-blue-200" : ""}`}
-                                >
-                                  <Network className="h-3.5 w-3.5 text-blue-600" />
-                                  <span className="text-sm">{cluster.name}</span>
-                                  {clusterAssigned && (
-                                    <Badge className="bg-blue-100 text-blue-800 text-[10px]">
-                                      Assigned
-                                    </Badge>
-                                  )}
-                                </div>
-                                {clusterProps.map((prop) => {
-                                  const propAssigned = assignments.some(
-                                    (a) => a.entityId === prop.id
-                                  );
-                                  return (
-                                    <div
-                                      key={prop.id}
-                                      className={`ml-6 flex items-center gap-2 p-1 rounded ${propAssigned ? "bg-emerald-50 border border-emerald-200" : ""}`}
-                                    >
-                                      <Hotel className="h-3 w-3 text-emerald-600" />
-                                      <span className="text-xs">{prop.name}</span>
-                                      {propAssigned && (
-                                        <Badge className="bg-emerald-100 text-emerald-800 text-[9px]">
-                                          Assigned
-                                        </Badge>
-                                      )}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            );
-                          })}
-                          {corpProperties.map((prop) => {
-                            const propAssigned = assignments.some((a) => a.entityId === prop.id);
-                            return (
-                              <div
-                                key={prop.id}
-                                className={`ml-6 flex items-center gap-2 p-1 rounded ${propAssigned ? "bg-emerald-50 border border-emerald-200" : ""}`}
-                              >
-                                <Hotel className="h-3 w-3 text-emerald-600" />
-                                <span className="text-xs">{prop.name}</span>
-                                {propAssigned && (
-                                  <Badge className="bg-emerald-100 text-emerald-800 text-[9px]">
-                                    Assigned
-                                  </Badge>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      );
-                    })}
-                  </div>
+                <CardContent className="space-y-2">
+                  {access && access.tenantPermissions.length > 0 && (
+                    <details className="rounded-lg border p-2">
+                      <summary className="cursor-pointer text-sm">
+                        <Globe2 className="mr-1 inline h-4 w-4 text-slate-600" /> Tenant-wide:{" "}
+                        {access.tenantPermissions.length} permissions
+                      </summary>
+                      <PermissionList codes={access.tenantPermissions} />
+                    </details>
+                  )}
+                  {!access || access.effective.length === 0 ? (
+                    <p className="py-2 text-center text-sm text-muted-foreground">
+                      This user can open none of the entities you manage.
+                    </p>
+                  ) : (
+                    access.effective.map(({ entity, permissions }) => (
+                      <details key={entity.id} className="rounded-lg border p-2">
+                        <summary className="flex cursor-pointer items-center gap-2 text-sm">
+                          {TYPE_ICONS[entity.type] ?? <Building2 className="h-4 w-4" />}
+                          <span className="font-medium">{entity.name}</span>
+                          <Badge variant="outline" className="text-[10px]">
+                            {TYPE_LABELS[entity.type] ?? entity.type}
+                          </Badge>
+                          <span className="ml-auto text-xs text-muted-foreground">
+                            {permissions.length} permissions
+                          </span>
+                        </summary>
+                        <PermissionList codes={permissions} />
+                      </details>
+                    ))
+                  )}
                 </CardContent>
               </Card>
             </>
@@ -466,67 +413,77 @@ export default function UserAssignmentsPage() {
         </div>
       </div>
 
-      {/* Assign Dialog */}
-      <Dialog open={showAssign} onOpenChange={setShowAssign}>
+      <Dialog open={showGrant} onOpenChange={setShowGrant}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Assign {selectedUser?.user.name} to Entity</DialogTitle>
+            <DialogTitle>Grant a role to {selected?.user.name ?? selected?.user.email}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1">
-              <Label>Target Entity</Label>
+              <Label htmlFor="grant-role">Role</Label>
               <select
+                id="grant-role"
                 className="flex h-9 w-full rounded-md border border-border bg-white px-3 py-1 text-sm"
-                value={assignEntityId}
-                onChange={(e) => setAssignEntityId(e.target.value)}
+                value={grantRoleId}
+                onChange={(e) => setGrantRoleId(e.target.value)}
               >
-                <option value="">Select entity...</option>
-                {corporates.map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {TYPE_LABELS[e.type]} — {e.name}
-                  </option>
-                ))}
-                {clusters.map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {"  "}Cluster — {e.name}
-                  </option>
-                ))}
-                {properties.map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {"    "}Property — {e.name}
+                <option value="">Select a role…</option>
+                {roles.map((role) => (
+                  <option key={role.id} value={role.id}>
+                    {role.name} ({role.code})
                   </option>
                 ))}
               </select>
             </div>
-            <label className="flex items-center gap-2 text-sm cursor-pointer">
-              <input
-                type="checkbox"
-                checked={assignCascade}
-                onChange={(e) => setAssignCascade(e.target.checked)}
-                className="rounded border-border"
-              />
-              <span>
-                Cascade to all child entities
-                <span className="text-xs text-muted-foreground ml-1">
-                  (assign to clusters & properties underneath)
-                </span>
-              </span>
-            </label>
+            <div className="space-y-1">
+              <Label htmlFor="grant-where">Where</Label>
+              <select
+                id="grant-where"
+                className="flex h-9 w-full rounded-md border border-border bg-white px-3 py-1 text-sm"
+                value={grantWhere}
+                onChange={(e) => setGrantWhere(e.target.value)}
+              >
+                <option value="">Select where it applies…</option>
+                {canGrantTenantWide && <option value={TENANT}>Whole tenant</option>}
+                {entities.map((entity) => (
+                  <option key={entity.id} value={entity.id}>
+                    {"  ".repeat(entity.depth)}
+                    {TYPE_LABELS[entity.type] ?? entity.type} — {entity.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-muted-foreground">
+                A role on a group or cluster applies to every property under it. You can only grant
+                a role whose permissions you hold there yourself.
+              </p>
+            </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAssign(false)}>
+            <Button variant="outline" onClick={() => setShowGrant(false)}>
               Cancel
             </Button>
             <Button
               variant="teal"
-              disabled={!assignEntityId || assignMut.isPending}
-              onClick={() => assignMut.mutate()}
+              disabled={!grantRoleId || !grantWhere || grantMut.isPending}
+              onClick={() => grantMut.mutate()}
             >
-              {assignMut.isPending ? "Assigning..." : "Assign"}
+              {grantMut.isPending ? "Granting…" : "Grant"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function PermissionList({ codes }: { codes: string[] }) {
+  return (
+    <div className="mt-2 flex flex-wrap gap-1">
+      {codes.map((code) => (
+        <Badge key={code} variant="outline" className="font-mono text-[10px]">
+          {code}
+        </Badge>
+      ))}
     </div>
   );
 }

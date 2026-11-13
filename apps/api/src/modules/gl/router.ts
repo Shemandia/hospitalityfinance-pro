@@ -1,11 +1,13 @@
 import type { FastifyInstance } from "fastify";
-import type { PrismaClient } from "../../db/client.js";
+import type { Prisma, PrismaClient } from "../../db/client.js";
 import { z } from "zod";
 import { prisma } from "../../db/prisma.js";
 import { setEntityDbContext } from "../../db/tenantContext.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
-import { requireRole } from "../../middleware/requireRole.js";
 import { requirePermission } from "../../middleware/requirePermission.js";
+import { hasEntityPermission } from "../access/resolver.js";
+import { grantsReachingEntity } from "../access/grants.js";
+import { withBypassRLS } from "../../db/rls-bypass.js";
 import { GLService } from "./service.js";
 import { mapError, requireEntityId } from "../../shared/router-utils.js";
 import { ServiceError } from "../../shared/service-error.js";
@@ -75,53 +77,69 @@ export async function registerGLRouter(app: FastifyInstance): Promise<void> {
     async (router) => {
       router.addHook("preHandler", requireAuth);
 
-      router.get("/accounts", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await glService.listAccounts(entityId);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/accounts",
+        { preHandler: [requirePermission(["COA_READ", "GL_READ"])] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await glService.listAccounts(entityId);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.get<{ Params: { id: string } }>("/accounts/:id", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await glService.getAccount(entityId, request.params.id);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get<{ Params: { id: string } }>(
+        "/accounts/:id",
+        { preHandler: [requirePermission(["COA_READ", "GL_READ"])] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await glService.getAccount(entityId, request.params.id);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.get<{ Params: { id: string } }>("/accounts/:id/balance", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await glService.getAccountCurrentBalance(entityId, request.params.id);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get<{ Params: { id: string } }>(
+        "/accounts/:id/balance",
+        { preHandler: [requirePermission(["COA_READ", "GL_READ"])] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await glService.getAccountCurrentBalance(entityId, request.params.id);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.get<{ Params: { id: string } }>("/accounts/:id/ledger", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const query = request.query as Record<string, string | undefined>;
-          const limit = Math.min(Number(query.limit) || 100, 500);
-          const offset = Math.min(Number(query.offset) || 0, 100000);
-          const data = await glService.getAccountLedger(entityId, request.params.id, {
-            periodId: query.periodId,
-            status: query.status,
-            limit,
-            offset
-          });
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get<{ Params: { id: string } }>(
+        "/accounts/:id/ledger",
+        { preHandler: [requirePermission(["COA_READ", "GL_READ"])] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const query = request.query as Record<string, string | undefined>;
+            const limit = Math.min(Number(query.limit) || 100, 500);
+            const offset = Math.min(Number(query.offset) || 0, 100000);
+            const data = await glService.getAccountLedger(entityId, request.params.id, {
+              periodId: query.periodId,
+              status: query.status,
+              limit,
+              offset
+            });
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.post(
         "/accounts",
@@ -264,17 +282,18 @@ export async function registerGLRouter(app: FastifyInstance): Promise<void> {
             const userId = requireUserId(request.user?.sub);
             const payload = journalCreateSchema.parse(request.body);
 
-            // Source override requires CONTROLLER or ADMIN role
+            // Overriding a source restriction is an approver's decision.
             if (payload.sourceOverrideReason) {
-              const userRoles = (request.user?.roles ?? []).map((r: string) => r.toUpperCase());
-              const allowed = ["CONTROLLER", "ADMIN", "SUPERADMIN"];
-              if (!allowed.some((r) => userRoles.includes(r))) {
+              const allowed =
+                request.access !== undefined &&
+                hasEntityPermission(request.access, entityId, "GL_APPROVE");
+              if (!allowed) {
                 return reply.code(403).send({
                   data: null,
                   errors: [
                     {
                       code: "GL_SOURCE_OVERRIDE_FORBIDDEN",
-                      message: "Only CONTROLLER or ADMIN can override source restrictions."
+                      message: "Overriding source restrictions requires the GL_APPROVE permission."
                     }
                   ]
                 });
@@ -361,55 +380,71 @@ export async function registerGLRouter(app: FastifyInstance): Promise<void> {
         }
       );
 
-      router.get("/journals", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const query = journalListQuerySchema.parse(request.query);
-          const data = await glService.listJournals(entityId, query);
-          return reply.send({
-            data,
-            meta: {
-              limit: query.limit,
-              cursor: data.length > 0 ? data[data.length - 1].id : null
-            },
-            errors: []
-          });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/journals",
+        { preHandler: [requirePermission("GL_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const query = journalListQuerySchema.parse(request.query);
+            const data = await glService.listJournals(entityId, query);
+            return reply.send({
+              data,
+              meta: {
+                limit: query.limit,
+                cursor: data.length > 0 ? data[data.length - 1].id : null
+              },
+              errors: []
+            });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.get<{ Params: { id: string } }>("/journals/:id", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await glService.getJournal(entityId, request.params.id);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get<{ Params: { id: string } }>(
+        "/journals/:id",
+        { preHandler: [requirePermission("GL_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await glService.getJournal(entityId, request.params.id);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       // ── Approval Rules ────────────────────────────────────────────────
 
-      router.get("/approval-rules", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await glService.listApprovalRules(entityId);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/approval-rules",
+        { preHandler: [requirePermission("GL_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await glService.listApprovalRules(entityId);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.get<{ Params: { id: string } }>("/approval-rules/:id", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await glService.getApprovalRule(entityId, request.params.id);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get<{ Params: { id: string } }>(
+        "/approval-rules/:id",
+        { preHandler: [requirePermission("GL_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await glService.getApprovalRule(entityId, request.params.id);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.post(
         "/approval-rules",
@@ -455,44 +490,61 @@ export async function registerGLRouter(app: FastifyInstance): Promise<void> {
         }
       );
 
-      // Lightweight users list for approver picker
-      router.get("/users", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const users = await prisma.user.findMany({
-            where: {
-              entities: { some: { entityId } }
-            },
-            select: { id: true, name: true, email: true },
-            orderBy: { name: "asc" }
-          });
-          return reply.send({ data: users, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      // Lightweight users list for approver picker: the active users who can
+      // open this entity through a role assignment.
+      router.get(
+        "/users",
+        { preHandler: [requirePermission("GL_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const grants = await withBypassRLS(prisma, (tx: Prisma.TransactionClient) =>
+              grantsReachingEntity(tx, entityId)
+            );
+            const byId = new Map<string, { id: string; name: string | null; email: string }>();
+            for (const { user } of grants) {
+              if (user.isActive)
+                byId.set(user.id, { id: user.id, name: user.name, email: user.email });
+            }
+            const users = [...byId.values()].sort((a, b) =>
+              (a.name ?? a.email).localeCompare(b.name ?? b.email)
+            );
+            return reply.send({ data: users, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       // ── Journal Types ──────────────────────────────────────────────────
 
-      router.get("/journal-types", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await glService.listJournalTypes(entityId);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/journal-types",
+        { preHandler: [requirePermission("GL_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await glService.listJournalTypes(entityId);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.get<{ Params: { id: string } }>("/journal-types/:id", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await glService.getJournalType(entityId, request.params.id);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get<{ Params: { id: string } }>(
+        "/journal-types/:id",
+        { preHandler: [requirePermission("GL_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await glService.getJournalType(entityId, request.params.id);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.post(
         "/journal-types",
@@ -538,40 +590,48 @@ export async function registerGLRouter(app: FastifyInstance): Promise<void> {
         }
       );
 
-      router.get("/trial-balance", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const query = trialBalanceQuerySchema.parse(request.query);
-          const result = await glService.getTrialBalance(
-            entityId,
-            query.period_id,
-            query.comparative_period_id,
-            query.show_zero_balances
-          );
-          return reply.send({
-            data: result.data,
-            meta: { isBalanced: result.isBalanced },
-            errors: []
-          });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/trial-balance",
+        { preHandler: [requirePermission("GL_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const query = trialBalanceQuerySchema.parse(request.query);
+            const result = await glService.getTrialBalance(
+              entityId,
+              query.period_id,
+              query.comparative_period_id,
+              query.show_zero_balances
+            );
+            return reply.send({
+              data: result.data,
+              meta: { isBalanced: result.isBalanced },
+              errors: []
+            });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
       // ── Recurring Journals ─────────────────────────────────────────────────
 
-      router.get("/recurring-journals", { preHandler: [requireAuth] }, async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await recurringService.list(entityId);
-          return { data, errors: [] };
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/recurring-journals",
+        { preHandler: [requireAuth, requirePermission("GL_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await recurringService.list(entityId);
+            return { data, errors: [] };
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.get<{ Params: { id: string } }>(
         "/recurring-journals/:id",
-        { preHandler: [requireAuth] },
+        { preHandler: [requireAuth, requirePermission("GL_READ")] },
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);

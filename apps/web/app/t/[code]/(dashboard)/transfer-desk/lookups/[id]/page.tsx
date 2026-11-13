@@ -17,7 +17,7 @@ import { useParams } from "next/navigation";
 import { useState, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useApiContext } from "../../../../../../../components/use-api-context";
-import { useUserRole } from "../../../../../../../components/use-user-role";
+import { usePermissions } from "../../../../../../../components/use-permissions";
 import { useTenantHref } from "../../../../../../../hooks/use-tenant-router";
 import {
   getTransferLookupTable,
@@ -56,7 +56,7 @@ type EditableRow = {
 export default function LookupTableDetailPage() {
   const params = useParams<{ id: string }>();
   const apiCtx = useApiContext();
-  const { canTransferDeskDesigner } = useUserRole();
+  const { canTransferDeskDesigner } = usePermissions();
   const href = useTenantHref();
   const queryClient = useQueryClient();
   const csvInputRef = useRef<HTMLInputElement>(null);

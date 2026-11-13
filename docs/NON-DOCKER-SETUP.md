@@ -41,8 +41,10 @@ Run registry and tenant setup:
 pnpm --filter @hfp/api run db:generate
 pnpm --filter @hfp/api run db:migrate:deploy:registry
 pnpm --filter @hfp/api run db:setup:tenant
-pnpm --filter @hfp/api run db:seed
 ```
+
+For a development machine, `pnpm dev:setup` does all of this and seeds a demo
+tenant (see `docs/RUNNING-WITHOUT-DOCKER.md`).
 
 Run the app without Docker:
 
@@ -96,8 +98,11 @@ Run production database setup:
 ```bash
 pnpm --filter @hfp/api run db:migrate:deploy:registry
 pnpm --filter @hfp/api run db:setup:tenant
-pnpm --filter @hfp/api run db:seed
 ```
+
+Do not run `db:seed` in production: it creates demo users and refuses
+`NODE_ENV=production`. Tenants get their roles, permissions and first
+administrator from provisioning.
 
 Tenant migrations currently run one tenant database at a time. An automated "migrate all tenants from registry" command is not implemented yet.
 
@@ -152,16 +157,22 @@ Use Nginx, Caddy, IIS ARR, Apache, or a cloud load balancer to terminate HTTPS.
 
 Recommended public routing:
 
-- `https://app.example.com` -> `127.0.0.1:3001`
-- `https://api.example.com` -> `127.0.0.1:4000`
+- `https://app.example.com` -> `127.0.0.1:3001` (the web app)
+
+The API is not published: the web app proxies `/api/v1/*` and `/auth/*` to it
+on `API_INTERNAL_URL`. Keep its port closed to the outside.
+
+The reverse proxy must **overwrite** `X-Forwarded-For` with the client's
+address (Nginx: `proxy_set_header X-Forwarded-For $remote_addr;`), not append
+to what the client sent. The web app passes that header on to the API, which
+uses it for rate limiting and the audit trail.
 
 Production API environment:
 
 ```bash
 NODE_ENV=production
 COOKIE_SECURE=true
-COOKIE_DOMAIN=.example.com
-ALLOWED_ORIGINS=https://app.example.com
+TRUST_PROXY=loopback
 APP_BASE_URL=https://app.example.com
 ```
 

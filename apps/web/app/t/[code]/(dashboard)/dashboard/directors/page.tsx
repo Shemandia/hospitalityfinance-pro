@@ -3,7 +3,6 @@
 import { useQuery, useQueries } from "@tanstack/react-query";
 import { useState, useMemo } from "react";
 import { useApiContext } from "../../../../../../components/use-api-context";
-import { useUserRole } from "../../../../../../components/use-user-role";
 import {
   getBalanceSheet,
   getCashFlow,
@@ -130,7 +129,6 @@ function LoadingState() {
 
 export default function DirectorsDashboardPage() {
   const apiContext = useApiContext();
-  useUserRole();
   const [periodId, setPeriodId] = useState("");
 
   // ── Periods ──

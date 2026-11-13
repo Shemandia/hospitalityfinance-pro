@@ -1,12 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { apiInternalUrl } from "../../../../lib/server/api-proxy";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4500";
 const COOKIE_NAME = "hfp_platform_key";
-// The backend's CSRF hook requires an allowed Origin on every mutating
-// request. Server-to-server fetches send none by default, so this proxy must
-// identify itself as the web app explicitly.
-const APP_ORIGIN = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3001";
 
 /**
  * POST /api/platform/provision — proxy tenant provisioning using httpOnly cookie.
@@ -26,12 +22,11 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const res = await fetch(`${API_BASE}/api/v1/platform/tenants/provision`, {
+    const res = await fetch(`${apiInternalUrl()}/api/v1/platform/tenants/provision`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Platform-Key": key,
-        Origin: APP_ORIGIN
+        "X-Platform-Key": key
       },
       body: JSON.stringify(body)
     });

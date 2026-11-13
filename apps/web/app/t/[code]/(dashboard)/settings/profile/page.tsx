@@ -266,23 +266,32 @@ export default function ProfilePage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {profile.entities.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No entity assignments found.</p>
+          {profile.assignments.length === 0 ? (
+            <p className="text-sm text-muted-foreground">You hold no roles.</p>
           ) : (
             <div className="space-y-2">
-              {profile.entities.map((eu) => (
+              {profile.assignments.map((grant) => (
                 <div
-                  key={eu.entity.id}
+                  key={`${grant.role.code}@${grant.entity?.id ?? "tenant"}`}
                   className="flex items-center justify-between p-3 rounded-lg border"
                 >
                   <div className="flex items-center gap-3">
                     <Building2 className="h-4 w-4 text-muted-foreground" />
                     <div>
-                      <p className="text-sm font-medium">{eu.entity.name}</p>
-                      <p className="text-xs text-muted-foreground">{eu.entity.type}</p>
+                      <p className="text-sm font-medium">
+                        {grant.entity ? grant.entity.name : "Whole tenant"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {grant.entity ? grant.entity.type : "Every property"}
+                      </p>
                     </div>
                   </div>
-                  <Badge className={`${ROLE_COLORS[eu.role] ?? ""} text-[10px]`}>{eu.role}</Badge>
+                  <Badge
+                    className={`${ROLE_COLORS[grant.role.code] ?? ""} text-[10px]`}
+                    title={grant.role.name}
+                  >
+                    {grant.role.code}
+                  </Badge>
                 </div>
               ))}
             </div>

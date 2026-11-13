@@ -6,67 +6,67 @@
  * and request context routing.
  *
  * These tests verify the routing logic WITHOUT requiring actual databases.
+ * tests/integration/two-tenants.test.ts proves it against two real ones.
  */
 
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  enterRequestContext,
   getRequestContext,
+  runWithContext,
   updateRequestContext
 } from "../src/db/requestContext.js";
 
 // ── Request Context: Tenant Fields ─────────────────────────────────────────
 
 describe("Request context carries tenant info", () => {
-  beforeEach(() => {
-    enterRequestContext();
+  it("defaults to no tenant", () =>
+    runWithContext({}, () => {
+      const ctx = getRequestContext();
+      expect(ctx.tenantId).toBeNull();
+      expect(ctx.tenantSlug).toBeNull();
+      expect(ctx.tenantDbUrl).toBeNull();
+    }));
+
+  it("stores the tenant set via updateRequestContext", () =>
+    runWithContext({}, () => {
+      updateRequestContext({
+        tenantSlug: "marriott-me",
+        tenantDbUrl: "postgresql://localhost:5432/hfp_marriott_me"
+      });
+      const ctx = getRequestContext();
+      expect(ctx.tenantSlug).toBe("marriott-me");
+      expect(ctx.tenantDbUrl).toBe("postgresql://localhost:5432/hfp_marriott_me");
+    }));
+
+  it("keeps tenant and entity independent", () =>
+    runWithContext({}, () => {
+      updateRequestContext({
+        tenantSlug: "hilton-eu",
+        tenantDbUrl: "postgresql://localhost:5432/hfp_hilton_eu",
+        entityId: "entity-123"
+      });
+      const ctx = getRequestContext();
+      expect(ctx.tenantSlug).toBe("hilton-eu");
+      expect(ctx.entityId).toBe("entity-123");
+    }));
+
+  it("refuses to update a context that does not exist", () => {
+    expect(() => updateRequestContext({ tenantSlug: "nowhere" })).toThrow(/outside runWithContext/);
   });
 
-  it("defaults to null tenantSlug and tenantDbUrl", () => {
-    const ctx = getRequestContext();
-    expect(ctx.tenantSlug).toBeNull();
-    expect(ctx.tenantDbUrl).toBeNull();
-  });
-
-  it("stores tenantSlug when set via updateRequestContext", () => {
-    updateRequestContext({
-      tenantSlug: "marriott-me",
-      tenantDbUrl: "postgresql://localhost:5432/hfp_marriott_me"
-    });
-
-    const ctx = getRequestContext();
-    expect(ctx.tenantSlug).toBe("marriott-me");
-    expect(ctx.tenantDbUrl).toBe("postgresql://localhost:5432/hfp_marriott_me");
-  });
-
-  it("tenant context is independent from entity context", () => {
-    updateRequestContext({
-      tenantSlug: "hilton-eu",
-      tenantDbUrl: "postgresql://localhost:5432/hfp_hilton_eu",
-      entityId: "entity-123"
-    });
-
-    const ctx = getRequestContext();
-    expect(ctx.tenantSlug).toBe("hilton-eu");
-    expect(ctx.entityId).toBe("entity-123");
-  });
-
-  it("different request contexts hold different tenants", () => {
-    // Simulate request 1
-    enterRequestContext({
-      tenantSlug: "chain-a",
-      tenantDbUrl: "postgresql://localhost:5432/hfp_chain_a"
-    });
-    expect(getRequestContext().tenantSlug).toBe("chain-a");
-
-    // Simulate request 2 (new context)
-    enterRequestContext({
-      tenantSlug: "chain-b",
-      tenantDbUrl: "postgresql://localhost:5432/hfp_chain_b"
-    });
-    expect(getRequestContext().tenantSlug).toBe("chain-b");
-    // chain-a is gone from this context
-    expect(getRequestContext().tenantSlug).not.toBe("chain-a");
+  it("keeps concurrent contexts apart across awaits", async () => {
+    const seen = await Promise.all(
+      ["chain-a", "chain-b", "chain-c"].map((slug, i) =>
+        runWithContext({ tenantSlug: slug }, async () => {
+          await new Promise((resolve) => setTimeout(resolve, 15 - i * 5));
+          await Promise.resolve();
+          return getRequestContext().tenantSlug;
+        })
+      )
+    );
+    expect(seen).toEqual(["chain-a", "chain-b", "chain-c"]);
+    // Nothing leaks out of the scopes.
+    expect(getRequestContext().tenantSlug).toBeNull();
   });
 });
 
@@ -141,41 +141,35 @@ describe("Three-chain tenant isolation", () => {
 
   it("each chain gets its own database URL in context", () => {
     for (const chain of chains) {
-      enterRequestContext({
-        tenantSlug: chain.slug,
-        tenantDbUrl: chain.dbUrl,
-        entityId: chain.entity
-      });
-
-      const ctx = getRequestContext();
-      expect(ctx.tenantSlug).toBe(chain.slug);
-      expect(ctx.tenantDbUrl).toBe(chain.dbUrl);
-      expect(ctx.entityId).toBe(chain.entity);
+      runWithContext(
+        { tenantSlug: chain.slug, tenantDbUrl: chain.dbUrl, entityId: chain.entity },
+        () => {
+          const ctx = getRequestContext();
+          expect(ctx.tenantSlug).toBe(chain.slug);
+          expect(ctx.tenantDbUrl).toBe(chain.dbUrl);
+          expect(ctx.entityId).toBe(chain.entity);
+        }
+      );
     }
   });
 
   it("chain A context does not leak to chain B", () => {
-    // Set chain A context
-    enterRequestContext({
-      tenantSlug: chains[0].slug,
-      tenantDbUrl: chains[0].dbUrl,
-      entityId: chains[0].entity
-    });
-    expect(getRequestContext().tenantSlug).toBe("sunrise-hotels");
-
-    // Overwrite with chain B context (simulates new request)
-    enterRequestContext({
-      tenantSlug: chains[1].slug,
-      tenantDbUrl: chains[1].dbUrl,
-      entityId: chains[1].entity
-    });
-
-    const ctx = getRequestContext();
-    expect(ctx.tenantSlug).toBe("ocean-resorts");
-    expect(ctx.tenantDbUrl).toBe(chains[1].dbUrl);
-    // Chain A's values are NOT present
-    expect(ctx.tenantSlug).not.toBe("sunrise-hotels");
-    expect(ctx.entityId).not.toBe(chains[0].entity);
+    runWithContext(
+      { tenantSlug: chains[0].slug, tenantDbUrl: chains[0].dbUrl, entityId: chains[0].entity },
+      () => {
+        expect(getRequestContext().tenantSlug).toBe("sunrise-hotels");
+        runWithContext(
+          { tenantSlug: chains[1].slug, tenantDbUrl: chains[1].dbUrl, entityId: chains[1].entity },
+          () => {
+            const ctx = getRequestContext();
+            expect(ctx.tenantSlug).toBe("ocean-resorts");
+            expect(ctx.tenantDbUrl).toBe(chains[1].dbUrl);
+            expect(ctx.entityId).not.toBe(chains[0].entity);
+          }
+        );
+        expect(getRequestContext().tenantSlug).toBe("sunrise-hotels");
+      }
+    );
   });
 
   it("each chain maps to a unique database in the pool", async () => {
@@ -189,17 +183,14 @@ describe("Three-chain tenant isolation", () => {
     expect(clients[0]).not.toBe(clients[2]);
   });
 
-  it("tenant context without slug falls back to default client", () => {
-    enterRequestContext({
-      tenantSlug: null,
-      tenantDbUrl: null,
-      entityId: "some-entity"
+  it("refuses any query when no tenant is bound (AUT-05)", async () => {
+    const { prisma } = await import("../src/db/prisma.js");
+    const { TenantNotBoundError } = await import("../src/db/tenantScope.js");
+    // Outside any context, and inside one with an entity but no tenant.
+    expect(() => prisma.account).toThrow(TenantNotBoundError);
+    runWithContext({ entityId: "some-entity" }, () => {
+      expect(() => prisma.$transaction).toThrow(TenantNotBoundError);
     });
-
-    const ctx = getRequestContext();
-    expect(ctx.tenantSlug).toBeNull();
-    expect(ctx.tenantDbUrl).toBeNull();
-    // The prisma proxy will use the default client (registry DB)
   });
 
   it("deactivated tenant is evicted and cannot reconnect to pool", async () => {

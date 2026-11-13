@@ -2,7 +2,6 @@ import { NextResponse, type NextRequest } from "next/server";
 
 const TENANT_CODE_RE = /^[a-z0-9]{8}$/;
 const isDev = process.env.NODE_ENV === "development";
-const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4500";
 
 function withCSP(response: NextResponse): NextResponse {
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
@@ -13,7 +12,9 @@ function withCSP(response: NextResponse): NextResponse {
       ? `script-src 'self' 'unsafe-inline' 'unsafe-eval'`
       : `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
     "style-src 'self' 'unsafe-inline'",
-    `connect-src 'self' ${apiBaseUrl}${isDev ? " ws://localhost:3001" : ""}`,
+    // One origin (AUT-13): API calls go through this app's proxy, and the dev
+    // server's websocket is on this origin too; 'self' covers ws: and wss:.
+    "connect-src 'self'",
     "img-src 'self' data: blob:",
     "font-src 'self'",
     "frame-ancestors 'none'",

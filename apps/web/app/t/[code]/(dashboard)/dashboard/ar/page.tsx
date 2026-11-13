@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useTenantRouter } from "../../../../../../hooks/use-tenant-router";
 import { useApiContext } from "../../../../../../components/use-api-context";
-import { useUserRole } from "../../../../../../components/use-user-role";
+import { usePermissions } from "../../../../../../components/use-permissions";
 import {
   getARInvoices,
   getARAgeing,
@@ -176,7 +176,8 @@ const BUCKET_CONFIG = [
 export default function ARDashboardPage() {
   const router = useTenantRouter();
   const apiContext = useApiContext();
-  const { canAdmin } = useUserRole();
+  const { can } = usePermissions();
+  const canRunDunning = can("AR_DUNNING");
   const queryClient = useQueryClient();
   const [dunningStatus, setDunningStatus] = useState<"idle" | "loading" | "success" | "error">(
     "idle"
@@ -552,7 +553,7 @@ export default function ARDashboardPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    disabled={!canAdmin || dunningMutation.isPending}
+                    disabled={!canRunDunning || dunningMutation.isPending}
                     onClick={() => {
                       setDunningStatus("loading");
                       setDunningResult(null);

@@ -19,6 +19,7 @@ import { withBypassRLS } from "../../src/db/rls-bypass.js";
 import { APService } from "../../src/modules/ap/service.js";
 import { ARService } from "../../src/modules/ar/service.js";
 import { TaxPostingError } from "../../src/modules/tax/tax-posting.js";
+import { grantRole } from "../../src/modules/access/grants.js";
 
 const D = (v: string | number) => new Prisma.Decimal(v);
 
@@ -80,9 +81,11 @@ if (!process.env.TEST_DATABASE_URL) {
         const user = await tx.user.create({
           data: { email: `tax-${unique}@example.test`, name: "Tax Tester" }
         });
-        await tx.entityUser.create({
-          data: { entityId: entity.id, userId: user.id, role: "ADMIN" }
+        // A role at the entity makes the user its recorded actor (access/actor.ts).
+        const role = await tx.role.create({
+          data: { code: `IT_TAX_${unique}`, name: "Integration test role" }
         });
+        await grantRole(tx, user.id, role.id, { scope: "ENTITY", entityId: entity.id });
 
         const period = await tx.period.create({
           data: {
@@ -380,6 +383,117 @@ if (!process.env.TEST_DATABASE_URL) {
       expect(lines).toHaveLength(2);
       const rev = lines.find((l: any) => l.accountId === revenueAcc);
       expect(D(rev.credit).toFixed(2)).toBe("75000.00");
+    });
+
+    it("posts an invoice created through the service with a tax code given by code", async () => {
+      const invoice = await apService.createInvoice(entityId, userId, {
+        supplierId,
+        periodId,
+        invoiceNumber: `INV-${Math.random().toString(36).slice(2, 10)}`,
+        invoiceDate: new Date(),
+        dueDate: new Date(),
+        currency: "TZS",
+        grossAmount: "118000",
+        taxAmount: "18000",
+        netAmount: "100000",
+        functionalAmount: "118000",
+        fxRate: "1",
+        lines: [
+          {
+            description: "Consumables",
+            quantity: "1",
+            unitPrice: "100000",
+            amount: "100000",
+            glAccountId: expenseAcc,
+            taxCode: "VAT18"
+          }
+        ]
+      });
+      await apService.approveInvoice(entityId, invoice.id, userId);
+      const posted = await apService.postInvoice(entityId, invoice.id, userId);
+
+      const lines = await journalLinesFor(posted!.glJournalId!);
+      const vat = lines.find((l: any) => l.accountId === inputVatAcc);
+      expect(vat, "input VAT line must exist").toBeDefined();
+      expect(D(vat.debit).toFixed(2)).toBe("18000.00");
+    });
+
+    it("refuses an invoice whose tax code is not defined for the entity", async () => {
+      await expect(
+        apService.createInvoice(entityId, userId, {
+          supplierId,
+          periodId,
+          invoiceNumber: `INV-${Math.random().toString(36).slice(2, 10)}`,
+          invoiceDate: new Date(),
+          dueDate: new Date(),
+          currency: "TZS",
+          grossAmount: "100",
+          taxAmount: "0",
+          netAmount: "100",
+          functionalAmount: "100",
+          fxRate: "1",
+          lines: [
+            {
+              description: "Line",
+              quantity: "1",
+              unitPrice: "100",
+              amount: "100",
+              glAccountId: expenseAcc,
+              taxCode: "NO-SUCH-CODE"
+            }
+          ]
+        })
+      ).rejects.toMatchObject({ code: "AP_TAX_CODE_NOT_FOUND" });
+    });
+
+    describe("a chart where 1200 and 2000 are not the control accounts (ACC-12)", () => {
+      let flaggedAp: string;
+      let flaggedAr: string;
+
+      beforeEach(async () => {
+        const flagged = await withBypassRLS(prisma, async (tx: any) => {
+          const mk = async (code: string, name: string, type: string, nb: string) =>
+            (
+              await tx.account.create({
+                data: { entityId, code, name, type, normalBalance: nb, isControlAccount: true }
+              })
+            ).id;
+          return {
+            ap: await mk("2001", "Trade Creditors", "LIABILITY", "CREDIT"),
+            ar: await mk("1100", "Trade Debtors", "ASSET", "DEBIT")
+          };
+        });
+        flaggedAp = flagged.ap;
+        flaggedAr = flagged.ar;
+      });
+
+      it("posts payables to the account the tenant flagged, not to code 2000", async () => {
+        const invoiceId = await makeApInvoice({ net: "500", tax: "0", gross: "500" });
+        const posted = await apService.postInvoice(entityId, invoiceId, userId);
+        const lines = await journalLinesFor(posted!.glJournalId!);
+
+        expect(lines.find((l: any) => l.accountId === flaggedAp)).toBeDefined();
+        expect(lines.find((l: any) => l.accountId === apControl)).toBeUndefined();
+      });
+
+      it("posts receivables to the account the tenant flagged, not to code 1200", async () => {
+        const invoice = await arService.createInvoice(entityId, {
+          customerId,
+          invoiceNumber: `AR-${Math.random().toString(36).slice(2, 10)}`,
+          invoiceDate: new Date(),
+          dueDate: new Date(),
+          currency: "TZS",
+          amount: "900",
+          functionalAmount: "900",
+          fxRate: "1",
+          origin: "MANUAL"
+        } as any);
+        const posted = await arService.postInvoice(entityId, (invoice as any).id, userId);
+        const lines = await journalLinesFor((posted as any).glJournalId!);
+
+        expect(lines.find((l: any) => l.accountId === flaggedAr)).toBeDefined();
+        expect(lines.find((l: any) => l.accountId === arControl)).toBeUndefined();
+      });
     });
   });
 }

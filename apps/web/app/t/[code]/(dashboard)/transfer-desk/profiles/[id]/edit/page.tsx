@@ -12,7 +12,7 @@ import { useParams } from "next/navigation";
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useApiContext } from "../../../../../../../../components/use-api-context";
-import { useUserRole } from "../../../../../../../../components/use-user-role";
+import { usePermissions } from "../../../../../../../../components/use-permissions";
 import { useTenantHref } from "../../../../../../../../hooks/use-tenant-router";
 import { getProfile } from "../../../../../../../../lib/transfer-desk/api";
 import { WizardContainer } from "../../../../../../../../components/transfer-desk/wizard/WizardContainer";
@@ -25,7 +25,7 @@ export default function EditTransferProfilePage() {
   const profileId = params.id as string;
   const apiContext = useApiContext();
   const tenantHref = useTenantHref();
-  const role = useUserRole();
+  const role = usePermissions();
 
   const profileQ = useQuery({
     queryKey: ["td-profile-edit", apiContext?.tenantSlug, apiContext?.entityId, profileId],

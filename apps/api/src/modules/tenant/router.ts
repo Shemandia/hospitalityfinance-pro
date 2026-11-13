@@ -44,7 +44,7 @@ export async function registerTenantRouter(app: FastifyInstance): Promise<void> 
       router.addHook("preHandler", requirePlatformKey);
 
       // List all tenants
-      router.get("/tenants", async (_request, reply) => {
+      router.get("/tenants", { config: { access: "platform" } }, async (_request, reply) => {
         const tenants = await registryPrisma.tenant.findMany({
           orderBy: { createdAt: "desc" },
           select: {
@@ -65,20 +65,24 @@ export async function registerTenantRouter(app: FastifyInstance): Promise<void> 
       });
 
       // Get tenant by slug
-      router.get<{ Params: { slug: string } }>("/tenants/:slug", async (request, reply) => {
-        const tenant = await registryPrisma.tenant.findUnique({
-          where: { slug: request.params.slug }
-        });
-        if (!tenant) {
-          return reply.code(404).send({
-            data: null,
-            errors: [{ code: "TENANT_NOT_FOUND", message: "Tenant not found." }]
+      router.get<{ Params: { slug: string } }>(
+        "/tenants/:slug",
+        { config: { access: "platform" } },
+        async (request, reply) => {
+          const tenant = await registryPrisma.tenant.findUnique({
+            where: { slug: request.params.slug }
           });
+          if (!tenant) {
+            return reply.code(404).send({
+              data: null,
+              errors: [{ code: "TENANT_NOT_FOUND", message: "Tenant not found." }]
+            });
+          }
+          // Never expose databaseUrl in API response
+          const { databaseUrl, ...safe } = tenant;
+          return reply.send({ data: safe, errors: [] });
         }
-        // Never expose databaseUrl in API response
-        const { databaseUrl, ...safe } = tenant;
-        return reply.send({ data: safe, errors: [] });
-      });
+      );
 
       // Register a new tenant (pre-provisioned — DB must already exist)
       router.post<{
@@ -91,7 +95,7 @@ export async function registerTenantRouter(app: FastifyInstance): Promise<void> 
           plan?: string;
           maxProperties?: number;
         };
-      }>("/tenants", async (request, reply) => {
+      }>("/tenants", { config: { access: "platform" } }, async (request, reply) => {
         const body = request.body;
 
         if (!body.name || !body.slug || !body.databaseUrl || !body.adminEmail) {
@@ -157,7 +161,7 @@ export async function registerTenantRouter(app: FastifyInstance): Promise<void> 
           maxProperties?: number;
           isActive?: boolean;
         };
-      }>("/tenants/:slug", async (request, reply) => {
+      }>("/tenants/:slug", { config: { access: "platform" } }, async (request, reply) => {
         const existing = await registryPrisma.tenant.findUnique({
           where: { slug: request.params.slug }
         });
@@ -193,94 +197,107 @@ export async function registerTenantRouter(app: FastifyInstance): Promise<void> 
       });
 
       // Deactivate tenant (soft delete)
-      router.delete<{ Params: { slug: string } }>("/tenants/:slug", async (request, reply) => {
-        const existing = await registryPrisma.tenant.findUnique({
-          where: { slug: request.params.slug }
-        });
-        if (!existing) {
-          return reply.code(404).send({
-            data: null,
-            errors: [{ code: "TENANT_NOT_FOUND", message: "Tenant not found." }]
+      router.delete<{ Params: { slug: string } }>(
+        "/tenants/:slug",
+        { config: { access: "platform" } },
+        async (request, reply) => {
+          const existing = await registryPrisma.tenant.findUnique({
+            where: { slug: request.params.slug }
           });
+          if (!existing) {
+            return reply.code(404).send({
+              data: null,
+              errors: [{ code: "TENANT_NOT_FOUND", message: "Tenant not found." }]
+            });
+          }
+
+          await registryPrisma.tenant.update({
+            where: { slug: request.params.slug },
+            data: { isActive: false }
+          });
+
+          await evictTenant(request.params.slug);
+          await invalidateTenantCache();
+
+          return reply.send({ data: { deactivated: true }, errors: [] });
         }
-
-        await registryPrisma.tenant.update({
-          where: { slug: request.params.slug },
-          data: { isActive: false }
-        });
-
-        await evictTenant(request.params.slug);
-        await invalidateTenantCache();
-
-        return reply.send({ data: { deactivated: true }, errors: [] });
-      });
+      );
 
       // List active tenants (cached view)
-      router.get("/tenants/active/cached", async (_request, reply) => {
-        const tenants = await listTenants();
-        return reply.send({
-          data: tenants.map((t) => ({
-            id: t.id,
-            slug: t.slug,
-            name: t.name,
-            isActive: t.isActive
-          })),
-          errors: []
-        });
-      });
+      router.get(
+        "/tenants/active/cached",
+        { config: { access: "platform" } },
+        async (_request, reply) => {
+          const tenants = await listTenants();
+          return reply.send({
+            data: tenants.map((t) => ({
+              id: t.id,
+              slug: t.slug,
+              name: t.name,
+              isActive: t.isActive
+            })),
+            errors: []
+          });
+        }
+      );
 
       // ── Provisioning endpoints ──────────────────────────────────────────
 
       const provisioningService = new ProvisioningService();
 
       // Start provisioning (SSE stream)
-      router.post("/tenants/provision", async (request, reply) => {
-        let input;
-        try {
-          input = provisionTenantSchema.parse(request.body);
-        } catch (err) {
-          if (err instanceof ZodError) {
-            return reply.code(400).send({
-              data: null,
-              errors: err.errors.map((e) => ({
-                code: "VALIDATION_ERROR",
-                message: e.message,
-                path: e.path
-              }))
-            });
+      router.post(
+        "/tenants/provision",
+        { config: { access: "platform" } },
+        async (request, reply) => {
+          let input;
+          try {
+            input = provisionTenantSchema.parse(request.body);
+          } catch (err) {
+            if (err instanceof ZodError) {
+              return reply.code(400).send({
+                data: null,
+                errors: err.errors.map((e) => ({
+                  code: "VALIDATION_ERROR",
+                  message: e.message,
+                  path: e.path
+                }))
+              });
+            }
+            throw err;
           }
-          throw err;
+
+          const origin = request.headers.origin ?? "*";
+          reply.raw.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+            "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true"
+          });
+          reply.raw.flushHeaders();
+
+          const sse = (event: string, data: Record<string, unknown>) => {
+            reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+          };
+
+          try {
+            await provisioningService.provision(input, sse);
+          } catch (err) {
+            // Emit error via SSE if not already emitted
+            const msg = err instanceof Error ? err.message : "Unknown error";
+            sse("error", { step: "unknown", order: 0, status: "FAILED", error: msg });
+          } finally {
+            reply.raw.end();
+          }
         }
-
-        const origin = request.headers.origin ?? "*";
-        reply.raw.writeHead(200, {
-          "Content-Type": "text/event-stream",
-          "Cache-Control": "no-cache",
-          Connection: "keep-alive",
-          "X-Accel-Buffering": "no",
-          "Access-Control-Allow-Origin": origin,
-          "Access-Control-Allow-Credentials": "true"
-        });
-        reply.raw.flushHeaders();
-
-        const sse = (event: string, data: Record<string, unknown>) => {
-          reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-        };
-
-        try {
-          await provisioningService.provision(input, sse);
-        } catch (err) {
-          // Emit error via SSE if not already emitted
-          const msg = err instanceof Error ? err.message : "Unknown error";
-          sse("error", { step: "unknown", order: 0, status: "FAILED", error: msg });
-        } finally {
-          reply.raw.end();
-        }
-      });
+      );
 
       // Get provisioning status
       router.get<{ Params: { slug: string } }>(
         "/tenants/:slug/provision-status",
+        { config: { access: "platform" } },
         async (request, reply) => {
           const status = await provisioningService.getStatus(request.params.slug);
           if (!status) {
@@ -296,6 +313,7 @@ export async function registerTenantRouter(app: FastifyInstance): Promise<void> 
       // Retry provisioning from failed step (SSE stream)
       router.post<{ Params: { slug: string } }>(
         "/tenants/:slug/provision-retry",
+        { config: { access: "platform" } },
         async (request, reply) => {
           const retryOrigin = request.headers.origin ?? "*";
           reply.raw.writeHead(200, {

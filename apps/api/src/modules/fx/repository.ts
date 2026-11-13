@@ -225,13 +225,6 @@ export class FXRepository {
     });
   }
 
-  findUser(entityId: string) {
-    return this.db.entityUser.findFirst({
-      where: { entityId },
-      include: { user: true }
-    });
-  }
-
   /**
    * @param referenceDate The closing-rate date, as YYYY-MM-DD. This MUST be the
    *   same value findExistingRevaluationJournal is called with. It previously

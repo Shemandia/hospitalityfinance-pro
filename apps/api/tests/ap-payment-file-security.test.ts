@@ -18,6 +18,8 @@ import {
   validatePaymentFileStorageKey
 } from "../src/modules/ap/service.js";
 import { registerAPRouter } from "../src/modules/ap/router.js";
+import { setAccessService } from "../src/modules/access/runtime.js";
+import { staticAccessService } from "./helpers/access.js";
 
 function makeService(paymentRun: Record<string, unknown> | null) {
   const prisma = {
@@ -145,6 +147,7 @@ describe("AP payment file download route authorization", () => {
   let app: ReturnType<typeof Fastify> | null = null;
 
   afterEach(async () => {
+    setAccessService(null);
     if (app) {
       await app.close();
       app = null;
@@ -153,13 +156,20 @@ describe("AP payment file download route authorization", () => {
 
   it("denies GET /payment-runs/:id/download without AP_PAYMENT_CONFIRM", async () => {
     app = Fastify({ logger: false });
+    // As app.ts does: each request runs in its own context.
+    app.addHook("onRequest", (_request: unknown, _reply: unknown, done: () => void) =>
+      runWithContext({}, done)
+    );
     app.decorate("verifyAccessToken", async (request: any) => {
-      request.user = {
-        sub: "user-1",
-        permissions: ["PAYMENT_RUN_READ", "PAYMENT_RUN_CREATE"]
-      };
+      request.user = { sub: "user-1", tenantId: "tenant-1" };
       request.entityId = "entity-1";
     });
+    setAccessService(
+      staticAccessService({
+        tenantPermissions: [],
+        entityPermissions: { "entity-1": ["PAYMENT_RUN_CREATE", "PAYMENT_RUN_READ"] }
+      })
+    );
     await registerAPRouter(app as any);
 
     const response = await app.inject({

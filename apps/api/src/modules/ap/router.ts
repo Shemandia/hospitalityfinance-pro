@@ -2,7 +2,6 @@ import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "../../db/client.js";
 import { prisma } from "../../db/prisma.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
-import { requireRole } from "../../middleware/requireRole.js";
 import { requirePermission } from "../../middleware/requirePermission.js";
 import { APService, APServiceError } from "./service.js";
 import { PaymentProfileService } from "./payment-profile-service.js";
@@ -37,15 +36,19 @@ export async function registerAPRouter(app: FastifyInstance): Promise<void> {
     async (router) => {
       router.addHook("preHandler", requireAuth);
 
-      router.get("/suppliers", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await apService.listSuppliers(entityId);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/suppliers",
+        { preHandler: [requirePermission("AP_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await apService.listSuppliers(entityId);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.post(
         "/suppliers",
@@ -62,15 +65,19 @@ export async function registerAPRouter(app: FastifyInstance): Promise<void> {
         }
       );
 
-      router.get<{ Params: { id: string } }>("/suppliers/:id", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await apService.getSupplier(entityId, request.params.id);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get<{ Params: { id: string } }>(
+        "/suppliers/:id",
+        { preHandler: [requirePermission("AP_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await apService.getSupplier(entityId, request.params.id);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.put<{ Params: { id: string } }>(
         "/suppliers/:id",
@@ -101,16 +108,20 @@ export async function registerAPRouter(app: FastifyInstance): Promise<void> {
         }
       );
 
-      router.get("/invoices", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const query = apInvoiceListQuerySchema.parse(request.query);
-          const data = await apService.listInvoices(entityId, query);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/invoices",
+        { preHandler: [requirePermission("AP_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const query = apInvoiceListQuerySchema.parse(request.query);
+            const data = await apService.listInvoices(entityId, query);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.post(
         "/invoices",
@@ -143,15 +154,19 @@ export async function registerAPRouter(app: FastifyInstance): Promise<void> {
         }
       );
 
-      router.get<{ Params: { id: string } }>("/invoices/:id", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await apService.getInvoice(entityId, request.params.id);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get<{ Params: { id: string } }>(
+        "/invoices/:id",
+        { preHandler: [requirePermission("AP_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await apService.getInvoice(entityId, request.params.id);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.put<{ Params: { id: string } }>(
         "/invoices/:id",
@@ -231,41 +246,49 @@ export async function registerAPRouter(app: FastifyInstance): Promise<void> {
         }
       );
 
-      router.get("/payment-runs", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const query = request.query as { limit?: string | number };
-          const limitValue =
-            typeof query.limit === "number"
-              ? query.limit
-              : typeof query.limit === "string"
-                ? Number.parseInt(query.limit, 10)
-                : 50;
+      router.get(
+        "/payment-runs",
+        { preHandler: [requirePermission(["PAYMENT_RUN_READ", "AP_READ"])] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const query = request.query as { limit?: string | number };
+            const limitValue =
+              typeof query.limit === "number"
+                ? query.limit
+                : typeof query.limit === "string"
+                  ? Number.parseInt(query.limit, 10)
+                  : 50;
 
-          if (!Number.isFinite(limitValue) || limitValue <= 0 || limitValue > 200) {
-            throw new APServiceError(
-              "AP_PAYMENT_RUN_INVALID_LIMIT",
-              "limit must be between 1 and 200.",
-              422
-            );
+            if (!Number.isFinite(limitValue) || limitValue <= 0 || limitValue > 200) {
+              throw new APServiceError(
+                "AP_PAYMENT_RUN_INVALID_LIMIT",
+                "limit must be between 1 and 200.",
+                422
+              );
+            }
+
+            const data = await apService.listPaymentRuns(entityId, limitValue);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
           }
-
-          const data = await apService.listPaymentRuns(entityId, limitValue);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
         }
-      });
+      );
 
-      router.get<{ Params: { id: string } }>("/payment-runs/:id", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await apService.getPaymentRun(entityId, request.params.id);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get<{ Params: { id: string } }>(
+        "/payment-runs/:id",
+        { preHandler: [requirePermission(["PAYMENT_RUN_READ", "AP_READ"])] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await apService.getPaymentRun(entityId, request.params.id);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.delete<{ Params: { id: string } }>(
         "/payment-runs/:id",
@@ -415,39 +438,47 @@ export async function registerAPRouter(app: FastifyInstance): Promise<void> {
       );
       // ── Payment Profiles ──────────────────────────────────────────────────
 
-      router.get("/payment-profiles", async (request, reply) => {
-        try {
-          const entityId = request.entityId;
-          if (!entityId)
-            return reply.code(400).send({
-              data: null,
-              errors: [{ code: "MISSING_ENTITY", message: "X-Entity-ID required." }]
-            });
-          const direction = (request.query as any)?.direction as string | undefined;
-          const data = await paymentProfileService.listProfiles(
-            entityId,
-            direction === "PAY" || direction === "COLLECT" ? direction : undefined
-          );
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/payment-profiles",
+        { preHandler: [requirePermission("AP_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = request.entityId;
+            if (!entityId)
+              return reply.code(400).send({
+                data: null,
+                errors: [{ code: "MISSING_ENTITY", message: "X-Entity-ID required." }]
+              });
+            const direction = (request.query as any)?.direction as string | undefined;
+            const data = await paymentProfileService.listProfiles(
+              entityId,
+              direction === "PAY" || direction === "COLLECT" ? direction : undefined
+            );
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.get<{ Params: { id: string } }>("/payment-profiles/:id", async (request, reply) => {
-        try {
-          const entityId = request.entityId;
-          if (!entityId)
-            return reply.code(400).send({
-              data: null,
-              errors: [{ code: "MISSING_ENTITY", message: "X-Entity-ID required." }]
-            });
-          const data = await paymentProfileService.getProfile(entityId, request.params.id);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get<{ Params: { id: string } }>(
+        "/payment-profiles/:id",
+        { preHandler: [requirePermission("AP_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = request.entityId;
+            if (!entityId)
+              return reply.code(400).send({
+                data: null,
+                errors: [{ code: "MISSING_ENTITY", message: "X-Entity-ID required." }]
+              });
+            const data = await paymentProfileService.getProfile(entityId, request.params.id);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.post(
         "/payment-profiles",

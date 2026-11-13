@@ -33,7 +33,7 @@ export function EntitySwitcher() {
 
   const isMulti = entities.length > 1;
   const entityType = currentEntity.type === "GROUP" ? "Group" : "Property";
-  const currency = currentEntity.functionalCurrency ?? currentEntity.currency;
+  const currency = currentEntity.functionalCurrency;
 
   return (
     <div ref={ref} className="relative mx-3 mb-3">

@@ -81,8 +81,7 @@ DATABASE_URL=postgresql://...
 REDIS_URL=redis://...
 JWT_SECRET=<strong-random-secret>
 COOKIE_SECURE=true
-COOKIE_DOMAIN=.hospitalityfinancepro.com
-ALLOWED_ORIGINS=https://app.hospitalityfinancepro.com
+TRUST_PROXY=loopback
 APP_BASE_URL=https://app.hospitalityfinancepro.com
 STORAGE_BACKEND=s3
 AWS_REGION=<region>
@@ -134,11 +133,9 @@ export DATABASE_URL="postgresql://hfp:<password>@db.example.com:5432/hfp_tenant_
 pnpm --filter @hfp/api run db:setup:tenant
 ```
 
-Run seed or tenant bootstrap scripts only after confirming they are intended for the target environment.
-
-```bash
-pnpm --filter @hfp/api run db:seed
-```
+Do not run `db:seed` here: it creates a demo tenant and demo users, and refuses
+to run with `NODE_ENV=production`. A production tenant gets its roles and
+permissions, and its first administrator, from tenant provisioning.
 
 ### 6. Build API and Web
 

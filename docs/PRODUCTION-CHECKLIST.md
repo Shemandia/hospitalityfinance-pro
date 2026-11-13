@@ -5,7 +5,7 @@
 - [ ] PostgreSQL 16+ (RDS Multi-AZ recommended)
   - Run `pnpm --filter @hfp/api run db:migrate:deploy:registry`
   - Run `pnpm --filter @hfp/api run db:setup:tenant` for each tenant database
-  - Run `pnpm --filter @hfp/api run db:seed` for system data (roles, permissions, report definitions)
+  - Provision each tenant through the platform; provisioning creates its roles, permissions and first administrator. Do not run `db:seed` (demo data; it refuses `NODE_ENV=production`)
 
 - [ ] Redis 7+ (ElastiCache recommended)
   - Used by: native auth sessions/refresh tokens, BullMQ jobs, and KPI cache
@@ -22,14 +22,14 @@
   - `pnpm --filter @hfp/api run build`
   - `node dist/index.js` or `pm2 start ecosystem.config.cjs --only hfp-api`
   - Set all env variables per `docs/ENV-VARIABLES.md`
-  - Set `JWT_SECRET`, `COOKIE_SECURE=true`, `ALLOWED_ORIGINS`, and `REDIS_URL`
+  - Set `JWT_SECRET`, `COOKIE_SECURE=true`, `TRUST_PROXY` (the web server's address) and `REDIS_URL`; keep the API port closed to the outside
   - Verify: `GET /health` returns `{ status: "ok" }`
 
 - [ ] Web (`apps/web`)
   - `pnpm install --frozen-lockfile`
   - `pnpm --filter @hfp/web run build`
   - `pnpm --filter @hfp/web start` or `pm2 start ecosystem.config.cjs --only hfp-web`
-  - Set `NEXT_PUBLIC_API_BASE_URL` to the public API origin
+  - Set `API_INTERNAL_URL` to the API as the web server reaches it; the reverse proxy overwrites `X-Forwarded-For`
 
 - [ ] Workers
   - `pnpm --filter @hfp/api run workers:prod` or `pm2 start ecosystem.config.cjs --only hfp-workers`

@@ -11,7 +11,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useApiContext } from "../../../../../../components/use-api-context";
-import { useUserRole } from "../../../../../../components/use-user-role";
+import { usePermissions } from "../../../../../../components/use-permissions";
 import { useTenantHref } from "../../../../../../hooks/use-tenant-router";
 import {
   listTransferFormats,
@@ -55,7 +55,7 @@ const CLASSIFICATION_LABELS: Record<FormatClassification, { label: string; badge
 
 export default function FormatsListPage() {
   const apiCtx = useApiContext();
-  const { canTransferDeskDesigner } = useUserRole();
+  const { canTransferDeskDesigner } = usePermissions();
   const href = useTenantHref();
 
   const [classFilter, setClassFilter] = useState<string>("all");

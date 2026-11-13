@@ -1,145 +1,58 @@
 /**
  * Worker Process Supervisor
  *
- * Manages all background worker processes with automatic restart on crash.
- * Run as: node dist/jobs/worker-supervisor.js
+ * Runs every background worker as a child process and restarts it on a crash.
+ * Run as: node dist/jobs/worker-supervisor.js (pnpm workers:prod), or
+ * pnpm workers in development.
  *
- * Features:
- * - Automatic restart with exponential backoff (1s → 2s → 4s → max 30s)
- * - Backoff resets after 60s of stable running
- * - Graceful shutdown on SIGTERM/SIGINT
- * - Health logging
+ * - Restart with exponential backoff (1s → 2s → 4s → max 30s); the backoff
+ *   resets after 60s of stable running.
+ * - A worker that exits cleanly WORKER_MAX_CLEAN_EXITS times in a row (default
+ *   3) is not restarted again. The supervisor then stops every worker and exits
+ *   with code 1, so the service manager (systemd, Docker) reports the failure
+ *   instead of the supervisor restarting a broken worker forever (OPS-10).
+ * - Graceful shutdown on SIGTERM/SIGINT.
  */
 
-import { fork, type ChildProcess } from "node:child_process";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-interface WorkerConfig {
-  name: string;
-  script: string;
-  enabled: boolean;
-}
-
-const WORKERS: WorkerConfig[] = [
-  {
-    name: "report-generation",
-    script: resolve(__dirname, "report-generation-worker.js"),
-    enabled: true
-  },
-  {
-    name: "dunning",
-    script: resolve(__dirname, "dunning-worker.js"),
-    enabled: true
-  },
-  {
-    name: "scheduled-reports",
-    script: resolve(__dirname, "scheduled-reports-worker.js"),
-    enabled: true
-  },
-  {
-    name: "transfer-desk",
-    script: resolve(__dirname, "transfer-desk-worker.js"),
-    enabled: true
-  }
-];
-
-interface ManagedWorker {
-  config: WorkerConfig;
-  process: ChildProcess | null;
-  restartCount: number;
-  lastStartTime: number;
-}
+import { createSupervisor, exponentialBackoff, workerEntryPoints } from "./supervisor.js";
 
 const MAX_BACKOFF_MS = 30_000;
 const STABLE_THRESHOLD_MS = 60_000;
+const SHUTDOWN_GRACE_MS = 10_000;
 
-const managed: ManagedWorker[] = [];
-let shuttingDown = false;
-
-function getBackoffMs(restartCount: number): number {
-  return Math.min(1000 * Math.pow(2, restartCount), MAX_BACKOFF_MS);
-}
-
-function startWorker(worker: ManagedWorker): void {
-  if (shuttingDown) return;
-
-  const now = Date.now();
-  // Reset backoff if last run was stable (ran for > 60s)
-  if (worker.lastStartTime > 0 && now - worker.lastStartTime > STABLE_THRESHOLD_MS) {
-    worker.restartCount = 0;
+function positiveInteger(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`${name} must be a positive integer, got "${raw}".`);
   }
-
-  worker.lastStartTime = now;
-
-  console.log(`[supervisor] Starting worker: ${worker.config.name}`);
-  const child = fork(worker.config.script, [], {
-    stdio: "inherit",
-    env: { ...process.env }
-  });
-
-  child.on("exit", (code, signal) => {
-    if (shuttingDown) return;
-
-    worker.restartCount++;
-    const delay = getBackoffMs(worker.restartCount);
-    console.error(
-      `[supervisor] Worker "${worker.config.name}" exited (code=${code}, signal=${signal}). ` +
-        `Restarting in ${delay}ms (attempt #${worker.restartCount})...`
-    );
-
-    setTimeout(() => startWorker(worker), delay);
-  });
-
-  child.on("error", (err) => {
-    console.error(`[supervisor] Worker "${worker.config.name}" error:`, err.message);
-  });
-
-  worker.process = child;
+  return value;
 }
 
-function shutdown(): void {
-  if (shuttingDown) return;
-  shuttingDown = true;
+const workers = workerEntryPoints();
+let exiting = false;
+
+async function exit(code: number): Promise<void> {
+  if (exiting) return;
+  exiting = true;
   console.log("[supervisor] Shutting down all workers...");
-
-  for (const worker of managed) {
-    if (worker.process && !worker.process.killed) {
-      worker.process.kill("SIGTERM");
-    }
-  }
-
-  // Force kill after 10s
-  setTimeout(() => {
-    for (const worker of managed) {
-      if (worker.process && !worker.process.killed) {
-        console.log(`[supervisor] Force-killing ${worker.config.name}`);
-        worker.process.kill("SIGKILL");
-      }
-    }
-    process.exit(0);
-  }, 10_000);
+  await supervisor.stop(SHUTDOWN_GRACE_MS);
+  process.exit(code);
 }
 
-// ── Main ────────────────────────────────────────────────────────────────────
+const supervisor = createSupervisor({
+  workers,
+  maxCleanExits: positiveInteger("WORKER_MAX_CLEAN_EXITS", 3),
+  stableMs: STABLE_THRESHOLD_MS,
+  backoffMs: exponentialBackoff(MAX_BACKOFF_MS),
+  onFailure: () => void exit(1)
+});
 
-process.on("SIGTERM", shutdown);
-process.on("SIGINT", shutdown);
+process.on("SIGTERM", () => void exit(0));
+process.on("SIGINT", () => void exit(0));
 
-const enabledWorkers = WORKERS.filter((w) => w.enabled);
 console.log(
-  `[supervisor] Starting ${enabledWorkers.length} workers: ${enabledWorkers.map((w) => w.name).join(", ")}`
+  `[supervisor] Starting ${workers.length} workers: ${workers.map((w) => w.name).join(", ")}`
 );
-
-for (const config of enabledWorkers) {
-  const worker: ManagedWorker = {
-    config,
-    process: null,
-    restartCount: 0,
-    lastStartTime: 0
-  };
-  managed.push(worker);
-  startWorker(worker);
-}
+supervisor.start();

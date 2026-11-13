@@ -333,70 +333,24 @@ describe("Account Lockout Logic", () => {
   });
 });
 
-// ── Scope-aware JWT claims (NS2) ─────────────────────────────────────────────
+// ── Access token contents (AUT-06) ───────────────────────────────────────────
 
-describe("buildScopedClaims (NS2 — scope-aware JWT claims)", () => {
-  let buildScopedClaims: (typeof import("../src/services/auth.service.js"))["buildScopedClaims"];
-
-  beforeAll(async () => {
+describe("access token", () => {
+  it("carries the user, the tenant and the session, and nothing about access", async () => {
     process.env.JWT_SECRET ??= "test-secret-for-auth-service-unit-tests-256-bit";
-    ({ buildScopedClaims } = await import("../src/services/auth.service.js"));
-  });
+    const { signAccessToken } = await import("../src/services/auth.service.js");
+    const jwt = (await import("jsonwebtoken")).default;
 
-  const perm = (code: string) => ({ permission: { code } });
-  const ENTITY_A = "entity-a";
-  const ENTITY_B = "entity-b";
+    const payload = jwt.decode(signAccessToken("user-1", "tenant-1", "session-1"));
 
-  it("includes global (entityId=null) roles and their permissions", () => {
-    const claims = buildScopedClaims(
-      [{ entityId: null, role: { code: "SUPERADMIN", permissions: [perm("ADMIN_USERS")] } }],
-      []
+    expect(Object.keys(payload as object).sort()).toEqual(
+      ["exp", "iat", "sessionId", "sub", "tenantId", "type"].sort()
     );
-    expect(claims.roles).toEqual(["SUPERADMIN"]);
-    expect(claims.permissions).toEqual(["ADMIN_USERS"]);
-  });
-
-  it("excludes a SUPERADMIN role granted with an entity scope (privilege-escalation vector)", () => {
-    const claims = buildScopedClaims(
-      [
-        { entityId: ENTITY_A, role: { code: "SUPERADMIN", permissions: [perm("ADMIN_USERS")] } },
-        { entityId: ENTITY_A, role: { code: "ACCOUNTANT", permissions: [perm("GL_READ")] } }
-      ],
-      [ENTITY_A]
-    );
-    expect(claims.roles).toEqual(["ACCOUNTANT"]);
-    expect(claims.permissions).toEqual(["GL_READ"]);
-  });
-
-  it("excludes scoped roles for entities the user no longer has access to", () => {
-    const claims = buildScopedClaims(
-      [{ entityId: ENTITY_B, role: { code: "ACCOUNTANT", permissions: [perm("GL_READ")] } }],
-      [ENTITY_A]
-    );
-    expect(claims.roles).toEqual([]);
-    expect(claims.permissions).toEqual([]);
-  });
-
-  it("includes scoped non-admin roles for accessible entities and dedupes", () => {
-    const claims = buildScopedClaims(
-      [
-        {
-          entityId: ENTITY_A,
-          role: { code: "ACCOUNTANT", permissions: [perm("GL_READ"), perm("GL_POST")] }
-        },
-        { entityId: ENTITY_B, role: { code: "ACCOUNTANT", permissions: [perm("GL_READ")] } }
-      ],
-      [ENTITY_A, ENTITY_B]
-    );
-    expect(claims.roles).toEqual(["ACCOUNTANT"]);
-    expect(claims.permissions.sort()).toEqual(["GL_POST", "GL_READ"]);
-  });
-
-  it("treats PLATFORM_ADMIN the same as SUPERADMIN", () => {
-    const claims = buildScopedClaims(
-      [{ entityId: ENTITY_A, role: { code: "PLATFORM_ADMIN", permissions: [] } }],
-      [ENTITY_A]
-    );
-    expect(claims.roles).toEqual([]);
+    expect(payload).toMatchObject({
+      sub: "user-1",
+      tenantId: "tenant-1",
+      sessionId: "session-1",
+      type: "access"
+    });
   });
 });

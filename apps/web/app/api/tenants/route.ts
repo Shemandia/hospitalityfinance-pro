@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
+import { apiInternalUrl } from "../../../lib/server/api-proxy";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4500";
 const PLATFORM_KEY = process.env.HFP_PLATFORM_KEY;
 
 export async function GET() {
@@ -8,7 +8,7 @@ export async function GET() {
     return NextResponse.json({ data: [] }, { status: 503 });
   }
   try {
-    const res = await fetch(`${API_BASE}/api/v1/platform/tenants`, {
+    const res = await fetch(`${apiInternalUrl()}/api/v1/platform/tenants`, {
       headers: { "X-Platform-Key": PLATFORM_KEY },
       next: { revalidate: 60 }
     });

@@ -1,9 +1,9 @@
 /**
  * Transfer Desk — per-tenant BullMQ worker.
  *
- * One worker per active tenant, lazily started when the matching queue gets
- * its first job. The worker name follows the spec pattern `transfer-{tenant-slug}`
- * (TD-BL-027).
+ * One worker per active tenant, on the queue `transfer-{tenant-slug}`
+ * (TD-BL-027). This module is a library: the workers run in their own process,
+ * started by transfer-desk-runner.ts under the worker supervisor (OPS-10).
  *
  * Responsibilities:
  *   1. Pull TransferDeskJobData from the per-tenant queue.
@@ -17,12 +17,15 @@
  * licensing module exists.
  *
  * Lifecycle:
- *   - Workers are NOT started at app boot. They start on first enqueue via
- *     `ensureTransferDeskWorker(tenantSlug, tenantDbUrl)`.
+ *   - The runner starts a worker for each active tenant, picks up new tenants
+ *     and stops the workers of deactivated ones. The API never starts one.
  *   - All workers are closed by `disconnectAllTransferDeskWorkers()` during
  *     graceful shutdown.
  */
 
+import { runWithContext, updateRequestContext } from "../db/requestContext.js";
+import { resolveTenant } from "../db/tenantRegistry.js";
+import { TenantUnavailableError } from "../db/tenantScope.js";
 import { Worker, type Job } from "bullmq";
 import { getTenantClient } from "../db/tenantPool.js";
 import {
@@ -58,7 +61,15 @@ export function ensureTransferDeskWorker(tenantSlug: string, tenantDbUrl: string
 
   const worker = new Worker<TransferDeskJobData>(
     getTransferDeskQueueName(tenantSlug),
-    (job) => processJob(job, tenantSlug, tenantDbUrl),
+    // The job runs with its tenant bound, so anything that reaches the shared
+    // prisma client lands in this tenant's database and no other.
+    (job) =>
+      runWithContext({ tenantSlug, tenantDbUrl }, async () => {
+        const tenant = await resolveTenant(tenantSlug);
+        if (!tenant || !tenant.isActive) throw new TenantUnavailableError(tenantSlug);
+        updateRequestContext({ tenantId: tenant.id });
+        return processJob(job, tenantSlug, tenantDbUrl);
+      }),
     {
       connection: getTransferDeskRedisConnection(),
       concurrency: 1, // TODO: read from license entitlements (Starter=1, Pro=3, Enterprise=10)
@@ -346,6 +357,19 @@ async function sendExecutionNotification(
       `[TransferDeskWorker:${tenantSlug}] Notification send failed: ${(err as Error).message}`
     );
   }
+}
+
+/** Slugs of the tenants that have a worker running in this process. */
+export function runningTransferDeskWorkers(): string[] {
+  return [...workers.keys()];
+}
+
+/** Stops one tenant's worker, for example when the tenant is deactivated. */
+export async function stopTransferDeskWorker(tenantSlug: string): Promise<void> {
+  const worker = workers.get(tenantSlug);
+  if (!worker) return;
+  workers.delete(tenantSlug);
+  await worker.close().catch(() => undefined);
 }
 
 /**

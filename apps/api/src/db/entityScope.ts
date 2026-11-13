@@ -1,8 +1,7 @@
 import { Prisma } from "./client.js";
+import { getRequestContext } from "./requestContext.js";
 
 export const MODELS_WITH_ENTITY_ID = new Set([
-  "EntityUser",
-  "UserRole",
   "Period",
   "Account",
   "JournalType",
@@ -184,6 +183,11 @@ export function createEntityScopeExtension(getEntityId: () => string | null) {
                 !MODELS_WITH_NULLABLE_ENTITY_ID.has(model) &&
                 !MODELS_WITH_SERVICE_SCOPED_ENTITY_ID.has(model))
             ) {
+              return query(args);
+            }
+
+            // Inside withBypassRLS the caller works across entities on purpose.
+            if (getRequestContext().rlsBypass) {
               return query(args);
             }
 

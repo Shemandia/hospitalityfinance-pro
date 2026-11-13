@@ -27,61 +27,11 @@ import { PrismaClient as RegistryPrismaClient } from "../db/registry-client.js";
 import { execSync } from "node:child_process";
 import { resolve } from "node:path";
 import bcrypt from "bcrypt";
-
-const SYSTEM_PERMISSION_CODES = [
-  "GL_READ",
-  "GL_WRITE",
-  "GL_POST",
-  "GL_REVERSE",
-  "GL_APPROVE",
-  "COA_READ",
-  "COA_CREATE",
-  "COA_EDIT",
-  "AP_READ",
-  "AP_WRITE",
-  "AP_APPROVE",
-  "AP_PAYMENT_CONFIRM",
-  "PAYMENT_RUN_READ",
-  "PAYMENT_RUN_CREATE",
-  "PAYMENT_RUN_APPROVE",
-  "AR_READ",
-  "AR_WRITE",
-  "AR_DUNNING",
-  "BUDGET_READ",
-  "BUDGET_WRITE",
-  "BUDGET_APPROVE",
-  "FX_READ",
-  "FX_WRITE",
-  "REPORT_READ",
-  "REPORT_WRITE",
-  "REPORT_EXPORT",
-  "REPORT_CREATE_CUSTOM",
-  "PERIOD_READ",
-  "PERIOD_MANAGE",
-  "PERIOD_REOPEN",
-  "TRANSFER_DESK_READ",
-  "TRANSFER_DESK_EXECUTE",
-  "TRANSFER_DESK_CONFIG",
-  "INTEGRATION_READ",
-  "INTEGRATION_IMPORT",
-  "INTEGRATION_CONFIG",
-  "IC_READ",
-  "IC_CREATE",
-  "IC_APPROVE",
-  "IC_REVERSE",
-  "IC_CONFIG",
-  "IC_RECONCILE",
-  "CONSOLIDATION_RUN",
-  "STATS_READ",
-  "STATS_IMPORT",
-  "AUDIT_READ",
-  "ADMIN_USERS_READ",
-  "ADMIN_USERS",
-  "ADMIN_ROLES_MANAGE",
-  "ADMIN_SETTINGS",
-  "ADMIN_ENTITIES",
-  "ADMIN_AUDIT_LOG"
-];
+import {
+  applyAccessMigration,
+  ensureSystemCatalog,
+  grantTenantAdministrator
+} from "../modules/access/setup.js";
 
 // ── Parse args ────────────────────────────────────────────────────────────────
 
@@ -161,38 +111,6 @@ function buildDbUrl(
   database: string
 ): string {
   return `postgresql://${user}:${encodeURIComponent(password)}@${host}:${port}/${database}`;
-}
-
-async function ensureTenantAdminRole(tenantClient: PrismaClient) {
-  const role = await tenantClient.role.upsert({
-    where: { code: "TENANT_ADMIN" },
-    update: {
-      name: "Tenant Administrator",
-      description: "Full system access - manages users, roles, entities, and all modules",
-      isSystem: true
-    },
-    create: {
-      code: "TENANT_ADMIN",
-      name: "Tenant Administrator",
-      description: "Full system access - manages users, roles, entities, and all modules",
-      isSystem: true
-    }
-  });
-
-  for (const code of SYSTEM_PERMISSION_CODES) {
-    const permission = await tenantClient.permission.upsert({
-      where: { code },
-      update: {},
-      create: { code, description: code.replace(/_/g, " "), category: "System" }
-    });
-    await tenantClient.rolePermission.upsert({
-      where: { roleId_permissionId: { roleId: role.id, permissionId: permission.id } },
-      update: {},
-      create: { roleId: role.id, permissionId: permission.id }
-    });
-  }
-
-  return role;
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -327,7 +245,9 @@ async function main() {
 
   // 7. Create admin user in tenant database
   console.log("\n5. Creating admin user...");
-  const tenantAdminRole = await ensureTenantAdminRole(tenantClient);
+  // The grants table must be constrained and protected before the first grant.
+  await applyAccessMigration(tenantClient);
+  await ensureSystemCatalog(tenantClient);
   const passwordHash = await bcrypt.hash(config.adminPassword, 12);
   const adminUser = await tenantClient.user.upsert({
     where: { email: config.adminEmail.toLowerCase() },
@@ -345,14 +265,7 @@ async function main() {
       isActive: true
     }
   });
-  const existingRole = await tenantClient.userRole.findFirst({
-    where: { userId: adminUser.id, roleId: tenantAdminRole.id, entityId: null }
-  });
-  if (!existingRole) {
-    await tenantClient.userRole.create({
-      data: { userId: adminUser.id, roleId: tenantAdminRole.id, entityId: null }
-    });
-  }
+  await grantTenantAdministrator(tenantClient, adminUser.id);
   console.log(`   Admin user created: ${config.adminEmail}`);
 
   await tenantClient.$disconnect();

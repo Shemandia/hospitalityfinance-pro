@@ -17,14 +17,17 @@ jobs:
     services:
       postgres:
         image: postgres:16
+        # The superuser only creates the application role and the database.
+        # The tests connect as hfp, which owns the database but is not a
+        # superuser, as in production: a superuser ignores row-level security.
         env:
-          POSTGRES_USER: hfp
-          POSTGRES_PASSWORD: hfp_ci
-          POSTGRES_DB: hfp_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_ci
+          POSTGRES_DB: postgres
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U hfp -d hfp_test"
+          --health-cmd "pg_isready -U postgres"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
@@ -41,6 +44,10 @@ jobs:
     env:
       NODE_ENV: test
       TEST_DATABASE_URL: postgresql://hfp:hfp_ci@localhost:5432/hfp_test
+      # A second tenant database, for the two-tenant isolation tests (WP-A).
+      TEST_SECOND_DATABASE_URL: postgresql://hfp:hfp_ci@localhost:5432/hfp_test_b
+      # A registry database, for the worker entry-point tests (OPS-10).
+      TEST_REGISTRY_DATABASE_URL: postgresql://hfp:hfp_ci@localhost:5432/hfp_registry_test
       REDIS_URL: redis://localhost:6379
       JWT_SECRET: ci-only-secret-not-used-outside-this-workflow
 
@@ -73,10 +80,30 @@ jobs:
       # Until WP-2 replaces it with a clean baseline, the test database is built
       # the same way provisioning builds a tenant. Replace with `migrate deploy`
       # and add the migrate-from-empty check when WP-2 lands.
+      - name: Create application role and test database
+        env:
+          PGPASSWORD: postgres_ci
+        run: |
+          psql -h localhost -U postgres -v ON_ERROR_STOP=1 \
+            -c "CREATE ROLE hfp LOGIN PASSWORD 'hfp_ci' NOSUPERUSER NOBYPASSRLS CREATEDB CREATEROLE" \
+            -c "CREATE DATABASE hfp_test OWNER hfp" \
+            -c "CREATE DATABASE hfp_test_b OWNER hfp" \
+            -c "CREATE DATABASE hfp_registry_test OWNER hfp"
+
       - name: Prepare test database
         run: pnpm --filter @hfp/api db:setup:test
         env:
           DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+
+      - name: Prepare second tenant test database
+        run: pnpm --filter @hfp/api db:setup:test
+        env:
+          DATABASE_URL: ${{ env.TEST_SECOND_DATABASE_URL }}
+
+      - name: Prepare test registry database
+        run: pnpm --filter @hfp/api exec prisma db push --schema src/db/schema-registry.prisma --skip-generate
+        env:
+          REGISTRY_DATABASE_URL: ${{ env.TEST_REGISTRY_DATABASE_URL }}
 
       - name: Unit tests
         run: pnpm test

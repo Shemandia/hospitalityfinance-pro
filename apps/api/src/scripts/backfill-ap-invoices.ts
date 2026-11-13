@@ -6,6 +6,7 @@
  */
 
 import { PrismaClient, Prisma } from "../db/client.js";
+import { entityActor } from "../modules/access/actor.js";
 
 const ENTITY_ID = "00000000-0000-0000-0000-000000000002";
 
@@ -34,10 +35,8 @@ async function main() {
     console.log(`Found ${journals.length} PROC journals to check`);
 
     // Find the entity user for createdById
-    const entityUser = await prisma.entityUser.findFirst({
-      where: { entityId: ENTITY_ID }
-    });
-    if (!entityUser) throw new Error("No entity user found");
+    const actor = await entityActor(prisma, ENTITY_ID);
+    if (!actor) throw new Error("No user holds a role at this entity");
 
     let invoicesCreated = 0;
     let suppliersCreated = 0;
@@ -159,8 +158,8 @@ async function main() {
             fxRate: new Prisma.Decimal(1),
             status: "POSTED",
             glJournalId: journal.id,
-            createdById: entityUser.userId,
-            approvedById: entityUser.userId,
+            createdById: actor.userId,
+            approvedById: actor.userId,
             lines: {
               create: invoiceLines
             }

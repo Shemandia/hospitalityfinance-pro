@@ -22,9 +22,6 @@ describe("APService.postInvoice", () => {
       user: {
         findFirst: async () => ({ id: "user-1" })
       },
-      entityUser: {
-        findFirst: async () => ({ userId: "user-1" })
-      },
       $transaction: async (callback: (tx: typeof transactionStub) => Promise<unknown>) =>
         callback(transactionStub)
     } as unknown as ConstructorParameters<typeof APService>[0];

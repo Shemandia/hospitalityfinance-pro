@@ -4,7 +4,10 @@ import type { ConnectionOptions } from "bullmq";
 const queueName = "report-generation";
 
 let redisConnection: ConnectionOptions | null = null;
-let reportQueue: Queue<{ reportRunId: string }> | null = null;
+/** A report run and the tenant whose database holds it. */
+export type ReportJobData = { reportRunId: string; tenantId: string };
+
+let reportQueue: Queue<ReportJobData> | null = null;
 
 function getRedisConnection(): ConnectionOptions {
   if (!redisConnection) {
@@ -29,7 +32,7 @@ function getRedisConnection(): ConnectionOptions {
   return redisConnection;
 }
 
-export function getReportQueue(): Queue<{ reportRunId: string }> {
+export function getReportQueue(): Queue<ReportJobData> {
   if (!reportQueue) {
     reportQueue = new Queue(queueName, {
       connection: getRedisConnection()

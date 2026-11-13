@@ -2,9 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "../../db/client.js";
 import { prisma } from "../../db/prisma.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
-import { requireRole } from "../../middleware/requireRole.js";
 import { requirePermission } from "../../middleware/requirePermission.js";
-import { requireWriteAccess } from "../../middleware/requireWriteAccess.js";
 import {
   assetCategoryCreateSchema,
   assetCreateSchema,
@@ -35,19 +33,22 @@ export async function registerFixedAssetRouter(app: FastifyInstance): Promise<vo
   app.register(
     async (router) => {
       router.addHook("preHandler", requireAuth);
-      router.addHook("preHandler", requireWriteAccess);
 
       // ── Asset Categories ─────────────────────────────────────────────────
 
-      router.get("/asset-categories", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await fixedAssetService.listCategories(entityId);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/asset-categories",
+        { preHandler: [requirePermission("GL_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await fixedAssetService.listCategories(entityId);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.post(
         "/asset-categories",
@@ -66,26 +67,34 @@ export async function registerFixedAssetRouter(app: FastifyInstance): Promise<vo
 
       // ── Fixed Assets CRUD ────────────────────────────────────────────────
 
-      router.get("/fixed-assets", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const query = assetListQuerySchema.parse(request.query);
-          const data = await fixedAssetService.listAssets(entityId, query);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/fixed-assets",
+        { preHandler: [requirePermission("GL_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const query = assetListQuerySchema.parse(request.query);
+            const data = await fixedAssetService.listAssets(entityId, query);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.get<{ Params: { id: string } }>("/fixed-assets/:id", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await fixedAssetService.getAsset(entityId, request.params.id);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get<{ Params: { id: string } }>(
+        "/fixed-assets/:id",
+        { preHandler: [requirePermission("GL_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await fixedAssetService.getAsset(entityId, request.params.id);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.post(
         "/fixed-assets",

@@ -8,7 +8,6 @@ import {
   enqueueTransferDeskExecution,
   cancelTransferDeskExecution
 } from "../../../jobs/transfer-desk-queue.js";
-import { ensureTransferDeskWorker } from "../../../jobs/transfer-desk-worker.js";
 import {
   ALL_SOURCE_FORMATS,
   ALL_CONNECTOR_TYPES,
@@ -85,547 +84,563 @@ const filterSchema = z.object({
 export function registerTransferDeskRoutes(router: FastifyInstance) {
   // ── Metadata ────────────────────────────────────────────────────────────
 
-  router.get("/transfer-desk/metadata", async (_request, reply) => {
-    return reply.send({
-      data: {
-        sourceFormats: ALL_SOURCE_FORMATS,
-        connectorTypes: ALL_CONNECTOR_TYPES,
-        sourceTypes: ALL_SOURCE_TYPES,
-        transforms: ALL_TRANSFORMS,
-        targetTypes: ["GL_JOURNAL", "AP_INVOICE", "SUPPLIER_SYNC"],
-        targetFields: {
-          GL_JOURNAL: GL_JOURNAL_TARGET_FIELDS,
-          AP_INVOICE: AP_INVOICE_TARGET_FIELDS,
-          SUPPLIER_SYNC: SUPPLIER_SYNC_TARGET_FIELDS
+  router.get(
+    "/transfer-desk/metadata",
+    { preHandler: [requirePermission("TRANSFER_DESK_READ")] },
+    async (_request, reply) => {
+      return reply.send({
+        data: {
+          sourceFormats: ALL_SOURCE_FORMATS,
+          connectorTypes: ALL_CONNECTOR_TYPES,
+          sourceTypes: ALL_SOURCE_TYPES,
+          transforms: ALL_TRANSFORMS,
+          targetTypes: ["GL_JOURNAL", "AP_INVOICE", "SUPPLIER_SYNC"],
+          targetFields: {
+            GL_JOURNAL: GL_JOURNAL_TARGET_FIELDS,
+            AP_INVOICE: AP_INVOICE_TARGET_FIELDS,
+            SUPPLIER_SYNC: SUPPLIER_SYNC_TARGET_FIELDS
+          },
+          filterOperators: [
+            "EQUALS",
+            "NOT_EQUALS",
+            "CONTAINS",
+            "STARTS_WITH",
+            "GT",
+            "LT",
+            "NOT_EMPTY"
+          ]
         },
-        filterOperators: [
-          "EQUALS",
-          "NOT_EQUALS",
-          "CONTAINS",
-          "STARTS_WITH",
-          "GT",
-          "LT",
-          "NOT_EMPTY"
-        ]
-      },
-      errors: []
-    });
-  });
+        errors: []
+      });
+    }
+  );
 
   // ── Components (UI-API-003) ─────────────────────────────────────────────
 
-  router.get("/transfer-desk/components", async (_request, reply) => {
-    const components = [
-      {
-        name: "GL_JOURNAL",
-        label: "General Ledger Journal",
-        description: "GL journal headers and lines. The most common target for journal imports.",
-        fields: [
-          {
-            name: "reference",
-            dataType: "string",
-            required: true,
-            description: "Journal reference / number (auto-assigned if blank)"
-          },
-          {
-            name: "description",
-            dataType: "string",
-            required: true,
-            description: "Journal narrative / description"
-          },
-          {
-            name: "periodId",
-            dataType: "string",
-            required: true,
-            description: "Posting period UUID"
-          },
-          {
-            name: "journalType",
-            dataType: "string",
-            required: false,
-            description: "Journal type code (e.g., AP, AR, GJ)"
-          },
-          {
-            name: "source",
-            dataType: "string",
-            required: false,
-            description: "Journal source enum (IMPORT, MANUAL, etc.)"
-          },
-          {
-            name: "functionalCurrency",
-            dataType: "string",
-            required: true,
-            description: "ISO 4217 currency code"
-          },
-          {
-            name: "lineAccountCode",
-            dataType: "string",
-            required: true,
-            description: "GL account code (line)"
-          },
-          {
-            name: "lineDebit",
-            dataType: "decimal",
-            required: true,
-            description: "Line debit amount in line currency"
-          },
-          {
-            name: "lineCredit",
-            dataType: "decimal",
-            required: true,
-            description: "Line credit amount in line currency"
-          },
-          {
-            name: "lineCurrency",
-            dataType: "string",
-            required: true,
-            description: "Line currency (ISO 4217)"
-          },
-          {
-            name: "lineFxRate",
-            dataType: "decimal",
-            required: false,
-            description: "FX rate to functional currency"
-          },
-          {
-            name: "lineDescription",
-            dataType: "string",
-            required: false,
-            description: "Per-line narrative"
-          },
-          {
-            name: "lineDimension1",
-            dataType: "string",
-            required: false,
-            description: "Analysis dimension T1"
-          },
-          {
-            name: "lineDimension2",
-            dataType: "string",
-            required: false,
-            description: "Analysis dimension T2"
-          },
-          {
-            name: "lineDimension3",
-            dataType: "string",
-            required: false,
-            description: "Analysis dimension T3"
-          },
-          {
-            name: "lineDimension4",
-            dataType: "string",
-            required: false,
-            description: "Analysis dimension T4"
-          },
-          {
-            name: "lineDimension5",
-            dataType: "string",
-            required: false,
-            description: "Analysis dimension T5"
-          },
-          {
-            name: "lineDimension6",
-            dataType: "string",
-            required: false,
-            description: "Analysis dimension T6"
-          }
-        ]
-      },
-      {
-        name: "AP_INVOICE",
-        label: "Accounts Payable Invoice",
-        description:
-          "AP invoice headers received from Sky Jana MMS as journal imports. HFP owns the AP control account, payment, and aging.",
-        fields: [
-          {
-            name: "supplierCode",
-            dataType: "string",
-            required: true,
-            description: "Supplier code as known to HFP (must already exist in tenant)"
-          },
-          {
-            name: "invoiceNumber",
-            dataType: "string",
-            required: true,
-            description: "Supplier invoice number"
-          },
-          {
-            name: "invoiceDate",
-            dataType: "date",
-            required: true,
-            description: "Invoice issue date"
-          },
-          {
-            name: "dueDate",
-            dataType: "date",
-            required: true,
-            description: "Invoice due date"
-          },
-          {
-            name: "currency",
-            dataType: "string",
-            required: true,
-            description: "Invoice currency (ISO 4217)"
-          },
-          {
-            name: "grossAmount",
-            dataType: "decimal",
-            required: true,
-            description: "Gross amount including tax"
-          },
-          { name: "taxAmount", dataType: "decimal", required: true, description: "Tax amount" },
-          {
-            name: "netAmount",
-            dataType: "decimal",
-            required: true,
-            description: "Net amount excluding tax"
-          },
-          {
-            name: "fxRate",
-            dataType: "decimal",
-            required: false,
-            description: "FX rate to functional currency"
-          },
-          {
-            name: "periodId",
-            dataType: "string",
-            required: true,
-            description: "Posting period UUID"
-          },
-          {
-            name: "externalPoRef",
-            dataType: "string",
-            required: false,
-            description: "External PO reference (from Jana)"
-          }
-        ]
-      },
-      {
-        name: "AR_INVOICE",
-        label: "Accounts Receivable Invoice",
-        description: "Customer invoices issued by HFP. Source for receipt allocation and aging.",
-        fields: [
-          {
-            name: "customerCode",
-            dataType: "string",
-            required: true,
-            description: "Customer code (must exist in tenant)"
-          },
-          {
-            name: "invoiceNumber",
-            dataType: "string",
-            required: true,
-            description: "AR invoice number"
-          },
-          {
-            name: "invoiceDate",
-            dataType: "date",
-            required: true,
-            description: "Invoice issue date"
-          },
-          {
-            name: "dueDate",
-            dataType: "date",
-            required: true,
-            description: "Invoice due date"
-          },
-          {
-            name: "currency",
-            dataType: "string",
-            required: true,
-            description: "Invoice currency (ISO 4217)"
-          },
-          { name: "amount", dataType: "decimal", required: true, description: "Total amount" },
-          {
-            name: "taxAmount",
-            dataType: "decimal",
-            required: false,
-            description: "Tax amount"
-          },
-          {
-            name: "fxRate",
-            dataType: "decimal",
-            required: false,
-            description: "FX rate to functional currency"
-          },
-          {
-            name: "periodId",
-            dataType: "string",
-            required: true,
-            description: "Posting period UUID"
-          }
-        ]
-      },
-      {
-        name: "AR_RECEIPT",
-        label: "Accounts Receivable Receipt",
-        description: "Customer payments received. Allocates against AR invoices.",
-        fields: [
-          {
-            name: "customerCode",
-            dataType: "string",
-            required: true,
-            description: "Customer code"
-          },
-          {
-            name: "receiptNumber",
-            dataType: "string",
-            required: true,
-            description: "Receipt reference"
-          },
-          {
-            name: "receiptDate",
-            dataType: "date",
-            required: true,
-            description: "Date of receipt"
-          },
-          {
-            name: "currency",
-            dataType: "string",
-            required: true,
-            description: "Receipt currency"
-          },
-          {
-            name: "amount",
-            dataType: "decimal",
-            required: true,
-            description: "Receipt amount"
-          },
-          {
-            name: "bankAccountCode",
-            dataType: "string",
-            required: true,
-            description: "Bank account that received the payment"
-          },
-          {
-            name: "paymentMethod",
-            dataType: "string",
-            required: false,
-            description: "Payment method (BANK_TRANSFER, CASH, CHEQUE, CARD)"
-          }
-        ]
-      },
-      {
-        name: "COA_ACCOUNT",
-        label: "Chart of Accounts (Account)",
-        description:
-          "GL account master records. Used by COA import profiles to create or update accounts in bulk.",
-        fields: [
-          {
-            name: "code",
-            dataType: "string",
-            required: true,
-            description: "Account code (unique per entity)"
-          },
-          { name: "name", dataType: "string", required: true, description: "Account name" },
-          {
-            name: "type",
-            dataType: "string",
-            required: true,
-            description: "Account type (ASSET, LIABILITY, EQUITY, REVENUE, EXPENSE, STATISTICAL)"
-          },
-          {
-            name: "normalBalance",
-            dataType: "string",
-            required: true,
-            description: "Normal balance side (DEBIT or CREDIT)"
-          },
-          {
-            name: "parentCode",
-            dataType: "string",
-            required: false,
-            description: "Parent account code (for hierarchy)"
-          },
-          {
-            name: "level",
-            dataType: "number",
-            required: false,
-            description: "Hierarchy level (1=root)"
-          },
-          {
-            name: "allowPosting",
-            dataType: "boolean",
-            required: false,
-            description: "Whether postings are allowed at this level"
-          },
-          {
-            name: "isControlAccount",
-            dataType: "boolean",
-            required: false,
-            description: "Whether this is a control account (e.g., AP control 2000)"
-          },
-          {
-            name: "usaliCategory",
-            dataType: "string",
-            required: false,
-            description: "USALI category (Rooms, F&B, A&G, etc.)"
-          },
-          {
-            name: "usaliDepartment",
-            dataType: "string",
-            required: false,
-            description: "USALI department"
-          }
-        ]
-      },
-      {
-        name: "BUDGET",
-        label: "Budget Lines",
-        description: "Budget amounts per account per period. Used by budget import profiles.",
-        fields: [
-          {
-            name: "budgetDefinitionCode",
-            dataType: "string",
-            required: true,
-            description: "Budget definition reference (e.g., 'FY2026-OP')"
-          },
-          {
-            name: "accountCode",
-            dataType: "string",
-            required: true,
-            description: "GL account code"
-          },
-          { name: "periodId", dataType: "string", required: true, description: "Period UUID" },
-          {
-            name: "amount",
-            dataType: "decimal",
-            required: true,
-            description: "Budget amount in functional currency"
-          },
-          {
-            name: "dimension1",
-            dataType: "string",
-            required: false,
-            description: "Analysis dimension T1 (optional)"
-          },
-          {
-            name: "dimension2",
-            dataType: "string",
-            required: false,
-            description: "Analysis dimension T2 (optional)"
-          }
-        ]
-      },
-      {
-        name: "BANK_STATEMENT",
-        label: "Bank Statement",
-        description:
-          "Bank statement transactions for reconciliation. Used by bank statement import profiles.",
-        fields: [
-          {
-            name: "bankAccountCode",
-            dataType: "string",
-            required: true,
-            description: "Bank account code as known to HFP"
-          },
-          {
-            name: "statementDate",
-            dataType: "date",
-            required: true,
-            description: "Statement closing date"
-          },
-          {
-            name: "openingBalance",
-            dataType: "decimal",
-            required: true,
-            description: "Statement opening balance"
-          },
-          {
-            name: "closingBalance",
-            dataType: "decimal",
-            required: true,
-            description: "Statement closing balance"
-          },
-          {
-            name: "currency",
-            dataType: "string",
-            required: true,
-            description: "Statement currency"
-          },
-          { name: "txDate", dataType: "date", required: true, description: "Transaction date" },
-          {
-            name: "txAmount",
-            dataType: "decimal",
-            required: true,
-            description: "Transaction amount (signed: positive=credit, negative=debit)"
-          },
-          {
-            name: "txReference",
-            dataType: "string",
-            required: false,
-            description: "Transaction reference"
-          },
-          {
-            name: "txDescription",
-            dataType: "string",
-            required: false,
-            description: "Transaction description / narrative"
-          },
-          {
-            name: "txCounterparty",
-            dataType: "string",
-            required: false,
-            description: "Counterparty name"
-          }
-        ]
-      }
-    ];
-    return reply.send({ data: components, errors: [] });
-  });
+  router.get(
+    "/transfer-desk/components",
+    { preHandler: [requirePermission("TRANSFER_DESK_READ")] },
+    async (_request, reply) => {
+      const components = [
+        {
+          name: "GL_JOURNAL",
+          label: "General Ledger Journal",
+          description: "GL journal headers and lines. The most common target for journal imports.",
+          fields: [
+            {
+              name: "reference",
+              dataType: "string",
+              required: true,
+              description: "Journal reference / number (auto-assigned if blank)"
+            },
+            {
+              name: "description",
+              dataType: "string",
+              required: true,
+              description: "Journal narrative / description"
+            },
+            {
+              name: "periodId",
+              dataType: "string",
+              required: true,
+              description: "Posting period UUID"
+            },
+            {
+              name: "journalType",
+              dataType: "string",
+              required: false,
+              description: "Journal type code (e.g., AP, AR, GJ)"
+            },
+            {
+              name: "source",
+              dataType: "string",
+              required: false,
+              description: "Journal source enum (IMPORT, MANUAL, etc.)"
+            },
+            {
+              name: "functionalCurrency",
+              dataType: "string",
+              required: true,
+              description: "ISO 4217 currency code"
+            },
+            {
+              name: "lineAccountCode",
+              dataType: "string",
+              required: true,
+              description: "GL account code (line)"
+            },
+            {
+              name: "lineDebit",
+              dataType: "decimal",
+              required: true,
+              description: "Line debit amount in line currency"
+            },
+            {
+              name: "lineCredit",
+              dataType: "decimal",
+              required: true,
+              description: "Line credit amount in line currency"
+            },
+            {
+              name: "lineCurrency",
+              dataType: "string",
+              required: true,
+              description: "Line currency (ISO 4217)"
+            },
+            {
+              name: "lineFxRate",
+              dataType: "decimal",
+              required: false,
+              description: "FX rate to functional currency"
+            },
+            {
+              name: "lineDescription",
+              dataType: "string",
+              required: false,
+              description: "Per-line narrative"
+            },
+            {
+              name: "lineDimension1",
+              dataType: "string",
+              required: false,
+              description: "Analysis dimension T1"
+            },
+            {
+              name: "lineDimension2",
+              dataType: "string",
+              required: false,
+              description: "Analysis dimension T2"
+            },
+            {
+              name: "lineDimension3",
+              dataType: "string",
+              required: false,
+              description: "Analysis dimension T3"
+            },
+            {
+              name: "lineDimension4",
+              dataType: "string",
+              required: false,
+              description: "Analysis dimension T4"
+            },
+            {
+              name: "lineDimension5",
+              dataType: "string",
+              required: false,
+              description: "Analysis dimension T5"
+            },
+            {
+              name: "lineDimension6",
+              dataType: "string",
+              required: false,
+              description: "Analysis dimension T6"
+            }
+          ]
+        },
+        {
+          name: "AP_INVOICE",
+          label: "Accounts Payable Invoice",
+          description:
+            "AP invoice headers received from Sky Jana MMS as journal imports. HFP owns the AP control account, payment, and aging.",
+          fields: [
+            {
+              name: "supplierCode",
+              dataType: "string",
+              required: true,
+              description: "Supplier code as known to HFP (must already exist in tenant)"
+            },
+            {
+              name: "invoiceNumber",
+              dataType: "string",
+              required: true,
+              description: "Supplier invoice number"
+            },
+            {
+              name: "invoiceDate",
+              dataType: "date",
+              required: true,
+              description: "Invoice issue date"
+            },
+            {
+              name: "dueDate",
+              dataType: "date",
+              required: true,
+              description: "Invoice due date"
+            },
+            {
+              name: "currency",
+              dataType: "string",
+              required: true,
+              description: "Invoice currency (ISO 4217)"
+            },
+            {
+              name: "grossAmount",
+              dataType: "decimal",
+              required: true,
+              description: "Gross amount including tax"
+            },
+            { name: "taxAmount", dataType: "decimal", required: true, description: "Tax amount" },
+            {
+              name: "netAmount",
+              dataType: "decimal",
+              required: true,
+              description: "Net amount excluding tax"
+            },
+            {
+              name: "fxRate",
+              dataType: "decimal",
+              required: false,
+              description: "FX rate to functional currency"
+            },
+            {
+              name: "periodId",
+              dataType: "string",
+              required: true,
+              description: "Posting period UUID"
+            },
+            {
+              name: "externalPoRef",
+              dataType: "string",
+              required: false,
+              description: "External PO reference (from Jana)"
+            }
+          ]
+        },
+        {
+          name: "AR_INVOICE",
+          label: "Accounts Receivable Invoice",
+          description: "Customer invoices issued by HFP. Source for receipt allocation and aging.",
+          fields: [
+            {
+              name: "customerCode",
+              dataType: "string",
+              required: true,
+              description: "Customer code (must exist in tenant)"
+            },
+            {
+              name: "invoiceNumber",
+              dataType: "string",
+              required: true,
+              description: "AR invoice number"
+            },
+            {
+              name: "invoiceDate",
+              dataType: "date",
+              required: true,
+              description: "Invoice issue date"
+            },
+            {
+              name: "dueDate",
+              dataType: "date",
+              required: true,
+              description: "Invoice due date"
+            },
+            {
+              name: "currency",
+              dataType: "string",
+              required: true,
+              description: "Invoice currency (ISO 4217)"
+            },
+            { name: "amount", dataType: "decimal", required: true, description: "Total amount" },
+            {
+              name: "taxAmount",
+              dataType: "decimal",
+              required: false,
+              description: "Tax amount"
+            },
+            {
+              name: "fxRate",
+              dataType: "decimal",
+              required: false,
+              description: "FX rate to functional currency"
+            },
+            {
+              name: "periodId",
+              dataType: "string",
+              required: true,
+              description: "Posting period UUID"
+            }
+          ]
+        },
+        {
+          name: "AR_RECEIPT",
+          label: "Accounts Receivable Receipt",
+          description: "Customer payments received. Allocates against AR invoices.",
+          fields: [
+            {
+              name: "customerCode",
+              dataType: "string",
+              required: true,
+              description: "Customer code"
+            },
+            {
+              name: "receiptNumber",
+              dataType: "string",
+              required: true,
+              description: "Receipt reference"
+            },
+            {
+              name: "receiptDate",
+              dataType: "date",
+              required: true,
+              description: "Date of receipt"
+            },
+            {
+              name: "currency",
+              dataType: "string",
+              required: true,
+              description: "Receipt currency"
+            },
+            {
+              name: "amount",
+              dataType: "decimal",
+              required: true,
+              description: "Receipt amount"
+            },
+            {
+              name: "bankAccountCode",
+              dataType: "string",
+              required: true,
+              description: "Bank account that received the payment"
+            },
+            {
+              name: "paymentMethod",
+              dataType: "string",
+              required: false,
+              description: "Payment method (BANK_TRANSFER, CASH, CHEQUE, CARD)"
+            }
+          ]
+        },
+        {
+          name: "COA_ACCOUNT",
+          label: "Chart of Accounts (Account)",
+          description:
+            "GL account master records. Used by COA import profiles to create or update accounts in bulk.",
+          fields: [
+            {
+              name: "code",
+              dataType: "string",
+              required: true,
+              description: "Account code (unique per entity)"
+            },
+            { name: "name", dataType: "string", required: true, description: "Account name" },
+            {
+              name: "type",
+              dataType: "string",
+              required: true,
+              description: "Account type (ASSET, LIABILITY, EQUITY, REVENUE, EXPENSE, STATISTICAL)"
+            },
+            {
+              name: "normalBalance",
+              dataType: "string",
+              required: true,
+              description: "Normal balance side (DEBIT or CREDIT)"
+            },
+            {
+              name: "parentCode",
+              dataType: "string",
+              required: false,
+              description: "Parent account code (for hierarchy)"
+            },
+            {
+              name: "level",
+              dataType: "number",
+              required: false,
+              description: "Hierarchy level (1=root)"
+            },
+            {
+              name: "allowPosting",
+              dataType: "boolean",
+              required: false,
+              description: "Whether postings are allowed at this level"
+            },
+            {
+              name: "isControlAccount",
+              dataType: "boolean",
+              required: false,
+              description: "Whether this is a control account (e.g., AP control 2000)"
+            },
+            {
+              name: "usaliCategory",
+              dataType: "string",
+              required: false,
+              description: "USALI category (Rooms, F&B, A&G, etc.)"
+            },
+            {
+              name: "usaliDepartment",
+              dataType: "string",
+              required: false,
+              description: "USALI department"
+            }
+          ]
+        },
+        {
+          name: "BUDGET",
+          label: "Budget Lines",
+          description: "Budget amounts per account per period. Used by budget import profiles.",
+          fields: [
+            {
+              name: "budgetDefinitionCode",
+              dataType: "string",
+              required: true,
+              description: "Budget definition reference (e.g., 'FY2026-OP')"
+            },
+            {
+              name: "accountCode",
+              dataType: "string",
+              required: true,
+              description: "GL account code"
+            },
+            { name: "periodId", dataType: "string", required: true, description: "Period UUID" },
+            {
+              name: "amount",
+              dataType: "decimal",
+              required: true,
+              description: "Budget amount in functional currency"
+            },
+            {
+              name: "dimension1",
+              dataType: "string",
+              required: false,
+              description: "Analysis dimension T1 (optional)"
+            },
+            {
+              name: "dimension2",
+              dataType: "string",
+              required: false,
+              description: "Analysis dimension T2 (optional)"
+            }
+          ]
+        },
+        {
+          name: "BANK_STATEMENT",
+          label: "Bank Statement",
+          description:
+            "Bank statement transactions for reconciliation. Used by bank statement import profiles.",
+          fields: [
+            {
+              name: "bankAccountCode",
+              dataType: "string",
+              required: true,
+              description: "Bank account code as known to HFP"
+            },
+            {
+              name: "statementDate",
+              dataType: "date",
+              required: true,
+              description: "Statement closing date"
+            },
+            {
+              name: "openingBalance",
+              dataType: "decimal",
+              required: true,
+              description: "Statement opening balance"
+            },
+            {
+              name: "closingBalance",
+              dataType: "decimal",
+              required: true,
+              description: "Statement closing balance"
+            },
+            {
+              name: "currency",
+              dataType: "string",
+              required: true,
+              description: "Statement currency"
+            },
+            { name: "txDate", dataType: "date", required: true, description: "Transaction date" },
+            {
+              name: "txAmount",
+              dataType: "decimal",
+              required: true,
+              description: "Transaction amount (signed: positive=credit, negative=debit)"
+            },
+            {
+              name: "txReference",
+              dataType: "string",
+              required: false,
+              description: "Transaction reference"
+            },
+            {
+              name: "txDescription",
+              dataType: "string",
+              required: false,
+              description: "Transaction description / narrative"
+            },
+            {
+              name: "txCounterparty",
+              dataType: "string",
+              required: false,
+              description: "Counterparty name"
+            }
+          ]
+        }
+      ];
+      return reply.send({ data: components, errors: [] });
+    }
+  );
 
   // ── Format CRUD (TD-API-030+) ───────────────────────────────────────────
 
   // TD-API-030 — GET /transfer-desk/formats (list)
-  router.get("/transfer-desk/formats", async (request, reply) => {
-    try {
-      const { classification } = request.query as { classification?: string };
-      const db = prisma as unknown as PrismaClient;
-      const data = await db.transferFormat.findMany({
-        where: {
-          ...(classification ? { classification: classification as any } : {})
-        },
-        select: {
-          id: true,
-          name: true,
-          description: true,
-          classification: true,
-          isSystem: true,
-          isValid: true,
-          createdAt: true,
-          updatedAt: true,
-          _count: {
-            select: {
-              sourceProfiles: true,
-              targetProfiles: true
+  router.get(
+    "/transfer-desk/formats",
+    { preHandler: [requirePermission("TRANSFER_DESK_READ")] },
+    async (request, reply) => {
+      try {
+        const { classification } = request.query as { classification?: string };
+        const db = prisma as unknown as PrismaClient;
+        const data = await db.transferFormat.findMany({
+          where: {
+            ...(classification ? { classification: classification as any } : {})
+          },
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            classification: true,
+            isSystem: true,
+            isValid: true,
+            createdAt: true,
+            updatedAt: true,
+            _count: {
+              select: {
+                sourceProfiles: true,
+                targetProfiles: true
+              }
             }
-          }
-        },
-        orderBy: [{ name: "asc" }]
-      });
-      return reply.send({ data, errors: [] });
-    } catch (error) {
-      return mapError(reply, error);
+          },
+          orderBy: [{ name: "asc" }]
+        });
+        return reply.send({ data, errors: [] });
+      } catch (error) {
+        return mapError(reply, error);
+      }
     }
-  });
+  );
 
   // TD-API-031 — GET /transfer-desk/formats/:id (detail with FSD)
-  router.get<{ Params: { id: string } }>("/transfer-desk/formats/:id", async (request, reply) => {
-    try {
-      const db = prisma as unknown as PrismaClient;
-      const data = await db.transferFormat.findUnique({
-        where: { id: request.params.id }
-      });
-      if (!data) {
-        return reply.code(404).send({
-          data: null,
-          errors: [{ code: "NOT_FOUND", message: "Format not found" }]
+  router.get<{ Params: { id: string } }>(
+    "/transfer-desk/formats/:id",
+    { preHandler: [requirePermission("TRANSFER_DESK_READ")] },
+    async (request, reply) => {
+      try {
+        const db = prisma as unknown as PrismaClient;
+        const data = await db.transferFormat.findUnique({
+          where: { id: request.params.id }
         });
+        if (!data) {
+          return reply.code(404).send({
+            data: null,
+            errors: [{ code: "NOT_FOUND", message: "Format not found" }]
+          });
+        }
+        return reply.send({ data, errors: [] });
+      } catch (error) {
+        return mapError(reply, error);
       }
-      return reply.send({ data, errors: [] });
-    } catch (error) {
-      return mapError(reply, error);
     }
-  });
+  );
 
   // TD-API-032 — POST /transfer-desk/formats/detect (auto-detect from sample file)
   router.post(
@@ -815,33 +830,38 @@ export function registerTransferDeskRoutes(router: FastifyInstance) {
   // ─── Transformation endpoints ──────────────────────────────────────────
 
   // TD-API-040 — GET /transfer-desk/transformations (list)
-  router.get("/transfer-desk/transformations", async (request, reply) => {
-    try {
-      const { sourceComponent, targetComponent } = request.query as {
-        sourceComponent?: string;
-        targetComponent?: string;
-      };
-      const data = await (prisma as unknown as PrismaClient).transferTransformation.findMany({
-        where: {
-          ...(sourceComponent ? { sourceComponent } : {}),
-          ...(targetComponent ? { targetComponent } : {})
-        },
-        include: {
-          sourceFormat: { select: { id: true, name: true, classification: true } },
-          targetFormat: { select: { id: true, name: true, classification: true } },
-          _count: { select: { profiles: true } }
-        },
-        orderBy: { updatedAt: "desc" }
-      });
-      return reply.send({ data, errors: [] });
-    } catch (error) {
-      return mapError(reply, error);
+  router.get(
+    "/transfer-desk/transformations",
+    { preHandler: [requirePermission("TRANSFER_DESK_READ")] },
+    async (request, reply) => {
+      try {
+        const { sourceComponent, targetComponent } = request.query as {
+          sourceComponent?: string;
+          targetComponent?: string;
+        };
+        const data = await (prisma as unknown as PrismaClient).transferTransformation.findMany({
+          where: {
+            ...(sourceComponent ? { sourceComponent } : {}),
+            ...(targetComponent ? { targetComponent } : {})
+          },
+          include: {
+            sourceFormat: { select: { id: true, name: true, classification: true } },
+            targetFormat: { select: { id: true, name: true, classification: true } },
+            _count: { select: { profiles: true } }
+          },
+          orderBy: { updatedAt: "desc" }
+        });
+        return reply.send({ data, errors: [] });
+      } catch (error) {
+        return mapError(reply, error);
+      }
     }
-  });
+  );
 
   // TD-API-041 — GET /transfer-desk/transformations/:id (detail)
   router.get<{ Params: { id: string } }>(
     "/transfer-desk/transformations/:id",
+    { preHandler: [requirePermission("TRANSFER_DESK_READ")] },
     async (request, reply) => {
       try {
         const data = await (prisma as unknown as PrismaClient).transferTransformation.findUnique({
@@ -1016,36 +1036,41 @@ export function registerTransferDeskRoutes(router: FastifyInstance) {
   // ─── Automation endpoints ─────────────────────────────────────────────
 
   // TD-API-050 — GET /transfer-desk/automations (list)
-  router.get("/transfer-desk/automations", async (request, reply) => {
-    try {
-      const data = await (prisma as unknown as PrismaClient).transferAutomation.findMany({
-        include: {
-          steps: {
-            select: { id: true, stepOrder: true, profileId: true, failOnError: true },
-            orderBy: { stepOrder: "asc" }
+  router.get(
+    "/transfer-desk/automations",
+    { preHandler: [requirePermission("TRANSFER_DESK_READ")] },
+    async (request, reply) => {
+      try {
+        const data = await (prisma as unknown as PrismaClient).transferAutomation.findMany({
+          include: {
+            steps: {
+              select: { id: true, stepOrder: true, profileId: true, failOnError: true },
+              orderBy: { stepOrder: "asc" }
+            },
+            schedules: {
+              select: {
+                id: true,
+                cronExpression: true,
+                timezone: true,
+                isActive: true,
+                nextRunAt: true
+              }
+            },
+            _count: { select: { steps: true, schedules: true, executions: true } }
           },
-          schedules: {
-            select: {
-              id: true,
-              cronExpression: true,
-              timezone: true,
-              isActive: true,
-              nextRunAt: true
-            }
-          },
-          _count: { select: { steps: true, schedules: true, executions: true } }
-        },
-        orderBy: { updatedAt: "desc" }
-      });
-      return reply.send({ data, errors: [] });
-    } catch (error) {
-      return mapError(reply, error);
+          orderBy: { updatedAt: "desc" }
+        });
+        return reply.send({ data, errors: [] });
+      } catch (error) {
+        return mapError(reply, error);
+      }
     }
-  });
+  );
 
   // TD-API-051 — GET /transfer-desk/automations/:id (detail)
   router.get<{ Params: { id: string } }>(
     "/transfer-desk/automations/:id",
+    { preHandler: [requirePermission("TRANSFER_DESK_READ")] },
     async (request, reply) => {
       try {
         const data = await (prisma as unknown as PrismaClient).transferAutomation.findUnique({
@@ -1352,47 +1377,55 @@ export function registerTransferDeskRoutes(router: FastifyInstance) {
   // ─── Lookup Table endpoints ────────────────────────────────────────────
 
   // TD-API-060 — GET /transfer-desk/lookups (list)
-  router.get("/transfer-desk/lookups", async (request, reply) => {
-    try {
-      const data = await (prisma as unknown as PrismaClient).transferLookupTable.findMany({
-        include: {
-          _count: { select: { columns: true, rows: true } }
-        },
-        orderBy: { updatedAt: "desc" }
-      });
-      return reply.send({ data, errors: [] });
-    } catch (error) {
-      return mapError(reply, error);
+  router.get(
+    "/transfer-desk/lookups",
+    { preHandler: [requirePermission("TRANSFER_DESK_READ")] },
+    async (request, reply) => {
+      try {
+        const data = await (prisma as unknown as PrismaClient).transferLookupTable.findMany({
+          include: {
+            _count: { select: { columns: true, rows: true } }
+          },
+          orderBy: { updatedAt: "desc" }
+        });
+        return reply.send({ data, errors: [] });
+      } catch (error) {
+        return mapError(reply, error);
+      }
     }
-  });
+  );
 
   // TD-API-061 — GET /transfer-desk/lookups/:id (detail with full data)
-  router.get<{ Params: { id: string } }>("/transfer-desk/lookups/:id", async (request, reply) => {
-    try {
-      const data = await (prisma as unknown as PrismaClient).transferLookupTable.findUnique({
-        where: { id: request.params.id },
-        include: {
-          columns: { orderBy: { columnOrder: "asc" } },
-          rows: {
-            orderBy: { rowOrder: "asc" },
-            include: {
-              values: {
-                include: {
-                  column: { select: { id: true, name: true } }
+  router.get<{ Params: { id: string } }>(
+    "/transfer-desk/lookups/:id",
+    { preHandler: [requirePermission("TRANSFER_DESK_READ")] },
+    async (request, reply) => {
+      try {
+        const data = await (prisma as unknown as PrismaClient).transferLookupTable.findUnique({
+          where: { id: request.params.id },
+          include: {
+            columns: { orderBy: { columnOrder: "asc" } },
+            rows: {
+              orderBy: { rowOrder: "asc" },
+              include: {
+                values: {
+                  include: {
+                    column: { select: { id: true, name: true } }
+                  }
                 }
               }
             }
           }
+        });
+        if (!data) {
+          return reply.status(404).send({ error: "Lookup table not found" });
         }
-      });
-      if (!data) {
-        return reply.status(404).send({ error: "Lookup table not found" });
+        return reply.send({ data, errors: [] });
+      } catch (error) {
+        return mapError(reply, error);
       }
-      return reply.send({ data, errors: [] });
-    } catch (error) {
-      return mapError(reply, error);
     }
-  });
+  );
 
   // TD-API-062 — POST /transfer-desk/lookups (create)
   router.post(
@@ -1686,67 +1719,75 @@ export function registerTransferDeskRoutes(router: FastifyInstance) {
   // ── Profile CRUD (TD-API-009..016) ──────────────────────────────────────
 
   // TD-API-009 — GET /transfer-desk/profiles (list)
-  router.get("/transfer-desk/profiles", async (request, reply) => {
-    try {
-      const { profileType, isActive, isSystem } = request.query as {
-        profileType?: string;
-        isActive?: string;
-        isSystem?: string;
-      };
-      const data = await (prisma as unknown as PrismaClient).transferProfile.findMany({
-        where: {
-          ...(profileType ? { profileType: profileType as any } : {}),
-          ...(isActive !== undefined ? { isActive: isActive === "true" } : {}),
-          ...(isSystem !== undefined ? { isSystem: isSystem === "true" } : {})
-        },
-        orderBy: [{ profileType: "asc" }, { name: "asc" }],
-        include: {
-          sourceFormat: { select: { id: true, name: true, classification: true } },
-          targetFormat: { select: { id: true, name: true, classification: true } },
-          transformation: { select: { id: true, name: true } },
-          _count: { select: { executions: true, versions: true } }
-        }
-      });
-      return reply.send({ data, errors: [] });
-    } catch (error) {
-      return mapError(reply, error);
+  router.get(
+    "/transfer-desk/profiles",
+    { preHandler: [requirePermission("TRANSFER_DESK_READ")] },
+    async (request, reply) => {
+      try {
+        const { profileType, isActive, isSystem } = request.query as {
+          profileType?: string;
+          isActive?: string;
+          isSystem?: string;
+        };
+        const data = await (prisma as unknown as PrismaClient).transferProfile.findMany({
+          where: {
+            ...(profileType ? { profileType: profileType as any } : {}),
+            ...(isActive !== undefined ? { isActive: isActive === "true" } : {}),
+            ...(isSystem !== undefined ? { isSystem: isSystem === "true" } : {})
+          },
+          orderBy: [{ profileType: "asc" }, { name: "asc" }],
+          include: {
+            sourceFormat: { select: { id: true, name: true, classification: true } },
+            targetFormat: { select: { id: true, name: true, classification: true } },
+            transformation: { select: { id: true, name: true } },
+            _count: { select: { executions: true, versions: true } }
+          }
+        });
+        return reply.send({ data, errors: [] });
+      } catch (error) {
+        return mapError(reply, error);
+      }
     }
-  });
+  );
 
   // TD-API-010 — GET /transfer-desk/profiles/:id (detail)
-  router.get<{ Params: { id: string } }>("/transfer-desk/profiles/:id", async (request, reply) => {
-    try {
-      const data = await (prisma as unknown as PrismaClient).transferProfile.findUnique({
-        where: { id: request.params.id },
-        include: {
-          sourceFormat: true,
-          targetFormat: true,
-          transformation: { select: { id: true, name: true, scriptType: true } },
-          filter: { select: { id: true, name: true } },
-          versions: {
-            select: {
-              id: true,
-              version: true,
-              changedBy: true,
-              changedAt: true,
-              changeNote: true
-            },
-            orderBy: { version: "desc" },
-            take: 10
+  router.get<{ Params: { id: string } }>(
+    "/transfer-desk/profiles/:id",
+    { preHandler: [requirePermission("TRANSFER_DESK_READ")] },
+    async (request, reply) => {
+      try {
+        const data = await (prisma as unknown as PrismaClient).transferProfile.findUnique({
+          where: { id: request.params.id },
+          include: {
+            sourceFormat: true,
+            targetFormat: true,
+            transformation: { select: { id: true, name: true, scriptType: true } },
+            filter: { select: { id: true, name: true } },
+            versions: {
+              select: {
+                id: true,
+                version: true,
+                changedBy: true,
+                changedAt: true,
+                changeNote: true
+              },
+              orderBy: { version: "desc" },
+              take: 10
+            }
           }
-        }
-      });
-      if (!data) {
-        return reply.code(404).send({
-          data: null,
-          errors: [{ code: "NOT_FOUND", message: "Profile not found" }]
         });
+        if (!data) {
+          return reply.code(404).send({
+            data: null,
+            errors: [{ code: "NOT_FOUND", message: "Profile not found" }]
+          });
+        }
+        return reply.send({ data, errors: [] });
+      } catch (error) {
+        return mapError(reply, error);
       }
-      return reply.send({ data, errors: [] });
-    } catch (error) {
-      return mapError(reply, error);
     }
-  });
+  );
 
   // TD-API-011 — POST /transfer-desk/profiles (create)
   router.post(
@@ -1928,6 +1969,7 @@ export function registerTransferDeskRoutes(router: FastifyInstance) {
   // TD-API-015 — GET /transfer-desk/profiles/:id/versions
   router.get<{ Params: { id: string } }>(
     "/transfer-desk/profiles/:id/versions",
+    { preHandler: [requirePermission("TRANSFER_DESK_READ")] },
     async (request, reply) => {
       try {
         const data = await (prisma as unknown as PrismaClient).transferProfileVersion.findMany({
@@ -2048,8 +2090,7 @@ export function registerTransferDeskRoutes(router: FastifyInstance) {
           });
         }
 
-        // 4. Ensure the worker is up and enqueue the job
-        ensureTransferDeskWorker(tenantSlug, tenantRecord.databaseUrl);
+        // 4. Enqueue the job; the transfer-desk worker process picks it up (OPS-10)
         const jobId = await enqueueTransferDeskExecution({
           tenantSlug,
           executionId: execution.id,
@@ -2077,38 +2118,43 @@ export function registerTransferDeskRoutes(router: FastifyInstance) {
   );
 
   // TD-API-002 — GET /transfer-desk/executions (list)
-  router.get("/transfer-desk/executions", async (request, reply) => {
-    try {
-      const { profileId, status, limit, offset } = request.query as {
-        profileId?: string;
-        status?: string;
-        limit?: string;
-        offset?: string;
-      };
-      const take = Math.min(Number(limit) || 50, 200);
-      const skip = Math.min(Number(offset) || 0, 100000);
-      const data = await (prisma as unknown as PrismaClient).transferExecution.findMany({
-        where: {
-          ...(profileId ? { profileId } : {}),
-          ...(status ? { status: status as any } : {})
-        },
-        orderBy: { createdAt: "desc" },
-        take,
-        skip,
-        include: {
-          profile: { select: { id: true, name: true, profileType: true } },
-          automation: { select: { id: true, name: true } }
-        }
-      });
-      return reply.send({ data, errors: [] });
-    } catch (error) {
-      return mapError(reply, error);
+  router.get(
+    "/transfer-desk/executions",
+    { preHandler: [requirePermission("TRANSFER_DESK_READ")] },
+    async (request, reply) => {
+      try {
+        const { profileId, status, limit, offset } = request.query as {
+          profileId?: string;
+          status?: string;
+          limit?: string;
+          offset?: string;
+        };
+        const take = Math.min(Number(limit) || 50, 200);
+        const skip = Math.min(Number(offset) || 0, 100000);
+        const data = await (prisma as unknown as PrismaClient).transferExecution.findMany({
+          where: {
+            ...(profileId ? { profileId } : {}),
+            ...(status ? { status: status as any } : {})
+          },
+          orderBy: { createdAt: "desc" },
+          take,
+          skip,
+          include: {
+            profile: { select: { id: true, name: true, profileType: true } },
+            automation: { select: { id: true, name: true } }
+          }
+        });
+        return reply.send({ data, errors: [] });
+      } catch (error) {
+        return mapError(reply, error);
+      }
     }
-  });
+  );
 
   // TD-API-003 — GET /transfer-desk/executions/:id (detail)
   router.get<{ Params: { id: string } }>(
     "/transfer-desk/executions/:id",
+    { preHandler: [requirePermission("TRANSFER_DESK_READ")] },
     async (request, reply) => {
       try {
         const data = await (prisma as unknown as PrismaClient).transferExecution.findUnique({
@@ -2134,6 +2180,7 @@ export function registerTransferDeskRoutes(router: FastifyInstance) {
   // TD-API-004 — GET /transfer-desk/executions/:id/logs (record-level logs)
   router.get<{ Params: { id: string } }>(
     "/transfer-desk/executions/:id/logs",
+    { preHandler: [requirePermission("TRANSFER_DESK_READ")] },
     async (request, reply) => {
       try {
         const { limit, offset, statusFilter } = request.query as {
@@ -2225,17 +2272,21 @@ export function registerTransferDeskRoutes(router: FastifyInstance) {
 
   // ── Filter CRUD (TD-API-017..020) ───────────────────────────────────────
 
-  router.get("/transfer-desk/filters", async (_request, reply) => {
-    try {
-      const data = await (prisma as unknown as PrismaClient).transferFilter.findMany({
-        orderBy: [{ sourceComponent: "asc" }, { name: "asc" }],
-        include: { _count: { select: { profiles: true } } }
-      });
-      return reply.send({ data, errors: [] });
-    } catch (error) {
-      return mapError(reply, error);
+  router.get(
+    "/transfer-desk/filters",
+    { preHandler: [requirePermission("TRANSFER_DESK_READ")] },
+    async (_request, reply) => {
+      try {
+        const data = await (prisma as unknown as PrismaClient).transferFilter.findMany({
+          orderBy: [{ sourceComponent: "asc" }, { name: "asc" }],
+          include: { _count: { select: { profiles: true } } }
+        });
+        return reply.send({ data, errors: [] });
+      } catch (error) {
+        return mapError(reply, error);
+      }
     }
-  });
+  );
 
   router.post(
     "/transfer-desk/filters",

@@ -66,11 +66,9 @@ REDIS_URL=redis://localhost:6379
 #   node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 JWT_SECRET=paste-a-64+-char-random-hex-string
 
-# Optional: dev auth bypass for quick local testing
-ENABLE_DEV_AUTH=true
 ```
 
-The web app reads `apps/web/.env` — set `NEXT_PUBLIC_API_BASE_URL=http://localhost:4000` (match the API `PORT`).
+The web app reads `apps/web/.env.local`. Set `API_INTERNAL_URL=http://127.0.0.1:4000` (match the API `PORT`). The browser only ever talks to the web app, which proxies `/api/v1/*` and `/auth/*` to the API, so no origin or CORS settings are needed and the web app can run on any port.
 
 > See `docs/ENV-VARIABLES.md` for the full list. Only the DB + Redis + JWT vars above are required to boot.
 
@@ -86,28 +84,61 @@ pnpm install
 # 1. Generate Prisma clients
 pnpm --filter @hfp/api run db:generate
 
-# 2. Create the schema in both databases (no Docker, no shadow DB needed):
-pnpm --filter @hfp/api run db:push:registry
-pnpm --filter @hfp/api run db:push:tenant
-#    (db:push applies the schema directly — simplest for local dev.
-#     Use db:migrate:deploy:* instead if you have migration files to apply.)
+# 2. Build both databases and seed the demo tenant (one command, safe to repeat)
+pnpm dev:setup
 
-# 3. (Optional) seed demo data
-pnpm --filter @hfp/api run db:seed
-
-# 4. Start API + web
+# 3. Start API + web
 pnpm dev
 ```
+
+`dev:setup` reads `apps/api/.env`, which needs `DATABASE_URL` (the demo
+tenant), `REGISTRY_DATABASE_URL` (a different database), `SEED_USER_PASSWORD`
+and `APP_BASE_URL`. It creates the databases when they do not exist (the role
+needs `CREATEDB`, or create them yourself), builds the registry and the tenant
+database, seeds the demo tenant and prints the sign-in address. Sign in as
+`admin@hfp.local` with `SEED_USER_PASSWORD`: that user holds Administrator for
+the whole tenant. A user who already had a password keeps it.
 
 API → http://localhost:4000, web → http://localhost:3000 (Next dev default).
 
 ### Background workers (optional)
 
-The async workers (transfer-desk processing, dunning, scheduled reports) run on BullMQ over **Redis**. Start them only if you're exercising those features:
+The async workers (Transfer Desk imports and exports, report generation, dunning, scheduled reports) run on BullMQ over **Redis**, in their own process. The API only queues the work: without this process a Transfer Desk run stays `QUEUED`. Start it when you use those features:
 
 ```powershell
 pnpm --filter @hfp/api run workers
 ```
+
+### Integration tests
+
+The integration suite runs against two real tenant databases, so it can prove
+that one tenant's session never reaches the other's data. Create both once
+(any names; the role needs to own them):
+
+The worker tests also need a registry database of their own:
+
+```powershell
+psql -c "CREATE DATABASE hfp_test" -c "CREATE DATABASE hfp_test_b" -c "CREATE DATABASE hfp_registry_test"
+$env:DATABASE_URL="postgresql://USER:PASS@localhost:5432/hfp_test";   pnpm --filter @hfp/api run db:setup:test
+$env:DATABASE_URL="postgresql://USER:PASS@localhost:5432/hfp_test_b"; pnpm --filter @hfp/api run db:setup:test
+$env:REGISTRY_DATABASE_URL="postgresql://USER:PASS@localhost:5432/hfp_registry_test"; pnpm --filter @hfp/api exec prisma db push --schema src/db/schema-registry.prisma --skip-generate
+```
+
+Then add to `apps/api/.env`:
+
+```
+TEST_DATABASE_URL=postgresql://USER:PASS@localhost:5432/hfp_test
+TEST_SECOND_DATABASE_URL=postgresql://USER:PASS@localhost:5432/hfp_test_b
+TEST_REGISTRY_DATABASE_URL=postgresql://USER:PASS@localhost:5432/hfp_registry_test
+```
+
+and run `pnpm --filter @hfp/api test:integration`. It refuses to start when
+any of these variables is missing. The worker tests start the real worker
+processes against `REDIS_URL` for about ten seconds; on a shared development
+Redis they could pick up a job queued in that window.
+
+Background workers and scripts have no default database: each job names its
+tenant and runs with it bound (`src/db/tenantScope.ts`).
 
 ---
 

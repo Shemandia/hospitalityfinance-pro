@@ -17,13 +17,6 @@ enum EntityType {
   PROPERTY // Individual hotel/resort
 }
 
-enum EntityRole {
-  ADMIN
-  CONTROLLER
-  VIEWER
-  SUPERADMIN
-}
-
 enum AccountTypeCategory {
   BALANCE_SHEET
   INCOME
@@ -329,8 +322,7 @@ model Entity {
   updatedAt          DateTime   @updatedAt @map("updated_at")
 
   // Relations
-  users                    EntityUser[]
-  userRoles                UserRole[]
+  roleAssignments          RoleAssignment[]
   periods                  Period[]
   accounts                 Account[]
   journals                 Journal[]
@@ -416,8 +408,7 @@ model User {
   passwordResetToken   String?   @map("password_reset_token") @db.VarChar(255)
   passwordResetExpires DateTime? @map("password_reset_expires")
 
-  entities                     EntityUser[]
-  roles                        UserRole[]
+  roleAssignments              RoleAssignment[]
   createdJournals              Journal[]                 @relation("JournalCreatedBy")
   approvedJournals             Journal[]                 @relation("JournalApprovedBy")
   journalApprovals             JournalApproval[]
@@ -454,19 +445,6 @@ model LoginAudit {
   @@map("login_audits")
 }
 
-model EntityUser {
-  entityId  String     @map("entity_id")
-  userId    String     @map("user_id")
-  role      EntityRole? // Deprecated: roles now assigned via UserRole table
-  createdAt DateTime    @default(now()) @map("created_at")
-  entity    Entity     @relation(fields: [entityId], references: [id])
-  user      User       @relation(fields: [userId], references: [id])
-
-  @@id([entityId, userId])
-  @@index([userId])
-  @@map("entity_users")
-}
-
 model Role {
   id          String           @id @default(uuid())
   code        String           @unique
@@ -476,7 +454,7 @@ model Role {
   createdAt   DateTime         @default(now()) @map("created_at")
   updatedAt   DateTime         @updatedAt @map("updated_at")
   permissions RolePermission[]
-  users       UserRole[]
+  assignments RoleAssignment[]
 
   @@map("roles")
 }
@@ -504,19 +482,34 @@ model RolePermission {
   @@map("role_permissions")
 }
 
-model UserRole {
-  id        String   @id @default(uuid())
-  userId    String   @map("user_id")
-  roleId    String   @map("role_id")
-  entityId  String?  @map("entity_id")
-  createdAt DateTime @default(now()) @map("created_at")
-  user      User     @relation(fields: [userId], references: [id])
-  role      Role     @relation(fields: [roleId], references: [id])
-  entity    Entity?  @relation(fields: [entityId], references: [id])
+/// Scope of a role assignment: the whole tenant, or one node of the entity tree.
+enum AssignmentScope {
+  TENANT
+  ENTITY
+}
+
+/// The single source of "who holds which role where" (WP-A, AUT-01/AUT-03).
+/// - scopeType TENANT: entityId is null; the role applies tenant-wide.
+/// - scopeType ENTITY: the role applies at entityId and every entity below it.
+/// Read only through modules/access (AccessService). The database enforces the
+/// scope/entity pairing with a CHECK constraint and makes the unique index
+/// NULLS NOT DISTINCT so a tenant-wide grant cannot be duplicated; both live in
+/// migration 20261111000000_role_assignments because Prisma cannot express them.
+model RoleAssignment {
+  id        String          @id @default(uuid())
+  userId    String          @map("user_id")
+  roleId    String          @map("role_id")
+  scopeType AssignmentScope @map("scope_type")
+  entityId  String?         @map("entity_id")
+  createdAt DateTime        @default(now()) @map("created_at")
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role            @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  entity    Entity?         @relation(fields: [entityId], references: [id], onDelete: Cascade)
 
   @@unique([userId, roleId, entityId])
   @@index([entityId])
-  @@map("user_roles")
+  @@index([roleId])
+  @@map("role_assignments")
 }
 
 // ─── Period Management ────────────────────────────────────────────────────────

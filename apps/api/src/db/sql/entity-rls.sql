@@ -68,10 +68,8 @@ DECLARE
 BEGIN
   FOREACH table_name IN ARRAY ARRAY[
     -- Core tenanted tables (original 17)
-    -- NOTE: entity_users and user_roles are intentionally NOT in this forced
-    -- loop — they are read during authentication before any entity context
-    -- exists (and user_roles.entity_id is NULL for global grants). They are
-    -- handled separately below (enabled, not forced).
+    -- Role assignments are not in this loop: role_assignments has its own
+    -- bypass-only policy (migration 20261111000000_role_assignments).
     'periods',
     'accounts',
     'journals',
@@ -156,19 +154,11 @@ CREATE POLICY account_type_definition_scope_policy ON account_type_definitions
     )
   );
 
--- Auth/RBAC tables (entities, user_roles, entity_users) are read during
--- authentication BEFORE any entity context is set, and user_roles.entity_id is
--- NULL for global grants (e.g. TENANT_ADMIN). FORCE ROW LEVEL SECURITY on them
--- makes even the owning app role read ZERO rows at login → empty token claims →
--- 403 on every API route. Keep RLS enabled as defense-in-depth against any
--- non-owner DB connection, but do NOT force it (the app owner must read them
--- for authentication). The entity-scoped business tables above remain FORCEd.
+-- The entity tree is read before any entity context is set (access
+-- resolution, sign-in). Keep RLS enabled as defense-in-depth against any
+-- non-owner DB connection, but do NOT force it on entities. The entity-scoped
+-- business tables above remain FORCEd.
 ALTER TABLE entities NO FORCE ROW LEVEL SECURITY;
-
-ALTER TABLE user_roles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE user_roles NO FORCE ROW LEVEL SECURITY;
-ALTER TABLE entity_users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE entity_users NO FORCE ROW LEVEL SECURITY;
 
 -- ── Intercompany v2 RLS ──────────────────────────────────────────────────────
 -- IC tables allow access when the current entity is EITHER side of the pair.

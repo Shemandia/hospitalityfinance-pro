@@ -126,18 +126,6 @@ describe("Auth Routes - Cookie Response Shape", () => {
   });
 });
 
-describe("Auth Plugin — Dev Mode", () => {
-  it("should detect dev-* token prefix", () => {
-    const token = "dev-abc123def456";
-    expect(token.startsWith("dev-")).toBe(true);
-  });
-
-  it("should not treat production tokens as dev tokens", () => {
-    const token = jwt.sign({ sub: "user" }, JWT_SECRET, { algorithm: "HS256" });
-    expect(token.startsWith("dev-")).toBe(false);
-  });
-});
-
 describe("Auth Plugin — Public Routes", () => {
   const publicPrefixes = ["/auth/", "/health"];
 
@@ -170,96 +158,11 @@ describe("Auth Plugin — Public Routes", () => {
   });
 });
 
-describe("Auth Plugin — Entity Access", () => {
+describe("Auth Plugin — Tenant headers", () => {
   async function importAuthPlugin() {
     process.env.JWT_SECRET = "test-secret-for-auth-plugin-unit-tests-256-bit";
     return import("../src/plugins/auth.js");
   }
-
-  it("allows explicit superadmin with empty entityIds without entity context", async () => {
-    const { evaluateEntityContext } = await importAuthPlugin();
-
-    const decision = evaluateEntityContext({
-      url: "/api/v1/gl/journals",
-      entityIds: [],
-      roles: ["SUPERADMIN"]
-    });
-
-    expect(decision.error).toBeUndefined();
-    expect(decision.entityId).toBeUndefined();
-  });
-
-  it("blocks empty entityIds for non-superadmin tenant users", async () => {
-    const { evaluateEntityContext } = await importAuthPlugin();
-
-    const decision = evaluateEntityContext({
-      url: "/api/v1/gl/journals",
-      entityIds: [],
-      roles: ["TENANT_ADMIN"]
-    });
-
-    expect(decision.error).toMatchObject({
-      statusCode: 403,
-      message: "User has no entity assignments. Cross-entity access requires SUPERADMIN."
-    });
-  });
-
-  it("requires explicit X-Entity-ID on tenant financial routes", async () => {
-    const { evaluateEntityContext } = await importAuthPlugin();
-
-    const decision = evaluateEntityContext({
-      url: "/api/v1/gl/journals",
-      entityIds: ["e-1", "e-2"],
-      roles: ["CONTROLLER"]
-    });
-
-    expect(decision.error).toMatchObject({
-      statusCode: 400,
-      message: "X-Entity-ID header is required."
-    });
-  });
-
-  it("does not auto-select one assigned entity on tenant financial routes", async () => {
-    const { evaluateEntityContext } = await importAuthPlugin();
-
-    const decision = evaluateEntityContext({
-      url: "/api/v1/ap/invoices",
-      entityIds: ["e-1"],
-      roles: ["AP_CLERK"]
-    });
-
-    expect(decision.error).toMatchObject({
-      statusCode: 400,
-      message: "X-Entity-ID header is required."
-    });
-  });
-
-  it("uses explicit X-Entity-ID when supplied", async () => {
-    const { evaluateEntityContext } = await importAuthPlugin();
-
-    const decision = evaluateEntityContext({
-      url: "/api/v1/ap/invoices",
-      headerEntityId: "e-1",
-      entityIds: ["e-1"],
-      roles: ["AP_CLERK"]
-    });
-
-    expect(decision.error).toBeUndefined();
-    expect(decision.entityId).toBe("e-1");
-  });
-
-  it("auto-selects one entity only on exempt non-financial routes", async () => {
-    const { evaluateEntityContext } = await importAuthPlugin();
-
-    const decision = evaluateEntityContext({
-      url: "/api/v1/me",
-      entityIds: ["e-1"],
-      roles: ["AP_CLERK"]
-    });
-
-    expect(decision.error).toBeUndefined();
-    expect(decision.entityId).toBe("e-1");
-  });
 
   it("detects tenant header mismatch as cross-tenant access", async () => {
     const { validateTenantHeaders } = await importAuthPlugin();

@@ -1408,7 +1408,7 @@ paths:
   /api/v1/admin/users:
     get:
       tags: [Admin]
-      summary: List entity users
+      summary: Users who can open the selected entity, with the role grants that reach it
       parameters:
         - $ref: "#/components/parameters/EntityIdHeader"
       responses:
@@ -1418,22 +1418,68 @@ paths:
   /api/v1/admin/users/invite:
     post:
       tags: [Admin]
-      summary: Invite user (create + assign to entity)
+      summary: Invite user (create, and grant the required role at the chosen entities or tenant-wide)
       parameters:
         - $ref: "#/components/parameters/EntityIdHeader"
       responses:
         "201":
           description: User invited
 
-  /api/v1/admin/users/assign-scope:
+  /api/v1/admin/users/{userId}/roles:
     post:
       tags: [Admin]
-      summary: Assign user to entity scope (SUPERADMIN)
+      summary: Grant a role tenant-wide (scope TENANT) or at a group, cluster or property (entityId)
       parameters:
-        - $ref: "#/components/parameters/EntityIdHeader"
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         "201":
-          description: Scope assigned
+          description: Role granted
+
+  /api/v1/admin/users/{userId}/roles/{roleId}:
+    delete:
+      tags: [Admin]
+      summary: Revoke a role at one entity (entityId) or the tenant-wide grant (scope=TENANT)
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: roleId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: entityId
+          in: query
+          schema:
+            type: string
+        - name: scope
+          in: query
+          schema:
+            type: string
+            enum: [TENANT]
+      responses:
+        "204":
+          description: Role revoked
+
+  /api/v1/admin/users/{userId}/access:
+    get:
+      tags: [Admin]
+      summary: A user's role grants and effective permissions per entity, within the caller's reach
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Grants and effective permissions
 
   /api/v1/admin/entity-tree:
     get:

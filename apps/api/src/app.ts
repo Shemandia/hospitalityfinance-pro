@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
-import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyInstance } from "fastify";
-import { runWithContext, enterRequestContext, updateRequestContext } from "./db/requestContext.js";
-import { prisma, setActiveTenant } from "./db/prisma.js";
+import { runWithContext, getRequestContext, updateRequestContext } from "./db/requestContext.js";
+import { registryPrisma } from "./db/prisma.js";
 import { requireAuth } from "./middleware/requireAuth.js";
+import { crossSiteRefusal } from "./middleware/csrf.js";
 import { logSerializers } from "./shared/log-redactor.js";
 import { registerGLRouter } from "./modules/gl/router.js";
 import { registerPeriodRouter } from "./modules/period/router.js";
@@ -35,9 +35,20 @@ import { registerTestRouter } from "./modules/transfer-desk/test-router.js";
 import { registerScheduleRouter } from "./modules/transfer-desk/schedule-router.js";
 import { registerIntercompanyRouter } from "./modules/intercompany/router.js";
 import authPlugin from "./plugins/auth.js";
+import { registerRouteAccessRegistry, type RouteAccess } from "./modules/access/route-access.js";
+import { AccessInfrastructureError } from "./modules/access/service.js";
 import { registerAuthRouter } from "./modules/auth/router.js";
 import { connectRedis } from "./db/redis.js";
+import { resolveChainEntityId } from "./modules/entity/chain.js";
+import { registerContextRouter } from "./modules/access/context.js";
 import { registerEntityRouter } from "./modules/entity/router.js";
+
+declare module "fastify" {
+  interface FastifyInstance {
+    /** "METHOD /url" -> how the route is protected. Filled as routes register. */
+    routeAccess: ReadonlyMap<string, RouteAccess>;
+  }
+}
 
 export async function createApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -45,39 +56,49 @@ export async function createApp(): Promise<FastifyInstance> {
       level: process.env.LOG_LEVEL ?? "info",
       serializers: logSerializers
     },
-    bodyLimit: 10 * 1024 * 1024 // 10 MB for file imports
+    bodyLimit: 10 * 1024 * 1024, // 10 MB for file imports
+    // The browser reaches the API through the web app's proxy (AUT-13). Its
+    // X-Forwarded-* headers are believed only from these addresses, so the
+    // client IP (rate limits, audit) and the host (cross-site check) are the
+    // browser's. Default: the proxy runs on the same machine.
+    trustProxy: process.env.TRUST_PROXY ?? "loopback"
   });
 
-  const allowedOrigins = (
-    process.env.ALLOWED_ORIGINS ?? "http://localhost:3000,http://localhost:3001"
-  )
-    .split(",")
-    .map((o) => o.trim());
-
-  await app.register(cors, {
-    origin: allowedOrigins,
-    credentials: true
+  // A database or cache fault while access is being checked or changed is an
+  // outage, not a denial and not a sign-out (AUT-10).
+  app.setErrorHandler((error, request, reply) => {
+    if (error instanceof AccessInfrastructureError) {
+      request.log.error({ err: error, dependency: error.dependency }, "Access service unavailable");
+      return reply.code(503).send({
+        data: null,
+        errors: [
+          {
+            code: "SERVICE_UNAVAILABLE",
+            message: "Access could not be checked or changed. Try again in a moment."
+          }
+        ]
+      });
+    }
+    return reply.send(error);
   });
 
-  // CSRF protection: validate Origin header on state-mutating requests
+  // Before any route: a route without an access classification fails startup.
+  app.decorate("routeAccess", registerRouteAccessRegistry(app));
+
+  // No CORS: the browser calls the API on the web app's own origin, through
+  // its proxy, so no other origin is allowed and none needs configuring.
+  // Cross-site protection for cookie-authenticated changes (middleware/csrf.ts).
   app.addHook("onRequest", async (request, reply) => {
-    const method = request.method.toUpperCase();
-    if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
-      const origin = request.headers.origin;
-      // Require Origin header on all mutations — reject if missing or not allowed
-      // Exception: internal health-check and webhook paths that may lack a browser Origin
-      const path = request.url;
-      const isInternalPath = path === "/health" || path.startsWith("/webhooks/");
-      if (!isInternalPath) {
-        if (!origin) {
-          reply.code(403);
-          throw new Error("Origin header is required for state-mutating requests");
-        }
-        if (!allowedOrigins.includes(origin)) {
-          reply.code(403);
-          throw new Error(`Origin ${origin} not allowed`);
-        }
-      }
+    const refusal = crossSiteRefusal({
+      method: request.method,
+      cookieHeader: request.headers.cookie,
+      origin: request.headers.origin,
+      host: request.hostname
+    });
+    if (refusal) {
+      return reply
+        .code(403)
+        .send({ data: null, errors: [{ code: "CROSS_SITE_REFUSED", message: refusal }] });
     }
   });
 
@@ -92,35 +113,41 @@ export async function createApp(): Promise<FastifyInstance> {
   // Connect Redis for session management
   await connectRedis();
 
-  // Auth routes (/auth/login, /auth/refresh, /auth/logout, etc.)
-  await registerAuthRouter(app);
-
-  app.addHook("onRequest", async (request, reply) => {
+  app.addHook("onRequest", (request, reply, done) => {
     // Generate or accept request ID for end-to-end tracing
     const requestId = (request.headers["x-request-id"] as string) || randomUUID();
     reply.header("x-request-id", requestId);
 
-    // Initialize request context with ID, IP, UA. Tenant context set later by auth.
-    enterRequestContext({
-      requestId,
-      ipAddress: request.ip ?? null,
-      userAgent: request.headers["user-agent"] ?? null
-    });
-
     // Attach to Fastify logger for structured log correlation
     (request as any).requestId = requestId;
+
+    // The rest of the request runs inside this scope (SEC-02, ARC-05): the
+    // lifecycle continues from `done`, so every hook and the handler see this
+    // request's context and no other. The tenant is bound later by auth.
+    runWithContext(
+      {
+        requestId,
+        ipAddress: request.ip ?? null,
+        userAgent: request.headers["user-agent"] ?? null
+      },
+      done
+    );
   });
+
+  // Auth routes (/auth/login, /auth/refresh, /auth/logout, etc.). Registered
+  // after the hook above so that they run inside a request context too.
+  await registerAuthRouter(app);
 
   // ── Health, Readiness & Version ───────────────────────────────────────────
 
   const startTime = Date.now();
 
-  app.get("/health", async () => {
+  app.get("/health", { config: { access: "public" } }, async () => {
     let dbOk = false;
     let redisOk = false;
 
     try {
-      await prisma.$queryRaw`SELECT 1`;
+      await registryPrisma.$queryRaw`SELECT 1`;
       dbOk = true;
     } catch {
       /* database unreachable */
@@ -151,9 +178,9 @@ export async function createApp(): Promise<FastifyInstance> {
     };
   });
 
-  app.get("/ready", async (_request, reply) => {
+  app.get("/ready", { config: { access: "public" } }, async (_request, reply) => {
     try {
-      await prisma.$queryRaw`SELECT 1`;
+      await registryPrisma.$queryRaw`SELECT 1`;
       const { getRedisClient } = await import("./db/redis.js");
       await getRedisClient().ping();
       return reply.send({ ready: true });
@@ -162,24 +189,31 @@ export async function createApp(): Promise<FastifyInstance> {
     }
   });
 
-  app.get("/api/v1/version", async () => ({
+  app.get("/api/v1/version", { config: { access: "public" } }, async () => ({
     version: process.env.APP_VERSION ?? "1.0.0",
     buildDate: process.env.BUILD_DATE ?? new Date().toISOString().split("T")[0],
     nodeVersion: process.version,
     environment: process.env.NODE_ENV ?? "development"
   }));
 
-  app.get("/api/v1/me", { preHandler: [requireAuth] }, async (request) => {
-    return {
-      data: {
-        user: request.user,
-        entityId: request.entityId,
-        chainId: request.chainId
-      },
-      errors: []
-    };
-  });
+  app.get(
+    "/api/v1/me",
+    { preHandler: [requireAuth], config: { access: "session" } },
+    async (request) => {
+      // The entity bound to the request: null unless the caller can open it (AUT-15).
+      const entityId = getRequestContext().entityId;
+      return {
+        data: {
+          user: request.user,
+          entityId,
+          chainId: entityId ? await resolveChainEntityId(entityId) : null
+        },
+        errors: []
+      };
+    }
+  );
 
+  await registerContextRouter(app);
   await registerEntityRouter(app);
 
   await registerGLRouter(app);

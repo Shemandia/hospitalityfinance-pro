@@ -3,14 +3,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useApiContext } from "../../../../../../components/use-api-context";
-import { useUserRole } from "../../../../../../components/use-user-role";
+import { usePermissions } from "../../../../../../components/use-permissions";
 import {
   getAdminEntityUsers,
   inviteEntityUser,
   removeEntityUser,
   getAdminRoles,
   getEntities,
-  type EntitySummaryItem
+  type EntitySummaryItem,
+  type EntityUserRow
 } from "../../../../../../lib/gl-api";
 import { Button } from "../../../../../../components/ui/button";
 import { Badge } from "../../../../../../components/ui/badge";
@@ -48,18 +49,11 @@ function getRoleColor(code: string): string {
 
 type RoleSummary = { id: string; code: string; name: string; description?: string | null };
 
-type EntityUserRow = {
-  entityId: string;
-  userId: string;
-  role?: string;
-  createdAt: string;
-  user: { id: string; name: string; email: string };
-};
-
 export default function UsersPage() {
   const apiContext = useApiContext();
   const qc = useQueryClient();
-  const { canAdmin } = useUserRole();
+  const { can } = usePermissions();
+  const canManageUsers = can("ADMIN_USERS");
   const [showCreate, setShowCreate] = useState(false);
   const [createEmail, setCreateEmail] = useState("");
   const [createName, setCreateName] = useState("");
@@ -88,9 +82,9 @@ export default function UsersPage() {
 
   const usersQ = useQuery({
     queryKey: ["admin-users", apiContext?.tenantSlug, apiContext?.entityId],
-    queryFn: () => (apiContext ? getAdminEntityUsers(apiContext) : Promise.resolve({ data: [] })),
+    queryFn: () => getAdminEntityUsers(apiContext!),
     enabled: Boolean(apiContext),
-    select: (r: { data: unknown }) => (r.data as EntityUserRow[]) ?? []
+    select: (r) => r.data ?? ([] as EntityUserRow[])
   });
 
   const createMut = useMutation({
@@ -98,7 +92,7 @@ export default function UsersPage() {
       inviteEntityUser(apiContext!, {
         email: createEmail,
         name: createName,
-        roleId: createRoleId || undefined,
+        roleId: createRoleId,
         entityIds: createEntityIds.length > 0 ? createEntityIds : undefined
       }),
     onSuccess: (data: any) => {
@@ -120,7 +114,7 @@ export default function UsersPage() {
     mutationFn: (userId: string) => removeEntityUser(apiContext!, userId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-users"] });
-      setFeedback("User removed from entity.");
+      setFeedback("Roles at this property removed.");
     }
   });
 
@@ -135,7 +129,7 @@ export default function UsersPage() {
             Manage users and their roles for this property
           </p>
         </div>
-        {canAdmin && (
+        {canManageUsers && (
           <Button variant="teal" size="sm" onClick={() => setShowCreate(true)}>
             <Plus className="mr-1 h-3 w-3" /> Create User
           </Button>
@@ -163,15 +157,15 @@ export default function UsersPage() {
               <TableRow>
                 <TableHead>Name</TableHead>
                 <TableHead>Email</TableHead>
-                <TableHead>Since</TableHead>
-                {canAdmin && <TableHead className="text-right">Actions</TableHead>}
+                <TableHead>Roles</TableHead>
+                {canManageUsers && <TableHead className="text-right">Actions</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
               {users.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={canAdmin ? 4 : 3}
+                    colSpan={canManageUsers ? 4 : 3}
                     className="text-center py-6 text-muted-foreground"
                   >
                     No users found.
@@ -180,12 +174,33 @@ export default function UsersPage() {
               ) : (
                 users.map((eu) => (
                   <TableRow key={eu.userId}>
-                    <TableCell className="font-medium">{eu.user.name}</TableCell>
+                    <TableCell className="font-medium">{eu.user.name ?? eu.user.email}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">{eu.user.email}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {new Date(eu.createdAt).toLocaleDateString()}
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1">
+                        {eu.roles.map((r) => (
+                          <Badge
+                            key={`${r.roleId}@${r.entityId ?? "tenant"}`}
+                            className={`${getRoleColor(r.code)} text-[10px]`}
+                            title={
+                              r.scopeType === "TENANT"
+                                ? "Whole tenant"
+                                : r.entityId === apiContext?.entityId
+                                  ? "At this property"
+                                  : "Through a group or cluster above this property"
+                            }
+                          >
+                            {r.code}
+                            {r.scopeType === "TENANT"
+                              ? " · tenant"
+                              : r.entityId === apiContext?.entityId
+                                ? ""
+                                : " · inherited"}
+                          </Badge>
+                        ))}
+                      </div>
                     </TableCell>
-                    {canAdmin && (
+                    {canManageUsers && (
                       <TableCell className="text-right">
                         <Button
                           size="sm"
@@ -252,7 +267,7 @@ export default function UsersPage() {
                 value={createRoleId}
                 onChange={(e) => setCreateRoleId(e.target.value)}
               >
-                <option value="">No role</option>
+                <option value="">Select a role…</option>
                 {availableRoles.map((r) => (
                   <option key={r.id} value={r.id}>
                     {r.name} ({r.code})
@@ -305,7 +320,7 @@ export default function UsersPage() {
             </Button>
             <Button
               variant="teal"
-              disabled={!createEmail || !createName || createMut.isPending}
+              disabled={!createEmail || !createName || !createRoleId || createMut.isPending}
               onClick={() => createMut.mutate()}
             >
               {createMut.isPending ? "Creating..." : "Create"}
@@ -317,10 +332,10 @@ export default function UsersPage() {
       <ConfirmDialog
         open={removeTarget !== null}
         onOpenChange={(open) => !open && setRemoveTarget(null)}
-        title="Remove User"
+        title="Remove roles at this property"
         description={
           removeTarget
-            ? `Remove ${removeTarget.user.name} from this entity? They will lose access to all data in this property.`
+            ? `Remove the roles ${removeTarget.user.name ?? removeTarget.user.email} holds at this property? Roles on a group above it, or for the whole tenant, still apply; change those under Roles & Access.`
             : ""
         }
         confirmLabel="Remove"

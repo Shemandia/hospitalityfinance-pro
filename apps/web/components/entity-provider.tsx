@@ -9,16 +9,24 @@ import {
   useState,
   type ReactNode
 } from "react";
-import { useSession } from "./auth-provider";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getEntities, type EntitySummaryItem } from "../lib/gl-api";
-import { useTenantSlug } from "../hooks/use-tenant-slug";
+import { useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "./auth-provider";
+import { pickEntity, selectedEntityStorageKey, type ContextEntity } from "../lib/access";
+
+/**
+ * The entity the user is working in (WP-A step 6).
+ *
+ * The list is the access context's: exactly the entities the API lets the
+ * user open, by the same rule (AUT-07). The selection is remembered per
+ * tenant and user (AUT-08) and is only a preference: every request is checked
+ * by the API again.
+ */
 
 type EntityContextValue = {
-  /** All entities the user has access to */
-  entities: EntitySummaryItem[];
+  /** The entities the user can open, higher levels of the tree first. */
+  entities: ContextEntity[];
   /** Currently selected entity */
-  currentEntity: EntitySummaryItem | null;
+  currentEntity: ContextEntity | null;
   /** Currently selected entity ID */
   entityId: string | null;
   /** Switch to a different entity */
@@ -35,103 +43,70 @@ const EntityContext = createContext<EntityContextValue>({
   isLoading: true
 });
 
-const STORAGE_KEY = "hfp-selected-entity";
+function readStored(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStored(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Storage unavailable: the selection lasts for this page only.
+  }
+}
 
 export function EntityProvider({ children }: { children: ReactNode }) {
-  const { data: session } = useSession();
-  const accessToken = session?.accessToken;
-  const sessionEntityIds = session?.user?.entityIds ?? [];
-  const sessionRoles = session?.user?.roles ?? [];
-  const isCrossEntityAdmin = sessionRoles.some((role) =>
-    ["SUPERADMIN", "PLATFORM_ADMIN"].includes(role.toUpperCase())
-  );
-  const urlTenantSlug = useTenantSlug();
-  // The session's slug is authoritative — the /t/[code] URL segment is the
-  // tenant CODE, not the slug, and must not be sent as X-Tenant-Slug.
-  const tenantSlug = session?.user?.tenantSlug ?? urlTenantSlug ?? undefined;
+  const { context, status } = useAuth();
+  const storageKey = context ? selectedEntityStorageKey(context) : null;
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // Fetch all entities the user can access
-  const { data: entities = [], isLoading } = useQuery({
-    queryKey: ["entities", accessToken, tenantSlug],
-    queryFn: () => {
-      if (!accessToken) throw new Error("No session");
-      if (sessionEntityIds.length === 0 && !isCrossEntityAdmin) {
-        throw new Error("No entity assignments");
-      }
-      // Empty entityIds omits X-Entity-ID only for SUPERADMIN/PLATFORM_ADMIN.
-      // Normal users with no assignments are blocked above with a configuration error.
-      const contextEntityId = sessionEntityIds[0] ?? "";
-      return getEntities({ accessToken, entityId: contextEntityId, tenantSlug }).then(
-        (res) => res.data
-      );
-    },
-    enabled: !!accessToken,
-    staleTime: 5 * 60 * 1000
-  });
+  // Load the remembered selection for this tenant and user.
+  useEffect(() => {
+    setSelectedId(storageKey ? readStored(storageKey) : null);
+  }, [storageKey]);
 
-  // Filter to entities the user has access to
-  // Empty entityIds means global access only for SUPERADMIN/PLATFORM_ADMIN.
-  // Other users see assigned entities plus children of assigned parents.
-  const userEntities = useMemo(() => {
-    if (sessionEntityIds.length === 0) return isCrossEntityAdmin ? entities : [];
-    const granted = new Set(sessionEntityIds);
-    return entities.filter((e) => {
-      if (granted.has(e.id)) return true;
-      // Include children of granted parents
-      if (e.parentId && granted.has(e.parentId)) return true;
-      return false;
-    });
-  }, [entities, sessionEntityIds, isCrossEntityAdmin]);
-
-  // Selected entity ID — initialize from localStorage or first entity
-  const [selectedId, setSelectedId] = useState<string | null>(() => {
-    if (typeof window === "undefined") return null;
-    return localStorage.getItem(STORAGE_KEY);
-  });
-
-  // Resolve the current entity object
-  const currentEntity = useMemo(() => {
-    if (!userEntities.length) return null;
-    // If stored ID matches an entity the user has access to, use it
-    const stored = userEntities.find((e) => e.id === selectedId);
-    if (stored) return stored;
-    // Fallback to first available
-    return userEntities[0] ?? null;
-  }, [userEntities, selectedId]);
-
+  const currentEntity = useMemo(() => pickEntity(context, selectedId), [context, selectedId]);
   const entityId = currentEntity?.id ?? null;
 
-  // Persist selection
   useEffect(() => {
-    if (entityId) {
-      localStorage.setItem(STORAGE_KEY, entityId);
-    }
-  }, [entityId]);
+    if (storageKey && entityId) writeStored(storageKey, entityId);
+  }, [storageKey, entityId]);
 
   const queryClient = useQueryClient();
 
   const switchEntity = useCallback(
     (id: string) => {
       setSelectedId(id);
-      localStorage.setItem(STORAGE_KEY, id);
-      // Invalidate all queries so they refetch with the new entity context
-      queryClient.invalidateQueries();
+      if (storageKey) writeStored(storageKey, id);
+      // Refetch everything with the new entity context.
+      void queryClient.invalidateQueries();
     },
-    [queryClient]
+    [queryClient, storageKey]
   );
 
   const value = useMemo<EntityContextValue>(
     () => ({
-      entities: userEntities,
+      entities: context?.entities ?? [],
       currentEntity,
       entityId,
       switchEntity,
-      isLoading
+      isLoading: status === "loading"
     }),
-    [userEntities, currentEntity, entityId, switchEntity, isLoading]
+    [context, currentEntity, entityId, switchEntity, status]
   );
 
-  if (accessToken && sessionEntityIds.length === 0 && !isCrossEntityAdmin && !isLoading) {
+  // A user with nothing to open. A tenant-wide grant (for example the
+  // administrator of a tenant still being set up) is not blocked.
+  if (
+    status === "authenticated" &&
+    context &&
+    context.entities.length === 0 &&
+    context.tenantPermissions.length === 0
+  ) {
     return (
       <div className="min-h-screen bg-slate-50 p-8">
         <div className="mx-auto max-w-xl rounded-lg border border-amber-200 bg-white p-6 shadow-sm">

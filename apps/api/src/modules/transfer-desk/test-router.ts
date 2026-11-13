@@ -127,6 +127,7 @@ export async function registerTestRouter(app: FastifyInstance): Promise<void> {
 
       router.get<{ Params: { profileId: string; testId: string } }>(
         "/transfer-desk/profiles/:profileId/test/:testId/results",
+        { preHandler: [requirePermission("TRANSFER_DESK_READ")] },
         async (request, reply) => {
           try {
             const data = await testService.getResults(

@@ -19,7 +19,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { useUserRole } from "../../../../../../components/use-user-role";
+import { usePermissions } from "../../../../../../components/use-permissions";
 import { useTenantHref } from "../../../../../../hooks/use-tenant-router";
 import { Card, CardContent } from "../../../../../../components/ui/card";
 import { Button } from "../../../../../../components/ui/button";
@@ -39,7 +39,7 @@ type Tab = "export" | "import" | "cleardown";
 
 export default function TransferDeskSettingsPage() {
   const tenantHref = useTenantHref();
-  const role = useUserRole();
+  const role = usePermissions();
   const [activeTab, setActiveTab] = useState<Tab>("export");
 
   if (!role.canTransferDeskAdmin) {

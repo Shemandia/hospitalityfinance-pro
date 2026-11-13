@@ -32,25 +32,33 @@ export async function registerARRouter(app: FastifyInstance): Promise<void> {
 
       // ── Customers ──────────────────────────────────────────────────────────────
 
-      router.get("/customers", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await arService.listCustomers(entityId);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/customers",
+        { preHandler: [requirePermission("AR_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await arService.listCustomers(entityId);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.get<{ Params: { id: string } }>("/customers/:id", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await arService.getCustomer(entityId, request.params.id);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get<{ Params: { id: string } }>(
+        "/customers/:id",
+        { preHandler: [requirePermission("AR_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await arService.getCustomer(entityId, request.params.id);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.post(
         "/customers",
@@ -84,26 +92,34 @@ export async function registerARRouter(app: FastifyInstance): Promise<void> {
 
       // ── AR Invoices ────────────────────────────────────────────────────────────
 
-      router.get("/invoices", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const query = arInvoiceListQuerySchema.parse(request.query);
-          const data = await arService.listInvoices(entityId, query);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/invoices",
+        { preHandler: [requirePermission("AR_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const query = arInvoiceListQuerySchema.parse(request.query);
+            const data = await arService.listInvoices(entityId, query);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.get<{ Params: { id: string } }>("/invoices/:id", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await arService.getInvoice(entityId, request.params.id);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get<{ Params: { id: string } }>(
+        "/invoices/:id",
+        { preHandler: [requirePermission("AR_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await arService.getInvoice(entityId, request.params.id);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.post(
         "/invoices",
@@ -153,16 +169,20 @@ export async function registerARRouter(app: FastifyInstance): Promise<void> {
 
       // ── Receipts ───────────────────────────────────────────────────────────────
 
-      router.get("/receipts", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const { customerId } = request.query as { customerId?: string };
-          const data = await arService.listReceipts(entityId, customerId);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/receipts",
+        { preHandler: [requirePermission("AR_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const { customerId } = request.query as { customerId?: string };
+            const data = await arService.listReceipts(entityId, customerId);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.post(
         "/receipts",
@@ -199,16 +219,20 @@ export async function registerARRouter(app: FastifyInstance): Promise<void> {
 
       // ── Ageing Report ──────────────────────────────────────────────────────────
 
-      router.get("/ageing", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const query = ageingQuerySchema.parse(request.query);
-          const data = await arService.getAgeingReport(entityId, query);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/ageing",
+        { preHandler: [requirePermission("AR_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const query = ageingQuerySchema.parse(request.query);
+            const data = await arService.getAgeingReport(entityId, query);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       // ── Dunning ────────────────────────────────────────────────────────────────
 
@@ -234,7 +258,7 @@ export async function registerARRouter(app: FastifyInstance): Promise<void> {
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
-            const jobId = await enqueueDunningRun(entityId);
+            const jobId = await enqueueDunningRun(request.user!.tenantId, entityId);
             return reply.code(202).send({
               data: { jobId, message: "Dunning job enqueued. Emails will be sent in background." },
               errors: []

@@ -3,9 +3,7 @@ import type { PrismaClient } from "../../db/client.js";
 import { z } from "zod";
 import { prisma } from "../../db/prisma.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
-import { requireRole } from "../../middleware/requireRole.js";
 import { requirePermission } from "../../middleware/requirePermission.js";
-import { requireWriteAccess } from "../../middleware/requireWriteAccess.js";
 import { ConsolidationService } from "./service.js";
 import { mapError } from "../../shared/router-utils.js";
 
@@ -22,10 +20,10 @@ export async function registerConsolidationRouter(app: FastifyInstance): Promise
   app.register(
     async (router) => {
       router.addHook("preHandler", requireAuth);
-      router.addHook("preHandler", requireWriteAccess);
 
       router.get<{ Params: { parentEntityId: string } }>(
         "/:parentEntityId/runs",
+        { preHandler: [requirePermission(["CONSOLIDATION_RUN", "REPORT_READ"])] },
         async (request, reply) => {
           try {
             if (request.entityId !== request.params.parentEntityId) {
@@ -44,6 +42,7 @@ export async function registerConsolidationRouter(app: FastifyInstance): Promise
 
       router.get<{ Params: { parentEntityId: string; runId: string } }>(
         "/:parentEntityId/runs/:runId",
+        { preHandler: [requirePermission(["CONSOLIDATION_RUN", "REPORT_READ"])] },
         async (request, reply) => {
           try {
             if (request.entityId !== request.params.parentEntityId) {

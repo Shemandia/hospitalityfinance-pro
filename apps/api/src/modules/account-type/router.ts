@@ -2,7 +2,6 @@ import { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "../../db/prisma.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
-import { requireRole } from "../../middleware/requireRole.js";
 import { requirePermission } from "../../middleware/requirePermission.js";
 import { accountTypeCreateSchema, accountTypeUpdateSchema } from "./types.js";
 
@@ -34,29 +33,33 @@ function assertAccountTypeVisibleToEntity(
 export function registerAccountTypeRouter(app: FastifyInstance): void {
   // ── List account types ─────────────────────────────────────────────────
   // Returns system (global) types + entity-specific types, ordered by sortOrder
-  app.get("/api/v1/account-types", { preHandler: [requireAuth] }, async (request, reply) => {
-    try {
-      const entityId = requireEntityId(request.entityId);
+  app.get(
+    "/api/v1/account-types",
+    { preHandler: [requireAuth, requirePermission(["COA_READ", "GL_READ"])] },
+    async (request, reply) => {
+      try {
+        const entityId = requireEntityId(request.entityId);
 
-      const types = await prisma.accountTypeDefinition.findMany({
-        where: {
-          OR: [
-            { entityId: null }, // system/global types
-            { entityId } // entity-specific types
-          ],
-          isActive: true
-        },
-        orderBy: { sortOrder: "asc" }
-      });
+        const types = await prisma.accountTypeDefinition.findMany({
+          where: {
+            OR: [
+              { entityId: null }, // system/global types
+              { entityId } // entity-specific types
+            ],
+            isActive: true
+          },
+          orderBy: { sortOrder: "asc" }
+        });
 
-      return reply.send({ data: types, errors: [] });
-    } catch (error: any) {
-      return reply.status(error.statusCode ?? 500).send({
-        data: null,
-        errors: [{ code: "FETCH_ERROR", message: error.message }]
-      });
+        return reply.send({ data: types, errors: [] });
+      } catch (error: any) {
+        return reply.status(error.statusCode ?? 500).send({
+          data: null,
+          errors: [{ code: "FETCH_ERROR", message: error.message }]
+        });
+      }
     }
-  });
+  );
 
   // ── List all (including inactive) — for admin ──────────────────────────
   app.get(

@@ -450,22 +450,15 @@ describe("PeriodService — reopen", () => {
     });
   });
 
-  it("rejects non-SUPERADMIN reopen", async () => {
-    await expect(service.reopenPeriod("entity-1", "period-1", ["ADMIN"])).rejects.toMatchObject({
-      code: "PERIOD_REOPEN_FORBIDDEN",
-      statusCode: 403
-    });
-  });
-
-  it("reopens a LOCKED period as SUPERADMIN", async () => {
-    const result = await service.reopenPeriod("entity-1", "period-1", ["SUPERADMIN"]);
+  it("reopens a LOCKED period", async () => {
+    const result = await service.reopenPeriod("entity-1", "period-1");
     expect(result?.status).toBe("OPEN");
     expect(result?.closedAt).toBeNull();
     expect(result?.openedAt).toBeDefined();
   });
 
   it("resets PeriodCloseStatus run flags on reopen", async () => {
-    await service.reopenPeriod("entity-1", "period-1", ["SUPERADMIN"]);
+    await service.reopenPeriod("entity-1", "period-1");
     expect(pcStatuses[0].status).toBe("PC_OPEN");
     expect(pcStatuses[0].revaluationRun).toBe(false);
     expect(pcStatuses[0].depreciationRun).toBe(false);
@@ -483,7 +476,7 @@ describe("PeriodService — reopen", () => {
       currentPeriodId: "period-2"
     });
 
-    await service.reopenPeriod("entity-1", "period-1", ["SUPERADMIN"]);
+    await service.reopenPeriod("entity-1", "period-1");
     expect(ledgerSetups[0].currentPeriodId).toBe("period-1");
   });
 
@@ -498,14 +491,14 @@ describe("PeriodService — reopen", () => {
       openedAt: new Date()
     });
 
-    await expect(
-      service.reopenPeriod("entity-1", "period-1", ["SUPERADMIN"])
-    ).rejects.toMatchObject({ code: "PERIOD_OPEN_EXISTS" });
+    await expect(service.reopenPeriod("entity-1", "period-1")).rejects.toMatchObject({
+      code: "PERIOD_OPEN_EXISTS"
+    });
   });
 
   it("reopens a CLOSED period (not just LOCKED)", async () => {
     periods[0].status = "CLOSED";
-    const result = await service.reopenPeriod("entity-1", "period-1", ["SUPERADMIN"]);
+    const result = await service.reopenPeriod("entity-1", "period-1");
     expect(result?.status).toBe("OPEN");
   });
 });

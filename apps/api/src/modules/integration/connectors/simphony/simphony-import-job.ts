@@ -24,6 +24,7 @@ import { mapSimphonyToGL } from "./simphony-mapper.js";
 import { sendEmail } from "../../../../shared/email.js";
 
 import { applyBalanceDelta } from "../../../../db/balance-writer.js";
+import { entityActor } from "../../../access/actor.js";
 type ImportInput = {
   entityId: string;
   locationId: string;
@@ -140,11 +141,9 @@ export async function runSimphonyImport(
     if (!period) throw new Error(`No open period for ${input.businessDate}`);
 
     // ── Entity user & accounts ────────────────────────────────────────────
-    const entityUser = await prisma.entityUser.findFirst({
-      where: { entityId: input.entityId },
-      include: { user: true }
-    });
-    if (!entityUser) throw new Error("No entity user found for journal creation");
+    const actor = await entityActor(prisma, input.entityId);
+    if (!actor)
+      throw new Error("No user holds a role at this entity to record as the journal's creator");
 
     // POS settlement account (typically 1010 - POS Clearing or 1000 - Cash)
     const posSettlement = await prisma.account.findFirst({
@@ -339,7 +338,7 @@ export async function runSimphonyImport(
           source: "POS",
           status: "POSTED",
           functionalCurrency: functionalCcy,
-          createdById: entityUser.userId,
+          createdById: actor.userId,
           postedAt: new Date(),
           lines: { create: lines }
         }

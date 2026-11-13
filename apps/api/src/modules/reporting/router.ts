@@ -22,33 +22,41 @@ export async function registerReportingRouter(app: FastifyInstance): Promise<voi
 
       // ── Report Definitions CRUD ─────────────────────────────────────────
 
-      router.get("/reports/definitions", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await reportingService.listDefinitions(entityId);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/reports/definitions",
+        { preHandler: [requirePermission("REPORT_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await reportingService.listDefinitions(entityId);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
-      router.get<{ Params: { id: string } }>("/reports/definitions/:id", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await (prisma as unknown as PrismaClient).reportDefinition.findFirst({
-            where: { entityId, id: request.params.id },
-            include: { _count: { select: { runs: true } } }
-          });
-          if (!data)
-            return reply.code(404).send({
-              data: null,
-              errors: [{ code: "NOT_FOUND", message: "Report definition not found." }]
+      router.get<{ Params: { id: string } }>(
+        "/reports/definitions/:id",
+        { preHandler: [requirePermission("REPORT_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await (prisma as unknown as PrismaClient).reportDefinition.findFirst({
+              where: { entityId, id: request.params.id },
+              include: { _count: { select: { runs: true } } }
             });
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+            if (!data)
+              return reply.code(404).send({
+                data: null,
+                errors: [{ code: "NOT_FOUND", message: "Report definition not found." }]
+              });
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       router.post(
         "/reports/definitions",
@@ -287,44 +295,52 @@ export async function registerReportingRouter(app: FastifyInstance): Promise<voi
         }
       );
 
-      router.get<{ Params: { id: string } }>("/reports/runs/:id", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const data = await reportingService.getRun(entityId, request.params.id);
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get<{ Params: { id: string } }>(
+        "/reports/runs/:id",
+        { preHandler: [requirePermission("REPORT_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const data = await reportingService.getRun(entityId, request.params.id);
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       // ── Report Run History ──────────────────────────────────────────────
 
-      router.get("/reports/history", async (request, reply) => {
-        try {
-          const entityId = requireEntityId(request.entityId);
-          const { definitionId, status, limit } = request.query as {
-            definitionId?: string;
-            status?: string;
-            limit?: string;
-          };
+      router.get(
+        "/reports/history",
+        { preHandler: [requirePermission("REPORT_READ")] },
+        async (request, reply) => {
+          try {
+            const entityId = requireEntityId(request.entityId);
+            const { definitionId, status, limit } = request.query as {
+              definitionId?: string;
+              status?: string;
+              limit?: string;
+            };
 
-          const data = await (prisma as unknown as PrismaClient).reportRun.findMany({
-            where: {
-              definition: { entityId },
-              ...(definitionId ? { definitionId } : {}),
-              ...(status ? { status: status as any } : {})
-            },
-            include: {
-              definition: { select: { id: true, name: true, type: true } }
-            },
-            orderBy: { createdAt: "desc" },
-            take: Math.min(parseInt(limit ?? "50", 10), 200)
-          });
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+            const data = await (prisma as unknown as PrismaClient).reportRun.findMany({
+              where: {
+                definition: { entityId },
+                ...(definitionId ? { definitionId } : {}),
+                ...(status ? { status: status as any } : {})
+              },
+              include: {
+                definition: { select: { id: true, name: true, type: true } }
+              },
+              orderBy: { createdAt: "desc" },
+              take: Math.min(parseInt(limit ?? "50", 10), 200)
+            });
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       // ── Report Download ─────────────────────────────────────────────────
 
@@ -363,72 +379,79 @@ export async function registerReportingRouter(app: FastifyInstance): Promise<voi
 
       // ── Report Types metadata ───────────────────────────────────────────
 
-      router.get("/reports/types", async (_request, reply) => {
-        return reply.send({
-          data: {
-            types: [
-              {
-                value: "USALI_PL",
-                label: "USALI Departmental P&L",
-                description: "Revenue and expenses by operated department per USALI 12th edition"
-              },
-              {
-                value: "BALANCE_SHEET",
-                label: "Balance Sheet",
-                description: "Assets, liabilities, and equity at period end"
-              },
-              {
-                value: "CASHFLOW",
-                label: "Cash Flow Statement",
-                description: "Operating, investing, and financing cash movements (indirect method)"
-              },
-              {
-                value: "TRIAL_BALANCE",
-                label: "Trial Balance",
-                description: "All accounts with period debits, credits, and closing balances"
-              },
-              {
-                value: "CUSTOM",
-                label: "Custom Report",
-                description: "Custom account grouping by USALI department and category"
-              },
-              {
-                value: "FAL",
-                label: "Financial Account Listing",
-                description: "Flexible account-level detail report with code range and type filters"
-              },
-              {
-                value: "FSL",
-                label: "Financial Statement Listing",
-                description:
-                  "Formatted financial statement with configurable row/column definitions"
-              },
-              {
-                value: "FTL",
-                label: "Financial Transaction Listing",
-                description: "Transaction-level drill-down with period, account, and amount filters"
-              }
-            ],
-            templateOptions: {
-              columns: [
-                "code",
-                "name",
-                "type",
-                "debit",
-                "credit",
-                "balance",
-                "budget",
-                "variance",
-                "variancePct"
+      router.get(
+        "/reports/types",
+        { preHandler: [requirePermission("REPORT_READ")] },
+        async (_request, reply) => {
+          return reply.send({
+            data: {
+              types: [
+                {
+                  value: "USALI_PL",
+                  label: "USALI Departmental P&L",
+                  description: "Revenue and expenses by operated department per USALI 12th edition"
+                },
+                {
+                  value: "BALANCE_SHEET",
+                  label: "Balance Sheet",
+                  description: "Assets, liabilities, and equity at period end"
+                },
+                {
+                  value: "CASHFLOW",
+                  label: "Cash Flow Statement",
+                  description:
+                    "Operating, investing, and financing cash movements (indirect method)"
+                },
+                {
+                  value: "TRIAL_BALANCE",
+                  label: "Trial Balance",
+                  description: "All accounts with period debits, credits, and closing balances"
+                },
+                {
+                  value: "CUSTOM",
+                  label: "Custom Report",
+                  description: "Custom account grouping by USALI department and category"
+                },
+                {
+                  value: "FAL",
+                  label: "Financial Account Listing",
+                  description:
+                    "Flexible account-level detail report with code range and type filters"
+                },
+                {
+                  value: "FSL",
+                  label: "Financial Statement Listing",
+                  description:
+                    "Formatted financial statement with configurable row/column definitions"
+                },
+                {
+                  value: "FTL",
+                  label: "Financial Transaction Listing",
+                  description:
+                    "Transaction-level drill-down with period, account, and amount filters"
+                }
               ],
-              groupBy: ["usali_department", "usali_category", "type", "parent_code"],
-              sortBy: ["code", "name", "balance", "debit", "credit"],
-              accountTypes: ["ASSET", "LIABILITY", "EQUITY", "REVENUE", "EXPENSE"]
-            }
-          },
-          errors: []
-        });
-      });
+              templateOptions: {
+                columns: [
+                  "code",
+                  "name",
+                  "type",
+                  "debit",
+                  "credit",
+                  "balance",
+                  "budget",
+                  "variance",
+                  "variancePct"
+                ],
+                groupBy: ["usali_department", "usali_category", "type", "parent_code"],
+                sortBy: ["code", "name", "balance", "debit", "credit"],
+                accountTypes: ["ASSET", "LIABILITY", "EQUITY", "REVENUE", "EXPENSE"]
+              }
+            },
+            errors: []
+          });
+        }
+      );
 
       // ── Synchronous Report Execution ──────────────────────────────────────
 

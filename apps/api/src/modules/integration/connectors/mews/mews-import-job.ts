@@ -26,6 +26,7 @@ import {
 } from "../shared/suspense.js";
 
 import { applyBalanceDeltas } from "../../../../db/balance-writer.js";
+import { entityActor } from "../../../access/actor.js";
 type ImportInput = {
   entityId: string;
   startUtc: string; // ISO 8601 e.g. "2025-03-20T00:00:00Z"
@@ -122,11 +123,9 @@ export async function runMewsImport(
     if (!period) throw new Error(`No open period for ${businessDate}`);
 
     // ── Entity user & accounts ────────────────────────────────────────────
-    const entityUser = await prisma.entityUser.findFirst({
-      where: { entityId: input.entityId },
-      include: { user: true }
-    });
-    if (!entityUser) throw new Error("No entity user found for journal creation");
+    const actor = await entityActor(prisma, input.entityId);
+    if (!actor)
+      throw new Error("No user holds a role at this entity to record as the journal's creator");
 
     // Cash/settlement account (typically 1010 or 1000)
     const cashSettlement = await prisma.account.findFirst({
@@ -273,7 +272,7 @@ export async function runMewsImport(
             source: "PMS",
             status: "POSTED",
             functionalCurrency: functionalCcy,
-            createdById: entityUser.userId,
+            createdById: actor.userId,
             postedAt: new Date(),
             lines: { create: lines }
           }

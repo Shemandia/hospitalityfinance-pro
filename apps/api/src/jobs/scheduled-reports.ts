@@ -17,6 +17,7 @@
 import { Prisma } from "../db/client.js";
 import { prisma } from "../db/prisma.js";
 import { getReportQueue } from "../modules/reporting/queue.js";
+import { currentTenantId } from "../db/tenantScope.js";
 
 // ── Cron Matching ─────────────────────────────────────────────────────────────
 
@@ -179,8 +180,9 @@ async function resolvePeriodId(
 // ── Main Scheduler Function ───────────────────────────────────────────────────
 
 /**
- * Check all report definitions across all entities for due scheduled reports.
- * Called by the scheduled-reports worker on an hourly cron.
+ * Check all report definitions across all entities of the bound tenant for
+ * due scheduled reports. The scheduled-reports worker calls it once per
+ * active tenant on an hourly cron.
  *
  * For each definition with an enabled schedule:
  * 1. Parse the cron expression
@@ -258,7 +260,7 @@ export async function checkAndRunScheduledReports(): Promise<number> {
     // Enqueue for processing via existing report generation worker
     await queue.add(
       "generate-report",
-      { reportRunId: run.id },
+      { reportRunId: run.id, tenantId: currentTenantId() },
       {
         attempts: 3,
         backoff: { type: "exponential", delay: 5000 },

@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useTenantRouter } from "../../../../../../hooks/use-tenant-router";
 import { useApiContext } from "../../../../../../components/use-api-context";
-import { useUserRole } from "../../../../../../components/use-user-role";
+import { usePermissions } from "../../../../../../components/use-permissions";
 import {
   approveAPPaymentRun,
   confirmAPPaymentRun,
@@ -103,7 +103,8 @@ function flattenAccounts(nodes: AccountNode[], level = 0): FlatAccount[] {
 export default function APPaymentRunsPage() {
   const apiContext = useApiContext();
   const queryClient = useQueryClient();
-  const { canWrite, canAdmin } = useUserRole();
+  const { can } = usePermissions();
+  const canPropose = can("PAYMENT_RUN_CREATE");
   const router = useTenantRouter();
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [startDate, setStartDate] = useState(() => {
@@ -518,15 +519,19 @@ export default function APPaymentRunsPage() {
           </label>
           <button
             onClick={() => proposeMutation.mutate()}
-            disabled={proposeMutation.isPending || !canWrite}
-            title={!canWrite ? "CONTROLLER or ADMIN role required" : undefined}
+            disabled={proposeMutation.isPending || !canPropose}
+            title={
+              !canPropose
+                ? "You need the PAYMENT_RUN_CREATE permission at this property"
+                : undefined
+            }
             style={{
               border: 0,
               borderRadius: "8px",
-              backgroundColor: canWrite ? "#0e7c7b" : "#94a3b8",
+              backgroundColor: canPropose ? "#0e7c7b" : "#94a3b8",
               color: "#fff",
               padding: "0.45rem 0.8rem",
-              cursor: canWrite ? "pointer" : "not-allowed"
+              cursor: canPropose ? "pointer" : "not-allowed"
             }}
           >
             {proposeMutation.isPending ? "Proposing..." : "Propose Run"}

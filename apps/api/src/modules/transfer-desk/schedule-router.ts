@@ -14,7 +14,6 @@ import type { PrismaClient } from "../../db/client.js";
 import { ZodError } from "zod";
 import { prisma } from "../../db/prisma.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
-import { requireRole } from "../../middleware/requireRole.js";
 import { requirePermission } from "../../middleware/requirePermission.js";
 import { scheduleCreateSchema } from "./schedule-types.js";
 import { ScheduleService, ScheduleServiceError } from "./schedule-service.js";
@@ -74,6 +73,7 @@ export async function registerScheduleRouter(app: FastifyInstance): Promise<void
 
       router.get<{ Params: { profileId: string } }>(
         "/transfer-desk/profiles/:profileId/schedule",
+        { preHandler: [requirePermission("TRANSFER_DESK_READ")] },
         async (request, reply) => {
           try {
             const svc = getScheduleService(request);

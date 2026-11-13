@@ -24,8 +24,6 @@ export const RLS_MODELS = new Set([
   // so any prisma.entity.* call needs the context set, otherwise it
   // returns zero rows and findUniqueOrThrow throws "No Entity found".
   "Entity",
-  "EntityUser",
-  "UserRole",
   "Period",
   "Account",
   "JournalType",
@@ -104,8 +102,8 @@ export function registerRLSMiddleware(
   client.$use(async (params, next) => {
     const context = getRequestContext();
 
-    // Already inside an RLS-wrapped scope — pass through
-    if (context._rlsDepth > 0) {
+    // Already inside an RLS-wrapped scope, or inside withBypassRLS — pass through
+    if (context._rlsDepth > 0 || context.rlsBypass) {
       return next(params);
     }
 

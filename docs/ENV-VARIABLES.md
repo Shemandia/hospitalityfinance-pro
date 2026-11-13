@@ -4,35 +4,36 @@
 
 ### Required
 
-| Variable          | Description                                                 | Example                                     |
-| ----------------- | ----------------------------------------------------------- | ------------------------------------------- |
-| `DATABASE_URL`    | PostgreSQL connection string                                | `postgresql://user:pass@localhost:5432/hfp` |
-| `NODE_ENV`        | Environment mode                                            | `development` / `production`                |
-| `PORT`            | API server port                                             | `4000`                                      |
-| `ALLOWED_ORIGINS` | Comma-separated browser origins allowed by CORS/CSRF checks | `https://app.example.com`                   |
-| `APP_BASE_URL`    | Frontend base URL for emails and links                      | `https://app.example.com`                   |
+| Variable       | Description                            | Example                                     |
+| -------------- | -------------------------------------- | ------------------------------------------- |
+| `DATABASE_URL` | PostgreSQL connection string           | `postgresql://user:pass@localhost:5432/hfp` |
+| `NODE_ENV`     | Environment mode                       | `development` / `production`                |
+| `PORT`         | API server port                        | `4000`                                      |
+| `APP_BASE_URL` | Frontend base URL for emails and links | `https://app.example.com`                   |
 
 ### Authentication (Native JWT)
 
-| Variable                   | Description                                 | Example                    |
-| -------------------------- | ------------------------------------------- | -------------------------- |
-| `JWT_SECRET`               | HS256 signing secret, 32+ random bytes      | `openssl-random-hex-value` |
-| `JWT_ACCESS_EXPIRY`        | Access token lifetime in seconds            | `900`                      |
-| `JWT_REFRESH_EXPIRY`       | Refresh token/session lifetime in seconds   | `604800`                   |
-| `BCRYPT_SALT_ROUNDS`       | Password hashing cost                       | `12`                       |
-| `MAX_FAILED_ATTEMPTS`      | Failed login attempts before lockout        | `5`                        |
-| `LOCKOUT_DURATION_MINUTES` | Account lockout duration                    | `15`                       |
-| `COOKIE_SECURE`            | Require HTTPS cookies in production         | `true`                     |
-| `COOKIE_DOMAIN`            | Cookie domain when needed across subdomains | `hotel.com`                |
+| Variable                   | Description                                                                                        | Example                    |
+| -------------------------- | -------------------------------------------------------------------------------------------------- | -------------------------- |
+| `JWT_SECRET`               | HS256 signing secret, 32+ random bytes                                                             | `openssl-random-hex-value` |
+| `JWT_ACCESS_EXPIRY`        | Access token lifetime in seconds                                                                   | `900`                      |
+| `JWT_REFRESH_EXPIRY`       | Refresh token/session lifetime in seconds                                                          | `604800`                   |
+| `BCRYPT_SALT_ROUNDS`       | Password hashing cost                                                                              | `12`                       |
+| `MAX_FAILED_ATTEMPTS`      | Failed login attempts before lockout                                                               | `5`                        |
+| `LOCKOUT_DURATION_MINUTES` | Account lockout duration                                                                           | `15`                       |
+| `COOKIE_SECURE`            | Require HTTPS cookies in production                                                                | `true`                     |
+| `COOKIE_DOMAIN`            | Leave unset: cookies belong to the web app's origin (same-origin proxy)                            |                            |
+| `TRUST_PROXY`              | Addresses whose `X-Forwarded-*` headers the API believes: the web app's server. Default `loopback` | `loopback` / `10.0.0.5`    |
 
 ### Redis (BullMQ queues)
 
-| Variable         | Description                       | Example                  |
-| ---------------- | --------------------------------- | ------------------------ |
-| `REDIS_URL`      | Full Redis URL (preferred)        | `redis://localhost:6379` |
-| `REDIS_HOST`     | Redis hostname (if not using URL) | `127.0.0.1`              |
-| `REDIS_PORT`     | Redis port                        | `6379`                   |
-| `REDIS_PASSWORD` | Redis password                    | `secret`                 |
+| Variable                   | Description                                                                  | Example                  |
+| -------------------------- | ---------------------------------------------------------------------------- | ------------------------ |
+| `REDIS_URL`                | Full Redis URL (preferred)                                                   | `redis://localhost:6379` |
+| `ACCESS_CACHE_TTL_SECONDS` | Lifetime of a cached access result (backstop; changes invalidate explicitly) | `300`                    |
+| `REDIS_HOST`               | Redis hostname (if not using URL)                                            | `127.0.0.1`              |
+| `REDIS_PORT`               | Redis port                                                                   | `6379`                   |
+| `REDIS_PASSWORD`           | Redis password                                                               | `secret`                 |
 
 ### Oracle OHIP (Opera Cloud / Simphony POS)
 
@@ -81,15 +82,44 @@ downloads are intentionally rejected.
 | -------------- | ----------------------------------- | ----------------------- |
 | `APP_BASE_URL` | Frontend base URL (for email links) | `https://app.hotel.com` |
 
+### Development setup (`pnpm dev:setup`)
+
+| Variable             | Description                                                                                                                                                                  | Example             |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
+| `SEED_USER_PASSWORD` | Password the demo users get when they are created (12+ characters, upper and lower case, a digit). Required by `dev:setup` and `db:seed`; users who have a password keep it. | `Choose-Your-Own-1` |
+
+`dev:setup` also needs `DATABASE_URL`, `REGISTRY_DATABASE_URL` (a different database) and `APP_BASE_URL`. Neither it nor `db:seed` runs with `NODE_ENV=production`.
+
+### Workers (`pnpm workers`, `workers:prod`)
+
+The API starts no background workers; it only enqueues. The worker process runs
+them all, Transfer Desk included (OPS-10).
+
+| Variable                       | Description                                                                                                                                 | Example |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| `WORKER_MAX_CLEAN_EXITS`       | A worker that exits cleanly this many times in a row is not restarted; the supervisor stops all workers and exits with code 1. Default `3`. | `3`     |
+| `TRANSFER_DESK_TENANT_POLL_MS` | How often the Transfer Desk process checks the registry for added or deactivated tenants. Default `60000`.                                  | `60000` |
+
+### Tests
+
+| Variable                     | Description                                                            | Example                                                  |
+| ---------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------- |
+| `TEST_DATABASE_URL`          | Tenant database for integration tests; required by `test:integration`  | `postgresql://hfp:pass@localhost:5432/hfp_test`          |
+| `TEST_SECOND_DATABASE_URL`   | A second tenant database, for the two-tenant isolation tests; required | `postgresql://hfp:pass@localhost:5432/hfp_test_b`        |
+| `TEST_REGISTRY_DATABASE_URL` | A registry database, for the worker entry-point tests; required        | `postgresql://hfp:pass@localhost:5432/hfp_registry_test` |
+
+`DATABASE_URL` is used by the setup scripts and as the registry fallback. It is
+not a default tenant: a query with no tenant bound fails (AUT-05).
+
 ---
 
 ## Web (`apps/web/.env.local`)
 
-| Variable                   | Description                  | Example                   |
-| -------------------------- | ---------------------------- | ------------------------- |
-| `API_BASE_URL`             | Server-side API base URL     | `http://localhost:4500`   |
-| `NEXT_PUBLIC_API_BASE_URL` | Browser-visible API base URL | `http://localhost:4500`   |
-| `NEXT_PUBLIC_APP_URL`      | Public web application URL   | `https://app.example.com` |
+| Variable           | Description                                                                                      | Example                 |
+| ------------------ | ------------------------------------------------------------------------------------------------ | ----------------------- |
+| `API_INTERNAL_URL` | The API as the web server reaches it; read at request time. Required. Never sent to the browser. | `http://127.0.0.1:4500` |
+
+The browser calls `/api/v1/*` and `/auth/*` on the web app itself, which proxies them to `API_INTERNAL_URL` (`lib/server/api-proxy.ts`). There is no browser-visible API address, no allowed-origin list and no CORS. `NEXT_PUBLIC_API_BASE_URL`, `API_BASE_URL` and `NEXT_PUBLIC_APP_URL` are no longer read.
 
 ---
 
@@ -99,11 +129,6 @@ Use `docs/NON-DOCKER-SETUP.md` for direct Node.js, PostgreSQL, Redis and PM2 dep
 
 ---
 
-## Dev Mode
+## Signing in during development
 
-When `NODE_ENV !== 'production'` and `ENABLE_DEV_AUTH=true`, the API accepts:
-
-- Bearer token: `dev-<uuid>`
-- Header: `X-Entity-ID: 00000000-0000-0000-0000-000000000002`
-- Roles and permissions are hardcoded for local development only
-- No external identity provider required
+There is no development token. Sign in with a real user at `/t/<tenant code>/login`; `pnpm dev:setup` builds the databases, creates the demo users with the password in `SEED_USER_PASSWORD` and gives them their roles, then prints the sign-in address. `ENABLE_DEV_AUTH` is no longer read.

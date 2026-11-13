@@ -18,7 +18,7 @@ import { useState } from "react";
 import { useParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useApiContext } from "../../../../../../../components/use-api-context";
-import { useUserRole } from "../../../../../../../components/use-user-role";
+import { usePermissions } from "../../../../../../../components/use-permissions";
 import { useTenantHref, useTenantRouter } from "../../../../../../../hooks/use-tenant-router";
 import {
   getTransferProfile,
@@ -61,7 +61,7 @@ export default function TransferProfileDetailPage() {
   const apiContext = useApiContext();
   const tenantHref = useTenantHref();
   const router = useTenantRouter();
-  const role = useUserRole();
+  const role = usePermissions();
   const qc = useQueryClient();
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(
     null

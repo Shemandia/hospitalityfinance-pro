@@ -1,13 +1,8 @@
 import { createApp } from "./app.js";
-import { disconnectAllTenants, getTenantClient } from "./db/tenantPool.js";
-import { disconnectRegistry, listTenants } from "./db/tenantRegistry.js";
+import { disconnectAllTenants } from "./db/tenantPool.js";
+import { disconnectRegistry } from "./db/tenantRegistry.js";
 import { disconnectRedis } from "./db/redis.js";
 import { disconnectAllTransferDeskQueues } from "./jobs/transfer-desk-queue.js";
-import {
-  disconnectAllTransferDeskWorkers,
-  ensureTransferDeskWorker
-} from "./jobs/transfer-desk-worker.js";
-import { syncAutomationSchedules } from "./jobs/automation-scheduler.js";
 
 const port = Number(process.env.PORT ?? 3001);
 
@@ -16,31 +11,8 @@ async function start(): Promise<void> {
   await app.listen({ port, host: "0.0.0.0" });
   app.log.info(`API listening on port ${port}`);
 
-  // ── Sync automation schedules for all active tenants ────────────────────
-  // Runs after server is listening so Redis connection is available.
-  try {
-    const tenants = await listTenants();
-    for (const tenant of tenants) {
-      try {
-        const db = getTenantClient(tenant.slug, tenant.databaseUrl);
-        const result = await syncAutomationSchedules(db, tenant.slug);
-        if (result.synced > 0) {
-          ensureTransferDeskWorker(tenant.slug, tenant.databaseUrl);
-          app.log.info(
-            `[AutomationScheduler:${tenant.slug}] Synced ${result.synced} schedules, removed ${result.removed}`
-          );
-        }
-      } catch (err) {
-        app.log.warn(
-          `[AutomationScheduler:${tenant.slug}] Schedule sync failed: ${(err as Error).message}`
-        );
-      }
-    }
-  } catch (err) {
-    app.log.warn(
-      `[AutomationScheduler] Failed to sync schedules on startup: ${(err as Error).message}`
-    );
-  }
+  // Background workers, Transfer Desk included, run in the worker process
+  // (pnpm workers), not here. The API only enqueues (OPS-10).
 
   // ── Graceful shutdown ──────────────────────────────────────────────────
   let shuttingDown = false;
@@ -60,11 +32,8 @@ async function start(): Promise<void> {
       await app.close();
       app.log.info("Fastify server closed");
 
-      // Stop the Transfer Desk workers BEFORE closing tenant DB connections
-      // — workers hold tenant Prisma clients via the same pool.
-      await disconnectAllTransferDeskWorkers();
       await disconnectAllTransferDeskQueues();
-      app.log.info("Transfer Desk workers + queues closed");
+      app.log.info("Transfer Desk queues closed");
 
       await Promise.allSettled([disconnectAllTenants(), disconnectRegistry(), disconnectRedis()]);
       app.log.info("All database connections released");

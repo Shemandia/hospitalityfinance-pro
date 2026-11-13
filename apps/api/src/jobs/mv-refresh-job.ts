@@ -12,6 +12,7 @@
 
 import { Queue, Worker } from "bullmq";
 import { prisma } from "../db/prisma.js";
+import { currentTenantId, forEachActiveTenant, runForTenantId } from "../db/tenantScope.js";
 import { withBypassRLS } from "../db/rls-bypass.js";
 
 const QUEUE_NAME = "mv-refresh";
@@ -42,12 +43,14 @@ export const mvRefreshQueue = new Queue(QUEUE_NAME, { connection });
  * Enqueue a materialized view refresh.
  * Deduplicated by jobId to avoid concurrent refreshes.
  */
+/** Enqueues a refresh of the bound tenant's view. One pending refresh per tenant. */
 export async function enqueueMVRefresh(reason: string): Promise<void> {
+  const tenantId = currentTenantId();
   await mvRefreshQueue.add(
     "refresh",
-    { reason, requestedAt: new Date().toISOString() },
+    { tenantId, reason, requestedAt: new Date().toISOString() },
     {
-      jobId: "mv-refresh-singleton",
+      jobId: `mv-refresh-${tenantId}`,
       removeOnComplete: 20,
       removeOnFail: 20,
       // Debounce: if a refresh is already queued, skip
@@ -128,8 +131,10 @@ if (process.argv[1]?.includes("mv-refresh-job")) {
     QUEUE_NAME,
     async (job) => {
       console.log(`[MVRefreshWorker] Refreshing MV — reason: ${job.data?.reason ?? "unknown"}`);
-      const result = await refreshMaterializedView();
-      return result;
+      // A refresh names its tenant; the scheduled safety net refreshes every tenant.
+      const tenantId: string | undefined = job.data?.tenantId;
+      if (tenantId) return runForTenantId(tenantId, () => refreshMaterializedView());
+      return forEachActiveTenant(() => refreshMaterializedView());
     },
     {
       connection,

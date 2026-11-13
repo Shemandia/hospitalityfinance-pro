@@ -47,28 +47,32 @@ export async function registerTransferDeskBatchRouter(app: FastifyInstance): Pro
   app.register(
     async (router) => {
       router.addHook("preHandler", requireAuth);
-      router.addHook("preHandler", requirePermission("TRANSFER_DESK_EXECUTE"));
 
       // ── GET /transfer-desk/batches — list batches ─────────────────────────
 
-      router.get("/transfer-desk/batches", async (request, reply) => {
-        try {
-          const q = request.query as { status?: string; profileId?: string };
-          const data = await service.listBatches({
-            entityId: request.entityId,
-            status: q.status,
-            profileId: q.profileId
-          });
-          return reply.send({ data, errors: [] });
-        } catch (error) {
-          return mapError(reply, error);
+      router.get(
+        "/transfer-desk/batches",
+        { preHandler: [requirePermission("TRANSFER_DESK_EXECUTE")] },
+        async (request, reply) => {
+          try {
+            const q = request.query as { status?: string; profileId?: string };
+            const data = await service.listBatches({
+              entityId: request.entityId,
+              status: q.status,
+              profileId: q.profileId
+            });
+            return reply.send({ data, errors: [] });
+          } catch (error) {
+            return mapError(reply, error);
+          }
         }
-      });
+      );
 
       // ── GET /transfer-desk/batches/:id — get batch detail ─────────────────
 
       router.get<{ Params: { id: string } }>(
         "/transfer-desk/batches/:id",
+        { preHandler: [requirePermission("TRANSFER_DESK_EXECUTE")] },
         async (request, reply) => {
           try {
             const data = await service.getBatch(requireEntityId(request), request.params.id);
@@ -83,6 +87,7 @@ export async function registerTransferDeskBatchRouter(app: FastifyInstance): Pro
 
       router.post<{ Params: { id: string; itemId: string } }>(
         "/transfer-desk/batches/:id/items/:itemId/reject",
+        { preHandler: [requirePermission("TRANSFER_DESK_EXECUTE")] },
         async (request, reply) => {
           try {
             const { reason } = rejectSchema.parse(request.body ?? {});
@@ -105,6 +110,7 @@ export async function registerTransferDeskBatchRouter(app: FastifyInstance): Pro
 
       router.post<{ Params: { id: string; itemId: string } }>(
         "/transfer-desk/batches/:id/items/:itemId/restore",
+        { preHandler: [requirePermission("TRANSFER_DESK_EXECUTE")] },
         async (request, reply) => {
           try {
             const data = await service.restoreItem(
@@ -123,6 +129,7 @@ export async function registerTransferDeskBatchRouter(app: FastifyInstance): Pro
 
       router.post<{ Params: { id: string } }>(
         "/transfer-desk/batches/:id/commit",
+        { preHandler: [requirePermission("TRANSFER_DESK_EXECUTE")] },
         async (request, reply) => {
           try {
             const userId = String((request.user as any)?.sub ?? "system");
@@ -142,6 +149,7 @@ export async function registerTransferDeskBatchRouter(app: FastifyInstance): Pro
 
       router.post<{ Params: { id: string } }>(
         "/transfer-desk/batches/:id/discard",
+        { preHandler: [requirePermission("TRANSFER_DESK_EXECUTE")] },
         async (request, reply) => {
           try {
             const userId = String((request.user as any)?.sub ?? "system");

@@ -34,17 +34,21 @@ export function registerSimphonyRoutes(router: FastifyInstance) {
     }
   );
 
-  router.get("/simphony/logs", async (request, reply) => {
-    try {
-      const entityId = requireEntityId(request.entityId);
-      const logs = await prisma.importLog.findMany({
-        where: { entityId, connectorType: "SIMPHONY_POS" },
-        orderBy: { createdAt: "desc" },
-        take: 200
-      });
-      return reply.send({ data: logs, errors: [] });
-    } catch (error) {
-      return mapError(reply, error);
+  router.get(
+    "/simphony/logs",
+    { preHandler: [requirePermission("INTEGRATION_READ")] },
+    async (request, reply) => {
+      try {
+        const entityId = requireEntityId(request.entityId);
+        const logs = await prisma.importLog.findMany({
+          where: { entityId, connectorType: "SIMPHONY_POS" },
+          orderBy: { createdAt: "desc" },
+          take: 200
+        });
+        return reply.send({ data: logs, errors: [] });
+      } catch (error) {
+        return mapError(reply, error);
+      }
     }
-  });
+  );
 }

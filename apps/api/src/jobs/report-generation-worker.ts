@@ -1,6 +1,8 @@
 import { Worker } from "bullmq";
 import { getReportQueueName } from "../modules/reporting/queue.js";
 import { processReportRun } from "./report-generation-job.js";
+import { runForTenantId } from "../db/tenantScope.js";
+import type { ReportJobData } from "../modules/reporting/queue.js";
 
 const redisUrl = process.env.REDIS_URL;
 const connection = redisUrl
@@ -18,10 +20,10 @@ const connection = redisUrl
       password: process.env.REDIS_PASSWORD ?? undefined
     };
 
-const worker = new Worker(
+const worker = new Worker<ReportJobData>(
   getReportQueueName(),
   async (job) => {
-    await processReportRun(job.data.reportRunId);
+    await runForTenantId(job.data.tenantId, () => processReportRun(job.data.reportRunId));
   },
   {
     connection,

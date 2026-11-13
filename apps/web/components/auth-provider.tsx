@@ -1,25 +1,38 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import type { AccessContext } from "../lib/access";
+
+/**
+ * Who is signed in, and what they may do (WP-A step 6).
+ *
+ * Everything comes from GET /api/v1/context: the tenant, the user, the
+ * permissions held tenant-wide and the entities the user can open with the
+ * permissions at each. Nothing is read from the token or from role names.
+ *
+ * A 401 means signed out. Any other failure (503, network) leaves the user
+ * signed in and reports the context as unavailable (AUT-10).
+ */
 
 type AuthUser = {
   id: string;
   email: string;
   name: string;
-  roles: string[];
-  permissions: string[];
-  entities: Array<{ entityId: string; name: string; type: string }>;
-  entityIds: string[];
   mustChangePassword: boolean;
-  tenantSlug?: string;
-  tenantCode?: string;
+  tenantId: string;
+  tenantSlug: string;
+  tenantCode: string;
+  tenantName: string;
 };
+
+type AuthStatus = "loading" | "authenticated" | "unauthenticated" | "unavailable";
 
 type AuthState = {
   user: AuthUser | null;
+  /** The access context the user's menus and buttons are drawn from. */
+  context: AccessContext | null;
   accessToken: string | null;
-  status: "loading" | "authenticated" | "unauthenticated";
+  status: AuthStatus;
   error?: string;
 };
 
@@ -31,117 +44,120 @@ type AuthContextValue = AuthState & {
   ) => Promise<{ mustChangePassword: boolean } | { error: string }>;
   logout: () => Promise<void>;
   refresh: () => Promise<boolean>;
+  /** Reload the access context, for example after an administrator changed this user's grants. */
+  reloadContext: () => Promise<void>;
+};
+
+const SIGNED_OUT: AuthState = {
+  user: null,
+  context: null,
+  accessToken: null,
+  status: "unauthenticated"
 };
 
 const AuthContext = createContext<AuthContextValue>({
   user: null,
+  context: null,
   accessToken: null,
   status: "loading",
   login: async () => ({ error: "Not initialized" }),
   logout: async () => {},
-  refresh: async () => false
+  refresh: async () => false,
+  reloadContext: async () => {}
 });
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4500";
+// Same origin: the web app proxies the API (lib/server/api-proxy.ts).
+const API_BASE = "";
+
+function userFrom(context: AccessContext): AuthUser {
+  return {
+    id: context.user.id,
+    email: context.user.email,
+    name: context.user.name ?? "",
+    mustChangePassword: context.user.mustChangePassword,
+    tenantId: context.tenant.id,
+    tenantSlug: context.tenant.slug,
+    tenantCode: context.tenant.code,
+    tenantName: context.tenant.name
+  };
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({
     user: null,
+    context: null,
     accessToken: null,
     status: "loading"
   });
-  const router = useRouter();
-  const pathname = usePathname();
 
-  // Check auth state on mount by calling /auth/me
-  useEffect(() => {
-    checkAuth();
-  }, []);
-
-  async function checkAuth() {
+  const loadContext = useCallback(async (): Promise<AuthStatus> => {
     try {
-      const res = await fetch(`${API_BASE}/auth/me`, {
-        credentials: "include"
-      });
+      const res = await fetch(`${API_BASE}/api/v1/context`, { credentials: "include" });
       if (res.ok) {
-        const json = await res.json();
-        const profile = json.data;
+        const context = ((await res.json()) as { data: AccessContext }).data;
         setState({
-          user: {
-            id: profile.id,
-            email: profile.email,
-            name: profile.name,
-            roles: profile.roles ?? [],
-            permissions: profile.permissions ?? [],
-            entities: profile.entities ?? [],
-            entityIds: (profile.entities ?? []).map((e: any) => e.entityId),
-            mustChangePassword: profile.mustChangePassword ?? false,
-            tenantSlug: profile.tenantSlug,
-            tenantCode: profile.tenantCode
-          },
-          accessToken: "cookie", // Tokens are in httpOnly cookies — we use "cookie" as sentinel
+          user: userFrom(context),
+          context,
+          // Tokens are in httpOnly cookies; "cookie" is the sentinel the API clients expect.
+          accessToken: "cookie",
           status: "authenticated"
         });
-      } else {
-        setState({ user: null, accessToken: null, status: "unauthenticated" });
+        return "authenticated";
       }
-    } catch {
-      setState({ user: null, accessToken: null, status: "unauthenticated" });
-    }
-  }
-
-  const login = useCallback(async (email: string, password: string, tenantCode: string) => {
-    try {
-      const res = await fetch(`${API_BASE}/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, tenantCode }),
-        credentials: "include"
-      });
-      const json = await res.json();
-
-      if (!res.ok) {
-        return { error: json.errors?.[0]?.message ?? "Login failed" };
+      if (res.status === 401) {
+        setState(SIGNED_OUT);
+        return "unauthenticated";
       }
-
-      const data = json.data;
-      const mustChangePassword = data.mustChangePassword ?? false;
-
-      // Set initial state from login response so the UI can proceed
-      setState({
-        user: {
-          id: data.user.id,
-          email: data.user.email,
-          name: data.user.name,
-          roles: data.user.roles ?? [],
-          permissions: [],
-          entities: [],
-          entityIds: data.user.entityIds ?? [],
-          mustChangePassword
-        },
-        accessToken: "cookie",
-        status: "authenticated"
-      });
-
-      // Immediately fetch full profile (including permissions) from /auth/me
-      await checkAuth();
-
-      return { mustChangePassword };
+      const message = `Your access could not be loaded (${res.status}). Try again in a moment.`;
+      setState((prev) => ({ ...prev, status: "unavailable", error: message }));
+      return "unavailable";
     } catch {
-      return { error: "Network error" };
+      setState((prev) => ({
+        ...prev,
+        status: "unavailable",
+        error: "The server could not be reached. Try again in a moment."
+      }));
+      return "unavailable";
     }
   }, []);
+
+  useEffect(() => {
+    void loadContext();
+  }, [loadContext]);
+
+  const login = useCallback(
+    async (email: string, password: string, tenantCode: string) => {
+      try {
+        const res = await fetch(`${API_BASE}/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password, tenantCode }),
+          credentials: "include"
+        });
+        const json = await res.json();
+        if (!res.ok) {
+          return { error: json.errors?.[0]?.message ?? "Login failed" };
+        }
+        const mustChangePassword = json.data?.mustChangePassword ?? false;
+        const status = await loadContext();
+        if (status !== "authenticated") {
+          return { error: "Signed in, but your access could not be loaded. Try again." };
+        }
+        return { mustChangePassword };
+      } catch {
+        return { error: "Network error" };
+      }
+    },
+    [loadContext]
+  );
 
   const logout = useCallback(async () => {
     try {
-      await fetch(`${API_BASE}/auth/logout`, {
-        method: "POST",
-        credentials: "include"
-      });
+      await fetch(`${API_BASE}/auth/logout`, { method: "POST", credentials: "include" });
     } catch {
       // Best-effort
     }
-    setState({ user: null, accessToken: null, status: "unauthenticated" });
+    setState(SIGNED_OUT);
   }, []);
 
   const refresh = useCallback(async () => {
@@ -151,32 +167,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         credentials: "include"
       });
       if (res.ok) {
-        // Re-check auth to get fresh user data
-        await checkAuth();
-        return true;
+        return (await loadContext()) === "authenticated";
+      }
+      if (res.status === 401) {
+        setState(SIGNED_OUT);
       }
     } catch {
-      // ignore
+      // A network fault is not a sign-out.
     }
-    setState({ user: null, accessToken: null, status: "unauthenticated" });
     return false;
-  }, []);
+  }, [loadContext]);
 
-  // Auto-refresh: set up interval to refresh token before expiry
+  const reloadContext = useCallback(async () => {
+    await loadContext();
+  }, [loadContext]);
+
+  // Refresh before the access token expires (it lasts 15 minutes). Each refresh
+  // also reloads the context, so grant changes reach the menus without a sign-in.
   useEffect(() => {
     if (state.status !== "authenticated") return;
-    // Refresh every 13 minutes (access token lasts 15 min)
-    const interval = setInterval(
-      () => {
-        refresh();
-      },
-      13 * 60 * 1000
-    );
+    const interval = setInterval(() => void refresh(), 13 * 60 * 1000);
     return () => clearInterval(interval);
   }, [state.status, refresh]);
 
   return (
-    <AuthContext.Provider value={{ ...state, login, logout, refresh }}>
+    <AuthContext.Provider value={{ ...state, login, logout, refresh, reloadContext }}>
       {children}
     </AuthContext.Provider>
   );
@@ -186,7 +201,7 @@ export function useAuth() {
   return useContext(AuthContext);
 }
 
-// Backwards-compatibility shim: useSession() equivalent
+/** The shape older screens read the session through. Identity only. */
 export function useSession() {
   const auth = useAuth();
   return {
@@ -197,9 +212,6 @@ export function useSession() {
             user: {
               email: auth.user?.email,
               name: auth.user?.name,
-              roles: auth.user?.roles ?? [],
-              permissions: auth.user?.permissions ?? [],
-              entityIds: auth.user?.entityIds ?? [],
               tenantSlug: auth.user?.tenantSlug,
               tenantCode: auth.user?.tenantCode
             },

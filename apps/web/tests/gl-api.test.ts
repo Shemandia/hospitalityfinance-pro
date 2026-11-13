@@ -6,7 +6,6 @@ const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
 // Reset process.env for API base URL
-vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "http://test-api:4500");
 
 describe("gl-api", () => {
   let mod: typeof import("../lib/gl-api");

@@ -59,7 +59,7 @@ export async function registerDunningSchedule(): Promise<void> {
   // Schedule: daily at 08:00 UTC
   await queue.add(
     "daily-dunning",
-    { entityId: "__ALL__" },
+    { scope: "all" },
     {
       repeat: { pattern: "0 8 * * *" },
       removeOnComplete: { count: 50 },
@@ -73,11 +73,11 @@ export async function registerDunningSchedule(): Promise<void> {
 /**
  * Enqueue an immediate dunning run for a specific entity.
  */
-export async function enqueueDunningRun(entityId: string): Promise<string> {
+export async function enqueueDunningRun(tenantId: string, entityId: string): Promise<string> {
   const queue = getDunningQueue();
   const job = await queue.add(
     "manual-dunning",
-    { entityId },
+    { scope: "entity", tenantId, entityId },
     {
       removeOnComplete: { count: 100 },
       removeOnFail: { count: 50 },

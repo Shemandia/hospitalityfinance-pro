@@ -16,6 +16,7 @@ import {
 } from "../shared/suspense.js";
 
 import { applyBalanceDelta } from "../../../../db/balance-writer.js";
+import { entityActor } from "../../../access/actor.js";
 // ── Shared types ──────────────────────────────────────────────────────────────
 
 type ImportResult = {
@@ -105,11 +106,9 @@ export async function importOperaSUNFile(
     }
 
     // Find actor user for journal creation
-    const entityUser = await prisma.entityUser.findFirst({
-      where: { entityId: input.entityId },
-      include: { user: true }
-    });
-    if (!entityUser) throw new Error("No entity user found for journal creation");
+    const actor = await entityActor(prisma, input.entityId);
+    if (!actor)
+      throw new Error("No user holds a role at this entity to record as the journal's creator");
 
     // Determine file currency and entity functional currency for FX conversion
     const fileCurrency = (parsed.currency ?? "USD").toUpperCase();
@@ -225,7 +224,7 @@ export async function importOperaSUNFile(
           source: "PMS",
           status: "DRAFT",
           functionalCurrency,
-          createdById: entityUser.userId,
+          createdById: actor.userId,
           lines: { create: journalLines }
         }
       });
@@ -342,11 +341,9 @@ export async function runOperaCloudImport(
 
     if (!period) throw new Error(`No open period for ${input.businessDate}`);
 
-    const entityUser = await prisma.entityUser.findFirst({
-      where: { entityId: input.entityId },
-      include: { user: true }
-    });
-    if (!entityUser) throw new Error("No entity user found for journal creation");
+    const actor = await entityActor(prisma, input.entityId);
+    if (!actor)
+      throw new Error("No user holds a role at this entity to record as the journal's creator");
 
     const cashAccount = await prisma.account.findFirst({
       where: { entityId: input.entityId, code: "1000", allowPosting: true }
@@ -443,7 +440,7 @@ export async function runOperaCloudImport(
           source: "PMS",
           status: "POSTED",
           functionalCurrency: cloudFunctionalCcy,
-          createdById: entityUser.userId,
+          createdById: actor.userId,
           postedAt: new Date(),
           lines: { create: lines }
         }

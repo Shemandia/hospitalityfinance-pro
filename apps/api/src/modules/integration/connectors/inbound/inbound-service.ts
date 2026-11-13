@@ -16,6 +16,7 @@ import type {
   InboundSupplierBatch,
   InboundBatchResult
 } from "./inbound-types.js";
+import { entityActor } from "../../../access/actor.js";
 
 // ── Invoice Import ──────────────────────────────────────────────────────────
 
@@ -35,11 +36,8 @@ export async function importInvoiceBatch(
   };
 
   // Resolve actor (first entity user) for journal creation
-  const entityUser = await prisma.entityUser.findFirst({
-    where: { entityId },
-    select: { userId: true }
-  });
-  if (!entityUser) {
+  const actor = await entityActor(prisma, entityId);
+  if (!actor) {
     result.errors.push({ index: -1, message: "No users found for this entity." });
     return result;
   }
@@ -168,7 +166,7 @@ export async function importInvoiceBatch(
           status: batch.autoPost ? "APPROVED" : "DRAFT",
           externalPoRef: inv.externalPoRef ?? null,
           paymentTerms: inv.paymentTerms,
-          createdById: entityUser.userId,
+          createdById: actor.userId,
           lines: { create: lines }
         },
         select: { id: true }
@@ -219,11 +217,8 @@ export async function importJournalBatch(
     duplicateRefs: []
   };
 
-  const entityUser = await prisma.entityUser.findFirst({
-    where: { entityId },
-    select: { userId: true }
-  });
-  if (!entityUser) {
+  const actor = await entityActor(prisma, entityId);
+  if (!actor) {
     result.errors.push({ index: -1, message: "No users found for this entity." });
     return result;
   }
@@ -394,7 +389,7 @@ export async function importJournalBatch(
         functionalCurrency: jnlFunctionalCcy,
         status: batch.autoPost ? "POSTED" : "DRAFT",
         postedAt: batch.autoPost ? jnl.postingDate : null,
-        createdById: entityUser.userId,
+        createdById: actor.userId,
         lines: { create: journalLines }
       };
 

@@ -19,6 +19,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { PrismaClient, Prisma } from "../../src/db/client.js";
 import { withBypassRLS } from "../../src/db/rls-bypass.js";
 import { FXService } from "../../src/modules/fx/service.js";
+import { grantRole } from "../../src/modules/access/grants.js";
 
 const D = (v: string | number) => new Prisma.Decimal(v);
 
@@ -69,9 +70,11 @@ if (!process.env.TEST_DATABASE_URL) {
         const user = await tx.user.create({
           data: { email: `fx-${unique}@example.test`, name: "FX Tester" }
         });
-        await tx.entityUser.create({
-          data: { entityId: entity.id, userId: user.id, role: "ADMIN" }
+        // A role at the entity makes the user its recorded actor (access/actor.ts).
+        const role = await tx.role.create({
+          data: { code: `IT_FX_${unique}`, name: "Integration test role" }
         });
+        await grantRole(tx, user.id, role.id, { scope: "ENTITY", entityId: entity.id });
 
         const period = await tx.period.create({
           data: { entityId: entity.id, year: 2026, month: 4, name: "2026-04", status: "OPEN" }
