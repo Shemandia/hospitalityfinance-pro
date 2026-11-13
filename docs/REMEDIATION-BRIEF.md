@@ -545,6 +545,20 @@ Added 11 November 2026 after bringing the project up on the development server. 
 6. Stopping Redis returns 503, not a sign-out.
 7. On an empty server, the setup command followed by sign-in reaches the dashboard with full admin permissions.
 
+**Status of the acceptance checks (13 November 2026, branch `wp-a/access-control`)**
+
+| Check | Status        | Evidence                                                                                                                          |
+| ----- | ------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | Passing in CI | `tests/integration/route-guard.test.ts`, "acceptance 1"                                                                           |
+| 2     | Passing in CI | `route-guard.test.ts`, "acceptance 2"                                                                                             |
+| 3     | Passing in CI | `route-guard.test.ts`, "acceptance 3"; `admin-scope.test.ts`, grants made through the admin API                                   |
+| 4     | Passing in CI | `tests/integration/menus-match-api.test.ts`: the web's `lib/access.ts` against the guard, every permission code, scope and entity |
+| 5     | Passing in CI | `tests/integration/two-tenants.test.ts`, two real tenant databases                                                                |
+| 6     | Passing in CI | `route-guard.test.ts`, "acceptance 6"                                                                                             |
+| 7     | Open          | Needs the `dev:setup` command (step 9).                                                                                           |
+
+Browser check by the owner on the development server, at step 6: sign-in answered 200, `GET /api/v1/context` answered 200, the dashboard loaded, and the unconfigured demo tenant was sent to the setup wizard. `db:migrate:access` is applied to the development database `hfp_db`.
+
 **Later addition, not part of this package:** sign-in with Microsoft Entra ID as a second way to authenticate. It plugs into the same session and assignment model.
 
 ## 11. Unified ledger model (WP-U)
@@ -597,7 +611,7 @@ WP-U code does not start until WP-A and WP-2 are merged. WP-U also closes ACC-12
 | `transactionDate`, `dueDate`                       | Ageing and payment selection are by line                     |
 | `transactionReference`, `secondReference`          | Invoice number, payment reference, purchase order            |
 | `baseAmount`, `reportingAmount`, `reportingRate`   | Third currency amount; rename the functional columns to base |
-| `allocationMarker`                                 | Unallocated, allocated, paid, withheld, in dispute           |
+| `allocationMarker`                                 | Unallocated, allocated, paid, on hold, in dispute            |
 | `allocationRef`, `allocationDate`, `allocatedById` | Groups the lines that were matched together                  |
 | `dimension1` to `dimension10`                      | Foreign keys to analysis codes, validated per dimension rule |
 | `taxCodeId`, `taxBaseAmount`                       | Tax reporting from the ledger                                |
@@ -611,16 +625,16 @@ WP-U code does not start until WP-A and WP-2 are merged. WP-U also closes ACC-12
 
 ### What happens to the existing modules
 
-| Existing                                                            | Action                                                                                                              |
-| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `modules/ap`, `modules/ar` services and routes                      | Rewrite as document entry and enquiry over the ledger. Keep URLs and screens where possible.                        |
-| `APInvoice`, `APInvoiceLine`, `APPayment`, `ARInvoice`, `ARReceipt` | Migrate to entry documents plus ledger lines, then drop.                                                            |
-| `APPaymentAllocation`, `ARAllocation`                               | Migrate to allocation references on lines, then drop.                                                               |
-| `Supplier`, `Customer`                                              | Migrate to accounts with attached address records, then drop.                                                       |
-| Payment runs                                                        | Select unallocated creditor lines by due date and marker; pay; allocate. Withheld and in-dispute lines are skipped. |
-| Dunning and statements                                              | Query unallocated debtor lines.                                                                                     |
-| `BudgetDefinition`, `BudgetLine`                                    | Migrate to journals in a budget ledger; budget versions become ledgers. Budget entry screens write to that ledger.  |
-| Three-way match, purchase documents                                 | Stay outside the ledger; they produce an entry document when approved.                                              |
+| Existing                                                            | Action                                                                                                             |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `modules/ap`, `modules/ar` services and routes                      | Rewrite as document entry and enquiry over the ledger. Keep URLs and screens where possible.                       |
+| `APInvoice`, `APInvoiceLine`, `APPayment`, `ARInvoice`, `ARReceipt` | Migrate to entry documents plus ledger lines, then drop.                                                           |
+| `APPaymentAllocation`, `ARAllocation`                               | Migrate to allocation references on lines, then drop.                                                              |
+| `Supplier`, `Customer`                                              | Migrate to accounts with attached address records, then drop.                                                      |
+| Payment runs                                                        | Select unallocated creditor lines by due date and marker; pay; allocate. On-hold and in-dispute lines are skipped. |
+| Dunning and statements                                              | Query unallocated debtor lines.                                                                                    |
+| `BudgetDefinition`, `BudgetLine`                                    | Migrate to journals in a budget ledger; budget versions become ledgers. Budget entry screens write to that ledger. |
+| Three-way match, purchase documents                                 | Stay outside the ledger; they produce an entry document when approved.                                             |
 
 ### Work items
 
@@ -643,7 +657,7 @@ WP-U code does not start until WP-A and WP-2 are merged. WP-U also closes ACC-12
 1. Supplier and customer ageing come from ledger lines only, and the total of open lines on each creditor and debtor account equals the account balance by construction.
 2. The reconciliation script shows zero difference per supplier, customer and account between the old tables and the migrated ledger on the seeded demo data.
 3. Posting an invoice, paying it and allocating the two leaves both lines marked allocated with one shared reference; reversing the allocation reopens both.
-4. A withheld line is skipped by a payment run.
+4. A line on hold (`ON_HOLD`) is skipped by a payment run.
 5. Actual versus budget for a department is one query across two ledgers.
 6. A line carries three currency amounts, and revaluation updates base and reporting amounts separately.
 7. A user restricted to one department's analysis code sees only that department's lines in enquiry and reports.
