@@ -82,6 +82,16 @@ downloads are intentionally rejected.
 | -------------- | ----------------------------------- | ----------------------- |
 | `APP_BASE_URL` | Frontend base URL (for email links) | `https://app.hotel.com` |
 
+### Tests
+
+| Variable                   | Description                                                            | Example                                           |
+| -------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------- |
+| `TEST_DATABASE_URL`        | Tenant database for integration tests; required by `test:integration`  | `postgresql://hfp:pass@localhost:5432/hfp_test`   |
+| `TEST_SECOND_DATABASE_URL` | A second tenant database, for the two-tenant isolation tests; required | `postgresql://hfp:pass@localhost:5432/hfp_test_b` |
+
+`DATABASE_URL` is used by the setup scripts and as the registry fallback. It is
+not a default tenant: a query with no tenant bound fails (AUT-05).
+
 ---
 
 ## Web (`apps/web/.env.local`)

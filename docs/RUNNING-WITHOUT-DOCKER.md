@@ -107,6 +107,31 @@ The async workers (transfer-desk processing, dunning, scheduled reports) run on 
 pnpm --filter @hfp/api run workers
 ```
 
+### Integration tests
+
+The integration suite runs against two real tenant databases, so it can prove
+that one tenant's session never reaches the other's data. Create both once
+(any names; the role needs to own them):
+
+```powershell
+psql -c "CREATE DATABASE hfp_test" -c "CREATE DATABASE hfp_test_b"
+$env:DATABASE_URL="postgresql://USER:PASS@localhost:5432/hfp_test";   pnpm --filter @hfp/api run db:setup:test
+$env:DATABASE_URL="postgresql://USER:PASS@localhost:5432/hfp_test_b"; pnpm --filter @hfp/api run db:setup:test
+```
+
+Then add to `apps/api/.env`:
+
+```
+TEST_DATABASE_URL=postgresql://USER:PASS@localhost:5432/hfp_test
+TEST_SECOND_DATABASE_URL=postgresql://USER:PASS@localhost:5432/hfp_test_b
+```
+
+and run `pnpm --filter @hfp/api test:integration`. It refuses to start when
+either variable is missing.
+
+Background workers and scripts have no default database: each job names its
+tenant and runs with it bound (`src/db/tenantScope.ts`).
+
 ---
 
 ## What this removes

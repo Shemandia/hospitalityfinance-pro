@@ -44,6 +44,8 @@ jobs:
     env:
       NODE_ENV: test
       TEST_DATABASE_URL: postgresql://hfp:hfp_ci@localhost:5432/hfp_test
+      # A second tenant database, for the two-tenant isolation tests (WP-A).
+      TEST_SECOND_DATABASE_URL: postgresql://hfp:hfp_ci@localhost:5432/hfp_test_b
       REDIS_URL: redis://localhost:6379
       JWT_SECRET: ci-only-secret-not-used-outside-this-workflow
 
@@ -82,12 +84,18 @@ jobs:
         run: |
           psql -h localhost -U postgres -v ON_ERROR_STOP=1 \
             -c "CREATE ROLE hfp LOGIN PASSWORD 'hfp_ci' NOSUPERUSER NOBYPASSRLS CREATEDB CREATEROLE" \
-            -c "CREATE DATABASE hfp_test OWNER hfp"
+            -c "CREATE DATABASE hfp_test OWNER hfp" \
+            -c "CREATE DATABASE hfp_test_b OWNER hfp"
 
       - name: Prepare test database
         run: pnpm --filter @hfp/api db:setup:test
         env:
           DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+
+      - name: Prepare second tenant test database
+        run: pnpm --filter @hfp/api db:setup:test
+        env:
+          DATABASE_URL: ${{ env.TEST_SECOND_DATABASE_URL }}
 
       - name: Unit tests
         run: pnpm test
