@@ -19,12 +19,9 @@ import fp from "fastify-plugin";
 import cookie from "@fastify/cookie";
 import jwt from "jsonwebtoken";
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { prisma } from "../db/prisma.js";
 import { resolveTenantById } from "../db/tenantRegistry.js";
 import { updateRequestContext } from "../db/requestContext.js";
 import { getRedisClient } from "../db/redis.js";
-import { withBypassRLS } from "../db/rls-bypass.js";
-import type { Prisma } from "../db/client.js";
 import type { AccessTokenClaims } from "../services/auth.service.js";
 
 type ErrorWithStatus = Error & { statusCode: number };
@@ -42,8 +39,9 @@ export type AuthenticatedUser = {
 declare module "fastify" {
   interface FastifyRequest {
     user?: AuthenticatedUser;
-    /** The entity the request acts on (X-Entity-ID). Access to it is the guard's decision. */
+    /** The entity the request names (X-Entity-ID). Access to it is the guard's decision. */
     entityId?: string;
+    /** The chain of the entity, set only when the caller can open the entity (AUT-15). */
     chainId?: string;
     tenantSlug?: string;
   }
@@ -131,26 +129,6 @@ export function readAccessTokenClaims(payload: unknown): AccessTokenClaims | nul
   return { sub, tenantId, sessionId, type: "access" };
 }
 
-/** The top of the entity's tree: the chain the entity belongs to. */
-async function resolveChainEntityId(entityId: string): Promise<string | undefined> {
-  return withBypassRLS(prisma, async (tx: Prisma.TransactionClient) => {
-    const visited = new Set<string>();
-    let currentId: string | null = entityId;
-    let top: string | undefined;
-    while (currentId && !visited.has(currentId)) {
-      visited.add(currentId);
-      const entity: { id: string; parentId: string | null } | null = await tx.entity.findUnique({
-        where: { id: currentId },
-        select: { id: true, parentId: true }
-      });
-      if (!entity) break;
-      top = entity.id;
-      currentId = entity.parentId;
-    }
-    return top;
-  });
-}
-
 export default fp(async (fastify: FastifyInstance) => {
   await fastify.register(cookie);
 
@@ -223,14 +201,12 @@ export default fp(async (fastify: FastifyInstance) => {
     };
 
     // ── Entity ──────────────────────────────────────────────────────────
-    // Recorded, not authorised: whether the caller may act on it is decided
-    // by the route guard, which also answers 400 when a route needs one.
+    // Recorded, not authorised and not bound: requireAuth binds it to the
+    // database context only once the caller is known to be able to open it
+    // (AUT-15), and the route guard answers 400 or 403 for entity routes.
     const entityId = getSingleHeader(request.headers["x-entity-id"])?.trim();
     if (entityId) {
       request.entityId = entityId;
-      request.chainId = await dependency(request, "tenant database", () =>
-        resolveChainEntityId(entityId)
-      );
     }
   });
 });

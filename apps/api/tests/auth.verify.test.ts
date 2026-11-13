@@ -31,6 +31,8 @@ vi.mock("../src/db/prisma.js", () => ({
 
 import authPlugin from "../src/plugins/auth.js";
 import { requireAuth } from "../src/middleware/requireAuth.js";
+import { setAccessService } from "../src/modules/access/runtime.js";
+import { staticAccessService } from "./helpers/access.js";
 
 const TENANT = {
   id: "tenant-1",
@@ -65,6 +67,7 @@ describe("verifyAccessToken", () => {
   });
 
   afterEach(async () => {
+    setAccessService(null);
     await app.close();
   });
 
@@ -99,12 +102,28 @@ describe("verifyAccessToken", () => {
     expect(user.tenantSlug).toBe("demo-hotels");
   });
 
-  it("records the entity from the header and resolves the top of its tree", async () => {
-    stubs.findEntity.mockImplementation(async ({ where }: { where: { id: string } }) =>
-      where.id === "prop-a" ? { id: "prop-a", parentId: "group" } : { id: "group", parentId: null }
-    );
-    const response = await call({ ...bearer(token(VALID)), "x-entity-id": "prop-a" });
-    expect(response.json()).toMatchObject({ entityId: "prop-a", chainId: "group" });
+  describe("the entity in X-Entity-ID (AUT-15)", () => {
+    beforeEach(() => {
+      stubs.findEntity.mockImplementation(async ({ where }: { where: { id: string } }) =>
+        where.id === "prop-a"
+          ? { id: "prop-a", parentId: "group" }
+          : { id: "group", parentId: null }
+      );
+      setAccessService(
+        staticAccessService({ tenantPermissions: [], entityPermissions: { "prop-a": ["GL_READ"] } })
+      );
+    });
+
+    it("resolves the chain of an entity the caller can open", async () => {
+      const response = await call({ ...bearer(token(VALID)), "x-entity-id": "prop-a" });
+      expect(response.json()).toMatchObject({ entityId: "prop-a", chainId: "group" });
+    });
+
+    it("does not look up an entity the caller cannot open", async () => {
+      const response = await call({ ...bearer(token(VALID)), "x-entity-id": "prop-b" });
+      expect(response.json()).toMatchObject({ entityId: "prop-b", chainId: null });
+      expect(stubs.findEntity).not.toHaveBeenCalled();
+    });
   });
 
   describe("401 — the token or the session is not good", () => {

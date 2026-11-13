@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyInstance } from "fastify";
-import { runWithContext, enterRequestContext, updateRequestContext } from "./db/requestContext.js";
+import {
+  runWithContext,
+  enterRequestContext,
+  getRequestContext,
+  updateRequestContext
+} from "./db/requestContext.js";
 import { prisma } from "./db/prisma.js";
 import { requireAuth } from "./middleware/requireAuth.js";
 import { logSerializers } from "./shared/log-redactor.js";
@@ -207,8 +212,9 @@ export async function createApp(): Promise<FastifyInstance> {
       return {
         data: {
           user: request.user,
-          entityId: request.entityId,
-          chainId: request.chainId
+          // The entity bound to the request: null unless the caller can open it (AUT-15).
+          entityId: getRequestContext().entityId,
+          chainId: getRequestContext().chainId
         },
         errors: []
       };
