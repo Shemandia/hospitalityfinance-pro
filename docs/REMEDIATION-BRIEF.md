@@ -592,16 +592,16 @@ WP-U code does not start until WP-A and WP-2 are merged. WP-U also closes ACC-12
 
 **Journal line.** Add or change the following.
 
-| Field                                              | Purpose                                                            |
-| -------------------------------------------------- | ------------------------------------------------------------------ |
-| `transactionDate`, `dueDate`                       | Ageing and payment selection are by line                           |
-| `transactionReference`, `secondReference`          | Invoice number, payment reference, purchase order                  |
-| `baseAmount`, `reportingAmount`, `reportingRate`   | Third currency amount; rename the functional columns to base       |
-| `allocationMarker`                                 | Unallocated, allocated, paid, withheld, in dispute, part-allocated |
-| `allocationRef`, `allocationDate`, `allocatedById` | Groups the lines that were matched together                        |
-| `dimension1` to `dimension10`                      | Foreign keys to analysis codes, validated per dimension rule       |
-| `taxCodeId`, `taxBaseAmount`                       | Tax reporting from the ledger                                      |
-| `documentId`                                       | Link to the entry document below                                   |
+| Field                                              | Purpose                                                      |
+| -------------------------------------------------- | ------------------------------------------------------------ |
+| `transactionDate`, `dueDate`                       | Ageing and payment selection are by line                     |
+| `transactionReference`, `secondReference`          | Invoice number, payment reference, purchase order            |
+| `baseAmount`, `reportingAmount`, `reportingRate`   | Third currency amount; rename the functional columns to base |
+| `allocationMarker`                                 | Unallocated, allocated, paid, withheld, in dispute           |
+| `allocationRef`, `allocationDate`, `allocatedById` | Groups the lines that were matched together                  |
+| `dimension1` to `dimension10`                      | Foreign keys to analysis codes, validated per dimension rule |
+| `taxCodeId`, `taxBaseAmount`                       | Tax reporting from the ledger                                |
+| `documentId`                                       | Link to the entry document below                             |
 
 **Entry document.** One light table for invoices, credit notes, payments and receipts as the user entered them: type, number, counterparty account, dates, attachments, approval state. It owns no balances. Its lines are ledger lines.
 
