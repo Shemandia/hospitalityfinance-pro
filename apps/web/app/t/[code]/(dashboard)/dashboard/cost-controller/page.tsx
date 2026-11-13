@@ -3,7 +3,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useApiContext } from "../../../../../../components/use-api-context";
-import { useUserRole } from "../../../../../../components/use-user-role";
 import {
   getPeriods,
   getRevPAR,
@@ -132,7 +131,6 @@ function LoadingState() {
 
 export default function CostControllerDashboardPage() {
   const apiContext = useApiContext();
-  useUserRole();
   const [periodId, setPeriodId] = useState("");
 
   // ── Periods ──

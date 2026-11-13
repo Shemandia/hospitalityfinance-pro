@@ -28,7 +28,7 @@ import {
   TableRow
 } from "../../../../../components/ui/table";
 import { Badge } from "../../../../../components/ui/badge";
-import { useUserRole } from "../../../../../components/use-user-role";
+import { usePermissions } from "../../../../../components/use-permissions";
 
 type AuditEvent = {
   id: string;
@@ -70,9 +70,10 @@ function redactState(state: unknown): unknown {
 
 export default function AuditPage() {
   const apiContext = useApiContext();
-  const { canAdmin } = useUserRole();
+  const { can } = usePermissions();
+  const canReadAudit = can(["AUDIT_READ", "ADMIN_AUDIT_LOG"]);
 
-  if (!canAdmin) {
+  if (!canReadAudit) {
     return (
       <Card>
         <CardContent className="py-12 text-center">

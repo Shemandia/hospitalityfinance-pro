@@ -9,7 +9,7 @@
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { useApiContext } from "../../../../../../components/use-api-context";
-import { useUserRole } from "../../../../../../components/use-user-role";
+import { usePermissions } from "../../../../../../components/use-permissions";
 import { useTenantHref } from "../../../../../../hooks/use-tenant-router";
 import {
   listTransferLookupTables,
@@ -30,7 +30,7 @@ import { ArrowLeft, Plus, Database } from "lucide-react";
 
 export default function LookupsListPage() {
   const apiCtx = useApiContext();
-  const { canTransferDeskDesigner } = useUserRole();
+  const { canTransferDeskDesigner } = usePermissions();
   const href = useTenantHref();
 
   const { data, isLoading, error } = useQuery({

@@ -19,7 +19,7 @@ import {
   Trash2
 } from "lucide-react";
 import { useApiContext } from "../../../../../../../components/use-api-context";
-import { useUserRole } from "../../../../../../../components/use-user-role";
+import { usePermissions } from "../../../../../../../components/use-permissions";
 import {
   getAPPaymentRun,
   approveAPPaymentRun,
@@ -102,7 +102,10 @@ export default function PaymentRunDetailPage() {
   const tenantHref = useTenantHref();
   const ctx = useApiContext();
   const qc = useQueryClient();
-  const { canWrite, canAdmin } = useUserRole();
+  const { can } = usePermissions();
+  const canDeleteRun = can("PAYMENT_RUN_CREATE");
+  const canApproveRun = can("PAYMENT_RUN_APPROVE");
+  const canConfirm = can("AP_PAYMENT_CONFIRM");
   const runId = params.id as string;
 
   const [confirmAction, setConfirmAction] = useState<string | null>(null);
@@ -266,24 +269,28 @@ export default function PaymentRunDetailPage() {
               <Download size={16} /> Bank File ({run.bankFileFormat})
             </button>
           )}
-          {run.status === "PROPOSED" && canWrite && (
+          {run.status === "PROPOSED" && (canDeleteRun || canApproveRun) && (
             <>
-              <button
-                type="button"
-                onClick={() => setConfirmAction("delete")}
-                disabled={deleteMut.isPending}
-                className="flex items-center gap-2 px-4 py-2 border border-red-200 rounded-xl bg-white text-red-600 hover:bg-red-50 font-medium text-sm transition-colors disabled:opacity-50"
-              >
-                <Trash2 size={16} /> Delete Run
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfirmAction("approve")}
-                disabled={approveMut.isPending}
-                className="flex items-center gap-2 px-5 py-2 bg-emerald-600 text-white rounded-xl font-bold shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-all text-sm disabled:opacity-50"
-              >
-                <CheckCircle2 size={16} /> Approve Run
-              </button>
+              {canDeleteRun && (
+                <button
+                  type="button"
+                  onClick={() => setConfirmAction("delete")}
+                  disabled={deleteMut.isPending}
+                  className="flex items-center gap-2 px-4 py-2 border border-red-200 rounded-xl bg-white text-red-600 hover:bg-red-50 font-medium text-sm transition-colors disabled:opacity-50"
+                >
+                  <Trash2 size={16} /> Delete Run
+                </button>
+              )}
+              {canApproveRun && (
+                <button
+                  type="button"
+                  onClick={() => setConfirmAction("approve")}
+                  disabled={approveMut.isPending}
+                  className="flex items-center gap-2 px-5 py-2 bg-emerald-600 text-white rounded-xl font-bold shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-all text-sm disabled:opacity-50"
+                >
+                  <CheckCircle2 size={16} /> Approve Run
+                </button>
+              )}
             </>
           )}
         </div>
@@ -474,7 +481,7 @@ export default function PaymentRunDetailPage() {
                 setFeedback(null);
                 confirmMut.mutate({ bankAccountId, paymentMethod, referencePrefix });
               }}
-              disabled={confirmMut.isPending || !bankAccountId || !canAdmin}
+              disabled={confirmMut.isPending || !bankAccountId || !canConfirm}
               className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 text-white rounded-xl font-bold shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {confirmMut.isPending ? "Processing..." : "Confirm & Process"}
@@ -482,7 +489,11 @@ export default function PaymentRunDetailPage() {
             {!bankAccountId && (
               <p className="text-xs text-red-500">Select a bank account to proceed.</p>
             )}
-            {!canAdmin && <p className="text-xs text-red-500">ADMIN role required.</p>}
+            {!canConfirm && (
+              <p className="text-xs text-red-500">
+                You need the AP_PAYMENT_CONFIRM permission at this property.
+              </p>
+            )}
           </div>
         </div>
       )}

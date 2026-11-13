@@ -15,7 +15,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { useUserRole } from "../../../../../../components/use-user-role";
+import { usePermissions } from "../../../../../../components/use-permissions";
 import { useTenantHref } from "../../../../../../hooks/use-tenant-router";
 import { Card, CardContent } from "../../../../../../components/ui/card";
 import { Badge } from "../../../../../../components/ui/badge";
@@ -71,7 +71,7 @@ const PLACEHOLDER_TREE: FolderNode[] = [
 
 export default function FilesPage() {
   const tenantHref = useTenantHref();
-  const role = useUserRole();
+  const role = usePermissions();
   const [selectedFolderId, setSelectedFolderId] = useState<string>("inbox");
 
   if (!role.canTransferDeskUser) {

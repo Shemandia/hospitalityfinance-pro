@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useApiContext } from "../../../../../../components/use-api-context";
-import { useUserRole } from "../../../../../../components/use-user-role";
+import { usePermissions } from "../../../../../../components/use-permissions";
 import {
   getEntityTree,
   getAdminEntityUsers,
@@ -89,7 +89,8 @@ type EntityUser = {
 export default function UserAssignmentsPage() {
   const apiContext = useApiContext();
   const qc = useQueryClient();
-  const { isSuperAdmin } = useUserRole();
+  const { can } = usePermissions();
+  const canManageScopes = can("ADMIN_ENTITIES", "any-entity");
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [showAssign, setShowAssign] = useState(false);
   const [assignEntityId, setAssignEntityId] = useState("");
@@ -261,7 +262,7 @@ export default function UserAssignmentsPage() {
                     <p className="font-semibold">{selectedUser?.user.name}</p>
                     <p className="text-sm text-muted-foreground">{selectedUser?.user.email}</p>
                   </div>
-                  {isSuperAdmin && (
+                  {canManageScopes && (
                     <Button
                       size="sm"
                       variant="teal"
@@ -295,7 +296,7 @@ export default function UserAssignmentsPage() {
                         <TableRow>
                           <TableHead>Entity</TableHead>
                           <TableHead>Scope Level</TableHead>
-                          {isSuperAdmin && <TableHead className="text-right">Actions</TableHead>}
+                          {canManageScopes && <TableHead className="text-right">Actions</TableHead>}
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -319,7 +320,7 @@ export default function UserAssignmentsPage() {
                                 {TYPE_LABELS[a.entity.type] ?? a.entity.type}
                               </Badge>
                             </TableCell>
-                            {isSuperAdmin && (
+                            {canManageScopes && (
                               <TableCell className="text-right">
                                 <div className="flex items-center justify-end gap-1">
                                   <Button

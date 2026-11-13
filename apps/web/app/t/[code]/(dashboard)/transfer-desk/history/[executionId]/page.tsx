@@ -20,7 +20,7 @@ import { useState } from "react";
 import { useParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useApiContext } from "../../../../../../../components/use-api-context";
-import { useUserRole } from "../../../../../../../components/use-user-role";
+import { usePermissions } from "../../../../../../../components/use-permissions";
 import { useTenantHref } from "../../../../../../../hooks/use-tenant-router";
 import {
   getTransferExecution,
@@ -108,7 +108,7 @@ export default function TransferDeskExecutionDetailPage() {
   const executionId = params.executionId as string;
   const apiContext = useApiContext();
   const tenantHref = useTenantHref();
-  const role = useUserRole();
+  const role = usePermissions();
   const qc = useQueryClient();
 
   const [logStatusFilter, setLogStatusFilter] = useState<"ALL" | "SUCCESS" | "FAILED" | "SKIPPED">(

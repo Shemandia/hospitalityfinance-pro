@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useMemo } from "react";
 import { useTenantRouter } from "../../../../../../hooks/use-tenant-router";
 import { useApiContext } from "../../../../../../components/use-api-context";
-import { useUserRole } from "../../../../../../components/use-user-role";
+import { usePermissions } from "../../../../../../components/use-permissions";
 import {
   getRevPAR,
   getUSALI,
@@ -131,7 +131,8 @@ function SectionHeader({ title }: { title: string }) {
 export default function NightAuditDashboard() {
   const router = useTenantRouter();
   const apiContext = useApiContext();
-  const { canWrite, canApprove } = useUserRole();
+  const { can } = usePermissions();
+  const canPost = can("GL_POST");
   const queryClient = useQueryClient();
   const [postingId, setPostingId] = useState<string | null>(null);
 
@@ -413,7 +414,7 @@ export default function NightAuditDashboard() {
                             </Badge>
                           </td>
                           <td className="py-2 text-right">
-                            {canApprove ? (
+                            {canPost ? (
                               <Button
                                 size="sm"
                                 variant="outline"
@@ -560,7 +561,7 @@ export default function NightAuditDashboard() {
               <Button
                 className="w-full justify-start"
                 variant="outline"
-                disabled={!canApprove || draftJournals.length === 0}
+                disabled={!canPost || draftJournals.length === 0}
                 onClick={() => {
                   // Post all draft journals sequentially
                   if (draftJournals.length > 0) {
@@ -579,7 +580,7 @@ export default function NightAuditDashboard() {
               <Button
                 className="w-full justify-start"
                 variant="outline"
-                disabled={!canApprove}
+                disabled={!canPost}
                 onClick={() => {
                   // Navigate to period management — placeholder
                   router.push("/periods");

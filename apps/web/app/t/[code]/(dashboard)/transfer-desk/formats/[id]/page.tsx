@@ -16,7 +16,7 @@ import { useParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTenantHref } from "../../../../../../../hooks/use-tenant-router";
 import { useApiContext } from "../../../../../../../components/use-api-context";
-import { useUserRole } from "../../../../../../../components/use-user-role";
+import { usePermissions } from "../../../../../../../components/use-permissions";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../../../../../components/ui/card";
 import { Button } from "../../../../../../../components/ui/button";
 import { Input } from "../../../../../../../components/ui/input";
@@ -103,7 +103,7 @@ export default function FormatDetailPage() {
   const formatId = params.id as string;
   const apiCtx = useApiContext();
   const href = useTenantHref();
-  const { canTransferDeskDesigner } = useUserRole();
+  const { canTransferDeskDesigner } = usePermissions();
   const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState<"gui" | "code">("gui");

@@ -9,12 +9,12 @@
  *   - Recent Executions widget
  *   - System Profiles cards (loaded from DB — isSystem=true profiles)
  *
- * RBAC: section visibility is gated by useUserRole's canTransferDesk* helpers.
+ * RBAC: section visibility is gated by usePermissions's canTransferDesk* helpers.
  */
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { useUserRole } from "../../../../../components/use-user-role";
+import { usePermissions } from "../../../../../components/use-permissions";
 import { useApiContext } from "../../../../../components/use-api-context";
 import { useTenantHref } from "../../../../../hooks/use-tenant-router";
 import { listTransferProfiles, type TransferProfileSummary } from "../../../../../lib/gl-api";
@@ -165,7 +165,7 @@ function getVendorName(sourceComponent: string | null): string {
 
 export default function TransferDeskLandingPage() {
   const tenantHref = useTenantHref();
-  const role = useUserRole();
+  const role = usePermissions();
   const apiCtx = useApiContext();
 
   const { data: profileData, isLoading: profilesLoading } = useQuery({

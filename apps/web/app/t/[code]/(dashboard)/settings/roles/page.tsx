@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useApiContext } from "../../../../../../components/use-api-context";
-import { useUserRole } from "../../../../../../components/use-user-role";
+import { usePermissions } from "../../../../../../components/use-permissions";
 import {
   getAdminRoles,
   getAdminRole,
@@ -44,7 +44,8 @@ const SYSTEM_ROLES = new Set(["TENANT_ADMIN"]);
 export default function RolesPage() {
   const ctx = useApiContext();
   const qc = useQueryClient();
-  const { canAdmin } = useUserRole();
+  const { can } = usePermissions();
+  const canManageRoles = can("ADMIN_ROLES_MANAGE", "tenant");
 
   const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
   const [rolePermissions, setRolePermissions] = useState<Set<string>>(new Set());
@@ -205,7 +206,7 @@ export default function RolesPage() {
             Create custom roles and manage permission assignments.
           </p>
         </div>
-        {canAdmin && (
+        {canManageRoles && (
           <button
             type="button"
             onClick={openCreate}
@@ -349,7 +350,7 @@ export default function RolesPage() {
                     <p className="text-[10px] text-slate-400">users</p>
                   </div>
                   <div className="flex items-center gap-1 opacity-0 group-hover/row:opacity-100 transition-opacity">
-                    {canAdmin && (
+                    {canManageRoles && (
                       <button
                         type="button"
                         onClick={(e) => {
@@ -362,7 +363,7 @@ export default function RolesPage() {
                         <Pencil className="h-4 w-4" />
                       </button>
                     )}
-                    {canAdmin && !isSystem && (
+                    {canManageRoles && !isSystem && (
                       <button
                         type="button"
                         onClick={(e) => {
@@ -432,7 +433,7 @@ export default function RolesPage() {
                           </td>
                           <td className="px-6 py-3.5 text-sm text-slate-500">{perm.description}</td>
                           <td className="px-6 py-3.5 text-right w-24">
-                            {canAdmin && (
+                            {canManageRoles && (
                               <button
                                 type="button"
                                 onClick={() =>

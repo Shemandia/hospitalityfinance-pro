@@ -3,7 +3,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useApiContext } from "../../../../../../components/use-api-context";
-import { useUserRole } from "../../../../../../components/use-user-role";
 import { getPeriods, getRevPAR, getRevPARTrend, getUSALI } from "../../../../../../lib/gl-api";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../../../../components/ui/card";
 import { Badge } from "../../../../../../components/ui/badge";
@@ -109,7 +108,6 @@ function SectionHeader({ title }: { title: string }) {
 
 export default function GMDashboardPage() {
   const apiContext = useApiContext();
-  const { role } = useUserRole();
   const tenantHref = useTenantHref();
   const [periodId, setPeriodId] = useState("");
 
@@ -175,9 +173,6 @@ export default function GMDashboardPage() {
         <CardContent className="flex flex-wrap items-center gap-4 py-3 px-6">
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold text-primary">General Manager Dashboard</span>
-            <Badge variant="outline" className="text-[10px]">
-              {role}
-            </Badge>
           </div>
           <div className="ml-auto flex items-center gap-2">
             <span className="text-sm text-muted-foreground">Period:</span>

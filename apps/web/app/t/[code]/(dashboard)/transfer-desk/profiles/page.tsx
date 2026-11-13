@@ -11,7 +11,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useApiContext } from "../../../../../../components/use-api-context";
-import { useUserRole } from "../../../../../../components/use-user-role";
+import { usePermissions } from "../../../../../../components/use-permissions";
 import { useTenantHref } from "../../../../../../hooks/use-tenant-router";
 import { listProfiles } from "../../../../../../lib/transfer-desk/api";
 import { PROFILE_TYPES, PROFILE_STATUSES } from "../../../../../../lib/transfer-desk/constants";
@@ -83,7 +83,7 @@ const STATUS_BADGE: Record<
 export default function TransferDeskProfileListPage() {
   const apiContext = useApiContext();
   const tenantHref = useTenantHref();
-  const role = useUserRole();
+  const role = usePermissions();
 
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<ProfileType | "ALL">("ALL");

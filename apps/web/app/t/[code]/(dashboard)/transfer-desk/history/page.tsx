@@ -17,7 +17,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApiContext } from "../../../../../../components/use-api-context";
-import { useUserRole } from "../../../../../../components/use-user-role";
+import { usePermissions } from "../../../../../../components/use-permissions";
 import { useTenantHref } from "../../../../../../hooks/use-tenant-router";
 import {
   listTransferExecutions,
@@ -105,7 +105,7 @@ function formatDate(d: string | null): string {
 export default function TransferDeskHistoryListPage() {
   const apiContext = useApiContext();
   const tenantHref = useTenantHref();
-  const role = useUserRole();
+  const role = usePermissions();
   const qc = useQueryClient();
 
   const [statusFilter, setStatusFilter] = useState<TransferExecutionStatus | "ALL">("ALL");

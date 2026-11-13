@@ -3,7 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useApiContext } from "../../../../../../components/use-api-context";
-import { useUserRole } from "../../../../../../components/use-user-role";
+import { usePermissions } from "../../../../../../components/use-permissions";
 import {
   getAPInvoices,
   getSuppliers,
@@ -125,7 +125,8 @@ function LoadingSkeleton() {
 
 export default function APDashboardPage() {
   const apiContext = useApiContext();
-  const { canApprove } = useUserRole();
+  const { can } = usePermissions();
+  const canApprove = can("AP_APPROVE");
   const queryClient = useQueryClient();
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 

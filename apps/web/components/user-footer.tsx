@@ -14,12 +14,6 @@ export function UserFooter() {
 
   const initials = (user.email ?? "U")[0].toUpperCase();
   const userName = user.name || user.email?.split("@")[0] || "User";
-  const upperRoles = (user.roles ?? []).map((r: string) => r.toUpperCase());
-  const userRole =
-    upperRoles.includes("TENANT_ADMIN") || upperRoles.includes("SUPERADMIN")
-      ? "TENANT_ADMIN"
-      : (upperRoles[0] ?? "VIEWER");
-
   async function handleLogout() {
     await logout();
     router.push(`/t/${code}/login`);
@@ -31,7 +25,7 @@ export function UserFooter() {
       <p className="text-sm font-bold text-slate-800 mt-1 truncate">{userName}</p>
       <div className="flex items-center justify-between mt-2">
         <span className="inline-flex items-center rounded-lg bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-emerald-700 border border-emerald-100">
-          {userRole}
+          {user.tenantName}
         </span>
         <button
           type="button"

@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useApiContext } from "../../../../../../components/use-api-context";
-import { useUserRole } from "../../../../../../components/use-user-role";
+import { usePermissions } from "../../../../../../components/use-permissions";
 import {
   getAdminEntityUsers,
   inviteEntityUser,
@@ -59,7 +59,8 @@ type EntityUserRow = {
 export default function UsersPage() {
   const apiContext = useApiContext();
   const qc = useQueryClient();
-  const { canAdmin } = useUserRole();
+  const { can } = usePermissions();
+  const canManageUsers = can("ADMIN_USERS");
   const [showCreate, setShowCreate] = useState(false);
   const [createEmail, setCreateEmail] = useState("");
   const [createName, setCreateName] = useState("");
@@ -135,7 +136,7 @@ export default function UsersPage() {
             Manage users and their roles for this property
           </p>
         </div>
-        {canAdmin && (
+        {canManageUsers && (
           <Button variant="teal" size="sm" onClick={() => setShowCreate(true)}>
             <Plus className="mr-1 h-3 w-3" /> Create User
           </Button>
@@ -164,14 +165,14 @@ export default function UsersPage() {
                 <TableHead>Name</TableHead>
                 <TableHead>Email</TableHead>
                 <TableHead>Since</TableHead>
-                {canAdmin && <TableHead className="text-right">Actions</TableHead>}
+                {canManageUsers && <TableHead className="text-right">Actions</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
               {users.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={canAdmin ? 4 : 3}
+                    colSpan={canManageUsers ? 4 : 3}
                     className="text-center py-6 text-muted-foreground"
                   >
                     No users found.
@@ -185,7 +186,7 @@ export default function UsersPage() {
                     <TableCell className="text-xs text-muted-foreground">
                       {new Date(eu.createdAt).toLocaleDateString()}
                     </TableCell>
-                    {canAdmin && (
+                    {canManageUsers && (
                       <TableCell className="text-right">
                         <Button
                           size="sm"

@@ -10,7 +10,7 @@
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { useApiContext } from "../../../../../../components/use-api-context";
-import { useUserRole } from "../../../../../../components/use-user-role";
+import { usePermissions } from "../../../../../../components/use-permissions";
 import { useTenantHref } from "../../../../../../hooks/use-tenant-router";
 import {
   listTransferTransformations,
@@ -31,7 +31,7 @@ import { ArrowLeft, Plus, Workflow, CheckCircle2, XCircle, Lock, ArrowRight } fr
 
 export default function TransformationsListPage() {
   const apiCtx = useApiContext();
-  const { canTransferDeskDesigner } = useUserRole();
+  const { canTransferDeskDesigner } = usePermissions();
   const href = useTenantHref();
 
   const { data, isLoading, error } = useQuery({

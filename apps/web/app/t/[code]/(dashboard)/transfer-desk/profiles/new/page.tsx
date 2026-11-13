@@ -7,12 +7,12 @@
  * RBAC: requires transfer:designer role.
  */
 
-import { useUserRole } from "../../../../../../../components/use-user-role";
+import { usePermissions } from "../../../../../../../components/use-permissions";
 import { WizardContainer } from "../../../../../../../components/transfer-desk/wizard/WizardContainer";
 import { Lock } from "lucide-react";
 
 export default function NewTransferProfilePage() {
-  const role = useUserRole();
+  const role = usePermissions();
 
   if (!role.canTransferDeskDesigner) {
     return (

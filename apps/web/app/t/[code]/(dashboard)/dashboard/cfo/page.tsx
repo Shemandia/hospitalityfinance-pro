@@ -3,7 +3,6 @@
 import { useQuery, useQueries } from "@tanstack/react-query";
 import { useState } from "react";
 import { useApiContext } from "../../../../../../components/use-api-context";
-import { useUserRole } from "../../../../../../components/use-user-role";
 import {
   getPeriods,
   getRevPAR,
@@ -112,7 +111,6 @@ function SectionHeader({ title }: { title: string }) {
 
 export default function CFODashboardPage() {
   const apiContext = useApiContext();
-  const { role } = useUserRole();
   const [periodId, setPeriodId] = useState("");
 
   // Periods
@@ -219,9 +217,6 @@ export default function CFODashboardPage() {
             <span className="text-sm font-semibold text-primary">
               Chief Finance Officer Dashboard
             </span>
-            <Badge variant="outline" className="text-[10px]">
-              {role}
-            </Badge>
           </div>
           <div className="ml-auto flex items-center gap-2">
             <span className="text-sm text-muted-foreground">Period:</span>
