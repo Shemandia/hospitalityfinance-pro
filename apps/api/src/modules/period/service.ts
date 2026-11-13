@@ -1,5 +1,4 @@
 import type { PrismaClient } from "../../db/client.js";
-import { publishEvent } from "../../shared/rabbitmq.js";
 import { enqueueMVRefresh } from "../../jobs/mv-refresh-job.js";
 import { ProcessLockService, ProcessLockError } from "../process-lock/service.js";
 import { carryForwardOpeningBalances, findFollowingPeriodId } from "./carry-forward.js";
@@ -327,13 +326,6 @@ export class PeriodService {
       });
 
       // Post-transaction side effects
-      await publishEvent("period.closed", {
-        entityId,
-        periodId,
-        closedBy,
-        closedAt: updated.closedAt?.toISOString() ?? null
-      });
-
       await enqueueMVRefresh(`period-close:${periodId}`).catch(() => {});
 
       return updated;
@@ -485,8 +477,6 @@ export class PeriodService {
           data: { status: "OPEN", openedAt: new Date(), closedAt: null }
         });
       });
-
-      await publishEvent("period.reopened", { entityId, periodId });
 
       return updated;
     } finally {

@@ -81,13 +81,6 @@ downloads are intentionally rejected.
 | -------------- | ----------------------------------- | ----------------------- |
 | `APP_BASE_URL` | Frontend base URL (for email links) | `https://app.hotel.com` |
 
-### Optional RabbitMQ
-
-| Variable                   | Description                     | Example                             |
-| -------------------------- | ------------------------------- | ----------------------------------- |
-| `RABBITMQ_URL`             | AMQP URL for optional event bus | `amqp://guest:guest@localhost:5672` |
-| `RABBITMQ_EVENTS_EXCHANGE` | Exchange for application events | `hfp.events`                        |
-
 ---
 
 ## Web (`apps/web/.env.local`)
@@ -102,7 +95,7 @@ downloads are intentionally rejected.
 
 ## Non-Docker Deployment
 
-Use `docs/NON-DOCKER-SETUP.md` for direct Node.js, PostgreSQL, Redis, PM2, and optional RabbitMQ deployment. Docker is optional and not required for development or production.
+Use `docs/NON-DOCKER-SETUP.md` for direct Node.js, PostgreSQL, Redis and PM2 deployment. Docker is optional and not required for development or production.
 
 ---
 

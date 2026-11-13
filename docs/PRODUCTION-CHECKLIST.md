@@ -11,10 +11,6 @@
   - Used by: native auth sessions/refresh tokens, BullMQ jobs, and KPI cache
   - Set `REDIS_URL` in API `.env`
 
-- [ ] Optional RabbitMQ
-  - Used for AMQP event delivery only
-  - Set `RABBITMQ_URL` and `RABBITMQ_EVENTS_EXCHANGE` if enabled
-
 - [ ] S3-compatible storage or private local storage
   - Set `STORAGE_BACKEND`, `TD_LOCAL_UPLOADS_PATH`, `TD_S3_BUCKET`, `AWS_S3_BUCKET`, and `AWS_REGION`
   - Local storage must not point inside a public web root

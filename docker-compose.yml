@@ -32,25 +32,6 @@ services:
       timeout: 5s
       retries: 10
 
-  rabbitmq:
-    image: rabbitmq:3-management
-    container_name: hfp-rabbitmq
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:5672:5672"
-      - "127.0.0.1:15672:15672"
-    environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-hfp}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "check_running"]
-      interval: 10s
-      timeout: 10s
-      retries: 10
-
-  # NOTE: Keycloak was removed — native auth (bcrypt + JWT + Redis sessions)
-  # replaced it. No runtime component uses Keycloak.
-
   api:
     build:
       context: .
@@ -65,15 +46,12 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-hfp}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-hfp_db}
       REGISTRY_DATABASE_URL: postgresql://${POSTGRES_USER:-hfp}:${POSTGRES_PASSWORD}@postgres:5432/hfp_registry
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
-      RABBITMQ_URL: amqp://${RABBITMQ_USER:-hfp}:${RABBITMQ_PASSWORD}@rabbitmq:5672
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3001}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      rabbitmq:
         condition: service_healthy
 
   web:

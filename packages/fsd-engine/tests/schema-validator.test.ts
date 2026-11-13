@@ -193,7 +193,7 @@ describe("validateProfileSchema", () => {
       const result = validateProfileSchema(schema);
       expect(result.valid).toBe(false);
       expect(result.errors.some((e) => e.path === "format.type")).toBe(true);
-      expect(result.errors[0].message).toContain("parquet");
+      expect(result.errors[0]?.message).toContain("parquet");
     });
 
     it("fails with invalid lineEnding", () => {
@@ -269,7 +269,7 @@ describe("validateProfileSchema", () => {
       const result = validateProfileSchema(schema);
       expect(result.valid).toBe(false);
       expect(result.errors.some((e) => e.path === "fields[0].type")).toBe(true);
-      expect(result.errors[0].message).toContain("blob");
+      expect(result.errors[0]?.message).toContain("blob");
     });
 
     it("detects duplicate field names", () => {

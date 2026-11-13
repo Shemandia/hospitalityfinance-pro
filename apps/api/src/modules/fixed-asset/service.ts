@@ -1,6 +1,5 @@
 import type { PrismaClient } from "../../db/client.js";
 import { Prisma } from "../../db/client.js";
-import { publishEvent } from "../../shared/rabbitmq.js";
 import { ProcessLockService, ProcessLockError } from "../process-lock/service.js";
 import { AuditService } from "../audit/service.js";
 
@@ -545,15 +544,6 @@ export class FixedAssetService {
       });
 
       result.journalId = journal.id;
-
-      await publishEvent("depreciation.run", {
-        entityId,
-        periodId,
-        journalId: journal.id,
-        totalDepreciation: result.totalDepreciation.toFixed(FOUR_DP),
-        assetCount: result.assetCount,
-        executedBy
-      }).catch(() => {});
 
       // Synchronous audit trail
       const auditService = new AuditService(this.prisma);

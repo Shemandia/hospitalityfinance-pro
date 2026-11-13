@@ -23,6 +23,9 @@ uploads/
 Thumbs.db
 Desktop.ini
 
-# Local tooling artifacts
-.claude/worktrees/
+# Local tooling artifacts and scratch files
+.claude/
+.superpowers/
+tmp/
+*.tsbuildinfo
 dump.rdb
