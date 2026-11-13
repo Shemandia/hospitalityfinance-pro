@@ -16,7 +16,7 @@ Section 1 records the owner's decisions. Section 5 lists what this note found th
 
 ## 1. Decisions
 
-Approved by the owner on 12 November 2026. Where section 11 of the brief says otherwise, these apply.
+Approved by the owner on 12 November 2026; D10 and D11 added on 13 November 2026. Where section 11 of the brief says otherwise, these apply.
 
 | #   | Decision                                                                                                                                                                                    |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -29,6 +29,8 @@ Approved by the owner on 12 November 2026. Where section 11 of the brief says ot
 | D7  | Only posted lines are paid and revalued. An approved, unposted invoice is a held posting: visible in enquiry, absent from statements, not payable.                                          |
 | D8  | ACC-02, ACC-04, ACC-05 and ACC-08 move from WP-3 into WP-U. ACC-02 is done first.                                                                                                           |
 | D9  | A change to a supplier's or customer's bank details takes effect only after a second person approves it, and every request, approval and rejection is audited.                              |
+| D10 | Cross-currency settlement: an allocation nets to zero in transaction currency, and in base and reporting currency once its realised exchange difference is booked (section 2.5).            |
+| D11 | Withholding tax on supplier payments: the payment allocates the invoice in full; the withheld part posts to a tenant-chosen withholding-tax payable account, with a certificate reference.  |
 
 ---
 
@@ -147,6 +149,16 @@ Existing periods are backfilled from `year` and `month` as calendar months. The 
 | `PaymentRunInvoice` | Renamed `PaymentRunLine`. `invoiceId` becomes `journalLineId`. `isCreditNote` is dropped: the line's side says it. |
 | `PaymentProfile`    | Unchanged. `selectionCriteria` is re-read against line fields (due date, marker, account analysis).                |
 
+**`TaxCode`** (D11)
+
+| Change                        | Detail                                                                                                                                               |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Add `withholdingAccountId`    | The withholding-tax payable account the withheld part is credited to. Chosen by the tenant; required for a code of type `WHT` (check constraint).    |
+| Add `withholdingBase`         | `NET` (the invoice's taxable amount, without VAT, from `taxBaseAmount`) or `GROSS` (the invoice total). Required for a code of type `WHT`.           |
+| Add `certificateSequenceCode` | Optional. When set, certificate references are drawn from this number series at posting; when not, the user enters them. Either way one is required. |
+
+The rate comes from the existing `TaxRate` rows, effective on the payment's document date.
+
 **Other tables that lose a relation**
 
 | Table         | Relation removed               | Replaced by                   |
@@ -170,12 +182,13 @@ A ledger table instead of a letter on the journal, because budget versions becom
 
 **`AccountCounterparty`** — one row per counterparty account.
 
-| Column             | From                                     |
-| ------------------ | ---------------------------------------- |
-| `paymentTermsDays` | `Supplier`, `Customer`                   |
-| `creditLimit`      | `Customer`                               |
-| `defaultCurrency`  | `Supplier.currency`, `Customer.currency` |
-| `taxRegistration`  | `Supplier.taxId`                         |
+| Column                 | From                                                                                                                                                  |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `paymentTermsDays`     | `Supplier`, `Customer`                                                                                                                                |
+| `creditLimit`          | `Customer`                                                                                                                                            |
+| `defaultCurrency`      | `Supplier.currency`, `Customer.currency`                                                                                                              |
+| `taxRegistration`      | `Supplier.taxId`                                                                                                                                      |
+| `withholdingTaxCodeId` | New (D11). The supplier's default withholding code; null when nothing is withheld. Copied to each purchase invoice at entry, where it can be changed. |
 
 **`AccountAddress`** — addresses and contacts of an account: kind (registered, billing, remittance), address lines, city, postal code, country, contact name, email, phone, primary flag.
 
@@ -212,6 +225,7 @@ Rules, enforced by the database as well as the service:
 | `paymentMethod`, `bankAccountId`, `paymentRunId` | Payments and receipts only.                                                                                         |
 | `externalOrderRef`, `notes`                      | From `APInvoice.externalPoRef`, `ARInvoice.notes`.                                                                  |
 | `lastDunningLevel`, `lastDunnedAt`               | Sales invoices only.                                                                                                |
+| `withholdingTaxCodeId`                           | Purchase invoices only (D11). Defaulted from the supplier; null means nothing is withheld on this invoice.          |
 | `createdById`                                    | As today.                                                                                                           |
 
 **`EntryDocumentAttachment`** — document, storage key, file name, media type, size, uploaded by.
@@ -224,6 +238,18 @@ Rules, enforced by the database as well as the service:
 | `allocationDate`, `allocatedById`    | When and by whom.                                                                        |
 | `differenceJournalId`                | The journal that booked a write-off, discount or realised exchange difference, if any.   |
 | `reversedAt`, `reversedById`         | Reversal clears the stamp on the lines and keeps this row as the record.                 |
+
+**`WithholdingDeduction`** — one row per invoice settled by a payment with tax withheld (D11).
+
+| Column                                    | Purpose                                                                                 |
+| ----------------------------------------- | --------------------------------------------------------------------------------------- |
+| `entityId`, `paymentDocumentId`           | The payment that withheld the tax.                                                      |
+| `invoiceLineId`                           | The invoice's counterparty line the payment allocated.                                  |
+| `taxCodeId`, `rate`, `baseAmount`         | The code, the rate applied and the amount it was applied to, in the invoice's currency. |
+| `amount`, `amountBase`, `amountReporting` | The tax withheld, in the invoice's currency and converted at the payment date's rates.  |
+| `payableLineId`                           | The payment journal's line on the withholding-tax payable account.                      |
+| `certificateReference`, `certificateDate` | Required. Unique per entity and tax code.                                               |
+| `remittanceAllocationId`                  | Set when the payable line is allocated against the payment to the tax authority.        |
 
 **`FiscalCalendar`** — one per entity (ACC-02): name, first month of the year, number of periods, number of adjustment periods. Periods belong to a calendar.
 
@@ -245,17 +271,86 @@ Also dropped: the materialized view `mv_period_account_balances` (ACC-09; it has
 
 ### 2.4 Database constraints (ACC-03, extended)
 
-| Constraint                 | Rule                                                                                                                                                                                                                                     |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Line sides                 | Debit and credit are not negative and not both above zero, in each of the three currencies.                                                                                                                                              |
-| Balanced journal           | A deferred trigger rejects a journal entering `HELD` or `POSTED` whose debits and credits differ in base or reporting currency, when the ledger's must-balance setting is on.                                                            |
-| Posted lines are fixed     | A trigger rejects any change to a held or posted journal or its lines, except: the allocation columns, through the allocation service; a split, through the split function; the move from held to posted; the status change to reversed. |
-| Counterparty lines         | A line on a counterparty account has a due date and a transaction reference.                                                                                                                                                             |
-| Marker and reference agree | `ALLOCATED` and `PAID` require an allocation; the other markers forbid one.                                                                                                                                                              |
-| An allocation nets to zero | The lines sharing one allocation net to zero in transaction currency. Checked by a deferred trigger.                                                                                                                                     |
-| Split is exact             | The two parts of a split equal the original line in all three currencies.                                                                                                                                                                |
-| One ledger per journal     | A journal's ledger and its entity's ledgers agree; balances are written to that ledger only.                                                                                                                                             |
-| Duplicate source           | Unique on entity, source system, source document reference.                                                                                                                                                                              |
+| Constraint                  | Rule                                                                                                                                                                                                                                     |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Line sides                  | Debit and credit are not negative and not both above zero, in each of the three currencies.                                                                                                                                              |
+| Balanced journal            | A deferred trigger rejects a journal entering `HELD` or `POSTED` whose debits and credits differ in base or reporting currency, when the ledger's must-balance setting is on.                                                            |
+| Posted lines are fixed      | A trigger rejects any change to a held or posted journal or its lines, except: the allocation columns, through the allocation service; a split, through the split function; the move from held to posted; the status change to reversed. |
+| Counterparty lines          | A line on a counterparty account has a due date and a transaction reference.                                                                                                                                                             |
+| Marker and reference agree  | `ALLOCATED` and `PAID` require an allocation; the other markers forbid one.                                                                                                                                                              |
+| One currency per allocation | All lines of one allocation have the same transaction currency.                                                                                                                                                                          |
+| An allocation nets to zero  | The lines sharing one allocation net to zero in transaction currency, base currency and reporting currency, the last two after the realised exchange difference is booked (2.5). Checked by a deferred trigger at commit.                |
+| Withholding agrees          | The deductions of one payment add up to its line on the withholding-tax payable account, in base currency.                                                                                                                               |
+| Split is exact              | The two parts of a split equal the original line in all three currencies.                                                                                                                                                                |
+| One ledger per journal      | A journal's ledger and its entity's ledgers agree; balances are written to that ledger only.                                                                                                                                             |
+| Duplicate source            | Unique on entity, source system, source document reference.                                                                                                                                                                              |
+
+### 2.5 Settlement rules
+
+#### Cross-currency settlement (D10)
+
+Every line carries three amounts: transaction currency, base currency and reporting currency. A settlement is an allocation, and the allocation is where the rule is enforced.
+
+**What must net to zero**
+
+1. **Transaction currency, exactly.** All lines of an allocation are on one account and in one transaction currency, and they net to zero in it. A payment in another currency still posts its counterparty line in the invoice's currency; the money side of the payment carries the bank's currency.
+2. **Base and reporting currency, after the difference is booked.** The lines of an allocation — including the revaluation adjustments tied to them by `revaluesLineId` — rarely net to zero in base or reporting currency, because they were converted at different dates. Whatever is left is the realised exchange difference. It is booked as part of the allocation, in the same transaction, and its lines join the allocation, so the allocation then nets to zero in all three currencies. A fully settled position therefore leaves no exchange residue on a supplier's or customer's account.
+
+**How a payment's counterparty line is converted.** Its base amount is the base amount of the money that left or reached the bank (plus any tax withheld from it, D11), and its reporting amount is the reporting amount of the same. The payment journal therefore balances by construction, whatever the bank's currency, and the whole exchange effect of the settlement shows in the allocation.
+
+**How the realised difference is booked.** The allocation's difference journal (`Allocation.differenceJournalId`) has up to two pairs of lines:
+
+| Line                                             | Transaction amount | Base amount                | Reporting amount                |
+| ------------------------------------------------ | ------------------ | -------------------------- | ------------------------------- |
+| Counterparty account, joins the allocation       | 0                  | The base residue, reversed | 0                               |
+| Realised exchange gain or loss account (by sign) | 0                  | The base residue           | 0                               |
+| Counterparty account, joins the allocation       | 0                  | 0                          | The reporting residue, reversed |
+| Realised exchange gain or loss account (by sign) | 0                  | 0                          | The reporting residue           |
+
+Base and reporting are booked separately because the two can differ in sign: a settlement can be a loss in base currency and a gain in reporting currency. A pair is left out when its residue is zero. The gain and loss accounts are the ones set on ledger A (2.1, `LedgerSetup`); there is no default in code, and an allocation that needs them when they are not set is refused.
+
+**Order with other differences.** A difference in transaction currency — a settlement discount or a write-off — is booked first, to the allocation-difference account, converted at the allocation date's rates. The exchange difference is what remains after that.
+
+**Unrealised and realised.** Revaluation adjustments stay where they were posted. Because they are part of the allocation, the realised difference booked at settlement is only the movement since the last revaluation, and the two together give the total exchange effect of the item.
+
+**Part settlement.** The line being part-settled is split first (D4). Base and reporting amounts are split in proportion to the transaction amount, with any rounding left on the part that stays open, and the line's revaluation adjustments are split in the same proportion. An overpayment splits the payment line instead; the remainder stays open on the account as an unallocated payment.
+
+Example, base currency USD. A EUR 1,000 invoice at 1.10 (base 1,100) is revalued at month end at 1.12 (adjustment line, base 20 credit; unrealised loss 20). It is paid at 1.15 (base 1,150).
+
+| Allocation line        | EUR      | Base USD |
+| ---------------------- | -------- | -------- |
+| Invoice                | 1,000 Cr | 1,100 Cr |
+| Revaluation adjustment | 0        | 20 Cr    |
+| Payment                | 1,000 Dr | 1,150 Dr |
+| Realised difference    | 0        | 30 Cr    |
+| Net                    | 0        | 0        |
+
+The difference journal debits realised exchange loss 30. Total loss on the item: 20 unrealised plus 30 realised, equal to EUR 1,000 × (1.15 − 1.10).
+
+#### Withholding tax on supplier payments (D11)
+
+The invoice is settled in full; the supplier receives the invoice amount less the tax, and the tax is owed to the authority.
+
+**The payment journal.** For an invoice of 1,180 (net 1,000 plus VAT 180) with 5 % withheld on the net amount:
+
+| Line                                                       | Debit | Credit |
+| ---------------------------------------------------------- | ----- | ------ |
+| Supplier's account (joins the allocation with the invoice) | 1,180 |        |
+| Bank                                                       |       | 1,130  |
+| Withholding-tax payable account, chosen on the tax code    |       | 50     |
+
+The supplier line and the invoice line form one allocation that nets to zero; the invoice is marked `PAID`. Nothing about the invoice stays open because tax was withheld. A `WithholdingDeduction` row records the code, rate, base, amount, the payable line and the certificate reference.
+
+**Rules.**
+
+- **Which code.** The invoice's withholding code, defaulted from the supplier when the invoice is entered. No code, nothing withheld. A payment run computes the deduction per invoice and shows the net amount it will pay; the bank file carries the net amount.
+- **Rate and base.** The rate effective on the payment's document date. The base is the invoice's net or gross amount, as the code says. A part payment withholds in proportion to the part of the invoice it settles.
+- **Account.** The code's `withholdingAccountId`. A payment that would withhold under a code without one is refused; there is no default account.
+- **Certificate.** Required before the payment can post: entered by the user, or drawn from the code's number series. Unique per entity and code. Shown on the payment voucher and the remittance advice.
+- **Currency.** The tax is computed in the invoice's currency. The payable line is posted in base currency at the payment date's rate, since that is the amount owed to the authority; the payment journal balances in base and reporting currency as any other.
+- **Remittance.** The withholding-tax payable account is allocation-enabled. The payment to the authority is allocated against the payable lines it covers, and each deduction records that allocation, so unremitted tax can be listed by certificate.
+- **Reversal.** Reversing the payment reverses its payable line and voids its deductions; the certificate reference is kept on the voided row and cannot be reused.
+- **Not the `WITHHELD` marker.** That marker means a payment is held back from a line. It has nothing to do with withholding tax (see section 5, item 7).
 
 ---
 
@@ -312,6 +407,8 @@ Steps 2 to 8 run per tenant in one transaction per entity. A failure leaves that
 | `isActive`           | `Account.isActive`                                                                                                                                                                       |
 
 The payables header account is the account the payables code posts to today: code `2000`, else the first liability account flagged as control. Note that FX revaluation and the balance-sheet template use `2100` for the same purpose; the migration treats both as header candidates and reports which one each entity actually used.
+
+Withholding tax (D11) has no history to move: nothing withholds tax today. Existing tax codes of type `WHT` get no payable account; the migration lists them so the tenant can choose one before the first payment that withholds.
 
 ### 3.4 Payables transactions
 
@@ -535,22 +632,24 @@ After the move a tenant's creditors and debtors are many accounts, not one.
 
 Section 11 names these; listing them so nobody looks for an existing source.
 
-| Report                           | Source                                                                                    |
-| -------------------------------- | ----------------------------------------------------------------------------------------- |
-| Payables ageing                  | Open creditor lines. Today there is a receivables ageing only.                            |
-| Supplier and customer statements | Lines on one counterparty account between two dates                                       |
-| Tax report                       | Lines with a tax code, using `taxBaseAmount`. Today tax is posted but nothing reports it. |
-| Sales credit notes (ACC-10)      | An entry-document type                                                                    |
+| Report                              | Source                                                                                                                        |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Payables ageing                     | Open creditor lines. Today there is a receivables ageing only.                                                                |
+| Supplier and customer statements    | Lines on one counterparty account between two dates                                                                           |
+| Tax report                          | Lines with a tax code, using `taxBaseAmount`. Today tax is posted but nothing reports it.                                     |
+| Sales credit notes (ACC-10)         | An entry-document type                                                                                                        |
+| Withholding tax (D11)               | `WithholdingDeduction` by period, supplier, code and certificate; unremitted deductions from the payable account's open lines |
+| Realised exchange differences (D10) | Difference journals of allocations, by account and counterparty                                                               |
 
 ### 4.5 Screens
 
-| Screen                                                                  | Change                                                                     |
-| ----------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `ap` (invoices), `ap/suppliers`, `ap/payment-runs`                      | Same screens over documents, accounts and lines                            |
-| `ar` (customers, invoices, receipts, allocation), `ar/ageing`           | Same; allocation works on lines                                            |
-| `budget`, `budget/variance`                                             | Entry writes journals to a budget ledger; the version picker lists ledgers |
-| `dashboard/ap`, `dashboard/ar`, `dashboard/cfo`, `dashboard/controller` | Read ledger enquiries                                                      |
-| `gl/trial-balance`, `gl/accounts`, `reports/*`                          | Ledger selector; held-postings switch on enquiry                           |
+| Screen                                                                  | Change                                                                                                                                                       |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ap` (invoices), `ap/suppliers`, `ap/payment-runs`                      | Same screens over documents, accounts and lines; the invoice and supplier carry a withholding code, the run shows the tax withheld and asks for certificates |
+| `ar` (customers, invoices, receipts, allocation), `ar/ageing`           | Same; allocation works on lines                                                                                                                              |
+| `budget`, `budget/variance`                                             | Entry writes journals to a budget ledger; the version picker lists ledgers                                                                                   |
+| `dashboard/ap`, `dashboard/ar`, `dashboard/cfo`, `dashboard/controller` | Read ledger enquiries                                                                                                                                        |
+| `gl/trial-balance`, `gl/accounts`, `reports/*`                          | Ledger selector; held-postings switch on enquiry                                                                                                             |
 
 ### 4.6 Writers that change (not reports, but they write the tables being dropped)
 
@@ -580,6 +679,8 @@ Under section 11 these become producers of the canonical document in WP-4. Until
 5. **`APPayment.status` is free text**, and `supplierId`, `amount`, `currency` and `paymentDate` are all nullable. Rows that are incomplete cannot be migrated and are listed.
 
 6. **Held postings interact with allocation and payment.** A held line cannot be allocated, paid or revalued. Releasing it makes it open.
+
+7. **The `WITHHELD` marker and withholding tax share a word.** The marker (from section 11) means payment of a line is held back; withholding tax (D11) is unrelated. Proposed: rename the marker `ON_HOLD`. Owner to decide; the note keeps `WITHHELD` until then.
 
 ## 6. Not covered by this note
 
