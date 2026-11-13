@@ -9,6 +9,7 @@
  */
 
 import { PrismaClient } from "./registry-client.js";
+import { registryDatabaseUrlIfSet } from "../config.js";
 
 export type TenantRecord = {
   id: string;
@@ -25,14 +26,13 @@ export type TenantRecord = {
 };
 
 // Registry client — connects to the shared registry DB
-const registryUrl = process.env.REGISTRY_DATABASE_URL ?? process.env.DATABASE_URL;
 
 let registryClient: PrismaClient | null = null;
 
 export function getRegistryClient(): PrismaClient {
   if (!registryClient) {
     registryClient = new PrismaClient({
-      datasourceUrl: registryUrl
+      datasourceUrl: registryDatabaseUrlIfSet()
     });
   }
   return registryClient;

@@ -2,114 +2,150 @@
 
 ## API (`apps/api/.env`)
 
-### Required
+Every setting the API, its workers and its scripts read is declared once, in
+`apps/api/src/config.ts`; no other file reads `process.env`. The API and the
+workers check their required settings at startup and exit naming every one
+that is missing or invalid. An empty value counts as unset. `apps/api/.env` is
+read by the config module and never overrides a variable already set in the
+environment.
 
-| Variable       | Description                            | Example                                     |
-| -------------- | -------------------------------------- | ------------------------------------------- |
-| `DATABASE_URL` | PostgreSQL connection string           | `postgresql://user:pass@localhost:5432/hfp` |
-| `NODE_ENV`     | Environment mode                       | `development` / `production`                |
-| `PORT`         | API server port                        | `4000`                                      |
-| `APP_BASE_URL` | Frontend base URL for emails and links | `https://app.example.com`                   |
+"Required by" names the processes that will not start without the setting:
+`api` (the API server) and `workers` (the worker supervisor). Scripts ask for
+what they need when they run: `dev:setup` and `db:seed` need `DATABASE_URL`
+and `SEED_USER_PASSWORD`, the database setup scripts need `DATABASE_URL`.
 
-### Authentication (Native JWT)
+<!-- api-config:start (generated from apps/api/src/config.ts; run pnpm --filter @hfp/api docs:env) -->
 
-| Variable                   | Description                                                                                        | Example                    |
-| -------------------------- | -------------------------------------------------------------------------------------------------- | -------------------------- |
-| `JWT_SECRET`               | HS256 signing secret, 32+ random bytes                                                             | `openssl-random-hex-value` |
-| `JWT_ACCESS_EXPIRY`        | Access token lifetime in seconds                                                                   | `900`                      |
-| `JWT_REFRESH_EXPIRY`       | Refresh token/session lifetime in seconds                                                          | `604800`                   |
-| `BCRYPT_SALT_ROUNDS`       | Password hashing cost                                                                              | `12`                       |
-| `MAX_FAILED_ATTEMPTS`      | Failed login attempts before lockout                                                               | `5`                        |
-| `LOCKOUT_DURATION_MINUTES` | Account lockout duration                                                                           | `15`                       |
-| `COOKIE_SECURE`            | Require HTTPS cookies in production                                                                | `true`                     |
-| `COOKIE_DOMAIN`            | Leave unset: cookies belong to the web app's origin (same-origin proxy)                            |                            |
-| `TRUST_PROXY`              | Addresses whose `X-Forwarded-*` headers the API believes: the web app's server. Default `loopback` | `loopback` / `10.0.0.5`    |
+### Runtime
 
-### Redis (BullMQ queues)
+| Variable       | Required by  | Default       | Description                                                                                     |
+| -------------- | ------------ | ------------- | ----------------------------------------------------------------------------------------------- |
+| `NODE_ENV`     |              | `development` | development, test or production. Production enforces the production requirements.               |
+| `PORT`         |              | `4000`        | Port the API listens on.                                                                        |
+| `LOG_LEVEL`    |              | `info`        | Log level.                                                                                      |
+| `TRUST_PROXY`  |              | `loopback`    | Addresses whose X-Forwarded-\* headers are believed (Fastify trustProxy): the web app's server. |
+| `APP_BASE_URL` | api, workers |               | The address users open in the browser, for links in e-mails.                                    |
+| `APP_VERSION`  |              |               | Version reported by /health and /version.                                                       |
+| `BUILD_DATE`   |              |               | Build date reported by /version.                                                                |
 
-| Variable                   | Description                                                                  | Example                  |
-| -------------------------- | ---------------------------------------------------------------------------- | ------------------------ |
-| `REDIS_URL`                | Full Redis URL (preferred)                                                   | `redis://localhost:6379` |
-| `ACCESS_CACHE_TTL_SECONDS` | Lifetime of a cached access result (backstop; changes invalidate explicitly) | `300`                    |
-| `REDIS_HOST`               | Redis hostname (if not using URL)                                            | `127.0.0.1`              |
-| `REDIS_PORT`               | Redis port                                                                   | `6379`                   |
-| `REDIS_PASSWORD`           | Redis password                                                               | `secret`                 |
+### Databases
 
-### Oracle OHIP (Opera Cloud / Simphony POS)
+| Variable                | Required by                              | Default | Description                                                                                                          |
+| ----------------------- | ---------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`          |                                          |         | A tenant database, for setup scripts and the seed; the registry fallback outside production. Never a default tenant. |
+| `REGISTRY_DATABASE_URL` | api in production, workers in production |         | The tenant registry database. Required in production.                                                                |
+| `TENANT_POOL_MAX`       |                                          | `50`    | Most tenant database clients kept open at once.                                                                      |
+| `TENANT_DB_HOST`        |                                          |         | Provisioning: host for new tenant databases (default: the registry's).                                               |
+| `TENANT_DB_PORT`        |                                          |         | Provisioning: port for new tenant databases (default: the registry's).                                               |
+| `TENANT_DB_USER`        |                                          |         | Provisioning: role that owns new tenant databases (default: the registry's).                                         |
+| `TENANT_DB_PASSWORD`    |                                          |         | Provisioning: that role's password (default: the registry's).                                                        |
 
-| Variable             | Description              | Example                           |
-| -------------------- | ------------------------ | --------------------------------- |
-| `OHIP_CLIENT_ID`     | OHIP OAuth client ID     | `abc123`                          |
-| `OHIP_CLIENT_SECRET` | OHIP OAuth client secret | `secret`                          |
-| `OHIP_ENTERPRISE_ID` | OHIP enterprise/hotel ID | `HOTEL001`                        |
-| `OHIP_HOSTNAME`      | OHIP API base URL        | `https://ohipapi.oraclecloud.com` |
+### Redis
 
-### Email (Resend)
+| Variable                   | Required by  | Default | Description                                                                                |
+| -------------------------- | ------------ | ------- | ------------------------------------------------------------------------------------------ |
+| `REDIS_URL`                | api, workers |         | Redis, for sessions, the access cache and job queues. Required by the API and the workers. |
+| `ACCESS_CACHE_TTL_SECONDS` |              | `300`   | Backstop lifetime of a cached access result; changes invalidate it at once.                |
 
-| Variable            | Description               | Example             |
-| ------------------- | ------------------------- | ------------------- |
-| `RESEND_API_KEY`    | Resend API key (optional) | `re_abc123`         |
-| `RESEND_FROM_EMAIL` | Sender email address      | `noreply@hotel.com` |
+### Sign-in and sessions
 
-### File Storage
+| Variable                   | Required by | Default  | Description                                                         |
+| -------------------------- | ----------- | -------- | ------------------------------------------------------------------- |
+| `JWT_SECRET`               | api         |          | Signs session tokens. Required by the API.                          |
+| `JWT_ACCESS_EXPIRY`        |             | `900`    | Access token lifetime, seconds.                                     |
+| `JWT_REFRESH_EXPIRY`       |             | `604800` | Refresh token lifetime, seconds.                                    |
+| `BCRYPT_SALT_ROUNDS`       |             | `12`     | bcrypt cost for password hashes.                                    |
+| `MAX_FAILED_ATTEMPTS`      |             | `5`      | Failed sign-ins before the account locks.                           |
+| `LOCKOUT_DURATION_MINUTES` |             | `15`     | How long a locked account stays locked.                             |
+| `COOKIE_SECURE`            |             | `false`  | Mark session cookies Secure. Always on in production.               |
+| `COOKIE_DOMAIN`            |             |          | Domain attribute for session cookies; normally unset.               |
+| `PLATFORM_API_KEY`         | api         |          | Key the platform admin uses for tenant routes. Required by the API. |
 
-| Variable                | Description                                                                      | Example        |
-| ----------------------- | -------------------------------------------------------------------------------- | -------------- |
-| `STORAGE_BACKEND`       | Storage backend for Transfer Desk/payment files                                  | `local` / `s3` |
-| `TD_LOCAL_UPLOADS_PATH` | Local private storage root; never use web public roots such as `apps/web/public` | `./uploads`    |
-| `TD_S3_BUCKET`          | S3 bucket for Transfer Desk/payment files                                        | `hfp-files`    |
-| `AWS_S3_BUCKET`         | S3 bucket for reports (optional)                                                 | `hfp-reports`  |
-| `AWS_REGION`            | AWS region                                                                       | `eu-west-1`    |
+### Files
 
-Payment run bank files are stored as StorageBackend object keys, not filesystem
-paths. Legacy payment runs whose `bank_file_path` contains a raw local path must
-be regenerated or migrated to the namespaced storage-key format; raw path
-downloads are intentionally rejected.
+| Variable                | Required by | Default     | Description                                              |
+| ----------------------- | ----------- | ----------- | -------------------------------------------------------- |
+| `STORAGE_BACKEND`       |             | `local`     | Where Transfer Desk files live.                          |
+| `TD_LOCAL_UPLOADS_PATH` |             | `./uploads` | Local storage path; keep it outside any public web root. |
+| `TD_S3_BUCKET`          |             |             | S3 bucket for Transfer Desk files.                       |
+| `AWS_REGION`            |             |             | AWS region for S3.                                       |
+| `AWS_S3_BUCKET`         |             |             | S3 bucket for generated reports.                         |
 
-### Sky Jana SFTP
+### E-mail
 
-| Variable               | Description           | Example           |
-| ---------------------- | --------------------- | ----------------- |
-| `JANA_SFTP_HOST`       | SFTP server hostname  | `sftp.jana.co.tz` |
-| `JANA_SFTP_PORT`       | SFTP port             | `22`              |
-| `JANA_SFTP_USERNAME`   | SFTP username         | `hfp`             |
-| `JANA_SFTP_PASSWORD`   | SFTP password         | `secret`          |
-| `JANA_SFTP_REMOTE_DIR` | Remote directory path | `/exports/`       |
+| Variable                    | Required by | Default | Description                                          |
+| --------------------------- | ----------- | ------- | ---------------------------------------------------- |
+| `RESEND_API_KEY`            |             |         | Resend API key; e-mail goes through Resend when set. |
+| `RESEND_FROM_EMAIL`         |             |         | Sender address for Resend.                           |
+| `AWS_SES_REGION`            |             |         | SES region; e-mail goes through SES when set.        |
+| `AWS_SES_ACCESS_KEY_ID`     |             |         | SES access key.                                      |
+| `AWS_SES_SECRET_ACCESS_KEY` |             |         | SES secret key.                                      |
+| `SES_FROM_EMAIL`            |             |         | Sender address for SES.                              |
 
-### Application
+### Exchange rates
 
-| Variable       | Description                         | Example                 |
-| -------------- | ----------------------------------- | ----------------------- |
-| `APP_BASE_URL` | Frontend base URL (for email links) | `https://app.hotel.com` |
+| Variable        | Required by | Default                                                         | Description                |
+| --------------- | ----------- | --------------------------------------------------------------- | -------------------------- |
+| `ECB_RATES_URL` |             | `https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml` | Daily reference-rate feed. |
 
-### Development setup (`pnpm dev:setup`)
+### Connectors (move to per-tenant connections in WP-5)
 
-| Variable             | Description                                                                                                                                                                  | Example             |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
-| `SEED_USER_PASSWORD` | Password the demo users get when they are created (12+ characters, upper and lower case, a digit). Required by `dev:setup` and `db:seed`; users who have a password keep it. | `Choose-Your-Own-1` |
+| Variable                      | Required by | Default                           | Description                |
+| ----------------------------- | ----------- | --------------------------------- | -------------------------- |
+| `OHIP_HOSTNAME`               |             | `https://ohipapi.oraclecloud.com` | Opera Cloud (OHIP) API.    |
+| `OHIP_CLIENT_ID`              |             |                                   | Opera Cloud client id.     |
+| `OHIP_CLIENT_SECRET`          |             |                                   | Opera Cloud client secret. |
+| `OHIP_ENTERPRISE_ID`          |             |                                   | Opera Cloud enterprise id. |
+| `MEWS_HOSTNAME`               |             | `https://api.mews.com`            | Mews API.                  |
+| `MEWS_CLIENT_TOKEN`           |             |                                   | Mews client token.         |
+| `MEWS_ACCESS_TOKEN`           |             |                                   | Mews access token.         |
+| `SKY_JANA_SFTP_HOST`          |             |                                   | Sky Jana SFTP host.        |
+| `SKY_JANA_SFTP_PORT`          |             | `22`                              | Sky Jana SFTP port.        |
+| `SKY_JANA_SFTP_USER`          |             |                                   | Sky Jana SFTP user.        |
+| `SKY_JANA_SFTP_PASSWORD`      |             |                                   | Sky Jana SFTP password.    |
+| `SKY_JANA_SFTP_PRIVATE_KEY`   |             |                                   | Sky Jana SFTP private key. |
+| `SKY_JANA_SFTP_INBOUND_PATH`  |             | `/inbound`                        | Sky Jana inbound folder.   |
+| `SKY_JANA_SFTP_OUTBOUND_PATH` |             | `/outbound`                       | Sky Jana outbound folder.  |
 
-`dev:setup` also needs `DATABASE_URL`, `REGISTRY_DATABASE_URL` (a different database) and `APP_BASE_URL`. Neither it nor `db:seed` runs with `NODE_ENV=production`.
+### Workers
 
-### Workers (`pnpm workers`, `workers:prod`)
+| Variable                       | Required by | Default | Description                                                                  |
+| ------------------------------ | ----------- | ------- | ---------------------------------------------------------------------------- |
+| `WORKER_MAX_CLEAN_EXITS`       |             | `3`     | Clean exits in a row after which the supervisor gives up on a worker.        |
+| `TRANSFER_DESK_TENANT_POLL_MS` |             | `60000` | How often the Transfer Desk process checks for added or deactivated tenants. |
 
-The API starts no background workers; it only enqueues. The worker process runs
-them all, Transfer Desk included (OPS-10).
+### Development
 
-| Variable                       | Description                                                                                                                                 | Example |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| `WORKER_MAX_CLEAN_EXITS`       | A worker that exits cleanly this many times in a row is not restarted; the supervisor stops all workers and exits with code 1. Default `3`. | `3`     |
-| `TRANSFER_DESK_TENANT_POLL_MS` | How often the Transfer Desk process checks the registry for added or deactivated tenants. Default `60000`.                                  | `60000` |
+| Variable                     | Required by | Default | Description                                                              |
+| ---------------------------- | ----------- | ------- | ------------------------------------------------------------------------ |
+| `SEED_USER_PASSWORD`         |             |         | The demo users' password (pnpm dev:setup, db:seed).                      |
+| `TML_ALLOW_INSECURE_SANDBOX` |             | `false` | Tests only: run TML without the isolated sandbox. Ignored in production. |
+
+<!-- api-config:end -->
+
+### Notes
+
+- `DATABASE_URL` is used by the setup scripts and the seed, and as the registry
+  fallback outside production. It is not a default tenant: a query with no
+  tenant bound fails (AUT-05).
+- `dev:setup` also needs `REGISTRY_DATABASE_URL` (a different database) and
+  `APP_BASE_URL`. Neither it nor `db:seed` runs with `NODE_ENV=production`.
+- The API starts no background workers; it only enqueues. The worker process
+  runs them all, Transfer Desk included (OPS-10).
+- Payment run bank files are stored as StorageBackend object keys, not
+  filesystem paths. Legacy payment runs whose `bank_file_path` contains a raw
+  local path must be regenerated or migrated to the namespaced storage-key
+  format; raw path downloads are intentionally rejected.
 
 ### Tests
+
+These are read by the test suites only, not by the application.
 
 | Variable                     | Description                                                            | Example                                                  |
 | ---------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------- |
 | `TEST_DATABASE_URL`          | Tenant database for integration tests; required by `test:integration`  | `postgresql://hfp:pass@localhost:5432/hfp_test`          |
 | `TEST_SECOND_DATABASE_URL`   | A second tenant database, for the two-tenant isolation tests; required | `postgresql://hfp:pass@localhost:5432/hfp_test_b`        |
 | `TEST_REGISTRY_DATABASE_URL` | A registry database, for the worker entry-point tests; required        | `postgresql://hfp:pass@localhost:5432/hfp_registry_test` |
-
-`DATABASE_URL` is used by the setup scripts and as the registry fallback. It is
-not a default tenant: a query with no tenant bound fails (AUT-05).
 
 ---
 

@@ -42,6 +42,7 @@ import { connectRedis } from "./db/redis.js";
 import { resolveChainEntityId } from "./modules/entity/chain.js";
 import { registerContextRouter } from "./modules/access/context.js";
 import { registerEntityRouter } from "./modules/entity/router.js";
+import { config } from "./config.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -53,7 +54,7 @@ declare module "fastify" {
 export async function createApp(): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
-      level: process.env.LOG_LEVEL ?? "info",
+      level: config().LOG_LEVEL,
       serializers: logSerializers
     },
     bodyLimit: 10 * 1024 * 1024, // 10 MB for file imports
@@ -61,7 +62,7 @@ export async function createApp(): Promise<FastifyInstance> {
     // X-Forwarded-* headers are believed only from these addresses, so the
     // client IP (rate limits, audit) and the host (cross-site check) are the
     // browser's. Default: the proxy runs on the same machine.
-    trustProxy: process.env.TRUST_PROXY ?? "loopback"
+    trustProxy: config().TRUST_PROXY
   });
 
   // A database or cache fault while access is being checked or changed is an
@@ -169,7 +170,7 @@ export async function createApp(): Promise<FastifyInstance> {
     const status = dbOk ? (redisOk ? "ok" : "degraded") : "down";
     return {
       status,
-      version: process.env.APP_VERSION ?? "1.0.0",
+      version: config().APP_VERSION ?? "unknown",
       uptime: Math.floor((Date.now() - startTime) / 1000),
       checks: {
         database: dbOk ? "ok" : "down",
@@ -190,10 +191,10 @@ export async function createApp(): Promise<FastifyInstance> {
   });
 
   app.get("/api/v1/version", { config: { access: "public" } }, async () => ({
-    version: process.env.APP_VERSION ?? "1.0.0",
-    buildDate: process.env.BUILD_DATE ?? new Date().toISOString().split("T")[0],
+    version: config().APP_VERSION ?? "unknown",
+    buildDate: config().BUILD_DATE ?? "unknown",
     nodeVersion: process.version,
-    environment: process.env.NODE_ENV ?? "development"
+    environment: config().NODE_ENV
   }));
 
   app.get(

@@ -1,7 +1,16 @@
 /**
- * The password rules. One copy: the auth service applies them when a user sets
- * a password, and the development seed applies them to SEED_USER_PASSWORD.
+ * Passwords: the rules and the hash. One copy: the auth service applies the
+ * rules when a user sets a password, and the development seed applies them to
+ * SEED_USER_PASSWORD. Every password hash is made by hashPassword, with the
+ * cost from BCRYPT_SALT_ROUNDS.
  */
+
+import bcrypt from "bcrypt";
+import { config } from "../config.js";
+
+export function hashPassword(plaintext: string): Promise<string> {
+  return bcrypt.hash(plaintext, config().BCRYPT_SALT_ROUNDS);
+}
 
 /** Returns what is wrong with the password; empty when it meets the rules. */
 export function passwordPolicyErrors(password: string): string[] {

@@ -15,20 +15,11 @@
  */
 
 import { createSupervisor, exponentialBackoff, workerEntryPoints } from "./supervisor.js";
+import { startupConfig } from "../config.js";
 
 const MAX_BACKOFF_MS = 30_000;
 const STABLE_THRESHOLD_MS = 60_000;
 const SHUTDOWN_GRACE_MS = 10_000;
-
-function positiveInteger(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (raw === undefined || raw === "") return fallback;
-  const value = Number(raw);
-  if (!Number.isInteger(value) || value < 1) {
-    throw new Error(`${name} must be a positive integer, got "${raw}".`);
-  }
-  return value;
-}
 
 const workers = workerEntryPoints();
 let exiting = false;
@@ -43,7 +34,7 @@ async function exit(code: number): Promise<void> {
 
 const supervisor = createSupervisor({
   workers,
-  maxCleanExits: positiveInteger("WORKER_MAX_CLEAN_EXITS", 3),
+  maxCleanExits: startupConfig("workers").WORKER_MAX_CLEAN_EXITS,
   stableMs: STABLE_THRESHOLD_MS,
   backoffMs: exponentialBackoff(MAX_BACKOFF_MS),
   onFailure: () => void exit(1)

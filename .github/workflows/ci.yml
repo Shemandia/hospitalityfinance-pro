@@ -50,6 +50,9 @@ jobs:
       TEST_REGISTRY_DATABASE_URL: postgresql://hfp:hfp_ci@localhost:5432/hfp_registry_test
       REDIS_URL: redis://localhost:6379
       JWT_SECRET: ci-only-secret-not-used-outside-this-workflow
+      # The API and the workers will not start without these (apps/api/src/config.ts).
+      APP_BASE_URL: http://web.ci.invalid
+      PLATFORM_API_KEY: ci-only-platform-key-not-used-outside-this-workflow
 
     steps:
       - name: Checkout

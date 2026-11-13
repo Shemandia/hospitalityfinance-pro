@@ -16,14 +16,12 @@
  */
 
 import { fork, type ChildProcess } from "node:child_process";
-import { Queue } from "bullmq";
+import type { Queue } from "bullmq";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PrismaClient as RegistryClient } from "../../src/db/registry-client.js";
 import { workerEntryPoints } from "../../src/jobs/supervisor.js";
-import {
-  getTransferDeskQueueName,
-  getTransferDeskRedisConnection
-} from "../../src/jobs/transfer-desk-queue.js";
+import { getTransferDeskQueueName } from "../../src/jobs/transfer-desk-queue.js";
+import { createQueue } from "../../src/jobs/queues.js";
 
 const registryUrl = process.env.TEST_REGISTRY_DATABASE_URL;
 const tenantDbUrl = process.env.TEST_DATABASE_URL;
@@ -63,9 +61,7 @@ if (!registryUrl || !tenantDbUrl || !redisUrl) {
     function workerCount(slug: string): Promise<number> {
       let queue = queues.find((q) => q.name === getTransferDeskQueueName(slug));
       if (!queue) {
-        queue = new Queue(getTransferDeskQueueName(slug), {
-          connection: getTransferDeskRedisConnection()
-        });
+        queue = createQueue(getTransferDeskQueueName(slug));
         queues.push(queue);
       }
       return queue.getWorkers().then((w) => w.length);

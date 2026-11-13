@@ -1,7 +1,6 @@
 import { PrismaClient } from "../../db/client.js";
 import { execSync } from "node:child_process";
 import { resolve } from "node:path";
-import bcrypt from "bcrypt";
 import { registryPrisma } from "../../db/prisma.js";
 import { generateTenantCode } from "../../db/generateTenantCode.js";
 import { sendWelcomeEmail } from "../../shared/email.js";
@@ -15,6 +14,8 @@ import {
   type ProvisionTenantInput,
   type ProvisioningStepName
 } from "./types.js";
+import { hashPassword } from "../../services/password-policy.js";
+import { appUrl, childProcessEnv, config, registryDatabaseUrl } from "../../config.js";
 
 type SSEWriter = (event: string, data: Record<string, unknown>) => void;
 
@@ -62,12 +63,13 @@ export class ProvisioningService {
     }
 
     // Determine DB connection details
-    const registryUrl = process.env.REGISTRY_DATABASE_URL ?? process.env.DATABASE_URL ?? "";
+    const registryUrl = registryDatabaseUrl();
     const dbConn = parseDbUrl(registryUrl);
-    const tenantDbHost = process.env.TENANT_DB_HOST ?? dbConn.host;
-    const tenantDbPort = process.env.TENANT_DB_PORT ?? dbConn.port;
-    const tenantDbUser = process.env.TENANT_DB_USER ?? dbConn.user;
-    const tenantDbPassword = process.env.TENANT_DB_PASSWORD ?? dbConn.password;
+    const settings = config();
+    const tenantDbHost = settings.TENANT_DB_HOST ?? dbConn.host;
+    const tenantDbPort = settings.TENANT_DB_PORT ?? dbConn.port;
+    const tenantDbUser = settings.TENANT_DB_USER ?? dbConn.user;
+    const tenantDbPassword = settings.TENANT_DB_PASSWORD ?? dbConn.password;
     const tenantDbUrl = buildDbUrl(
       tenantDbUser,
       tenantDbPassword,
@@ -144,7 +146,7 @@ export class ProvisioningService {
       const apiRoot = resolve(import.meta.dirname ?? __dirname, "../../..");
       execSync("npx prisma db push --schema src/db/schema-tenant.prisma --skip-generate", {
         cwd: apiRoot,
-        env: { ...process.env, DATABASE_URL: tenantDbUrl },
+        env: childProcessEnv({ DATABASE_URL: tenantDbUrl }),
         stdio: "pipe",
         timeout: 60_000
       });
@@ -213,7 +215,7 @@ export class ProvisioningService {
       try {
         // The catalogue and the starting roles, then the first administrator.
         await ensureSystemCatalog(tenantClient);
-        const passwordHash = await bcrypt.hash(adminUser.temporaryPassword, 12);
+        const passwordHash = await hashPassword(adminUser.temporaryPassword);
         const user = await tenantClient.user.upsert({
           where: { email: adminUser.email.toLowerCase() },
           update: {
@@ -258,8 +260,7 @@ export class ProvisioningService {
     });
 
     await this.executeStep(tenantRecord.id, "sending_email", sse, async () => {
-      const appUrl = process.env.APP_BASE_URL ?? "http://localhost:3001";
-      const loginUrl = `${appUrl}/t/${tenantRecord.tenantCode}/login`;
+      const loginUrl = appUrl(`t/${tenantRecord.tenantCode}/login`);
       await sendWelcomeEmail({
         to: adminUser.email,
         userName: adminUser.firstName,
@@ -281,7 +282,7 @@ export class ProvisioningService {
     sse("complete", {
       tenantId: tenantRecord.id,
       slug: tenant.slug,
-      url: `${process.env.APP_BASE_URL ?? "http://localhost:3001"}/t/${tenantRecord.tenantCode}/login`
+      url: appUrl(`t/${tenantRecord.tenantCode}/login`)
     });
   }
 

@@ -18,6 +18,7 @@ import { PrismaClient as RegistryPrismaClient } from "./generated/registry/index
 import { getRequestContext } from "./requestContext.js";
 import { TenantNotBoundError } from "./tenantScope.js";
 import { getTenantClient } from "./tenantPool.js";
+import { registryDatabaseUrlIfSet } from "../config.js";
 
 type TenantClient = ReturnType<typeof getTenantClient>;
 
@@ -40,5 +41,5 @@ export const prisma: TenantClient = new Proxy({} as TenantClient, {
 });
 
 export const registryPrisma = new RegistryPrismaClient({
-  datasourceUrl: process.env.REGISTRY_DATABASE_URL ?? process.env.DATABASE_URL
+  datasourceUrl: registryDatabaseUrlIfSet()
 });

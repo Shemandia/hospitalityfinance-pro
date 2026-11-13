@@ -15,8 +15,8 @@
  * waits in Redis until that process picks it up.
  */
 
-import { Queue } from "bullmq";
-import type { ConnectionOptions } from "bullmq";
+import type { Queue } from "bullmq";
+import { createQueue } from "./queues.js";
 
 // ── Job payload type ────────────────────────────────────────────────────────
 
@@ -31,35 +31,6 @@ export type TransferDeskJobData = {
   automationId?: string;
   automationStepOrder?: number;
 };
-
-// ── Redis connection (shared across all tenant queues) ─────────────────────
-
-let redisConnection: ConnectionOptions | null = null;
-
-function getRedisConnection(): ConnectionOptions {
-  if (!redisConnection) {
-    const redisUrl = process.env.REDIS_URL;
-    if (redisUrl) {
-      const parsed = new URL(redisUrl);
-      redisConnection = {
-        host: parsed.hostname,
-        port: Number(parsed.port || 6379),
-        password: parsed.password || undefined
-      };
-    } else {
-      redisConnection = {
-        host: process.env.REDIS_HOST ?? "127.0.0.1",
-        port: Number(process.env.REDIS_PORT ?? 6379),
-        password: process.env.REDIS_PASSWORD ?? undefined
-      };
-    }
-  }
-  return redisConnection;
-}
-
-export function getTransferDeskRedisConnection(): ConnectionOptions {
-  return getRedisConnection();
-}
 
 // ── Per-tenant queue cache ─────────────────────────────────────────────────
 
@@ -76,8 +47,7 @@ export function getTransferDeskQueueName(tenantSlug: string): string {
 export function getTransferDeskQueue(tenantSlug: string): Queue<TransferDeskJobData> {
   let q = queues.get(tenantSlug);
   if (!q) {
-    q = new Queue<TransferDeskJobData>(getTransferDeskQueueName(tenantSlug), {
-      connection: getRedisConnection(),
+    q = createQueue<TransferDeskJobData>(getTransferDeskQueueName(tenantSlug), {
       defaultJobOptions: {
         removeOnComplete: { count: 100, age: 7 * 24 * 60 * 60 },
         removeOnFail: { count: 200, age: 30 * 24 * 60 * 60 },
