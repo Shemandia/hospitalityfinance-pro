@@ -84,18 +84,20 @@ pnpm install
 # 1. Generate Prisma clients
 pnpm --filter @hfp/api run db:generate
 
-# 2. Create the schema in both databases (no Docker, no shadow DB needed):
-pnpm --filter @hfp/api run db:push:registry
-pnpm --filter @hfp/api run db:push:tenant
-#    (db:push applies the schema directly — simplest for local dev.
-#     Use db:migrate:deploy:* instead if you have migration files to apply.)
+# 2. Build both databases and seed the demo tenant (one command, safe to repeat)
+pnpm dev:setup
 
-# 3. (Optional) seed demo data
-pnpm --filter @hfp/api run db:seed
-
-# 4. Start API + web
+# 3. Start API + web
 pnpm dev
 ```
+
+`dev:setup` reads `apps/api/.env`, which needs `DATABASE_URL` (the demo
+tenant), `REGISTRY_DATABASE_URL` (a different database), `SEED_USER_PASSWORD`
+and `APP_BASE_URL`. It creates the databases when they do not exist (the role
+needs `CREATEDB`, or create them yourself), builds the registry and the tenant
+database, seeds the demo tenant and prints the sign-in address. Sign in as
+`admin@hfp.local` with `SEED_USER_PASSWORD`: that user holds Administrator for
+the whole tenant. A user who already had a password keeps it.
 
 API → http://localhost:4000, web → http://localhost:3000 (Next dev default).
 

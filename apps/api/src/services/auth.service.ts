@@ -11,6 +11,7 @@ import crypto from "node:crypto";
 import { getRegistryClient, resolveTenantByCode } from "../db/tenantRegistry.js";
 import { getTenantClient } from "../db/tenantPool.js";
 import { withBypassRLS } from "../db/rls-bypass.js";
+import { passwordPolicyErrors } from "./password-policy.js";
 import type { Prisma } from "../db/client.js";
 
 // ── Configuration ────────────────────────────────────────────────────────────
@@ -548,11 +549,7 @@ export class AuthService {
 // ── Password Policy ──────────────────────────────────────────────────────────
 
 function validatePasswordPolicy(password: string): void {
-  const errors: string[] = [];
-  if (password.length < 12) errors.push("Password must be at least 12 characters");
-  if (!/[A-Z]/.test(password)) errors.push("Password must contain an uppercase letter");
-  if (!/[a-z]/.test(password)) errors.push("Password must contain a lowercase letter");
-  if (!/[0-9]/.test(password)) errors.push("Password must contain a digit");
+  const errors = passwordPolicyErrors(password);
   if (errors.length > 0) throw new ValidationError(errors.join(". "));
 }
 

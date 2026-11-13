@@ -3,6 +3,8 @@ import { Prisma, PrismaClient } from "./client.js";
 import { PrismaClient as RegistryPrismaClient } from "./registry-client.js";
 import { USALI_ACCOUNTS, SYSTEM_ACCOUNT_TYPES } from "../modules/setup/usali-template.js";
 import { seedTransferDeskSystemData } from "./seed-transfer-desk.js";
+import { hashPassword } from "../services/auth.service.js";
+import { passwordPolicyErrors } from "../services/password-policy.js";
 import { SYSTEM_PERMISSIONS, SYSTEM_ROLES } from "../modules/access/system-catalog.js";
 import {
   applyAccessMigration,
@@ -11,19 +13,72 @@ import {
   grantTenantAdministrator
 } from "../modules/access/setup.js";
 
-if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL is required to seed.");
+// Demo data and demo users with a known password. Never on a live system:
+// production tenants get their roles and permissions from tenant provisioning.
+if (process.env.NODE_ENV === "production") {
+  throw new Error("The demo seed does not run with NODE_ENV=production.");
+}
+
+function required(name: string, why: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required to seed. ${why}`);
+  return value;
+}
+
+const databaseUrl = required("DATABASE_URL", "It is the demo tenant's database.");
+
+// The demo users' password. Never a value in the code: it comes from the
+// environment, and must meet the same rules as any password a user sets.
+const seedPassword = required(
+  "SEED_USER_PASSWORD",
+  "It becomes the password of the demo users (admin@hfp.local, controller@hfp.local, viewer@hfp.local)."
+);
+const passwordProblems = passwordPolicyErrors(seedPassword);
+if (passwordProblems.length > 0) {
+  throw new Error(
+    `SEED_USER_PASSWORD does not meet the password rules: ${passwordProblems.join("; ")}.`
+  );
 }
 
 // The seed writes rows for several entities and rows that belong to none, so
 // it runs with the row-level security bypass set for its whole session. One
 // connection only: a session setting lives on the connection that set it.
-const seedUrl = new URL(process.env.DATABASE_URL);
+const seedUrl = new URL(databaseUrl);
 seedUrl.searchParams.set("connection_limit", "1");
 const prisma = new PrismaClient({ datasourceUrl: seedUrl.toString() });
 const registryPrisma = new RegistryPrismaClient({
   datasourceUrl: process.env.REGISTRY_DATABASE_URL ?? process.env.DATABASE_URL
 });
+
+const DEMO_TENANT_SLUG = "demo-hotels";
+
+/**
+ * A demo user who can sign in. A new user gets SEED_USER_PASSWORD. A user who
+ * already has a password keeps it: running the seed again never resets a
+ * password someone has changed.
+ */
+async function seedUser(email: string, keycloakId: string, name: string) {
+  const existing = await prisma.user.findUnique({ where: { email } });
+  if (existing?.passwordHash) {
+    console.log(`${email}: exists with a password; password kept.`);
+    return existing;
+  }
+  const passwordHash = await hashPassword(seedPassword);
+  const user = await prisma.user.upsert({
+    where: { email },
+    update: { passwordHash, passwordChangedAt: new Date(), mustChangePassword: false },
+    create: {
+      email,
+      keycloakId,
+      name,
+      passwordHash,
+      passwordChangedAt: new Date(),
+      mustChangePassword: false
+    }
+  });
+  console.log(`${email}: password set from SEED_USER_PASSWORD.`);
+  return user;
+}
 
 async function main(): Promise<void> {
   await prisma.$executeRaw`SELECT set_config('app.bypass_rls', 'true', false)`;
@@ -68,13 +123,17 @@ async function main(): Promise<void> {
 
   // ── Demo Tenant ─────────────────────────────────────────────────────────
   await registryPrisma.tenant.upsert({
-    where: { slug: "demo-hotels" },
+    where: { slug: DEMO_TENANT_SLUG },
     update: {},
     create: {
-      slug: "demo-hotels",
+      slug: DEMO_TENANT_SLUG,
       name: "HFP Demo Hotels",
-      tenantCode: crypto.createHash("sha256").update("demo-hotels").digest("hex").substring(0, 8),
-      databaseUrl: process.env.DATABASE_URL ?? "postgresql://hfp:password@localhost:5432/hfp_db",
+      tenantCode: crypto
+        .createHash("sha256")
+        .update(DEMO_TENANT_SLUG)
+        .digest("hex")
+        .substring(0, 8),
+      databaseUrl,
       adminEmail: "admin@hfp.local",
       plan: "enterprise",
       maxProperties: 10,
@@ -129,35 +188,9 @@ async function main(): Promise<void> {
     }
   });
 
-  const admin = await prisma.user.upsert({
-    where: { email: "admin@hfp.local" },
-    update: {},
-    create: {
-      email: "admin@hfp.local",
-      keycloakId: "kc-admin-001",
-      name: "Demo Admin"
-    }
-  });
-
-  const controller = await prisma.user.upsert({
-    where: { email: "controller@hfp.local" },
-    update: {},
-    create: {
-      email: "controller@hfp.local",
-      keycloakId: "kc-controller-001",
-      name: "Demo Controller"
-    }
-  });
-
-  const viewer = await prisma.user.upsert({
-    where: { email: "viewer@hfp.local" },
-    update: {},
-    create: {
-      email: "viewer@hfp.local",
-      keycloakId: "kc-viewer-001",
-      name: "Demo Viewer"
-    }
-  });
+  const admin = await seedUser("admin@hfp.local", "kc-admin-001", "Demo Admin");
+  const controller = await seedUser("controller@hfp.local", "kc-controller-001", "Demo Controller");
+  const viewer = await seedUser("viewer@hfp.local", "kc-viewer-001", "Demo Viewer");
 
   // Memberships only; the role grants follow once the roles are seeded.
   for (const [entityId, userId] of [
@@ -510,12 +543,44 @@ async function main(): Promise<void> {
 
   // ── Transfer Desk System Profiles ──────────────────────────────────────────
   await seedTransferDeskSystemData(prisma);
+
+  // ── Setup wizard ─────────────────────────────────────────────────────────
+  // The seed has created what the wizard would: properties, a chart of
+  // accounts and an open period. Mark the tenant set up, so sign-in goes to
+  // the dashboard rather than the wizard.
+  const progress = await prisma.tenantSetupProgress.findFirst({
+    where: { tenantId: DEMO_TENANT_SLUG }
+  });
+  if (!progress) {
+    await prisma.tenantSetupProgress.create({
+      data: {
+        tenantId: DEMO_TENANT_SLUG,
+        currentStep: 7,
+        isCompleted: true,
+        completedSteps: [1, 2, 3, 4, 5, 6],
+        completedAt: new Date()
+      }
+    });
+  } else if (!progress.isCompleted) {
+    await prisma.tenantSetupProgress.update({
+      where: { id: progress.id },
+      data: {
+        currentStep: 7,
+        isCompleted: true,
+        completedSteps: [1, 2, 3, 4, 5, 6],
+        completedAt: new Date()
+      }
+    });
+  }
+  console.log("Marked the demo tenant's setup complete.");
 }
 
 main()
-  .then(async () => prisma.$disconnect())
+  .then(async () => {
+    await Promise.all([prisma.$disconnect(), registryPrisma.$disconnect()]);
+  })
   .catch(async (error) => {
     console.error(error);
-    await prisma.$disconnect();
+    await Promise.all([prisma.$disconnect(), registryPrisma.$disconnect()]);
     process.exit(1);
   });

@@ -82,6 +82,14 @@ downloads are intentionally rejected.
 | -------------- | ----------------------------------- | ----------------------- |
 | `APP_BASE_URL` | Frontend base URL (for email links) | `https://app.hotel.com` |
 
+### Development setup (`pnpm dev:setup`)
+
+| Variable             | Description                                                                                                                                                                  | Example             |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
+| `SEED_USER_PASSWORD` | Password the demo users get when they are created (12+ characters, upper and lower case, a digit). Required by `dev:setup` and `db:seed`; users who have a password keep it. | `Choose-Your-Own-1` |
+
+`dev:setup` also needs `DATABASE_URL`, `REGISTRY_DATABASE_URL` (a different database) and `APP_BASE_URL`. Neither it nor `db:seed` runs with `NODE_ENV=production`.
+
 ### Workers (`pnpm workers`, `workers:prod`)
 
 The API starts no background workers; it only enqueues. The worker process runs
@@ -123,4 +131,4 @@ Use `docs/NON-DOCKER-SETUP.md` for direct Node.js, PostgreSQL, Redis and PM2 dep
 
 ## Signing in during development
 
-There is no development token. Sign in with a real user at `/t/<tenant code>/login`; `pnpm --filter @hfp/api db:seed` creates the demo users and gives them their roles. `ENABLE_DEV_AUTH` is no longer read.
+There is no development token. Sign in with a real user at `/t/<tenant code>/login`; `pnpm dev:setup` builds the databases, creates the demo users with the password in `SEED_USER_PASSWORD` and gives them their roles, then prints the sign-in address. `ENABLE_DEV_AUTH` is no longer read.

@@ -5,7 +5,7 @@
 - [ ] PostgreSQL 16+ (RDS Multi-AZ recommended)
   - Run `pnpm --filter @hfp/api run db:migrate:deploy:registry`
   - Run `pnpm --filter @hfp/api run db:setup:tenant` for each tenant database
-  - Run `pnpm --filter @hfp/api run db:seed` for system data (roles, permissions, report definitions)
+  - Provision each tenant through the platform; provisioning creates its roles, permissions and first administrator. Do not run `db:seed` (demo data; it refuses `NODE_ENV=production`)
 
 - [ ] Redis 7+ (ElastiCache recommended)
   - Used by: native auth sessions/refresh tokens, BullMQ jobs, and KPI cache

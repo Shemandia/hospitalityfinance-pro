@@ -41,8 +41,10 @@ Run registry and tenant setup:
 pnpm --filter @hfp/api run db:generate
 pnpm --filter @hfp/api run db:migrate:deploy:registry
 pnpm --filter @hfp/api run db:setup:tenant
-pnpm --filter @hfp/api run db:seed
 ```
+
+For a development machine, `pnpm dev:setup` does all of this and seeds a demo
+tenant (see `docs/RUNNING-WITHOUT-DOCKER.md`).
 
 Run the app without Docker:
 
@@ -96,8 +98,11 @@ Run production database setup:
 ```bash
 pnpm --filter @hfp/api run db:migrate:deploy:registry
 pnpm --filter @hfp/api run db:setup:tenant
-pnpm --filter @hfp/api run db:seed
 ```
+
+Do not run `db:seed` in production: it creates demo users and refuses
+`NODE_ENV=production`. Tenants get their roles, permissions and first
+administrator from provisioning.
 
 Tenant migrations currently run one tenant database at a time. An automated "migrate all tenants from registry" command is not implemented yet.
 
