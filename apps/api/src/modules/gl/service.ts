@@ -60,6 +60,7 @@ type PostingJournal = {
 };
 
 import { ServiceError } from "../../shared/service-error.js";
+import { appUrl } from "../../config.js";
 
 export class GLServiceError extends ServiceError {}
 
@@ -544,8 +545,6 @@ export class GLService {
       }
     }
 
-    const appBaseUrl = process.env.APP_BASE_URL ?? "http://localhost:3000";
-
     const emailResults = await Promise.allSettled(
       result.approvalRecipients.map((recipient) =>
         sendApprovalEmail({
@@ -553,8 +552,12 @@ export class GLService {
           approverName: recipient.name,
           journalId: result.journal.id,
           entityId,
-          approveUrl: `${appBaseUrl}/approval/journals/${result.journal.id}?action=approve&approverId=${recipient.id}`,
-          rejectUrl: `${appBaseUrl}/approval/journals/${result.journal.id}?action=reject&approverId=${recipient.id}`
+          approveUrl: appUrl(
+            `approval/journals/${result.journal.id}?action=approve&approverId=${recipient.id}`
+          ),
+          rejectUrl: appUrl(
+            `approval/journals/${result.journal.id}?action=reject&approverId=${recipient.id}`
+          )
         })
       )
     );

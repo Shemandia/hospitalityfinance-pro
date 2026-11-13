@@ -9,7 +9,7 @@ import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { ConfigError, config, reloadConfig, requireConfig } from "../src/config.js";
+import { ConfigError, appUrl, config, reloadConfig, requireConfig } from "../src/config.js";
 
 const apiRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -80,6 +80,23 @@ describe("config", () => {
     process.env.TD_S3_BUCKET = "late-bucket";
     expect(requireConfig(["TD_S3_BUCKET"], "S3 storage").TD_S3_BUCKET).toBe("late-bucket");
     expect(config().TD_S3_BUCKET).toBe("late-bucket");
+  });
+
+  it("builds links into the web app from APP_BASE_URL, with or without a path (HC-31)", () => {
+    process.env.APP_BASE_URL = "https://finance.example.test";
+    reloadConfig();
+    expect(appUrl("t/ab12cd34/login")).toBe("https://finance.example.test/t/ab12cd34/login");
+    process.env.APP_BASE_URL = "https://example.test/hfp/";
+    reloadConfig();
+    expect(appUrl("t/ab12cd34/reset-password?token=x")).toBe(
+      "https://example.test/hfp/t/ab12cd34/reset-password?token=x"
+    );
+  });
+
+  it("refuses to build a link when APP_BASE_URL is unset, instead of guessing a host (HC-31)", () => {
+    process.env.APP_BASE_URL = "";
+    reloadConfig();
+    expect(() => appUrl("t/x/login")).toThrow(/APP_BASE_URL is required by links in e-mails/);
   });
 
   it("starting the API without JWT_SECRET exits with a message naming it (WP-1 acceptance)", async () => {

@@ -337,6 +337,15 @@ export function registryDatabaseUrl(): string {
 }
 
 /**
+ * A link into the web app: `path` under APP_BASE_URL. There is no fallback
+ * address; a link to a guessed host would reach the wrong place (HC-31).
+ */
+export function appUrl(path: string): string {
+  const { APP_BASE_URL } = requireConfig(["APP_BASE_URL"], "links in e-mails");
+  return new URL(path, APP_BASE_URL.endsWith("/") ? APP_BASE_URL : `${APP_BASE_URL}/`).toString();
+}
+
+/**
  * The environment for a child process: this process's own, with `overrides`
  * on top. Passing the environment on is not reading configuration.
  */

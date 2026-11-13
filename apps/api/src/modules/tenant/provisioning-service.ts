@@ -15,7 +15,7 @@ import {
   type ProvisioningStepName
 } from "./types.js";
 import { hashPassword } from "../../services/password-policy.js";
-import { childProcessEnv, config, registryDatabaseUrl } from "../../config.js";
+import { appUrl, childProcessEnv, config, registryDatabaseUrl } from "../../config.js";
 
 type SSEWriter = (event: string, data: Record<string, unknown>) => void;
 
@@ -260,8 +260,7 @@ export class ProvisioningService {
     });
 
     await this.executeStep(tenantRecord.id, "sending_email", sse, async () => {
-      const appUrl = process.env.APP_BASE_URL ?? "http://localhost:3001";
-      const loginUrl = `${appUrl}/t/${tenantRecord.tenantCode}/login`;
+      const loginUrl = appUrl(`t/${tenantRecord.tenantCode}/login`);
       await sendWelcomeEmail({
         to: adminUser.email,
         userName: adminUser.firstName,
@@ -283,7 +282,7 @@ export class ProvisioningService {
     sse("complete", {
       tenantId: tenantRecord.id,
       slug: tenant.slug,
-      url: `${process.env.APP_BASE_URL ?? "http://localhost:3001"}/t/${tenantRecord.tenantCode}/login`
+      url: appUrl(`t/${tenantRecord.tenantCode}/login`)
     });
   }
 

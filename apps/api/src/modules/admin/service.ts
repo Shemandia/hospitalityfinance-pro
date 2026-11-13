@@ -34,6 +34,7 @@ import {
   type ResolvedAccess
 } from "../access/resolver.js";
 import { hashPassword } from "../../services/password-policy.js";
+import { appUrl } from "../../config.js";
 
 const db = prisma as unknown as PrismaClient;
 
@@ -514,10 +515,9 @@ export async function inviteUser(
   const { user } = outcome;
 
   // Send welcome email with credentials
-  const appBaseUrl = process.env.APP_BASE_URL ?? "http://localhost:3001";
   const tenantCode = tenantContext?.tenantCode ?? "";
   const tenantName = tenantContext?.tenantName ?? "HospitalityFinance Pro";
-  const loginUrl = tenantCode ? `${appBaseUrl}/t/${tenantCode}/login` : appBaseUrl;
+  const loginUrl = appUrl(tenantCode ? `t/${tenantCode}/login` : "");
 
   sendWelcomeEmail({
     to: payload.email,

@@ -13,7 +13,7 @@ import { resolveTenantByCode, resolveTenantById } from "../../db/tenantRegistry.
 import { sendPasswordResetEmail } from "../../shared/email.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
 import { AccessInfrastructureError } from "../access/service.js";
-import { config } from "../../config.js";
+import { appUrl, config } from "../../config.js";
 
 const COOKIE_SECURE = config().NODE_ENV === "production" ? true : config().COOKIE_SECURE;
 const COOKIE_DOMAIN = config().COOKIE_DOMAIN;
@@ -244,8 +244,7 @@ export async function registerAuthRouter(app: FastifyInstance): Promise<void> {
         const result = await getAuthService().requestPasswordReset(email, tenantCode);
         if (result) {
           const tenant = await resolveTenantByCode(tenantCode);
-          const appBaseUrl = process.env.APP_BASE_URL ?? "http://localhost:3001";
-          const resetUrl = `${appBaseUrl}/t/${tenantCode}/reset-password?token=${result.token}`;
+          const resetUrl = appUrl(`t/${tenantCode}/reset-password?token=${result.token}`);
           try {
             await sendPasswordResetEmail({
               to: email,
