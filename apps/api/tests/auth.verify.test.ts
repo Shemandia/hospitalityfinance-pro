@@ -22,7 +22,7 @@ vi.mock("../src/db/redis.js", () => ({
   getRedisClient: () => ({ exists: stubs.sessionExists })
 }));
 import authPlugin from "../src/plugins/auth.js";
-import { enterRequestContext, getRequestContext } from "../src/db/requestContext.js";
+import { getRequestContext, runWithContext } from "../src/db/requestContext.js";
 import { requireAuth } from "../src/middleware/requireAuth.js";
 import { setAccessService } from "../src/modules/access/runtime.js";
 import { staticAccessService } from "./helpers/access.js";
@@ -51,7 +51,7 @@ describe("verifyAccessToken", () => {
 
     app = Fastify({ logger: false });
     // As app.ts does: every request gets its own context before auth runs.
-    app.addHook("onRequest", async () => enterRequestContext({}));
+    app.addHook("onRequest", (_request, _reply, done) => runWithContext({}, done));
     await app.register(authPlugin);
     app.get("/whoami", { preHandler: [requireAuth] }, async (request) => ({
       user: request.user,

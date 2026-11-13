@@ -188,7 +188,11 @@ export default fp(async (fastify: FastifyInstance) => {
 
     // From here on the prisma proxy routes to this tenant's database.
     request.tenantSlug = tenant.slug;
-    updateRequestContext({ tenantSlug: tenant.slug, tenantDbUrl: tenant.databaseUrl });
+    updateRequestContext({
+      tenantId: tenant.id,
+      tenantSlug: tenant.slug,
+      tenantDbUrl: tenant.databaseUrl
+    });
 
     request.user = {
       sub: claims.sub,

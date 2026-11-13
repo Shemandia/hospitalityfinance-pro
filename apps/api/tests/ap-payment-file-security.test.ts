@@ -156,6 +156,10 @@ describe("AP payment file download route authorization", () => {
 
   it("denies GET /payment-runs/:id/download without AP_PAYMENT_CONFIRM", async () => {
     app = Fastify({ logger: false });
+    // As app.ts does: each request runs in its own context.
+    app.addHook("onRequest", (_request: unknown, _reply: unknown, done: () => void) =>
+      runWithContext({}, done)
+    );
     app.decorate("verifyAccessToken", async (request: any) => {
       request.user = { sub: "user-1", tenantId: "tenant-1" };
       request.entityId = "entity-1";

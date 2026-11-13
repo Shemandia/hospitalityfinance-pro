@@ -2,6 +2,8 @@ import { AsyncLocalStorage } from "node:async_hooks";
 
 export type RequestContext = {
   requestId: string | null;
+  /** The tenant bound to this context. Without it the shared prisma client refuses to query. */
+  tenantId: string | null;
   entityId: string | null;
   userId: string | null;
   ipAddress: string | null;
@@ -24,6 +26,7 @@ const storage = new AsyncLocalStorage<RequestContext>();
 function defaultContext(): RequestContext {
   return {
     requestId: null,
+    tenantId: null,
     entityId: null,
     userId: null,
     ipAddress: null,
@@ -46,28 +49,18 @@ export function runWithContext<T>(initial: Partial<RequestContext>, fn: () => T)
   return storage.run({ ...defaultContext(), ...initial }, fn);
 }
 
-/**
- * @deprecated Use runWithContext() for new code. Kept for backward compat.
- */
-export function enterRequestContext(initial?: Partial<RequestContext>): void {
-  storage.enterWith({
-    ...defaultContext(),
-    ...(initial ?? {})
-  });
-}
-
 export function getRequestContext(): RequestContext {
   return storage.getStore() ?? defaultContext();
 }
 
 export function updateRequestContext(patch: Partial<RequestContext>): void {
   const store = storage.getStore();
-  if (store) {
-    Object.assign(store, patch);
-  } else {
-    // No active store — create one (backward compat with enterWith callers)
-    storage.enterWith({ ...defaultContext(), ...patch });
+  if (!store) {
+    // Every request and job runs inside runWithContext. Updating a context
+    // that does not exist would bind nothing, so it is a programming error.
+    throw new Error("updateRequestContext called outside runWithContext.");
   }
+  Object.assign(store, patch);
 }
 
 export async function runWithAuditDisabled<T>(fn: () => Promise<T>): Promise<T> {

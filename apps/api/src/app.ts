@@ -2,13 +2,8 @@ import { randomUUID } from "node:crypto";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyInstance } from "fastify";
-import {
-  runWithContext,
-  enterRequestContext,
-  getRequestContext,
-  updateRequestContext
-} from "./db/requestContext.js";
-import { prisma } from "./db/prisma.js";
+import { runWithContext, getRequestContext, updateRequestContext } from "./db/requestContext.js";
+import { registryPrisma } from "./db/prisma.js";
 import { requireAuth } from "./middleware/requireAuth.js";
 import { logSerializers } from "./shared/log-redactor.js";
 import { registerGLRouter } from "./modules/gl/router.js";
@@ -129,20 +124,25 @@ export async function createApp(): Promise<FastifyInstance> {
   // Connect Redis for session management
   await connectRedis();
 
-  app.addHook("onRequest", async (request, reply) => {
+  app.addHook("onRequest", (request, reply, done) => {
     // Generate or accept request ID for end-to-end tracing
     const requestId = (request.headers["x-request-id"] as string) || randomUUID();
     reply.header("x-request-id", requestId);
 
-    // Initialize request context with ID, IP, UA. Tenant context set later by auth.
-    enterRequestContext({
-      requestId,
-      ipAddress: request.ip ?? null,
-      userAgent: request.headers["user-agent"] ?? null
-    });
-
     // Attach to Fastify logger for structured log correlation
     (request as any).requestId = requestId;
+
+    // The rest of the request runs inside this scope (SEC-02, ARC-05): the
+    // lifecycle continues from `done`, so every hook and the handler see this
+    // request's context and no other. The tenant is bound later by auth.
+    runWithContext(
+      {
+        requestId,
+        ipAddress: request.ip ?? null,
+        userAgent: request.headers["user-agent"] ?? null
+      },
+      done
+    );
   });
 
   // Auth routes (/auth/login, /auth/refresh, /auth/logout, etc.). Registered
@@ -158,7 +158,7 @@ export async function createApp(): Promise<FastifyInstance> {
     let redisOk = false;
 
     try {
-      await prisma.$queryRaw`SELECT 1`;
+      await registryPrisma.$queryRaw`SELECT 1`;
       dbOk = true;
     } catch {
       /* database unreachable */
@@ -191,7 +191,7 @@ export async function createApp(): Promise<FastifyInstance> {
 
   app.get("/ready", { config: { access: "public" } }, async (_request, reply) => {
     try {
-      await prisma.$queryRaw`SELECT 1`;
+      await registryPrisma.$queryRaw`SELECT 1`;
       const { getRedisClient } = await import("./db/redis.js");
       await getRedisClient().ping();
       return reply.send({ ready: true });
