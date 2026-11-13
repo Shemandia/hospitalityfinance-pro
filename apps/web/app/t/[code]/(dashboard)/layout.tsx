@@ -50,13 +50,6 @@ export default async function DashboardLayout({
 
       {/* ── Main area ────────────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
-        {/* Dev auth warning banner */}
-        {process.env.ENABLE_DEV_AUTH === "true" && (
-          <div className="bg-amber-500 text-white text-center text-xs font-semibold py-1.5 px-4 shrink-0 z-40">
-            DEV AUTH ACTIVE — Do not use in production.
-          </div>
-        )}
-
         {/* Top bar */}
         <header className="h-14 lg:h-16 bg-white border-b border-slate-100 flex items-center justify-between px-4 lg:px-8 shrink-0 z-30">
           <div className="flex items-center gap-3">
