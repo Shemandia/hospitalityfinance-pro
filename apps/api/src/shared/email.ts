@@ -1,5 +1,8 @@
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 import { config } from "../config.js";
+import { moduleLogger } from "./logger.js";
+
+const log = moduleLogger("email");
 
 function escapeHtml(str: string): string {
   return str
@@ -46,6 +49,10 @@ function getFromEmail(): string {
 
 const isDev = () => config().NODE_ENV !== "production";
 
+function plainText(html: string): string {
+  return html.replace(/<[^>]+>/g, "").trim();
+}
+
 // ── Generic email ────────────────────────────────────────────────────────────
 
 type GenericEmailPayload = {
@@ -74,11 +81,13 @@ export async function sendEmail(payload: GenericEmailPayload): Promise<void> {
     return;
   }
 
-  // Fallback 2: No email provider configured — log to console
+  // Fallback 2: no e-mail provider. In development the message goes to the
+  // log instead, so sign-in and reset links can be followed.
   if (!client) {
     if (isDev()) {
-      console.log(
-        `\n📧 EMAIL (console fallback)\n  To: ${payload.to}\n  Subject: ${payload.subject}\n  ──────\n${payload.html.replace(/<[^>]+>/g, "").trim()}\n  ──────\n`
+      log.info(
+        { to: payload.to, subject: payload.subject, body: plainText(payload.html) },
+        "E-mail not sent: no provider configured"
       );
     }
     return;
@@ -97,7 +106,7 @@ export async function sendEmail(payload: GenericEmailPayload): Promise<void> {
       })
     );
   } catch (err: any) {
-    // If SES domain is not verified or sandbox issue, fall back to console logging
+    // SES domain not verified, sandbox and similar: log instead of failing the caller
     const sesError = err?.name ?? err?.Code ?? "";
     const recoverableErrors = [
       "MessageRejected",
@@ -107,9 +116,16 @@ export async function sendEmail(payload: GenericEmailPayload): Promise<void> {
     ];
 
     if (recoverableErrors.includes(sesError) || isDev()) {
-      console.warn(`⚠️  SES send failed (${sesError}): ${err.message}`);
-      console.log(
-        `📧 EMAIL (SES fallback)\n  To: ${payload.to}\n  Subject: ${payload.subject}\n  Body: ${payload.html.replace(/<[^>]+>/g, "").substring(0, 500)}`
+      // The body can hold sign-in and reset links: it is logged only in development.
+      log.warn(
+        {
+          err,
+          sesError,
+          to: payload.to,
+          subject: payload.subject,
+          ...(isDev() ? { body: plainText(payload.html) } : {})
+        },
+        "SES send failed; e-mail not sent"
       );
       return;
     }

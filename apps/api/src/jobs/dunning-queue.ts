@@ -1,6 +1,9 @@
 import type { Queue } from "bullmq";
 import { createQueue } from "./queues.js";
 import type { DunningJobData } from "./dunning-job.js";
+import { moduleLogger } from "../shared/logger.js";
+
+const log = moduleLogger("dunning-queue");
 
 const queueName = "ar-dunning";
 
@@ -41,7 +44,7 @@ export async function registerDunningSchedule(): Promise<void> {
     }
   );
 
-  console.log("[DunningQueue] Registered daily dunning schedule (08:00 UTC)");
+  log.info("Registered daily dunning schedule (08:00 UTC)");
 }
 
 /**

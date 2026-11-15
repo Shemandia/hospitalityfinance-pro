@@ -3,6 +3,9 @@ import { getReportQueueName } from "../modules/reporting/queue.js";
 import { processReportRun } from "./report-generation-job.js";
 import { runForTenantId } from "../db/tenantScope.js";
 import type { ReportJobData } from "../modules/reporting/queue.js";
+import { moduleLogger } from "../shared/logger.js";
+
+const log = moduleLogger("report-generation-worker");
 
 const worker = createWorker<ReportJobData>(
   getReportQueueName(),
@@ -13,11 +16,11 @@ const worker = createWorker<ReportJobData>(
 );
 
 worker.on("completed", (job) => {
-  console.log(`Report job ${job.id} completed`);
+  log.info(`Report job ${job.id} completed`);
 });
 
 worker.on("failed", (job, error) => {
-  console.error(`Report job ${job?.id ?? "unknown"} failed`, error);
+  log.error({ err: error }, `Report job ${job?.id ?? "unknown"} failed`);
 });
 
-console.log("Report generation worker started.");
+log.info("Report generation worker started.");

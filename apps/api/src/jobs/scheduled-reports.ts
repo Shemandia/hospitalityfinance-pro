@@ -18,6 +18,9 @@ import { Prisma } from "../db/client.js";
 import { prisma } from "../db/prisma.js";
 import { getReportQueue } from "../modules/reporting/queue.js";
 import { currentTenantId } from "../db/tenantScope.js";
+import { moduleLogger } from "../shared/logger.js";
+
+const log = moduleLogger("scheduled-reports");
 
 // ── Cron Matching ─────────────────────────────────────────────────────────────
 
@@ -192,7 +195,7 @@ async function resolvePeriodId(
  * 5. Create a ReportRun and enqueue it
  */
 export async function checkAndRunScheduledReports(): Promise<number> {
-  console.log("[ScheduledReports] Checking for due scheduled reports...");
+  log.info("Checking for due scheduled reports...");
 
   // Fetch all report definitions that have a template (potential schedule inside)
   const definitions = await prisma.reportDefinition.findMany({
@@ -235,8 +238,8 @@ export async function checkAndRunScheduledReports(): Promise<number> {
     const periodId = await resolvePeriodId(def.entityId, schedule.periodSelection ?? "AUTO");
 
     if (!periodId) {
-      console.warn(
-        `[ScheduledReports] No ${schedule.periodSelection ?? "AUTO"} period found for ` +
+      log.warn(
+        `No ${schedule.periodSelection ?? "AUTO"} period found for ` +
           `entity ${def.entityId}, skipping report "${def.name}" (${def.id}).`
       );
       continue;
@@ -290,13 +293,13 @@ export async function checkAndRunScheduledReports(): Promise<number> {
       }
     });
 
-    console.log(
-      `[ScheduledReports] Enqueued report "${def.name}" (${def.type}) ` +
+    log.info(
+      `Enqueued report "${def.name}" (${def.type}) ` +
         `for entity ${def.entityId}, period ${periodId}, run ${run.id}.`
     );
     enqueued++;
   }
 
-  console.log(`[ScheduledReports] Check complete. Enqueued ${enqueued} report(s).`);
+  log.info(`Check complete. Enqueued ${enqueued} report(s).`);
   return enqueued;
 }

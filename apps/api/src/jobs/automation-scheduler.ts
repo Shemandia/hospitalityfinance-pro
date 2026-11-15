@@ -9,6 +9,9 @@
  */
 
 import { getTransferDeskQueue } from "./transfer-desk-queue.js";
+import { moduleLogger } from "../shared/logger.js";
+
+const log = moduleLogger("automation-scheduler");
 
 export type ScheduleRow = {
   id: string;
@@ -115,9 +118,9 @@ export async function syncAutomationSchedules(
       }
       synced++;
     } catch (err) {
-      console.error(
-        `[AutomationScheduler] Failed to add repeatable for schedule ${schedule.id}:`,
-        (err as Error).message
+      log.error(
+        { err, scheduleId: schedule.id },
+        "Failed to add the repeatable job for a schedule"
       );
     }
   }

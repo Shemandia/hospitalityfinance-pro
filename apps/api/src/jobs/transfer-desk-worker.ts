@@ -41,6 +41,9 @@ import {
 import { getStorageBackend } from "./transfer-desk-storage.js";
 import { executeAutomation, type AutomationStep } from "./automation-engine.js";
 import { sendEmail } from "../shared/email.js";
+import { moduleLogger } from "../shared/logger.js";
+
+const log = moduleLogger("transfer-desk-worker");
 
 // ── Per-tenant worker cache ────────────────────────────────────────────────
 
@@ -74,22 +77,19 @@ export function ensureTransferDeskWorker(tenantSlug: string, tenantDbUrl: string
   );
 
   worker.on("completed", (job) => {
-    console.log(`[TransferDeskWorker:${tenantSlug}] Job ${job.id} completed`);
+    log.info({ tenantSlug }, `Job ${job.id} completed`);
   });
 
   worker.on("failed", (job, error) => {
-    console.error(
-      `[TransferDeskWorker:${tenantSlug}] Job ${job?.id ?? "unknown"} failed:`,
-      error.message
-    );
+    log.error({ err: error, tenantSlug }, `Job ${job?.id ?? "unknown"} failed`);
   });
 
   worker.on("error", (error) => {
-    console.error(`[TransferDeskWorker:${tenantSlug}] Worker error:`, error);
+    log.error({ err: error, tenantSlug }, `Worker error`);
   });
 
   workers.set(tenantSlug, worker);
-  console.log(`[TransferDeskWorker:${tenantSlug}] Worker started`);
+  log.info({ tenantSlug }, `Worker started`);
 }
 
 /**
@@ -108,7 +108,7 @@ async function processJob(
   // If this is an automation trigger from the scheduler (empty executionId),
   // load the automation and run all its steps via the automation engine.
   if (automationId && !executionId) {
-    console.log(`[TransferDeskWorker:${tenantSlug}] Running automation ${automationId}`);
+    log.info({ tenantSlug }, `Running automation ${automationId}`);
 
     const automation = await prisma.transferAutomation.findUnique({
       where: { id: automationId },
@@ -139,9 +139,7 @@ async function processJob(
     };
   }
 
-  console.log(
-    `[TransferDeskWorker:${tenantSlug}] Picked up execution ${executionId} (profile ${profileId})`
-  );
+  log.info({ tenantSlug }, `Picked up execution ${executionId} (profile ${profileId})`);
 
   // ── Mark RUNNING ────────────────────────────────────────────────────────
   try {
@@ -154,10 +152,7 @@ async function processJob(
       }
     });
   } catch (err) {
-    console.error(
-      `[TransferDeskWorker:${tenantSlug}] Failed to mark execution ${executionId} as RUNNING:`,
-      err
-    );
+    log.error({ err, tenantSlug }, `Failed to mark execution ${executionId} as RUNNING`);
     throw err;
   }
 
@@ -255,10 +250,7 @@ async function processJob(
       }
     });
   } catch (err) {
-    console.error(
-      `[TransferDeskWorker:${tenantSlug}] Failed to mark execution ${executionId} as ${finalStatus}:`,
-      err
-    );
+    log.error({ err, tenantSlug }, `Failed to mark execution ${executionId} as ${finalStatus}`);
     await markFailed(prisma, executionId, (err as Error).message);
     throw err;
   }
@@ -349,9 +341,7 @@ async function sendExecutionNotification(
       notifyEmails.map((email: string) => sendEmail({ to: email, subject, html }))
     );
   } catch (err) {
-    console.warn(
-      `[TransferDeskWorker:${tenantSlug}] Notification send failed: ${(err as Error).message}`
-    );
+    log.warn({ tenantSlug }, `Notification send failed: ${(err as Error).message}`);
   }
 }
 

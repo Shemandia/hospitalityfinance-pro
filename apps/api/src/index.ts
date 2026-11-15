@@ -4,6 +4,7 @@ import { startupConfig } from "./config.js";
 // setting, rather than failing inside whichever module needs it first.
 const { PORT: port } = startupConfig("api");
 
+const { logger: startLog } = await import("./shared/logger.js");
 const { createApp } = await import("./app.js");
 const { disconnectAllTenants } = await import("./db/tenantPool.js");
 const { disconnectRegistry } = await import("./db/tenantRegistry.js");
@@ -54,6 +55,6 @@ async function start(): Promise<void> {
 }
 
 start().catch((error) => {
-  console.error(error);
+  startLog.fatal({ err: error }, "API failed to start");
   process.exit(1);
 });

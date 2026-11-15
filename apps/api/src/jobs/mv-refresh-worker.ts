@@ -14,6 +14,9 @@ import {
   type MVRefreshJob
 } from "./mv-refresh-job.js";
 import { forEachActiveTenant, runForTenantId } from "../db/tenantScope.js";
+import { moduleLogger } from "../shared/logger.js";
+
+const log = moduleLogger("mv-refresh-worker");
 
 const SCHEDULE = "*/15 * * * *";
 
@@ -27,13 +30,13 @@ async function registerSchedule(): Promise<void> {
     { reason: "scheduled" },
     { repeat: { pattern: SCHEDULE }, removeOnComplete: 20, removeOnFail: 20 }
   );
-  console.log(`[MVRefreshWorker] Scheduled refresh registered: ${SCHEDULE}.`);
+  log.info(`Scheduled refresh registered: ${SCHEDULE}.`);
 }
 
 const worker = createWorker<MVRefreshJob>(
   MV_REFRESH_QUEUE,
   async (job) => {
-    console.log(`[MVRefreshWorker] Refreshing MV — reason: ${job.data?.reason ?? "unknown"}`);
+    log.info(`Refreshing MV — reason: ${job.data?.reason ?? "unknown"}`);
     // A queued refresh names its tenant; the scheduled safety net refreshes every tenant.
     const tenantId = job.data?.tenantId;
     if (tenantId) return runForTenantId(tenantId, () => refreshMaterializedView());
@@ -44,16 +47,16 @@ const worker = createWorker<MVRefreshJob>(
 
 worker.on("completed", (job, result) => {
   const r = result as { durationMs: number } | undefined;
-  console.log(`[MVRefreshWorker] Job ${job.id} completed in ${r?.durationMs ?? "?"}ms.`);
+  log.info(`Job ${job.id} completed in ${r?.durationMs ?? "?"}ms.`);
 });
 
 worker.on("failed", (job, error) => {
-  console.error(`[MVRefreshWorker] Job ${job?.id ?? "unknown"} failed:`, error);
+  log.error({ err: error }, `Job ${job?.id ?? "unknown"} failed`);
 });
 
 registerSchedule().catch((err) => {
-  console.error("[MVRefreshWorker] Failed to register the scheduled refresh:", err);
+  log.error({ err }, "Failed to register the scheduled refresh");
   process.exit(1);
 });
 
-console.log("MV refresh worker started.");
+log.info("MV refresh worker started.");

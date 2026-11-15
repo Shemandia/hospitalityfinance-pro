@@ -3,6 +3,9 @@ import { createWorker } from "./queues.js";
 import { processDunningJob, processDunningForAllEntities } from "./dunning-job.js";
 import type { DunningJobData } from "./dunning-job.js";
 import { forEachActiveTenant, runForTenantId } from "../db/tenantScope.js";
+import { moduleLogger } from "../shared/logger.js";
+
+const log = moduleLogger("dunning-worker");
 
 const worker = createWorker<DunningJobData>(
   getDunningQueueName(),
@@ -18,11 +21,11 @@ const worker = createWorker<DunningJobData>(
 );
 
 worker.on("completed", (job) => {
-  console.log(`[DunningWorker] Job ${job.id} completed`);
+  log.info(`Job ${job.id} completed`);
 });
 
 worker.on("failed", (job, error) => {
-  console.error(`[DunningWorker] Job ${job?.id ?? "unknown"} failed`, error);
+  log.error({ err: error }, `Job ${job?.id ?? "unknown"} failed`);
 });
 
-console.log("AR Dunning worker started.");
+log.info("AR Dunning worker started.");

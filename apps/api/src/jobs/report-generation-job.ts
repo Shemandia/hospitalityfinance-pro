@@ -21,6 +21,9 @@ import { prisma } from "../db/prisma.js";
 import { KPIService } from "../modules/kpi/service.js";
 import { sendEmail } from "../shared/email.js";
 import { config } from "../config.js";
+import { moduleLogger } from "../shared/logger.js";
+
+const log = moduleLogger("report-generation-job");
 
 const kpiService = new KPIService(prisma as unknown as PrismaClientType);
 
@@ -120,7 +123,7 @@ export async function processReportRun(reportRunId: string): Promise<void> {
       });
     }
 
-    console.log(`[ReportJob] ${reportType} report ${reportRunId} generated successfully.`);
+    log.info(`${reportType} report ${reportRunId} generated successfully.`);
   } catch (error) {
     await prisma.reportRun.update({
       where: { id: reportRunId },

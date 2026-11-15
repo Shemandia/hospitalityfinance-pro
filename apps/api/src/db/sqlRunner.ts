@@ -1,4 +1,7 @@
 import { readFile } from "node:fs/promises";
+import { moduleLogger } from "../shared/logger.js";
+
+const log = moduleLogger("sqlRunner");
 
 type SqlExecutor = {
   $executeRawUnsafe(query: string): Promise<unknown>;
@@ -170,7 +173,7 @@ export async function executeSqlFile(
       // precedes a statement, which would otherwise fill the whole preview.
       const preview = statement.replace(/--.*$/gm, "").replace(/\s+/g, " ").trim().slice(0, 120);
       skipped.push(preview);
-      console.warn(`[sqlRunner] skipped statement in ${sqlFilePath}: ${preview}`);
+      log.warn(`skipped statement in ${sqlFilePath}: ${preview}`);
     }
   }
 

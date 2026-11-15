@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import rateLimit from "@fastify/rate-limit";
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyBaseLogger, type FastifyInstance } from "fastify";
 import { runWithContext, getRequestContext, updateRequestContext } from "./db/requestContext.js";
 import { registryPrisma } from "./db/prisma.js";
 import { requireAuth } from "./middleware/requireAuth.js";
 import { crossSiteRefusal } from "./middleware/csrf.js";
-import { logSerializers } from "./shared/log-redactor.js";
+import { logger } from "./shared/logger.js";
 import { registerGLRouter } from "./modules/gl/router.js";
 import { registerPeriodRouter } from "./modules/period/router.js";
 import { registerPeriodCloseRouter } from "./modules/period-close/router.js";
@@ -51,11 +51,21 @@ declare module "fastify" {
   }
 }
 
+/** A caller-supplied request ID is used only when it looks like one. */
+const REQUEST_ID = /^[A-Za-z0-9._:-]{1,128}$/;
+
 export async function createApp(): Promise<FastifyInstance> {
   const app = Fastify({
-    logger: {
-      level: config().LOG_LEVEL,
-      serializers: logSerializers
+    // One logger for the API and the workers; every line carries the request
+    // ID, tenant and entity (OPS-06).
+    logger: logger as FastifyBaseLogger,
+    // The request ID: the caller's X-Request-Id when it is a plain token,
+    // otherwise a new one. Fastify's own header handling is off so an
+    // arbitrary header value never reaches the logs.
+    requestIdHeader: false,
+    genReqId: (req) => {
+      const supplied = req.headers["x-request-id"];
+      return typeof supplied === "string" && REQUEST_ID.test(supplied) ? supplied : randomUUID();
     },
     bodyLimit: 10 * 1024 * 1024, // 10 MB for file imports
     // The browser reaches the API through the web app's proxy (AUT-13). Its
@@ -115,12 +125,9 @@ export async function createApp(): Promise<FastifyInstance> {
   await connectRedis();
 
   app.addHook("onRequest", (request, reply, done) => {
-    // Generate or accept request ID for end-to-end tracing
-    const requestId = (request.headers["x-request-id"] as string) || randomUUID();
+    // The request ID (genReqId above) goes back to the caller for tracing.
+    const requestId = request.id;
     reply.header("x-request-id", requestId);
-
-    // Attach to Fastify logger for structured log correlation
-    (request as any).requestId = requestId;
 
     // The rest of the request runs inside this scope (SEC-02, ARC-05): the
     // lifecycle continues from `done`, so every hook and the handler see this

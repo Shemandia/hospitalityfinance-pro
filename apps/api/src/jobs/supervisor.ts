@@ -20,6 +20,7 @@ import { fork, type ChildProcess } from "node:child_process";
 import { dirname, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { childProcessEnv } from "../config.js";
+import { moduleLogger } from "../shared/logger.js";
 
 const here = fileURLToPath(import.meta.url);
 
@@ -44,6 +45,9 @@ export function workerEntryPoints(): WorkerEntryPoint[] {
   ];
 }
 
+/** Where the supervisor reports; the shared logger unless a test passes its own. */
+export type SupervisorLog = { info(message: string): void; error(message: string): void };
+
 export type SupervisorOptions = {
   workers: WorkerEntryPoint[];
   /** Clean exits in a row after which a worker is given up on. */
@@ -55,7 +59,7 @@ export type SupervisorOptions = {
   /** Called once when a worker has been given up on. */
   onFailure: (worker: WorkerEntryPoint, reason: string) => void;
   start?: (script: string) => ChildProcess;
-  log?: Pick<Console, "log" | "error">;
+  log?: SupervisorLog;
 };
 
 export type WorkerState = {
@@ -73,7 +77,7 @@ export function exponentialBackoff(maxMs: number): (attempt: number) => number {
 }
 
 export function createSupervisor(options: SupervisorOptions) {
-  const log = options.log ?? console;
+  const log: SupervisorLog = options.log ?? moduleLogger("supervisor");
   const start =
     options.start ??
     ((script: string) => fork(script, [], { stdio: "inherit", env: childProcessEnv() }));
@@ -93,12 +97,12 @@ export function createSupervisor(options: SupervisorOptions) {
     if (stopping || state.failed) return;
     state.lastStartTime = Date.now();
     state.starts++;
-    log.log(`[supervisor] Starting worker: ${state.entry.name}`);
+    log.info(`Starting worker: ${state.entry.name}`);
     const child = start(state.entry.script);
     state.process = child;
 
     child.on("error", (err) => {
-      log.error(`[supervisor] Worker "${state.entry.name}" error: ${err.message}`);
+      log.error(`Worker "${state.entry.name}" error: ${err.message}`);
     });
 
     child.on("exit", (code, signal) => {
@@ -117,7 +121,7 @@ export function createSupervisor(options: SupervisorOptions) {
           const reason =
             `exited cleanly ${state.cleanExitsInARow} times in a row. A worker must keep ` +
             `running; its entry point starts nothing that does. Not restarting it.`;
-          log.error(`[supervisor] FAILED: worker "${state.entry.name}" ${reason}`);
+          log.error(`FAILED: worker "${state.entry.name}" ${reason}`);
           options.onFailure(state.entry, reason);
           return;
         }
@@ -128,7 +132,7 @@ export function createSupervisor(options: SupervisorOptions) {
       state.restartAttempt++;
       const delay = options.backoffMs(state.restartAttempt);
       log.error(
-        `[supervisor] Worker "${state.entry.name}" exited (code=${code}, signal=${signal}). ` +
+        `Worker "${state.entry.name}" exited (code=${code}, signal=${signal}). ` +
           `Restarting in ${delay}ms (attempt #${state.restartAttempt})...`
       );
       const timer = setTimeout(() => {
@@ -165,7 +169,7 @@ export function createSupervisor(options: SupervisorOptions) {
       if (outcome === "timeout") {
         for (const p of running) {
           if (p.exitCode === null) {
-            log.log(`[supervisor] Force-killing pid ${p.pid}`);
+            log.info(`Force-killing pid ${p.pid}`);
             p.kill("SIGKILL");
           }
         }

@@ -36,6 +36,9 @@ import {
 import { hashPassword } from "../../services/password-policy.js";
 import { appUrl } from "../../config.js";
 import { pageLimit } from "../../shared/pagination.js";
+import { moduleLogger } from "../../shared/logger.js";
+
+const log = moduleLogger("admin-service");
 
 const db = prisma as unknown as PrismaClient;
 
@@ -527,7 +530,7 @@ export async function inviteUser(
     loginUrl,
     temporaryPassword: tempPassword
   }).catch((err) => {
-    console.error(`Failed to send welcome email to ${payload.email}:`, err);
+    log.error({ err }, `Failed to send welcome email to ${payload.email}`);
   });
 
   return {

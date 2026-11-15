@@ -1,6 +1,9 @@
 import { Prisma, PrismaClient } from "./client.js";
 import { serializeForAudit } from "./auditSerialization.js";
 import { getRequestContext, runWithAuditDisabled } from "./requestContext.js";
+import { moduleLogger } from "../shared/logger.js";
+
+const log = moduleLogger("auditMiddleware");
 
 const AUDIT_MODELS = new Set([
   "Supplier",
@@ -108,13 +111,10 @@ export function registerAuditMiddleware(
         });
       } catch (err) {
         // Log audit failures but don't break business operations
-        console.error(
-          `[Audit] Failed to write audit event for ${modelName}.${params.action}:`,
-          err
-        );
+        log.error({ err }, `Failed to write audit event for ${modelName}.${params.action}`);
       }
     }).catch((err) => {
-      console.error(`[Audit] Unhandled rejection in audit middleware:`, err);
+      log.error({ err }, `Unhandled rejection in audit middleware`);
     });
     return result;
   });

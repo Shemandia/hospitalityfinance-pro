@@ -15,6 +15,9 @@ import type {
 
 import { ServiceError } from "../../shared/service-error.js";
 import { resolveTaxAccountId } from "../tax/tax-posting.js";
+import { moduleLogger } from "../../shared/logger.js";
+
+const log = moduleLogger("ar-service");
 
 export class ARServiceError extends ServiceError {}
 
@@ -89,8 +92,8 @@ export class ARService {
 
     // City ledger invoices from PMS should not be created manually without origin tag
     if (!input.origin || input.origin === "MANUAL") {
-      console.info(
-        `[ARService] Manual AR invoice creation for entity=${entityId}, invoice=${input.invoiceNumber}. ` +
+      log.info(
+        `Manual AR invoice creation for entity=${entityId}, invoice=${input.invoiceNumber}. ` +
           `Note: In hospitality, AR invoices typically originate from PMS city ledger.`
       );
     }

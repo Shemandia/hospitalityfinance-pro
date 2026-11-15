@@ -16,6 +16,9 @@
 
 import { createSupervisor, exponentialBackoff, workerEntryPoints } from "./supervisor.js";
 import { startupConfig } from "../config.js";
+import { moduleLogger } from "../shared/logger.js";
+
+const log = moduleLogger("worker-supervisor");
 
 const MAX_BACKOFF_MS = 30_000;
 const STABLE_THRESHOLD_MS = 60_000;
@@ -27,7 +30,7 @@ let exiting = false;
 async function exit(code: number): Promise<void> {
   if (exiting) return;
   exiting = true;
-  console.log("[supervisor] Shutting down all workers...");
+  log.info("Shutting down all workers...");
   await supervisor.stop(SHUTDOWN_GRACE_MS);
   process.exit(code);
 }
@@ -43,7 +46,5 @@ const supervisor = createSupervisor({
 process.on("SIGTERM", () => void exit(0));
 process.on("SIGINT", () => void exit(0));
 
-console.log(
-  `[supervisor] Starting ${workers.length} workers: ${workers.map((w) => w.name).join(", ")}`
-);
+log.info(`Starting ${workers.length} workers: ${workers.map((w) => w.name).join(", ")}`);
 supervisor.start();

@@ -18,7 +18,7 @@ const entry = (name: string): WorkerEntryPoint => ({
   name,
   script: resolve(fixtures, `${name}.mjs`)
 });
-const quiet = { log: () => {}, error: () => {} };
+const quiet = { info: () => {}, error: () => {} };
 
 function until(condition: () => boolean, timeoutMs = 10_000): Promise<void> {
   const started = Date.now();
