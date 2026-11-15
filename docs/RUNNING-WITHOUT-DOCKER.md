@@ -135,7 +135,10 @@ TEST_REGISTRY_DATABASE_URL=postgresql://USER:PASS@localhost:5432/hfp_registry_te
 ```
 
 and run `pnpm --filter @hfp/api test:integration`. It refuses to start when
-any of these variables is missing. The worker tests start the real worker
+any of these variables is missing. It runs the test files one at a time:
+several at once time out in their setup on a busy machine, and a failed
+local run should always mean a real fault. CI runs them in parallel
+(`test:integration:parallel`). The worker tests start the real worker
 processes against `REDIS_URL` for about ten seconds; on a shared development
 Redis they could pick up a job queued in that window.
 

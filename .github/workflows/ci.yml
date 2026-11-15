@@ -119,8 +119,9 @@ jobs:
         run: pnpm test
 
       # Run explicitly so a missing database fails the job instead of skipping.
+      # Files in parallel here; locally, test:integration runs them one at a time.
       - name: Integration tests
-        run: pnpm --filter @hfp/api test:integration
+        run: pnpm --filter @hfp/api test:integration:parallel
 
       - name: Build
         run: pnpm build
