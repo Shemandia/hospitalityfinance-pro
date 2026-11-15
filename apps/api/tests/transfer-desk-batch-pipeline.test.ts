@@ -19,8 +19,18 @@ vi.mock("../src/modules/ar/service.js", () => ({
 }));
 vi.mock("../src/modules/allocation/service.js", () => ({ AllocationService: class {} }));
 vi.mock("../src/modules/fixed-asset/service.js", () => ({ FixedAssetService: class {} }));
+// The pipeline sets the acting user in the context it opens; the mocked
+// system-user module reads it back, as the real one does.
+const acting = vi.hoisted(() => ({ userId: null as string | null }));
 vi.mock("../src/db/requestContext.js", () => ({
-  runWithContext: (_ctx: unknown, fn: () => unknown) => fn()
+  runWithContext: (ctx: { userId?: string | null }, fn: () => unknown) => {
+    acting.userId = ctx?.userId ?? null;
+    return fn();
+  }
+}));
+vi.mock("../src/modules/access/system-user.js", () => ({
+  systemUserId: async () => "system-user",
+  actingUserId: async () => acting.userId ?? "system-user"
 }));
 
 import {

@@ -17,6 +17,33 @@ import { provisionTenantSchema } from "./types.js";
 import { ProvisioningService } from "./provisioning-service.js";
 import { requireConfig } from "../../config.js";
 
+/**
+ * What the platform API shows of a tenant: an allow-list, so a new registry
+ * column (a connection string, a role, a sealed password) is never sent by
+ * accident.
+ */
+const PUBLIC_TENANT_FIELDS = [
+  "id",
+  "slug",
+  "tenantCode",
+  "name",
+  "domain",
+  "adminEmail",
+  "countryCode",
+  "plan",
+  "maxProperties",
+  "isActive",
+  "provisioningStatus",
+  "provisionedAt",
+  "schemaVersion",
+  "createdAt",
+  "updatedAt"
+] as const;
+
+function publicTenant<T extends Record<string, unknown>>(tenant: T) {
+  return Object.fromEntries(PUBLIC_TENANT_FIELDS.map((key) => [key, tenant[key] ?? null]));
+}
+
 // ── Platform API key auth ─────────────────────────────────────────────────────
 
 // Throws at load when unset: tenant routes never run without their key.
@@ -74,9 +101,7 @@ export async function registerTenantRouter(app: FastifyInstance): Promise<void> 
               errors: [{ code: "TENANT_NOT_FOUND", message: "Tenant not found." }]
             });
           }
-          // Never expose databaseUrl in API response
-          const { databaseUrl, ...safe } = tenant;
-          return reply.send({ data: safe, errors: [] });
+          return reply.send({ data: publicTenant(tenant), errors: [] });
         }
       );
 
@@ -142,8 +167,7 @@ export async function registerTenantRouter(app: FastifyInstance): Promise<void> 
 
         await invalidateTenantCache();
 
-        const { databaseUrl, ...safe } = tenant;
-        return reply.code(201).send({ data: safe, errors: [] });
+        return reply.code(201).send({ data: publicTenant(tenant), errors: [] });
       });
 
       // Update tenant
@@ -188,8 +212,7 @@ export async function registerTenantRouter(app: FastifyInstance): Promise<void> 
 
         await invalidateTenantCache();
 
-        const { databaseUrl, ...safe } = tenant;
-        return reply.send({ data: safe, errors: [] });
+        return reply.send({ data: publicTenant(tenant), errors: [] });
       });
 
       // Deactivate tenant (soft delete)

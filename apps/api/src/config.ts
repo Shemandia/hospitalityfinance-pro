@@ -86,16 +86,12 @@ const schema = z.object({
     .describe("Most tenant database clients kept open at once."),
   TENANT_DB_HOST: text()
     .optional()
-    .describe("Provisioning: host for new tenant databases (default: the registry's)."),
+    .describe(
+      "Provisioning: server for new tenant databases (default: the registry's). The registry's role creates their roles and databases there."
+    ),
   TENANT_DB_PORT: text()
     .optional()
     .describe("Provisioning: port for new tenant databases (default: the registry's)."),
-  TENANT_DB_USER: text()
-    .optional()
-    .describe("Provisioning: role that owns new tenant databases (default: the registry's)."),
-  TENANT_DB_PASSWORD: text()
-    .optional()
-    .describe("Provisioning: that role's password (default: the registry's)."),
 
   // ── Redis ────────────────────────────────────────────────────────────────
   REDIS_URL: url()
@@ -135,6 +131,14 @@ const schema = z.object({
   PLATFORM_API_KEY: text()
     .optional()
     .describe("Key the platform admin uses for tenant routes. Required by the API."),
+  PLATFORM_ENCRYPTION_KEY: text()
+    .refine((v) => Buffer.from(v, "base64").length === 32, {
+      message: "must be 32 bytes, base64-encoded"
+    })
+    .optional()
+    .describe(
+      "Encrypts tenant database passwords in the registry (AES-256-GCM). 32 random bytes, base64: node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\". Rotation: docs/SECRETS-ROTATION.md."
+    ),
 
   // ── Files ────────────────────────────────────────────────────────────────
   UPLOAD_MAX_MB: positiveInt()
@@ -300,11 +304,17 @@ export type ProcessKind = "api" | "workers";
 /** What each long-running process needs, always and in production. */
 export const STARTUP: Record<ProcessKind, { always: ConfigKey[]; production: ConfigKey[] }> = {
   api: {
-    always: ["JWT_SECRET", "REDIS_URL", "APP_BASE_URL", "PLATFORM_API_KEY"],
+    always: [
+      "JWT_SECRET",
+      "REDIS_URL",
+      "APP_BASE_URL",
+      "PLATFORM_API_KEY",
+      "PLATFORM_ENCRYPTION_KEY"
+    ],
     production: ["REGISTRY_DATABASE_URL"]
   },
   workers: {
-    always: ["REDIS_URL", "APP_BASE_URL"],
+    always: ["REDIS_URL", "APP_BASE_URL", "PLATFORM_ENCRYPTION_KEY"],
     production: ["REGISTRY_DATABASE_URL"]
   }
 };
@@ -408,9 +418,7 @@ export const CONFIG_GROUPS: ReadonlyArray<{ title: string; keys: readonly Config
       "REGISTRY_DATABASE_URL",
       "TENANT_POOL_MAX",
       "TENANT_DB_HOST",
-      "TENANT_DB_PORT",
-      "TENANT_DB_USER",
-      "TENANT_DB_PASSWORD"
+      "TENANT_DB_PORT"
     ]
   },
   { title: "Redis", keys: ["REDIS_URL", "ACCESS_CACHE_TTL_SECONDS"] },
@@ -425,7 +433,8 @@ export const CONFIG_GROUPS: ReadonlyArray<{ title: string; keys: readonly Config
       "LOCKOUT_DURATION_MINUTES",
       "COOKIE_SECURE",
       "COOKIE_DOMAIN",
-      "PLATFORM_API_KEY"
+      "PLATFORM_API_KEY",
+      "PLATFORM_ENCRYPTION_KEY"
     ]
   },
   {

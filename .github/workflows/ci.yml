@@ -55,6 +55,8 @@ jobs:
       # The API and the workers will not start without these (apps/api/src/config.ts).
       APP_BASE_URL: http://web.ci.invalid
       PLATFORM_API_KEY: ci-only-platform-key-not-used-outside-this-workflow
+      # 32 bytes, base64; seals tenant role passwords in the registry (WP-2).
+      PLATFORM_ENCRYPTION_KEY: Y2ktb25seS1lbmNyeXB0aW9uLWtleS0zMi1ieXRlcyE=
 
     steps:
       - name: Checkout

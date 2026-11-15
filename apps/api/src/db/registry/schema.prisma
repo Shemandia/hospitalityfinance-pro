@@ -42,7 +42,22 @@ model Tenant {
   slug               String             @unique @db.VarChar(50) // URL-safe identifier, e.g. "marriott-me"
   tenantCode         String             @unique @map("tenant_code") @db.VarChar(8) // Opaque 8-char hex for URLs: /t/{tenantCode}/...
   name               String // Display name, e.g. "Marriott Middle East"
-  databaseUrl        String             @map("database_url") // PostgreSQL connection string for this tenant
+  // Before WP-2: the full connection string, password included, in plain text.
+  // Tenants provisioned since use the fields below; adoption moves the rest.
+  databaseUrl        String?            @map("database_url")
+  // Where the tenant's database is, and the two roles that use it (WP-2).
+  dbHost             String?            @map("db_host")
+  dbPort             Int?               @map("db_port")
+  dbName             String?            @map("db_name")
+  // Owns the schema; runs migrations. Never used by the API or the workers.
+  ownerRole          String?            @map("owner_role")
+  // Data rights only; the API and the workers connect as this role.
+  appRole            String?            @map("app_role")
+  // The roles' passwords, sealed with PLATFORM_ENCRYPTION_KEY (shared/secret-box.ts).
+  ownerPasswordEnc   String?            @map("owner_password_enc")
+  appPasswordEnc     String?            @map("app_password_enc")
+  // The last tenant migration applied (src/db/tenant/migrations).
+  schemaVersion      String?            @map("schema_version")
   domain             String?            @unique // Custom domain, e.g. "finance.marriott.com"
   adminEmail         String             @map("admin_email") // Primary contact
   countryCode        String             @default("") @map("country_code") @db.VarChar(2) // ISO 3166-1 alpha-2

@@ -5,6 +5,7 @@ import { prisma } from "../../db/prisma.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
 import { requirePermission } from "../../middleware/requirePermission.js";
 import { BatchReviewService, BatchReviewError } from "./batch-service.js";
+import { signedInUserId } from "../access/system-user.js";
 
 const service = new BatchReviewService(prisma as unknown as PrismaClient);
 
@@ -91,7 +92,7 @@ export async function registerTransferDeskBatchRouter(app: FastifyInstance): Pro
         async (request, reply) => {
           try {
             const { reason } = rejectSchema.parse(request.body ?? {});
-            const userId = String((request.user as any)?.sub ?? "system");
+            const userId = signedInUserId(request);
             const data = await service.rejectItem(
               requireEntityId(request),
               request.params.id,
@@ -132,7 +133,7 @@ export async function registerTransferDeskBatchRouter(app: FastifyInstance): Pro
         { preHandler: [requirePermission("TRANSFER_DESK_EXECUTE")] },
         async (request, reply) => {
           try {
-            const userId = String((request.user as any)?.sub ?? "system");
+            const userId = signedInUserId(request);
             const data = await service.commitBatch(
               requireEntityId(request),
               request.params.id,
@@ -152,7 +153,7 @@ export async function registerTransferDeskBatchRouter(app: FastifyInstance): Pro
         { preHandler: [requirePermission("TRANSFER_DESK_EXECUTE")] },
         async (request, reply) => {
           try {
-            const userId = String((request.user as any)?.sub ?? "system");
+            const userId = signedInUserId(request);
             const data = await service.discardBatch(
               requireEntityId(request),
               request.params.id,

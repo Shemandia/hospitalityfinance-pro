@@ -396,6 +396,10 @@ model User {
   department  String?
   avatarUrl   String?   @map("avatar_url")
   isActive    Boolean   @default(true) @map("is_active")
+  /// The tenant's system user (HC-38): records work no person did, such as
+  /// scheduled imports. Exactly one per tenant, created by migration; it is
+  /// inactive, has no password and can never sign in.
+  isSystem    Boolean   @default(false) @map("is_system")
   lastLoginAt DateTime? @map("last_login_at")
   lastLoginIp String?   @map("last_login_ip") @db.VarChar(45)
   loginCount  Int       @default(0) @map("login_count")

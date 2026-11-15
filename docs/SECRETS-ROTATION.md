@@ -53,3 +53,18 @@ deployed environment.
 - [ ] PLATFORM_API_KEY rotated
 - [ ] Keycloak admin password rotated/disabled
 - [ ] Secrets manager adopted
+
+## PLATFORM_ENCRYPTION_KEY
+
+Seals each tenant's database role passwords in the registry (AES-256-GCM,
+`apps/api/src/shared/secret-box.ts`). The API and the workers refuse to start
+without it. Each sealed value names the key that sealed it, so a value sealed
+with another key fails with a message naming both keys.
+
+- Generate: `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`.
+- Keep it outside the database, and back it up separately from database
+  backups: without it no tenant provisioned since WP-2 can be reached, and a
+  backup that holds both the registry and the key gives away every tenant.
+- Rotation (re-sealing every value under a new key without downtime) arrives
+  with WP-2 item 5. Until then, do not change the key on a system that has
+  tenants provisioned since WP-2.

@@ -1,248 +1,87 @@
 /**
- * Tenant Provisioning Script
- *
- * Creates a new tenant: registers in the shared registry, creates a PostgreSQL
- * database, runs Prisma migrations, applies performance indexes and RLS.
+ * Provisions a tenant from the command line, exactly as the platform's
+ * onboarding screen does (ProvisioningService): registry entry, a database
+ * with its own owner and application roles, the tenant migrations, the
+ * application role's rights, the first administrator and the welcome e-mail.
  *
  * Usage:
- *   npx tsx src/scripts/provision-tenant.ts \
- *     --name "Jumeirah Group" \
- *     --slug "jumeirah" \
- *     --admin-email "admin@jumeirah.com" \
- *     --admin-password "TemporaryPassword123" \
- *     --plan standard \
- *     --max-properties 20
+ *   pnpm --filter @hfp/api exec tsx src/scripts/provision-tenant.ts \
+ *     --name "Jumeirah Group" --slug jumeirah --admin-email admin@jumeirah.com \
+ *     [--admin-first-name Ada] [--admin-last-name Admin] \
+ *     [--admin-password <temporary password, 12+ chars>] \
+ *     [--country AE] [--plan STANDARD|ENTERPRISE|TRIAL] [--max-properties 10] \
+ *     [--max-users 50] [--modules GL,AP,AR,REPORTING]
  *
- * Environment:
- *   REGISTRY_DATABASE_URL  — shared registry DB (default: DATABASE_URL)
- *   TENANT_DB_HOST         — host for new tenant DBs (default: localhost)
- *   TENANT_DB_PORT         — port (default: 5432)
- *   TENANT_DB_USER         — superuser to create DBs (default: from DATABASE_URL)
- *   TENANT_DB_PASSWORD     — password (default: from DATABASE_URL)
+ * Needs REGISTRY_DATABASE_URL (its role creates roles and databases: CREATEDB
+ * and CREATEROLE) and PLATFORM_ENCRYPTION_KEY. TENANT_DB_HOST/PORT place the
+ * database on another server.
  */
 
 import crypto from "node:crypto";
-import { PrismaClient } from "../db/client.js";
-import { PrismaClient as RegistryPrismaClient } from "../db/registry-client.js";
-import { assertTenantSecurity, deployMigrations } from "../db/migrate.js";
-import { ensureSystemCatalog, grantTenantAdministrator } from "../modules/access/setup.js";
-import { hashPassword } from "../services/password-policy.js";
-import { config as appConfig, registryDatabaseUrl } from "../config.js";
+import { provisionTenantSchema } from "../modules/tenant/types.js";
+import { ProvisioningService } from "../modules/tenant/provisioning-service.js";
 
-// ── Parse args ────────────────────────────────────────────────────────────────
-
-function parseArgs(): {
-  name: string;
-  slug: string;
-  adminEmail: string;
-  adminPassword: string;
-  generatedPassword: boolean;
-  plan: string;
-  maxProperties: number;
-} {
-  const args = process.argv.slice(2);
+function args(): Map<string, string> {
+  const list = process.argv.slice(2);
   const map = new Map<string, string>();
-
-  for (let i = 0; i < args.length; i += 2) {
-    const key = args[i]?.replace(/^--/, "");
-    const val = args[i + 1];
-    if (key && val) map.set(key, val);
+  for (let i = 0; i < list.length; i += 2) {
+    const key = list[i]?.replace(/^--/, "");
+    const value = list[i + 1];
+    if (key && value) map.set(key, value);
   }
-
-  const name = map.get("name");
-  const slug = map.get("slug");
-  const adminEmail = map.get("admin-email");
-
-  if (!name || !slug || !adminEmail) {
-    console.error("Usage: provision-tenant --name <name> --slug <slug> --admin-email <email>");
-    console.error(
-      "  Optional: --admin-password <temporary-password> --plan <standard|enterprise|trial> --max-properties <n>"
-    );
-    process.exit(1);
-  }
-
-  // Validate slug: lowercase, alphanumeric + hyphens
-  if (!/^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$/.test(slug)) {
-    console.error(
-      "Slug must be 3-50 chars, lowercase alphanumeric with hyphens, no leading/trailing hyphen."
-    );
-    process.exit(1);
-  }
-
-  return {
-    name,
-    slug,
-    adminEmail,
-    adminPassword: map.get("admin-password") ?? crypto.randomBytes(18).toString("base64url"),
-    generatedPassword: !map.has("admin-password"),
-    plan: map.get("plan") ?? "standard",
-    maxProperties: parseInt(map.get("max-properties") ?? "10", 10)
-  };
+  return map;
 }
 
-// ── Parse connection URL ──────────────────────────────────────────────────────
-
-function parseDbUrl(url: string): {
-  user: string;
-  password: string;
-  host: string;
-  port: string;
-  database: string;
-} {
-  const parsed = new URL(url);
-  return {
-    user: parsed.username,
-    password: parsed.password,
-    host: parsed.hostname,
-    port: parsed.port || "5432",
-    database: parsed.pathname.slice(1) // remove leading /
-  };
-}
-
-function buildDbUrl(
-  user: string,
-  password: string,
-  host: string,
-  port: string,
-  database: string
-): string {
-  return `postgresql://${user}:${encodeURIComponent(password)}@${host}:${port}/${database}`;
-}
-
-// ── Main ──────────────────────────────────────────────────────────────────────
-
-async function main() {
-  const config = parseArgs();
-  const registryUrl = registryDatabaseUrl();
-
-  const registry = new RegistryPrismaClient({ datasourceUrl: registryUrl });
-
-  console.log(`\n=== Provisioning tenant: ${config.name} (${config.slug}) ===\n`);
-
-  // 1. Check if slug already exists
-  const existing = await registry.tenant.findUnique({ where: { slug: config.slug } });
-  if (existing) {
-    console.error(`Tenant with slug '${config.slug}' already exists (id: ${existing.id}).`);
-    process.exit(1);
+const a = args();
+const generatedPassword = !a.has("admin-password");
+const parsed = provisionTenantSchema.safeParse({
+  tenant: {
+    name: a.get("name"),
+    slug: a.get("slug"),
+    adminEmail: a.get("admin-email"),
+    countryCode: a.get("country") ?? "AE"
+  },
+  entitlements: {
+    licenseType: (a.get("plan") ?? "STANDARD").toUpperCase(),
+    maxProperties: Number(a.get("max-properties") ?? 10),
+    maxUsers: Number(a.get("max-users") ?? 50),
+    enabledModules: (a.get("modules") ?? "GL,AP,AR,REPORTING").split(","),
+    maxConcurrentSessions: 10,
+    subscriptionStartDate: new Date().toISOString().slice(0, 10)
+  },
+  adminUser: {
+    firstName: a.get("admin-first-name") ?? "Tenant",
+    lastName: a.get("admin-last-name") ?? "Administrator",
+    email: a.get("admin-email"),
+    temporaryPassword:
+      a.get("admin-password") ?? `${crypto.randomBytes(18).toString("base64url")}Aa1`
   }
-
-  // 2. Determine tenant database name and URL
-  const dbConn = parseDbUrl(registryUrl);
-  const settings = appConfig();
-  const tenantDbHost = settings.TENANT_DB_HOST ?? dbConn.host;
-  const tenantDbPort = settings.TENANT_DB_PORT ?? dbConn.port;
-  const tenantDbUser = settings.TENANT_DB_USER ?? dbConn.user;
-  const tenantDbPassword = settings.TENANT_DB_PASSWORD ?? dbConn.password;
-  const tenantDbName = `hfp_${config.slug.replace(/-/g, "_")}`;
-  const tenantDbUrl = buildDbUrl(
-    tenantDbUser,
-    tenantDbPassword,
-    tenantDbHost,
-    tenantDbPort,
-    tenantDbName
-  );
-
-  console.log(`  Database: ${tenantDbName}`);
-  console.log(`  Host: ${tenantDbHost}:${tenantDbPort}`);
-
-  // 3. Create the database (using psql or raw connection via registry)
-  console.log("\n1. Creating database...");
-
-  // Validate identifiers to prevent SQL injection (allowlist: letters, digits, underscores)
-  const identifierRegex = /^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/;
-  if (!identifierRegex.test(tenantDbName)) {
-    throw new Error(
-      `Invalid database name: ${tenantDbName}. Only alphanumeric and underscores allowed.`
-    );
-  }
-  if (!identifierRegex.test(tenantDbUser)) {
-    throw new Error(
-      `Invalid database user: ${tenantDbUser}. Only alphanumeric and underscores allowed.`
-    );
-  }
-
-  try {
-    await registry.$executeRawUnsafe(`CREATE DATABASE "${tenantDbName}" OWNER "${tenantDbUser}"`);
-    console.log(`   Created database: ${tenantDbName}`);
-  } catch (error: any) {
-    if (error.message?.includes("already exists")) {
-      console.log(`   Database ${tenantDbName} already exists, continuing...`);
-    } else {
-      throw error;
-    }
-  }
-
-  // 4. Apply the tenant migrations: tables, security policies and constraints.
-  console.log("\n2. Running migrations...");
-  await deployMigrations("tenant", tenantDbUrl);
-  const tenantClient = new PrismaClient({ datasourceUrl: tenantDbUrl });
-  await assertTenantSecurity(tenantClient);
-  console.log("   Migrations applied; security policies present.");
-
-  // 6. Register in tenant registry
-  console.log("\n3. Registering tenant...");
-  const tenant = await registry.tenant.create({
-    data: {
-      name: config.name,
-      slug: config.slug,
-      tenantCode: crypto
-        .createHash("sha256")
-        .update(config.slug + ":" + Date.now() + ":" + Math.random())
-        .digest("hex")
-        .substring(0, 8),
-      databaseUrl: tenantDbUrl,
-      adminEmail: config.adminEmail,
-      plan: config.plan,
-      maxProperties: config.maxProperties,
-      isActive: true,
-      provisionedAt: new Date()
-    }
-  });
-
-  console.log(`   Registered: ${tenant.id}`);
-
-  // 7. Create admin user in tenant database
-  console.log("\n4. Creating admin user...");
-  await ensureSystemCatalog(tenantClient);
-  const passwordHash = await hashPassword(config.adminPassword);
-  const adminUser = await tenantClient.user.upsert({
-    where: { email: config.adminEmail.toLowerCase() },
-    update: {
-      name: config.name + " Admin",
-      passwordHash,
-      mustChangePassword: true,
-      isActive: true
-    },
-    create: {
-      email: config.adminEmail.toLowerCase(),
-      name: config.name + " Admin",
-      passwordHash,
-      mustChangePassword: true,
-      isActive: true
-    }
-  });
-  await grantTenantAdministrator(tenantClient, adminUser.id);
-  console.log(`   Admin user created: ${config.adminEmail}`);
-
-  await tenantClient.$disconnect();
-  await registry.$disconnect();
-
-  console.log(`\n=== Tenant '${config.slug}' provisioned successfully ===`);
-  console.log(`  ID: ${tenant.id}`);
-  console.log(`  Database: ${tenantDbName}`);
-  console.log(`  URL: ${tenantDbUrl}`);
-  if (config.generatedPassword) {
-    console.log(`  Temporary admin password: ${config.adminPassword}`);
-  }
-  console.log(`\nNext steps:`);
-  console.log(`  1. Sign in at /t/${tenant.tenantCode}/login with ${config.adminEmail}`);
-  console.log(`  2. Change the temporary password on first login`);
-  console.log(
-    `  3. Run seed-uat.ts with DATABASE_URL=${tenantDbUrl} to populate demo data if needed`
-  );
-}
-
-main().catch((error) => {
-  console.error("\nProvisioning failed:", error);
-  process.exit(1);
 });
+
+if (!parsed.success) {
+  console.error("Usage: provision-tenant --name <name> --slug <slug> --admin-email <email> [...]");
+  for (const issue of parsed.error.issues) {
+    console.error(`  ${issue.path.join(".")}: ${issue.message}`);
+  }
+  process.exit(1);
+}
+
+let failed = false;
+await new ProvisioningService()
+  .provision(parsed.data, (event, data) => {
+    if (event === "step") console.log(`  ${data.status === "COMPLETED" ? "✓" : "…"} ${data.step}`);
+    if (event === "error") {
+      failed = true;
+      console.error(`  ✗ ${data.step}: ${data.error}`);
+    }
+    if (event === "complete") console.log(`\nTenant ready. Sign-in: ${data.url}`);
+  })
+  .catch(() => {
+    failed = true;
+  });
+
+if (!failed && generatedPassword) {
+  console.log(`Temporary administrator password: ${parsed.data.adminUser.temporaryPassword}`);
+  console.log("It must be changed at first sign-in.");
+}
+process.exit(failed ? 1 : 0);

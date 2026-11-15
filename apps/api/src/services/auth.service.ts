@@ -14,6 +14,7 @@ import { withBypassRLS } from "../db/rls-bypass.js";
 import { hashPassword, passwordPolicyErrors } from "./password-policy.js";
 import type { Prisma } from "../db/client.js";
 import { requireConfig } from "../config.js";
+import { appConnectionUrl } from "../db/tenant-location.js";
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
@@ -166,7 +167,8 @@ export class AuthService {
     const user = await withBypassRLS(tenantPrisma, (tx: Prisma.TransactionClient) =>
       tx.user.findUnique({ where: { email: email.toLowerCase() } })
     );
-    if (!user || !user.passwordHash) throw new AuthError("Invalid credentials");
+    // The system user (HC-38) never signs in, whatever its row says.
+    if (!user || !user.passwordHash || user.isSystem) throw new AuthError("Invalid credentials");
 
     // 4. Check account lock
     if (user.lockedUntil && user.lockedUntil > new Date()) {
@@ -317,7 +319,7 @@ export class AuthService {
     if (!tenant || !tenant.isActive) throw new AuthError("Invalid tenant");
 
     // Load fresh user claims from tenant DB
-    const tenantPrisma = getTenantClient(tenant.slug, tenant.databaseUrl);
+    const tenantPrisma = getTenantClient(tenant.slug, appConnectionUrl(tenant));
     const user = await tenantPrisma.user.findUnique({
       where: { id: userId },
       select: { id: true, isActive: true }

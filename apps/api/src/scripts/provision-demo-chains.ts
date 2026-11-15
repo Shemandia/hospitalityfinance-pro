@@ -9,9 +9,10 @@
  *   npx tsx src/scripts/provision-demo-chains.ts
  *
  * This script:
- *   1. Creates 3 tenant entries in the registry (with deterministic tenantCode)
- *   2. Creates 3 PostgreSQL databases
- *   3. Runs migrations on each
+ *   1. Creates 3 tenant entries in the registry (with deterministic tenantCode),
+ *      each with its database location and sealed role passwords
+ *   2. Creates each database with its owner and application roles, applies
+ *      the migrations and grants the application role its rights
  *   4. Seeds each with its own entities, accounts, periods, and data
  *
  * No hardcoded IDs — everything is auto-generated.
@@ -20,7 +21,14 @@
 import crypto from "node:crypto";
 import { PrismaClient, Prisma } from "../db/client.js";
 import { PrismaClient as RegistryPrismaClient } from "../db/registry-client.js";
-import { assertTenantSecurity, deployMigrations } from "../db/migrate.js";
+import { hasRoles, type NewLocation } from "../db/tenant-location.js";
+import {
+  createDatabase,
+  migrateDatabase,
+  planTenantDatabase,
+  secureDatabase,
+  tenantUrls
+} from "../modules/tenant/tenant-database.js";
 import { ensureSystemCatalog, grantRoleAtEntity } from "../modules/access/setup.js";
 import { registryDatabaseUrl } from "../config.js";
 
@@ -30,26 +38,6 @@ const DEMO_ADMIN_ROLE = "ADMIN";
 const registryUrl = registryDatabaseUrl();
 
 const registry = new RegistryPrismaClient({ datasourceUrl: registryUrl });
-
-function parseDbUrl(url: string) {
-  const parsed = new URL(url);
-  return {
-    user: parsed.username,
-    password: parsed.password,
-    host: parsed.hostname,
-    port: parsed.port || "5432"
-  };
-}
-
-function buildDbUrl(
-  user: string,
-  password: string,
-  host: string,
-  port: string,
-  database: string
-): string {
-  return `postgresql://${user}:${encodeURIComponent(password)}@${host}:${port}/${database}`;
-}
 
 // ── Chain definitions (no hardcoded IDs) ──────────────────────────────────────
 
@@ -94,65 +82,31 @@ const chains = [
 ];
 
 async function provisionChain(chain: (typeof chains)[0]) {
-  const dbConn = parseDbUrl(registryUrl!);
-  const tenantDbName = `hfp_${chain.slug.replace(/-/g, "_")}`;
-  const tenantDbUrl = buildDbUrl(
-    dbConn.user,
-    dbConn.password,
-    dbConn.host,
-    dbConn.port,
-    tenantDbName
-  );
+  const tenantCode = crypto.createHash("sha256").update(chain.slug).digest("hex").substring(0, 8);
 
   console.log(`\n${"=".repeat(60)}`);
   console.log(`Provisioning: ${chain.name} (${chain.slug})`);
-  console.log(`Database: ${tenantDbName}`);
   console.log(`${"=".repeat(60)}`);
 
-  // 1. Create database
-  // Validate identifiers to prevent SQL injection (allowlist: letters, digits, underscores)
-  const identifierRegex = /^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/;
-  if (!identifierRegex.test(tenantDbName)) {
-    throw new Error(
-      `Invalid database name: ${tenantDbName}. Only alphanumeric and underscores allowed.`
-    );
-  }
-  if (!identifierRegex.test(dbConn.user)) {
-    throw new Error(
-      `Invalid database user: ${dbConn.user}. Only alphanumeric and underscores allowed.`
-    );
-  }
-
-  try {
-    await registry.$executeRawUnsafe(`CREATE DATABASE "${tenantDbName}" OWNER "${dbConn.user}"`);
-    console.log(`  ✓ Database created`);
-  } catch (e: any) {
-    if (e.message?.includes("already exists")) {
-      console.log(`  ✓ Database exists`);
-    } else {
-      throw e;
-    }
-  }
-
-  // 2. Run migrations
-  console.log(`  Running migrations...`);
-  // Tables, security policies and constraints, from the tenant migrations.
-  await deployMigrations("tenant", tenantDbUrl);
-  console.log(`  ✓ Migrations applied`);
-
-  // 3. Register tenant
+  // 1. Register the tenant with its database location and sealed role
+  //    passwords; a chain registered before keeps its own.
   const existingTenant = await registry.tenant.findUnique({ where: { slug: chain.slug } });
-  let tenantId: string;
-  if (existingTenant) {
-    tenantId = existingTenant.id;
-    console.log(`  ✓ Tenant already registered: ${tenantId}`);
+  let location: NewLocation;
+  if (existingTenant && hasRoles(existingTenant)) {
+    location = existingTenant;
+    console.log(`  ✓ Tenant already registered: ${existingTenant.id}`);
+  } else if (existingTenant) {
+    throw new Error(
+      `${chain.slug} was registered before WP-2 (no owner and application roles); adopt it first.`
+    );
   } else {
+    location = planTenantDatabase(chain.slug, tenantCode);
     const tenant = await registry.tenant.create({
       data: {
         name: chain.name,
         slug: chain.slug,
-        tenantCode: crypto.createHash("sha256").update(chain.slug).digest("hex").substring(0, 8),
-        databaseUrl: tenantDbUrl,
+        tenantCode,
+        ...location,
         adminEmail: chain.adminEmail,
         plan: "standard",
         maxProperties: 20,
@@ -160,13 +114,21 @@ async function provisionChain(chain: (typeof chains)[0]) {
         provisionedAt: new Date()
       }
     });
-    tenantId = tenant.id;
-    console.log(`  ✓ Tenant registered: ${tenantId}`);
+    console.log(`  ✓ Tenant registered: ${tenant.id}`);
   }
+  const tenantId = (await registry.tenant.findUniqueOrThrow({ where: { slug: chain.slug } })).id;
+  console.log(`  Database: ${location.dbName}`);
+
+  // 2. Roles, database, migrations (as the owner) and the application role's rights.
+  await createDatabase(location);
+  const schemaVersion = await migrateDatabase(location);
+  await secureDatabase(location);
+  await registry.tenant.update({ where: { id: tenantId }, data: { schemaVersion } });
+  console.log(`  ✓ Database ready (${schemaVersion})`);
 
   // 4. Seed data in tenant database
-  const tenantDb = new PrismaClient({ datasourceUrl: tenantDbUrl });
-  await assertTenantSecurity(tenantDb);
+  // The data goes in as the application role, as the API writes it.
+  const tenantDb = new PrismaClient({ datasourceUrl: tenantUrls(location).app });
   await ensureSystemCatalog(tenantDb);
 
   // Admin user
@@ -300,7 +262,7 @@ async function provisionChain(chain: (typeof chains)[0]) {
 
 async function main() {
   console.log("=== HFP Multi-Tenant Demo Provisioning ===");
-  console.log(`Registry: ${registryUrl}`);
+  console.log(`Registry: ${new URL(registryUrl).host}${new URL(registryUrl).pathname}`);
   console.log(`Chains to provision: ${chains.length}\n`);
 
   for (const chain of chains) {

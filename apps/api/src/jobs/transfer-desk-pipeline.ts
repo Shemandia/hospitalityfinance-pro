@@ -39,6 +39,7 @@ import {
 } from "./transfer-desk-batch-stager.js";
 import { moduleLogger } from "../shared/logger.js";
 import { insecureTmlSandboxAllowed } from "../shared/tml-sandbox.js";
+import { actingUserId, systemUserId } from "../modules/access/system-user.js";
 
 const log = moduleLogger("transfer-desk-pipeline");
 
@@ -283,7 +284,9 @@ export async function executeImport(
 
   // HOLD only applies to GL_JOURNAL in v1; other targets keep direct behaviour.
   if (effectiveMode === "HOLD" && mapResult.component === "GL_JOURNAL") {
-    const createdById = String(runtimeParams.triggeredBy ?? execMeta?.triggeredBy ?? "system");
+    const createdById = String(
+      runtimeParams.triggeredBy ?? execMeta?.triggeredBy ?? (await systemUserId())
+    );
     return stageHeldBatch(
       ctx,
       executionId,
@@ -301,7 +304,9 @@ export async function executeImport(
       tenantSlug: ctx.tenantSlug,
       tenantDbUrl: ctx.tenantDbUrl,
       entityId: targetParams.entityId || null,
-      userId: String(runtimeParams.triggeredBy ?? "system")
+      // The person who ran the import, or the tenant's system user for a
+      // scheduled one. writeToTarget records this user as the creator.
+      userId: String(runtimeParams.triggeredBy ?? (await systemUserId()))
     },
     () => writeToTarget(ctx, executionId, profile, mapResult, parseResult.records, targetParams)
   );
@@ -348,7 +353,8 @@ async function writeToTarget(
 
   if (mapResult.component === "GL_JOURNAL") {
     const glService = new GLService(ctx.db as any);
-    const postUserId = String(targetParams.entityId ?? "system");
+    // Not the entity id (IMP-01): it is no user, and broke journals_created_by_fkey.
+    const postUserId = await actingUserId();
 
     for (const journal of mapResult.journals) {
       try {
@@ -403,7 +409,7 @@ async function writeToTarget(
       try {
         await apService.createInvoice(
           targetParams.entityId ?? "",
-          String(targetParams.entityId ?? "system"),
+          await actingUserId(),
           rec.data as any
         );
         await ctx.db.transferExecutionLog.create({
@@ -647,7 +653,7 @@ export async function executeExport(
         tenantSlug: ctx.tenantSlug,
         tenantDbUrl: ctx.tenantDbUrl,
         entityId: entityId || null,
-        userId: String(runtimeParams.triggeredBy ?? "system")
+        userId: String(runtimeParams.triggeredBy ?? (await systemUserId()))
       },
       () => readFromSource(ctx, profile.sourceComponent!, entityId, runtimeParams)
     );
@@ -869,7 +875,7 @@ async function executeAllocationProcess(
     );
   }
 
-  const userId = params.executedBy ?? "system";
+  const userId = params.executedBy ?? (await systemUserId());
   const periodId = params.periodId ?? undefined;
 
   try {
@@ -943,7 +949,7 @@ async function executeDepreciationProcess(
     );
   }
 
-  const userId = params.executedBy ?? "system";
+  const userId = params.executedBy ?? (await systemUserId());
 
   try {
     const fixedAssetService = new FixedAssetService(ctx.db as any);
