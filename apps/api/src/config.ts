@@ -216,6 +216,11 @@ const schema = z.object({
     .describe("How often the Transfer Desk process checks for added or deactivated tenants."),
 
   // ── Development ──────────────────────────────────────────────────────────
+  SHADOW_DATABASE_URL: url()
+    .optional()
+    .describe(
+      "An empty scratch database (name it hfp_shadow) for db:check:migrations and creating migrations; its contents are discarded."
+    ),
   SEED_USER_PASSWORD: text()
     .optional()
     .describe("The demo users' password (pnpm dev:setup, db:seed)."),
@@ -471,5 +476,8 @@ export const CONFIG_GROUPS: ReadonlyArray<{ title: string; keys: readonly Config
     title: "Workers",
     keys: ["IMPORT_CONCURRENCY", "WORKER_MAX_CLEAN_EXITS", "TRANSFER_DESK_TENANT_POLL_MS"]
   },
-  { title: "Development", keys: ["SEED_USER_PASSWORD", "TML_ALLOW_INSECURE_SANDBOX"] }
+  {
+    title: "Development",
+    keys: ["SHADOW_DATABASE_URL", "SEED_USER_PASSWORD", "TML_ALLOW_INSECURE_SANDBOX"]
+  }
 ];

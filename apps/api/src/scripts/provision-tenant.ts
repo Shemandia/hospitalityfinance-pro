@@ -24,15 +24,10 @@
 import crypto from "node:crypto";
 import { PrismaClient } from "../db/client.js";
 import { PrismaClient as RegistryPrismaClient } from "../db/registry-client.js";
-import { execSync } from "node:child_process";
-import { resolve } from "node:path";
-import {
-  applyAccessMigration,
-  ensureSystemCatalog,
-  grantTenantAdministrator
-} from "../modules/access/setup.js";
+import { assertTenantSecurity, deployMigrations } from "../db/migrate.js";
+import { ensureSystemCatalog, grantTenantAdministrator } from "../modules/access/setup.js";
 import { hashPassword } from "../services/password-policy.js";
-import { childProcessEnv, config as appConfig, registryDatabaseUrl } from "../config.js";
+import { config as appConfig, registryDatabaseUrl } from "../config.js";
 
 // ── Parse args ────────────────────────────────────────────────────────────────
 
@@ -177,49 +172,15 @@ async function main() {
     }
   }
 
-  // 4. Run Prisma migrations on the new database
+  // 4. Apply the tenant migrations: tables, security policies and constraints.
   console.log("\n2. Running migrations...");
-  const apiRoot = resolve(import.meta.dirname ?? __dirname, "../..");
-  execSync(`npx prisma migrate deploy`, {
-    cwd: apiRoot,
-    env: childProcessEnv({ DATABASE_URL: tenantDbUrl }),
-    stdio: "inherit"
-  });
-
-  // 5. Apply performance indexes and RLS
-  console.log("\n3. Applying performance indexes...");
+  await deployMigrations("tenant", tenantDbUrl);
   const tenantClient = new PrismaClient({ datasourceUrl: tenantDbUrl });
-
-  try {
-    // Read and execute SQL files
-    const { readFileSync } = await import("node:fs");
-    const sqlDir = resolve(apiRoot, "src/db/sql");
-
-    const performanceSql = readFileSync(resolve(sqlDir, "performance.sql"), "utf-8");
-    const rlsSql = readFileSync(resolve(sqlDir, "entity-rls.sql"), "utf-8");
-
-    // Split by semicolons and execute each statement
-    for (const file of [performanceSql, rlsSql]) {
-      const statements = file
-        .split(";")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0 && !s.startsWith("--"));
-
-      for (const stmt of statements) {
-        try {
-          await tenantClient.$executeRawUnsafe(stmt);
-        } catch {
-          // Some statements may fail if already applied — continue
-        }
-      }
-    }
-    console.log("   Performance indexes and RLS applied.");
-  } catch (error) {
-    console.warn("   Warning: Could not apply SQL files. Apply manually if needed.", error);
-  }
+  await assertTenantSecurity(tenantClient);
+  console.log("   Migrations applied; security policies present.");
 
   // 6. Register in tenant registry
-  console.log("\n4. Registering tenant...");
+  console.log("\n3. Registering tenant...");
   const tenant = await registry.tenant.create({
     data: {
       name: config.name,
@@ -241,9 +202,7 @@ async function main() {
   console.log(`   Registered: ${tenant.id}`);
 
   // 7. Create admin user in tenant database
-  console.log("\n5. Creating admin user...");
-  // The grants table must be constrained and protected before the first grant.
-  await applyAccessMigration(tenantClient);
+  console.log("\n4. Creating admin user...");
   await ensureSystemCatalog(tenantClient);
   const passwordHash = await hashPassword(config.adminPassword);
   const adminUser = await tenantClient.user.upsert({

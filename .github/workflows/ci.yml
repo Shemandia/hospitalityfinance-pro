@@ -48,6 +48,8 @@ jobs:
       TEST_SECOND_DATABASE_URL: postgresql://hfp:hfp_ci@localhost:5432/hfp_test_b
       # A registry database, for the worker entry-point tests (OPS-10).
       TEST_REGISTRY_DATABASE_URL: postgresql://hfp:hfp_ci@localhost:5432/hfp_registry_test
+      # Scratch database for the schema/migrations drift check (WP-2).
+      SHADOW_DATABASE_URL: postgresql://hfp:hfp_ci@localhost:5432/hfp_shadow
       REDIS_URL: redis://localhost:6379
       JWT_SECRET: ci-only-secret-not-used-outside-this-workflow
       # The API and the workers will not start without these (apps/api/src/config.ts).
@@ -79,11 +81,9 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      # The tenant migration chain cannot build an empty database yet (OPS-04).
-      # Until WP-2 replaces it with a clean baseline, the test database is built
-      # the same way provisioning builds a tenant. Replace with `migrate deploy`
-      # and add the migrate-from-empty check when WP-2 lands.
-      - name: Create application role and test database
+      # Test databases are built from empty by the migrations, exactly as
+      # provisioning builds a tenant (WP-2, ARC-03).
+      - name: Create application role and test databases
         env:
           PGPASSWORD: postgres_ci
         run: |
@@ -91,7 +91,12 @@ jobs:
             -c "CREATE ROLE hfp LOGIN PASSWORD 'hfp_ci' NOSUPERUSER NOBYPASSRLS CREATEDB CREATEROLE" \
             -c "CREATE DATABASE hfp_test OWNER hfp" \
             -c "CREATE DATABASE hfp_test_b OWNER hfp" \
-            -c "CREATE DATABASE hfp_registry_test OWNER hfp"
+            -c "CREATE DATABASE hfp_registry_test OWNER hfp" \
+            -c "CREATE DATABASE hfp_shadow OWNER hfp"
+
+      # Fails when a schema.prisma and its migrations disagree.
+      - name: Migrations match the schemas
+        run: pnpm --filter @hfp/api db:check:migrations
 
       - name: Prepare test database
         run: pnpm --filter @hfp/api db:setup:test
@@ -104,7 +109,7 @@ jobs:
           DATABASE_URL: ${{ env.TEST_SECOND_DATABASE_URL }}
 
       - name: Prepare test registry database
-        run: pnpm --filter @hfp/api exec prisma db push --schema src/db/schema-registry.prisma --skip-generate
+        run: pnpm --filter @hfp/api db:migrate:deploy:registry
         env:
           REGISTRY_DATABASE_URL: ${{ env.TEST_REGISTRY_DATABASE_URL }}
 

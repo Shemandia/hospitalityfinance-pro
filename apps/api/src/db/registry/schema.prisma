@@ -1,11 +1,14 @@
 generator client {
   provider = "prisma-client-js"
-  output   = "./generated/registry"
+  output   = "../generated/registry"
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("REGISTRY_DATABASE_URL")
+  provider          = "postgresql"
+  url               = env("REGISTRY_DATABASE_URL")
+  // An empty scratch database for `migrate dev` and the drift check, so Prisma
+  // never creates one with its own name (src/scripts/check-migrations.ts).
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
 }
 
 // ─── Enums ────────────────────────────────────────────────────────────────────

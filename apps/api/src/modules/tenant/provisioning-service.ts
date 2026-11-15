@@ -1,21 +1,16 @@
 import { PrismaClient } from "../../db/client.js";
-import { execSync } from "node:child_process";
-import { resolve } from "node:path";
 import { registryPrisma } from "../../db/prisma.js";
 import { generateTenantCode } from "../../db/generateTenantCode.js";
 import { sendWelcomeEmail } from "../../shared/email.js";
-import {
-  applyAccessMigration,
-  ensureSystemCatalog,
-  grantTenantAdministrator
-} from "../access/setup.js";
+import { assertTenantSecurity, deployMigrations } from "../../db/migrate.js";
+import { ensureSystemCatalog, grantTenantAdministrator } from "../access/setup.js";
 import {
   PROVISIONING_STEPS,
   type ProvisionTenantInput,
   type ProvisioningStepName
 } from "./types.js";
 import { hashPassword } from "../../services/password-policy.js";
-import { appUrl, childProcessEnv, config, registryDatabaseUrl } from "../../config.js";
+import { appUrl, config, registryDatabaseUrl } from "../../config.js";
 
 type SSEWriter = (event: string, data: Record<string, unknown>) => void;
 
@@ -143,68 +138,18 @@ export class ProvisioningService {
     });
 
     await this.executeStep(tenantRecord.id, "running_migrations", sse, async () => {
-      const apiRoot = resolve(import.meta.dirname ?? __dirname, "../../..");
-      execSync("npx prisma db push --schema src/db/schema-tenant.prisma --skip-generate", {
-        cwd: apiRoot,
-        env: childProcessEnv({ DATABASE_URL: tenantDbUrl }),
-        stdio: "pipe",
-        timeout: 60_000
-      });
+      // The tenant baseline and every later migration, recorded in the
+      // database's own migration history (ARC-03). Security functions,
+      // policies and constraints are part of the migrations.
+      await deployMigrations("tenant", tenantDbUrl);
     });
 
     await this.executeStep(tenantRecord.id, "applying_security", sse, async () => {
+      // The policies came with the migrations; refuse to continue if they are
+      // missing, rather than create users in an unprotected database.
       const tenantClient = new PrismaClient({ datasourceUrl: tenantDbUrl });
       try {
-        const { readFileSync } = await import("node:fs");
-        const apiRoot = resolve(import.meta.dirname ?? __dirname, "../../..");
-        const sqlDir = resolve(apiRoot, "src/db/sql");
-        const performanceSql = readFileSync(resolve(sqlDir, "performance.sql"), "utf-8");
-        const rlsSql = readFileSync(resolve(sqlDir, "entity-rls.sql"), "utf-8");
-        for (const file of [performanceSql, rlsSql]) {
-          // Split on semicolons but respect $$ dollar-quoted blocks (PL/pgSQL)
-          const statements: string[] = [];
-          let current = "";
-          let inDollarBlock = false;
-          for (const line of file.split("\n")) {
-            const trimmed = line.trim();
-            if (trimmed.startsWith("--") && !inDollarBlock) continue;
-            if (trimmed.includes("$$")) {
-              inDollarBlock = !inDollarBlock;
-            }
-            current += line + "\n";
-            if (!inDollarBlock && trimmed.endsWith(";")) {
-              const stmt = current.trim().replace(/;$/, "").trim();
-              if (stmt.length > 0) statements.push(stmt);
-              current = "";
-            }
-          }
-          if (current.trim().length > 0) {
-            const stmt = current.trim().replace(/;$/, "").trim();
-            if (stmt.length > 0) statements.push(stmt);
-          }
-          for (const stmt of statements) {
-            try {
-              await tenantClient.$executeRawUnsafe(stmt);
-            } catch (sqlErr: any) {
-              // Skip statements referencing tables/relations that don't exist yet
-              // or indexes/views that already exist. Prisma wraps PG errors in
-              // different structures, so check message string as fallback.
-              const msg = sqlErr?.message ?? "";
-              const code = sqlErr?.code ?? sqlErr?.meta?.code ?? "";
-              if (
-                code === "42P01" ||
-                code === "42P07" ||
-                msg.includes("does not exist") ||
-                msg.includes("already exists")
-              )
-                continue;
-              throw sqlErr;
-            }
-          }
-        }
-        // Not skippable like the statements above: the grants table must be
-        // constrained and protected before the first administrator is written.
-        await applyAccessMigration(tenantClient);
+        await assertTenantSecurity(tenantClient);
       } finally {
         await tenantClient.$disconnect();
       }

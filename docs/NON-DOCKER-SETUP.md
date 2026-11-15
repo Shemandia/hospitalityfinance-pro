@@ -40,7 +40,7 @@ Run registry and tenant setup:
 ```powershell
 pnpm --filter @hfp/api run db:generate
 pnpm --filter @hfp/api run db:migrate:deploy:registry
-pnpm --filter @hfp/api run db:setup:tenant
+pnpm --filter @hfp/api run db:migrate:deploy:tenant
 ```
 
 For a development machine, `pnpm dev:setup` does all of this and seeds a demo
@@ -97,16 +97,16 @@ Run production database setup:
 
 ```bash
 pnpm --filter @hfp/api run db:migrate:deploy:registry
-pnpm --filter @hfp/api run db:setup:tenant
+pnpm --filter @hfp/api run db:migrate:deploy:tenant
 ```
 
 Do not run `db:seed` in production: it creates demo users and refuses
 `NODE_ENV=production`. Tenants get their roles, permissions and first
 administrator from provisioning.
 
-Tenant migrations currently run one tenant database at a time. An automated "migrate all tenants from registry" command is not implemented yet.
+Tenant migrations currently run one tenant database at a time; a command that migrates every tenant in the registry comes with WP-2 item 3. Each tenant database's migrations (tables, row-level security, audit immutability, reporting view) live in `apps/api/src/db/tenant/migrations`, the registry's in `apps/api/src/db/registry/migrations`. A database built before WP-2 has no migration history and must be adopted, not migrated.
 
-For each tenant database, run `db:setup:tenant` with `DATABASE_URL` pointing at that tenant database. Keep `REGISTRY_DATABASE_URL` pointed at the registry database for tenant registry operations.
+For each tenant database, run `db:migrate:deploy:tenant` with `DATABASE_URL` pointing at that tenant database. Keep `REGISTRY_DATABASE_URL` pointed at the registry database for tenant registry operations.
 
 Manual tenant pattern:
 
@@ -114,10 +114,10 @@ Manual tenant pattern:
 export REGISTRY_DATABASE_URL="postgresql://hfp:<password>@localhost:5432/hfp_registry"
 
 export DATABASE_URL="postgresql://hfp:<password>@localhost:5432/hfp_tenant_a"
-pnpm --filter @hfp/api run db:setup:tenant
+pnpm --filter @hfp/api run db:migrate:deploy:tenant
 
 export DATABASE_URL="postgresql://hfp:<password>@localhost:5432/hfp_tenant_b"
-pnpm --filter @hfp/api run db:setup:tenant
+pnpm --filter @hfp/api run db:migrate:deploy:tenant
 ```
 
 ## PM2 Production Startup

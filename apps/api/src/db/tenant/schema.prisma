@@ -1,11 +1,14 @@
 generator client {
   provider = "prisma-client-js"
-  output   = "./generated/tenant"
+  output   = "../generated/tenant"
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider          = "postgresql"
+  url               = env("DATABASE_URL")
+  // An empty scratch database for `migrate dev` and the drift check, so Prisma
+  // never creates one with its own name (src/scripts/check-migrations.ts).
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
 }
 
 // ─── Enums ────────────────────────────────────────────────────────────────────
@@ -701,48 +704,49 @@ model RecurringJournalLine {
 }
 
 model Journal {
-  id                    String                 @id @default(uuid())
-  entityId              String                 @map("entity_id")
-  periodId              String                 @map("period_id")
-  journalTypeId         String?                @map("journal_type_id")
-  reference             String?
-  description           String?
-  source                JournalSource
-  status                JournalStatus          @default(DRAFT)
-  postedAt              DateTime?              @map("posted_at")
-  functionalCurrency    String                 @map("functional_currency")
-  createdById           String                 @map("created_by")
-  approvedById          String?                @map("approved_by")
+  id                        String                 @id @default(uuid())
+  entityId                  String                 @map("entity_id")
+  periodId                  String                 @map("period_id")
+  journalTypeId             String?                @map("journal_type_id")
+  reference                 String?
+  description               String?
+  source                    JournalSource
+  status                    JournalStatus          @default(DRAFT)
+  postedAt                  DateTime?              @map("posted_at")
+  functionalCurrency        String                 @map("functional_currency")
+  createdById               String                 @map("created_by")
+  approvedById              String?                @map("approved_by")
   /// Current authorization stage sequence order (null = not in authorization workflow)
-  currentAuthStageOrder Int?                   @map("current_auth_stage_order")
+  currentAuthStageOrder     Int?                   @map("current_auth_stage_order")
   /// Authorization set this journal belongs to (for batch approval)
-  authorizationSetId    String?                @map("authorization_set_id")
+  authorizationSetId        String?                @map("authorization_set_id")
   /// Auto-reversal flag: if true, a mirrored reversal journal is created in the next period
-  isAutoReversible      Boolean                @default(false) @map("is_auto_reversible")
+  isAutoReversible          Boolean                @default(false) @map("is_auto_reversible")
   /// Self-reference to the original journal this entry reverses (for auto-reversal tracking)
-  reversalOfId          String?                @map("reversal_of_id")
-  createdAt             DateTime               @default(now()) @map("created_at")
-  updatedAt             DateTime               @updatedAt @map("updated_at")
-  entity                Entity                 @relation(fields: [entityId], references: [id])
-  period                Period                 @relation(fields: [periodId], references: [id])
-  journalType           JournalType?           @relation(fields: [journalTypeId], references: [id])
-  createdBy             User                   @relation("JournalCreatedBy", fields: [createdById], references: [id])
-  approvedBy            User?                  @relation("JournalApprovedBy", fields: [approvedById], references: [id])
-  authorizationSet      AuthorizationSet?      @relation(fields: [authorizationSetId], references: [id])
-  reversalOf            Journal?               @relation("JournalReversal", fields: [reversalOfId], references: [id])
-  reversals             Journal[]              @relation("JournalReversal")
-  lines                 JournalLine[]
-  approvals             JournalApproval[]
-  authorizations        JournalAuthorization[]
-  icSourceJournals      IntercompanyJournal[]  @relation("ICSourceJournal")
-  icMirrorJournals      IntercompanyJournal[]  @relation("ICMirrorJournal")
-  icTxnInitiatorJournals   ICTransaction[]    @relation("ICTxnInitiatorJournal")
-  icTxnCounterpartyJournals ICTransaction[]   @relation("ICTxnCounterpartyJournal")
+  reversalOfId              String?                @map("reversal_of_id")
+  createdAt                 DateTime               @default(now()) @map("created_at")
+  updatedAt                 DateTime               @updatedAt @map("updated_at")
+  entity                    Entity                 @relation(fields: [entityId], references: [id])
+  period                    Period                 @relation(fields: [periodId], references: [id])
+  journalType               JournalType?           @relation(fields: [journalTypeId], references: [id])
+  createdBy                 User                   @relation("JournalCreatedBy", fields: [createdById], references: [id])
+  approvedBy                User?                  @relation("JournalApprovedBy", fields: [approvedById], references: [id])
+  authorizationSet          AuthorizationSet?      @relation(fields: [authorizationSetId], references: [id])
+  reversalOf                Journal?               @relation("JournalReversal", fields: [reversalOfId], references: [id])
+  reversals                 Journal[]              @relation("JournalReversal")
+  lines                     JournalLine[]
+  approvals                 JournalApproval[]
+  authorizations            JournalAuthorization[]
+  icSourceJournals          IntercompanyJournal[]  @relation("ICSourceJournal")
+  icMirrorJournals          IntercompanyJournal[]  @relation("ICMirrorJournal")
+  icTxnInitiatorJournals    ICTransaction[]        @relation("ICTxnInitiatorJournal")
+  icTxnCounterpartyJournals ICTransaction[]        @relation("ICTxnCounterpartyJournal")
 
   @@index([entityId, periodId, status])
   @@index([entityId, createdAt])
   @@index([entityId, journalTypeId])
   @@index([entityId, authorizationSetId])
+  @@index([entityId, source], map: "idx_journal_entity_source")
   @@map("journals")
 }
 
@@ -1522,35 +1526,35 @@ enum SavePayloadOption {
 // ── TD-DB-003: transfer_profiles ─────────────────────────────────────────────
 
 model TransferProfile {
-  id               String            @id @default(uuid())
-  name             String            @unique
+  id               String             @id @default(uuid())
+  name             String             @unique
   description      String?
-  profileType      ProfileType       @map("profile_type")
+  profileType      ProfileType        @map("profile_type")
   /// External component (e.g. "OPERA_CLOUD"); free-text to allow custom systems
-  sourceComponent  String?           @map("source_component")
+  sourceComponent  String?            @map("source_component")
   /// HFP target component (GL_JOURNAL, AP_INVOICE, AR_INVOICE, etc.)
-  targetComponent  String?           @map("target_component")
-  sourceFormatId   String?           @map("source_format_id")
-  targetFormatId   String?           @map("target_format_id")
-  transformationId String?           @map("transformation_id")
-  filterId         String?           @map("filter_id")
+  targetComponent  String?            @map("target_component")
+  sourceFormatId   String?            @map("source_format_id")
+  targetFormatId   String?            @map("target_format_id")
+  transformationId String?            @map("transformation_id")
+  filterId         String?            @map("filter_id")
   /// Runtime parameters (JSONB) — e.g. ledger, posting_options, file_handling
-  sourceParams     Json?             @map("source_params")
-  targetParams     Json?             @map("target_params")
+  sourceParams     Json?              @map("source_params")
+  targetParams     Json?              @map("target_params")
   /// Whether this profile passes its own validation rules; false blocks execute
-  isValid          Boolean           @default(false) @map("is_valid")
+  isValid          Boolean            @default(false) @map("is_valid")
   /// Increments on every save; profile_versions captures the snapshot
-  version          Int               @default(1)
+  version          Int                @default(1)
   /// System profiles ship with every tenant and cannot be deleted
-  isSystem         Boolean           @default(false) @map("is_system")
+  isSystem         Boolean            @default(false) @map("is_system")
   /// Soft delete flag
-  isActive         Boolean           @default(true) @map("is_active")
+  isActive         Boolean            @default(true) @map("is_active")
   /// Save behavior: NONE / INPUT / OUTPUT / BOTH
   savePayload      SavePayloadOption  @default(NONE) @map("save_payload")
   reviewMode       TransferReviewMode @default(HOLD) @map("review_mode")
   createdById      String?            @map("created_by")
-  createdAt        DateTime          @default(now()) @map("created_at")
-  updatedAt        DateTime          @updatedAt @map("updated_at")
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
 
   sourceFormat    TransferFormat?          @relation("TransferProfileSourceFormat", fields: [sourceFormatId], references: [id])
   targetFormat    TransferFormat?          @relation("TransferProfileTargetFormat", fields: [targetFormatId], references: [id])
@@ -2538,28 +2542,28 @@ enum RevaluationRateType {
 }
 
 model RevaluationProfile {
-  id                String               @id @default(uuid())
-  entityId          String               @map("entity_id")
-  name              String               @db.VarChar(200)
+  id                String              @id @default(uuid())
+  entityId          String              @map("entity_id")
+  name              String              @db.VarChar(200)
   /// Account type filter: ["ASSET","LIABILITY","EQUITY","REVENUE","EXPENSE"] or subset
-  accountTypeFilter Json                 @default("[]") @map("account_type_filter")
-  accountCodeFrom   String?              @map("account_code_from") @db.VarChar(15)
-  accountCodeTo     String?              @map("account_code_to") @db.VarChar(15)
+  accountTypeFilter Json                @default("[]") @map("account_type_filter")
+  accountCodeFrom   String?             @map("account_code_from") @db.VarChar(15)
+  accountCodeTo     String?             @map("account_code_to") @db.VarChar(15)
   /// Specific currency to revalue (NULL = all non-functional currencies)
-  currencyFilter    String?              @map("currency_filter") @db.Char(3)
-  rateType          RevaluationRateType  @default(CLOSING) @map("rate_type")
+  currencyFilter    String?             @map("currency_filter") @db.Char(3)
+  rateType          RevaluationRateType @default(CLOSING) @map("rate_type")
   /// Account code for posting unrealized FX gains
-  gainAccountCode   String               @map("gain_account_code") @db.VarChar(15)
+  gainAccountCode   String              @map("gain_account_code") @db.VarChar(15)
   /// Account code for posting unrealized FX losses
-  lossAccountCode   String               @map("loss_account_code") @db.VarChar(15)
+  lossAccountCode   String              @map("loss_account_code") @db.VarChar(15)
   /// Auto-reverse the revaluation journal in the next period (standard IAS 21 practice)
-  autoReverse       Boolean              @default(true) @map("auto_reverse")
+  autoReverse       Boolean             @default(true) @map("auto_reverse")
   /// Whether to post revaluation entries or just produce a report
-  postDifferences   Boolean              @default(true) @map("post_differences")
-  isActive          Boolean              @default(true) @map("is_active")
-  description       String?              @db.VarChar(500)
-  createdAt         DateTime             @default(now()) @map("created_at")
-  updatedAt         DateTime             @updatedAt @map("updated_at")
+  postDifferences   Boolean             @default(true) @map("post_differences")
+  isActive          Boolean             @default(true) @map("is_active")
+  description       String?             @db.VarChar(500)
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
 
   entity Entity @relation(fields: [entityId], references: [id])
 
@@ -2572,17 +2576,17 @@ model RevaluationProfile {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 model YearEndConfig {
-  id                      String   @id @default(uuid())
-  entityId                String   @map("entity_id")
+  id                   String   @id @default(uuid())
+  entityId             String   @map("entity_id")
   /// Account code of the Retained Earnings / Accumulated P&L account
-  retainedEarningsCode    String   @map("retained_earnings_code") @db.VarChar(15)
+  retainedEarningsCode String   @map("retained_earnings_code") @db.VarChar(15)
   /// Optional: journal type to use for the year-end journal
-  journalTypeCode         String?  @map("journal_type_code") @db.VarChar(20)
+  journalTypeCode      String?  @map("journal_type_code") @db.VarChar(20)
   /// Fiscal year start month (1-12). Default 1 = January fiscal year.
-  fiscalYearStartMonth    Int      @default(1) @map("fiscal_year_start_month")
-  description             String?  @db.VarChar(500)
-  createdAt               DateTime @default(now()) @map("created_at")
-  updatedAt               DateTime @updatedAt @map("updated_at")
+  fiscalYearStartMonth Int      @default(1) @map("fiscal_year_start_month")
+  description          String?  @db.VarChar(500)
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
 
   entity Entity @relation(fields: [entityId], references: [id])
 
@@ -2604,16 +2608,16 @@ enum IntercompanyJournalStatus {
 }
 
 model IntercompanyAccountPair {
-  id                     String   @id @default(uuid())
-  entityId               String   @map("entity_id")
-  counterpartyEntityId   String   @map("counterparty_entity_id")
+  id                   String   @id @default(uuid())
+  entityId             String   @map("entity_id")
+  counterpartyEntityId String   @map("counterparty_entity_id")
   /// IC Receivable account code in this entity
-  icReceivableCode       String   @map("ic_receivable_code") @db.VarChar(15)
+  icReceivableCode     String   @map("ic_receivable_code") @db.VarChar(15)
   /// IC Payable account code in this entity
-  icPayableCode          String   @map("ic_payable_code") @db.VarChar(15)
-  isActive               Boolean  @default(true) @map("is_active")
-  createdAt              DateTime @default(now()) @map("created_at")
-  updatedAt              DateTime @updatedAt @map("updated_at")
+  icPayableCode        String   @map("ic_payable_code") @db.VarChar(15)
+  isActive             Boolean  @default(true) @map("is_active")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
 
   entity             Entity @relation("ICPairOwner", fields: [entityId], references: [id])
   counterpartyEntity Entity @relation("ICPairCounterparty", fields: [counterpartyEntityId], references: [id])
@@ -2623,31 +2627,31 @@ model IntercompanyAccountPair {
 }
 
 model IntercompanyJournal {
-  id                   String                      @id @default(uuid())
+  id                 String                    @id @default(uuid())
   /// Entity that initiated the IC transaction
-  sourceEntityId       String                      @map("source_entity_id")
+  sourceEntityId     String                    @map("source_entity_id")
   /// Counterparty entity receiving the mirror entry
-  mirrorEntityId       String                      @map("mirror_entity_id")
+  mirrorEntityId     String                    @map("mirror_entity_id")
   /// Journal in the source entity
-  sourceJournalId      String?                     @map("source_journal_id")
+  sourceJournalId    String?                   @map("source_journal_id")
   /// Mirror journal in the counterparty entity
-  mirrorJournalId      String?                     @map("mirror_journal_id")
-  status               IntercompanyJournalStatus   @default(PENDING_BOTH_APPROVAL)
+  mirrorJournalId    String?                   @map("mirror_journal_id")
+  status             IntercompanyJournalStatus @default(PENDING_BOTH_APPROVAL)
   /// Amount in functional currency of the source entity
-  amount               Decimal                     @db.Decimal(18, 4)
-  currency             String                      @db.VarChar(3)
-  reference            String                      @db.VarChar(60)
-  description          String?                     @db.VarChar(500)
-  sourceApprovedById   String?                     @map("source_approved_by")
-  sourceApprovedAt     DateTime?                   @map("source_approved_at")
-  mirrorApprovedById   String?                     @map("mirror_approved_by")
-  mirrorApprovedAt     DateTime?                   @map("mirror_approved_at")
-  rejectedById         String?                     @map("rejected_by")
-  rejectedAt           DateTime?                   @map("rejected_at")
-  rejectionReason      String?                     @map("rejection_reason") @db.VarChar(500)
-  createdById          String                      @map("created_by")
-  createdAt            DateTime                    @default(now()) @map("created_at")
-  updatedAt            DateTime                    @updatedAt @map("updated_at")
+  amount             Decimal                   @db.Decimal(18, 4)
+  currency           String                    @db.VarChar(3)
+  reference          String                    @db.VarChar(60)
+  description        String?                   @db.VarChar(500)
+  sourceApprovedById String?                   @map("source_approved_by")
+  sourceApprovedAt   DateTime?                 @map("source_approved_at")
+  mirrorApprovedById String?                   @map("mirror_approved_by")
+  mirrorApprovedAt   DateTime?                 @map("mirror_approved_at")
+  rejectedById       String?                   @map("rejected_by")
+  rejectedAt         DateTime?                 @map("rejected_at")
+  rejectionReason    String?                   @map("rejection_reason") @db.VarChar(500)
+  createdById        String                    @map("created_by")
+  createdAt          DateTime                  @default(now()) @map("created_at")
+  updatedAt          DateTime                  @updatedAt @map("updated_at")
 
   sourceEntity  Entity   @relation("ICJournalSource", fields: [sourceEntityId], references: [id])
   mirrorEntity  Entity   @relation("ICJournalMirror", fields: [mirrorEntityId], references: [id])
@@ -2681,8 +2685,8 @@ model ICEntityPair {
   createdAt            DateTime @default(now()) @map("created_at")
   updatedAt            DateTime @updatedAt @map("updated_at")
 
-  entityA  Entity @relation("ICPairEntityA", fields: [entityAId], references: [id])
-  entityB  Entity @relation("ICPairEntityB", fields: [entityBId], references: [id])
+  entityA Entity @relation("ICPairEntityA", fields: [entityAId], references: [id])
+  entityB Entity @relation("ICPairEntityB", fields: [entityBId], references: [id])
 
   accountMappings ICAccountMapping[]
   transactions    ICTransaction[]
@@ -2692,18 +2696,18 @@ model ICEntityPair {
 }
 
 model ICAccountMapping {
-  id              String   @id @default(uuid())
-  pairId          String   @map("pair_id")
-  name            String   @db.VarChar(100)
+  id                String   @id @default(uuid())
+  pairId            String   @map("pair_id")
+  name              String   @db.VarChar(100)
   /// Account code in Entity A to debit
-  entityADebitCode  String  @map("entity_a_debit_code") @db.VarChar(15)
+  entityADebitCode  String   @map("entity_a_debit_code") @db.VarChar(15)
   /// Account code in Entity A to credit
-  entityACreditCode String  @map("entity_a_credit_code") @db.VarChar(15)
+  entityACreditCode String   @map("entity_a_credit_code") @db.VarChar(15)
   /// Account code in Entity B to debit
-  entityBDebitCode  String  @map("entity_b_debit_code") @db.VarChar(15)
+  entityBDebitCode  String   @map("entity_b_debit_code") @db.VarChar(15)
   /// Account code in Entity B to credit
-  entityBCreditCode String  @map("entity_b_credit_code") @db.VarChar(15)
-  isActive          Boolean @default(true) @map("is_active")
+  entityBCreditCode String   @map("entity_b_credit_code") @db.VarChar(15)
+  isActive          Boolean  @default(true) @map("is_active")
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 
@@ -2714,52 +2718,52 @@ model ICAccountMapping {
 }
 
 model ICTransaction {
-  id                String              @id @default(uuid())
-  pairId            String              @map("pair_id")
-  mappingId         String?             @map("mapping_id")
+  id                           String              @id @default(uuid())
+  pairId                       String              @map("pair_id")
+  mappingId                    String?             @map("mapping_id")
   /// Entity that initiated the transaction
-  initiatingEntityId String             @map("initiating_entity_id")
+  initiatingEntityId           String              @map("initiating_entity_id")
   /// Counterparty entity
-  counterpartyEntityId String           @map("counterparty_entity_id")
-  status            ICTransactionStatus @default(DRAFT)
+  counterpartyEntityId         String              @map("counterparty_entity_id")
+  status                       ICTransactionStatus @default(DRAFT)
   /// Transaction amount in the stated currency
-  amount            Decimal             @db.Decimal(18, 4)
-  currency          String              @db.VarChar(3)
+  amount                       Decimal             @db.Decimal(18, 4)
+  currency                     String              @db.VarChar(3)
   /// FX rate from transaction currency to initiating entity functional currency
-  fxRateInitiator   Decimal             @default(1) @map("fx_rate_initiator") @db.Decimal(18, 8)
+  fxRateInitiator              Decimal             @default(1) @map("fx_rate_initiator") @db.Decimal(18, 8)
   /// FX rate from transaction currency to counterparty functional currency
-  fxRateCounterparty Decimal            @default(1) @map("fx_rate_counterparty") @db.Decimal(18, 8)
+  fxRateCounterparty           Decimal             @default(1) @map("fx_rate_counterparty") @db.Decimal(18, 8)
   /// Functional amount in initiating entity's currency
-  functionalAmountInitiator Decimal     @map("functional_amount_initiator") @db.Decimal(18, 4)
+  functionalAmountInitiator    Decimal             @map("functional_amount_initiator") @db.Decimal(18, 4)
   /// Functional amount in counterparty entity's currency
-  functionalAmountCounterparty Decimal  @map("functional_amount_counterparty") @db.Decimal(18, 4)
-  reference         String              @db.VarChar(60)
-  description       String?             @db.VarChar(500)
-  periodId          String              @map("period_id")
+  functionalAmountCounterparty Decimal             @map("functional_amount_counterparty") @db.Decimal(18, 4)
+  reference                    String              @db.VarChar(60)
+  description                  String?             @db.VarChar(500)
+  periodId                     String              @map("period_id")
   /// Journal posted in initiating entity
-  initiatorJournalId String?            @map("initiator_journal_id")
+  initiatorJournalId           String?             @map("initiator_journal_id")
   /// Journal posted in counterparty entity
-  counterpartyJournalId String?         @map("counterparty_journal_id")
+  counterpartyJournalId        String?             @map("counterparty_journal_id")
   /// If this is a reversal, the original transaction ID
-  reversalOfId      String?             @map("reversal_of_id")
-  createdById       String              @map("created_by")
-  approvedById      String?             @map("approved_by")
-  approvedAt        DateTime?           @map("approved_at")
-  rejectedById      String?             @map("rejected_by")
-  rejectedAt        DateTime?           @map("rejected_at")
-  rejectionReason   String?             @map("rejection_reason") @db.VarChar(500)
-  postedAt          DateTime?           @map("posted_at")
-  createdAt         DateTime            @default(now()) @map("created_at")
-  updatedAt         DateTime            @updatedAt @map("updated_at")
+  reversalOfId                 String?             @map("reversal_of_id")
+  createdById                  String              @map("created_by")
+  approvedById                 String?             @map("approved_by")
+  approvedAt                   DateTime?           @map("approved_at")
+  rejectedById                 String?             @map("rejected_by")
+  rejectedAt                   DateTime?           @map("rejected_at")
+  rejectionReason              String?             @map("rejection_reason") @db.VarChar(500)
+  postedAt                     DateTime?           @map("posted_at")
+  createdAt                    DateTime            @default(now()) @map("created_at")
+  updatedAt                    DateTime            @updatedAt @map("updated_at")
 
-  pair               ICEntityPair     @relation(fields: [pairId], references: [id])
-  mapping            ICAccountMapping? @relation(fields: [mappingId], references: [id])
-  initiatingEntity   Entity           @relation("ICTxnInitiator", fields: [initiatingEntityId], references: [id])
-  counterpartyEntity Entity           @relation("ICTxnCounterparty", fields: [counterpartyEntityId], references: [id])
-  initiatorJournal   Journal?         @relation("ICTxnInitiatorJournal", fields: [initiatorJournalId], references: [id])
-  counterpartyJournal Journal?        @relation("ICTxnCounterpartyJournal", fields: [counterpartyJournalId], references: [id])
-  reversalOf         ICTransaction?   @relation("ICTxnReversal", fields: [reversalOfId], references: [id])
-  reversals          ICTransaction[]  @relation("ICTxnReversal")
+  pair                ICEntityPair      @relation(fields: [pairId], references: [id])
+  mapping             ICAccountMapping? @relation(fields: [mappingId], references: [id])
+  initiatingEntity    Entity            @relation("ICTxnInitiator", fields: [initiatingEntityId], references: [id])
+  counterpartyEntity  Entity            @relation("ICTxnCounterparty", fields: [counterpartyEntityId], references: [id])
+  initiatorJournal    Journal?          @relation("ICTxnInitiatorJournal", fields: [initiatorJournalId], references: [id])
+  counterpartyJournal Journal?          @relation("ICTxnCounterpartyJournal", fields: [counterpartyJournalId], references: [id])
+  reversalOf          ICTransaction?    @relation("ICTxnReversal", fields: [reversalOfId], references: [id])
+  reversals           ICTransaction[]   @relation("ICTxnReversal")
 
   @@index([pairId, status])
   @@index([initiatingEntityId, status])
@@ -2768,20 +2772,20 @@ model ICTransaction {
 }
 
 model ICReconciliationSnapshot {
-  id              String   @id @default(uuid())
-  pairId          String   @map("pair_id")
-  periodId        String   @map("period_id")
+  id             String   @id @default(uuid())
+  pairId         String   @map("pair_id")
+  periodId       String   @map("period_id")
   /// Balance as seen by Entity A (positive = A owes B)
-  balanceEntityA  Decimal  @map("balance_entity_a") @db.Decimal(18, 4)
+  balanceEntityA Decimal  @map("balance_entity_a") @db.Decimal(18, 4)
   /// Balance as seen by Entity B (positive = B owes A)
-  balanceEntityB  Decimal  @map("balance_entity_b") @db.Decimal(18, 4)
+  balanceEntityB Decimal  @map("balance_entity_b") @db.Decimal(18, 4)
   /// Difference between the two views
-  difference      Decimal  @db.Decimal(18, 4)
-  currency        String   @db.VarChar(3)
-  status          String   @default("UNRECONCILED") @db.VarChar(20)
-  notes           String?  @db.VarChar(500)
-  createdById     String   @map("created_by")
-  createdAt       DateTime @default(now()) @map("created_at")
+  difference     Decimal  @db.Decimal(18, 4)
+  currency       String   @db.VarChar(3)
+  status         String   @default("UNRECONCILED") @db.VarChar(20)
+  notes          String?  @db.VarChar(500)
+  createdById    String   @map("created_by")
+  createdAt      DateTime @default(now()) @map("created_at")
 
   @@unique([pairId, periodId])
   @@map("ic_reconciliation_snapshots")
@@ -2807,10 +2811,10 @@ model BankAccount {
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
-  entity      Entity     @relation(fields: [entityId], references: [id])
-  glAccount   Account?   @relation(fields: [glAccountId], references: [id])
-  apPayments  APPayment[]
-  arReceipts  ARReceipt[]
+  entity          Entity           @relation(fields: [entityId], references: [id])
+  glAccount       Account?         @relation(fields: [glAccountId], references: [id])
+  apPayments      APPayment[]
+  arReceipts      ARReceipt[]
   paymentProfiles PaymentProfile[]
 
   @@unique([entityId, accountNumber])
@@ -2830,23 +2834,23 @@ enum TaxType {
 }
 
 model TaxCode {
-  id          String   @id @default(uuid())
-  entityId    String   @map("entity_id")
-  code        String   @db.VarChar(20)
-  description String?  @db.VarChar(200)
-  taxType     TaxType  @map("tax_type")
-  isActive    Boolean  @default(true) @map("is_active")
+  id                 String   @id @default(uuid())
+  entityId           String   @map("entity_id")
+  code               String   @db.VarChar(20)
+  description        String?  @db.VarChar(200)
+  taxType            TaxType  @map("tax_type")
+  isActive           Boolean  @default(true) @map("is_active")
   /// GL account debited for input (recoverable) tax when an AP invoice is
   /// posted. Normally a receivable-from-revenue-authority asset account.
   /// Required before an AP invoice carrying tax under this code can post —
   /// there is no safe default, so posting fails loudly rather than silently
   /// dropping the tax the way it used to.
-  inputTaxAccountId  String? @map("input_tax_account_id")
+  inputTaxAccountId  String?  @map("input_tax_account_id")
   /// GL account credited for output tax when an AR invoice is posted.
   /// Normally a payable-to-revenue-authority liability account.
-  outputTaxAccountId String? @map("output_tax_account_id")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  outputTaxAccountId String?  @map("output_tax_account_id")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
 
   entity           Entity          @relation(fields: [entityId], references: [id])
   rates            TaxRate[]

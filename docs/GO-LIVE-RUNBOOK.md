@@ -127,10 +127,10 @@ For each tenant database, set `DATABASE_URL` to that tenant database and keep `R
 export REGISTRY_DATABASE_URL="postgresql://hfp:<password>@db.example.com:5432/hfp_registry"
 
 export DATABASE_URL="postgresql://hfp:<password>@db.example.com:5432/hfp_tenant_a"
-pnpm --filter @hfp/api run db:setup:tenant
+pnpm --filter @hfp/api run db:migrate:deploy:tenant
 
 export DATABASE_URL="postgresql://hfp:<password>@db.example.com:5432/hfp_tenant_b"
-pnpm --filter @hfp/api run db:setup:tenant
+pnpm --filter @hfp/api run db:migrate:deploy:tenant
 ```
 
 Do not run `db:seed` here: it creates a demo tenant and demo users, and refuses

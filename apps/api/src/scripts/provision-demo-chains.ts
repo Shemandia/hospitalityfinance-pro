@@ -20,14 +20,9 @@
 import crypto from "node:crypto";
 import { PrismaClient, Prisma } from "../db/client.js";
 import { PrismaClient as RegistryPrismaClient } from "../db/registry-client.js";
-import { execSync } from "node:child_process";
-import { resolve } from "node:path";
-import {
-  applyAccessMigration,
-  ensureSystemCatalog,
-  grantRoleAtEntity
-} from "../modules/access/setup.js";
-import { childProcessEnv, registryDatabaseUrl } from "../config.js";
+import { assertTenantSecurity, deployMigrations } from "../db/migrate.js";
+import { ensureSystemCatalog, grantRoleAtEntity } from "../modules/access/setup.js";
+import { registryDatabaseUrl } from "../config.js";
 
 /** The demo administrator holds this starting role on the chain's group. */
 const DEMO_ADMIN_ROLE = "ADMIN";
@@ -55,8 +50,6 @@ function buildDbUrl(
 ): string {
   return `postgresql://${user}:${encodeURIComponent(password)}@${host}:${port}/${database}`;
 }
-
-const apiRoot = resolve(import.meta.dirname ?? __dirname, "../..");
 
 // ── Chain definitions (no hardcoded IDs) ──────────────────────────────────────
 
@@ -143,11 +136,8 @@ async function provisionChain(chain: (typeof chains)[0]) {
 
   // 2. Run migrations
   console.log(`  Running migrations...`);
-  execSync(`npx prisma db push --schema src/db/schema-tenant.prisma --skip-generate`, {
-    cwd: apiRoot,
-    env: childProcessEnv({ DATABASE_URL: tenantDbUrl }),
-    stdio: "pipe"
-  });
+  // Tables, security policies and constraints, from the tenant migrations.
+  await deployMigrations("tenant", tenantDbUrl);
   console.log(`  ✓ Migrations applied`);
 
   // 3. Register tenant
@@ -176,7 +166,7 @@ async function provisionChain(chain: (typeof chains)[0]) {
 
   // 4. Seed data in tenant database
   const tenantDb = new PrismaClient({ datasourceUrl: tenantDbUrl });
-  await applyAccessMigration(tenantDb);
+  await assertTenantSecurity(tenantDb);
   await ensureSystemCatalog(tenantDb);
 
   // Admin user

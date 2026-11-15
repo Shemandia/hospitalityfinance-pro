@@ -1,8 +1,25 @@
--- CreateEnum
-CREATE TYPE "EntityType" AS ENUM ('CORPORATE', 'GROUP', 'CLUSTER', 'PROPERTY');
+-- Tenant database baseline (WP-2, ARC-03).
+--
+-- Everything a tenant database needs, from an empty database: the tables
+-- (generated from src/db/tenant/schema.prisma), then what the Prisma schema
+-- cannot express: integrity constraints, the row-level security functions and
+-- policies, the audit log's immutability and the reporting view.
+--
+-- It reproduces exactly what `prisma db push` plus the old setup scripts
+-- (entity-rls.sql, audit-events-immutable.sql, performance.sql and the WP-A
+-- access migrations) built. An existing tenant database is adopted by
+-- recording this migration as applied once a catalog comparison
+-- (src/db/catalog.ts) shows no difference. Gaps in that old setup are closed
+-- by later migrations, not here.
+--
+-- Requires PostgreSQL 15+ (UNIQUE ... NULLS NOT DISTINCT).
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- 1. Tables, enums, indexes and keys (prisma migrate diff --from-empty)
+-- ════════════════════════════════════════════════════════════════════════════
 
 -- CreateEnum
-CREATE TYPE "EntityRole" AS ENUM ('ADMIN', 'CONTROLLER', 'VIEWER', 'SUPERADMIN');
+CREATE TYPE "EntityType" AS ENUM ('CORPORATE', 'GROUP', 'CLUSTER', 'PROPERTY');
 
 -- CreateEnum
 CREATE TYPE "AccountTypeCategory" AS ENUM ('BALANCE_SHEET', 'INCOME', 'STATISTICAL');
@@ -30,6 +47,18 @@ CREATE TYPE "JournalSource" AS ENUM ('MANUAL', 'PMS', 'POS', 'PAYROLL', 'FX_REVA
 
 -- CreateEnum
 CREATE TYPE "JournalStatus" AS ENUM ('DRAFT', 'PENDING_APPROVAL', 'POSTED', 'REVERSED', 'RETURNED', 'VOIDED');
+
+-- CreateEnum
+CREATE TYPE "TransferBatchStatus" AS ENUM ('PENDING_REVIEW', 'COMMITTING', 'COMMITTED', 'DISCARDED');
+
+-- CreateEnum
+CREATE TYPE "TransferBatchItemStatus" AS ENUM ('HELD', 'COMMITTED', 'REJECTED', 'ERROR');
+
+-- CreateEnum
+CREATE TYPE "TransferValidationStatus" AS ENUM ('OK', 'WARNING', 'ERROR');
+
+-- CreateEnum
+CREATE TYPE "TransferReviewMode" AS ENUM ('HOLD', 'AUTO_COMMIT');
 
 -- CreateEnum
 CREATE TYPE "RejectionReturnsTo" AS ENUM ('PREVIOUS_STAGE', 'ORIGINATOR', 'SPECIFIC_STAGE');
@@ -95,6 +124,9 @@ CREATE TYPE "DepreciationMethod" AS ENUM ('STRAIGHT_LINE', 'REDUCING_BALANCE', '
 CREATE TYPE "AssetStatus" AS ENUM ('ACTIVE', 'FULLY_DEPRECIATED', 'DISPOSED');
 
 -- CreateEnum
+CREATE TYPE "AssignmentScope" AS ENUM ('TENANT', 'ENTITY');
+
+-- CreateEnum
 CREATE TYPE "ProfileType" AS ENUM ('IMPORT', 'EXPORT', 'PROCESS', 'INTERNAL_TRANSFER', 'EXTERNAL_TRANSFER');
 
 -- CreateEnum
@@ -129,6 +161,9 @@ CREATE TYPE "IntercompanyJournalStatus" AS ENUM ('PENDING_SOURCE_APPROVAL', 'PEN
 
 -- CreateEnum
 CREATE TYPE "ICTransactionStatus" AS ENUM ('DRAFT', 'PENDING_APPROVAL', 'POSTED', 'REJECTED', 'REVERSED');
+
+-- CreateEnum
+CREATE TYPE "TaxType" AS ENUM ('VAT', 'WHT', 'SALES_TAX', 'EXCISE');
 
 -- CreateTable
 CREATE TABLE "tenant_setup_progress" (
@@ -210,16 +245,6 @@ CREATE TABLE "login_audits" (
 );
 
 -- CreateTable
-CREATE TABLE "entity_users" (
-    "entity_id" TEXT NOT NULL,
-    "user_id" TEXT NOT NULL,
-    "role" "EntityRole",
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "entity_users_pkey" PRIMARY KEY ("entity_id","user_id")
-);
-
--- CreateTable
 CREATE TABLE "roles" (
     "id" TEXT NOT NULL,
     "code" TEXT NOT NULL,
@@ -254,14 +279,15 @@ CREATE TABLE "role_permissions" (
 );
 
 -- CreateTable
-CREATE TABLE "user_roles" (
+CREATE TABLE "role_assignments" (
     "id" TEXT NOT NULL,
     "user_id" TEXT NOT NULL,
     "role_id" TEXT NOT NULL,
+    "scope_type" "AssignmentScope" NOT NULL,
     "entity_id" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "user_roles_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "role_assignments_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -546,6 +572,7 @@ CREATE TABLE "ap_invoice_lines" (
     "amount" DECIMAL(18,4) NOT NULL,
     "gl_account_id" TEXT,
     "tax_code" TEXT,
+    "tax_code_id" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
@@ -712,6 +739,9 @@ CREATE TABLE "ar_invoices" (
     "due_date" TIMESTAMP(3) NOT NULL,
     "currency" CHAR(3) NOT NULL,
     "amount" DECIMAL(18,4) NOT NULL,
+    "net_amount" DECIMAL(18,4) NOT NULL DEFAULT 0,
+    "tax_amount" DECIMAL(18,4) NOT NULL DEFAULT 0,
+    "tax_code_id" TEXT,
     "functional_amount" DECIMAL(18,4) NOT NULL,
     "fx_rate" DECIMAL(14,8) NOT NULL,
     "amount_paid" DECIMAL(18,4) NOT NULL DEFAULT 0,
@@ -992,6 +1022,7 @@ CREATE TABLE "transfer_profiles" (
     "is_system" BOOLEAN NOT NULL DEFAULT false,
     "is_active" BOOLEAN NOT NULL DEFAULT true,
     "save_payload" "SavePayloadOption" NOT NULL DEFAULT 'NONE',
+    "review_mode" "TransferReviewMode" NOT NULL DEFAULT 'HOLD',
     "created_by" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
@@ -1245,6 +1276,46 @@ CREATE TABLE "transfer_execution_logs" (
     "error_message" TEXT,
 
     CONSTRAINT "transfer_execution_logs_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "transfer_batches" (
+    "id" TEXT NOT NULL,
+    "entity_id" TEXT NOT NULL,
+    "profile_id" TEXT NOT NULL,
+    "execution_id" TEXT NOT NULL,
+    "target_component" TEXT NOT NULL,
+    "status" "TransferBatchStatus" NOT NULL DEFAULT 'PENDING_REVIEW',
+    "total_items" INTEGER NOT NULL DEFAULT 0,
+    "held_items" INTEGER NOT NULL DEFAULT 0,
+    "rejected_items" INTEGER NOT NULL DEFAULT 0,
+    "committed_items" INTEGER NOT NULL DEFAULT 0,
+    "error_items" INTEGER NOT NULL DEFAULT 0,
+    "source_hash" TEXT,
+    "created_by" TEXT NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "reviewed_by" TEXT,
+    "committed_at" TIMESTAMP(3),
+
+    CONSTRAINT "transfer_batches_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "transfer_batch_items" (
+    "id" TEXT NOT NULL,
+    "batch_id" TEXT NOT NULL,
+    "item_index" INTEGER NOT NULL,
+    "status" "TransferBatchItemStatus" NOT NULL DEFAULT 'HELD',
+    "target_component" TEXT NOT NULL,
+    "payload" JSONB NOT NULL,
+    "source_record_indices" INTEGER[],
+    "validation_status" "TransferValidationStatus" NOT NULL DEFAULT 'OK',
+    "validation_messages" JSONB,
+    "result_journal_id" TEXT,
+    "rejected_reason" TEXT,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "transfer_batch_items_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -1734,6 +1805,54 @@ CREATE TABLE "ic_reconciliation_snapshots" (
     CONSTRAINT "ic_reconciliation_snapshots_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "bank_accounts" (
+    "id" TEXT NOT NULL,
+    "entity_id" TEXT NOT NULL,
+    "gl_account_id" TEXT,
+    "bank_name" VARCHAR(200) NOT NULL,
+    "account_name" VARCHAR(200),
+    "account_number" VARCHAR(50) NOT NULL,
+    "currency" CHAR(3) NOT NULL,
+    "swift_code" VARCHAR(11),
+    "iban" VARCHAR(34),
+    "branch_code" VARCHAR(20),
+    "is_active" BOOLEAN NOT NULL DEFAULT true,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "bank_accounts_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "tax_codes" (
+    "id" TEXT NOT NULL,
+    "entity_id" TEXT NOT NULL,
+    "code" VARCHAR(20) NOT NULL,
+    "description" VARCHAR(200),
+    "tax_type" "TaxType" NOT NULL,
+    "is_active" BOOLEAN NOT NULL DEFAULT true,
+    "input_tax_account_id" TEXT,
+    "output_tax_account_id" TEXT,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "tax_codes_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "tax_rates" (
+    "id" TEXT NOT NULL,
+    "tax_code_id" TEXT NOT NULL,
+    "rate" DECIMAL(8,4) NOT NULL,
+    "effective_from" DATE NOT NULL,
+    "effective_to" DATE,
+    "is_current" BOOLEAN NOT NULL DEFAULT true,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "tax_rates_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE INDEX "entities_parent_id_idx" ON "entities"("parent_id");
 
@@ -1750,19 +1869,21 @@ CREATE INDEX "login_audits_user_id_created_at_idx" ON "login_audits"("user_id", 
 CREATE INDEX "login_audits_email_created_at_idx" ON "login_audits"("email", "created_at");
 
 -- CreateIndex
-CREATE INDEX "entity_users_user_id_idx" ON "entity_users"("user_id");
-
--- CreateIndex
 CREATE UNIQUE INDEX "roles_code_key" ON "roles"("code");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "permissions_code_key" ON "permissions"("code");
 
 -- CreateIndex
-CREATE INDEX "user_roles_entity_id_idx" ON "user_roles"("entity_id");
+CREATE INDEX "role_assignments_entity_id_idx" ON "role_assignments"("entity_id");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "user_roles_user_id_role_id_entity_id_key" ON "user_roles"("user_id", "role_id", "entity_id");
+CREATE INDEX "role_assignments_role_id_idx" ON "role_assignments"("role_id");
+
+-- CreateIndex
+-- NULLS NOT DISTINCT: a tenant-wide grant (entity_id NULL) is unique too. The
+-- Prisma schema cannot express this.
+CREATE UNIQUE INDEX "role_assignments_user_id_role_id_entity_id_key" ON "role_assignments"("user_id", "role_id", "entity_id") NULLS NOT DISTINCT;
 
 -- CreateIndex
 CREATE INDEX "periods_entity_id_status_idx" ON "periods"("entity_id", "status");
@@ -1796,6 +1917,9 @@ CREATE INDEX "journals_entity_id_journal_type_id_idx" ON "journals"("entity_id",
 
 -- CreateIndex
 CREATE INDEX "journals_entity_id_authorization_set_id_idx" ON "journals"("entity_id", "authorization_set_id");
+
+-- CreateIndex
+CREATE INDEX "idx_journal_entity_source" ON "journals"("entity_id", "source");
 
 -- CreateIndex
 CREATE INDEX "journal_lines_journal_id_line_number_idx" ON "journal_lines"("journal_id", "line_number");
@@ -1843,6 +1967,9 @@ CREATE INDEX "ap_invoice_lines_invoice_id_idx" ON "ap_invoice_lines"("invoice_id
 CREATE INDEX "ap_invoice_lines_gl_account_id_idx" ON "ap_invoice_lines"("gl_account_id");
 
 -- CreateIndex
+CREATE INDEX "ap_invoice_lines_tax_code_id_idx" ON "ap_invoice_lines"("tax_code_id");
+
+-- CreateIndex
 CREATE INDEX "purchase_orders_entity_id_supplier_id_status_idx" ON "purchase_orders"("entity_id", "supplier_id", "status");
 
 -- CreateIndex
@@ -1871,6 +1998,9 @@ CREATE INDEX "ap_payments_supplier_id_idx" ON "ap_payments"("supplier_id");
 
 -- CreateIndex
 CREATE INDEX "ap_payments_payment_run_id_idx" ON "ap_payments"("payment_run_id");
+
+-- CreateIndex
+CREATE INDEX "ap_payments_bank_account_id_idx" ON "ap_payments"("bank_account_id");
 
 -- CreateIndex
 CREATE INDEX "payment_runs_entity_id_status_created_at_idx" ON "payment_runs"("entity_id", "status", "created_at");
@@ -1907,6 +2037,9 @@ CREATE UNIQUE INDEX "ar_invoices_entity_id_customer_id_invoice_number_key" ON "a
 
 -- CreateIndex
 CREATE INDEX "ar_receipts_entity_id_customer_id_receipt_date_idx" ON "ar_receipts"("entity_id", "customer_id", "receipt_date");
+
+-- CreateIndex
+CREATE INDEX "ar_receipts_bank_account_id_idx" ON "ar_receipts"("bank_account_id");
 
 -- CreateIndex
 CREATE INDEX "ar_allocations_invoice_id_idx" ON "ar_allocations"("invoice_id");
@@ -2071,6 +2204,18 @@ CREATE INDEX "transfer_execution_logs_execution_id_record_index_idx" ON "transfe
 CREATE INDEX "transfer_execution_logs_execution_id_status_idx" ON "transfer_execution_logs"("execution_id", "status");
 
 -- CreateIndex
+CREATE INDEX "transfer_batches_entity_id_status_idx" ON "transfer_batches"("entity_id", "status");
+
+-- CreateIndex
+CREATE INDEX "transfer_batches_profile_id_idx" ON "transfer_batches"("profile_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "transfer_batches_entity_id_profile_id_source_hash_key" ON "transfer_batches"("entity_id", "profile_id", "source_hash");
+
+-- CreateIndex
+CREATE INDEX "transfer_batch_items_batch_id_status_idx" ON "transfer_batch_items"("batch_id", "status");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "ledger_setups_entity_id_ledger_key" ON "ledger_setups"("entity_id", "ledger");
 
 -- CreateIndex
@@ -2149,6 +2294,9 @@ CREATE UNIQUE INDEX "journal_authorizations_journal_id_stage_id_key" ON "journal
 CREATE INDEX "payment_profiles_entity_id_direction_is_active_idx" ON "payment_profiles"("entity_id", "direction", "is_active");
 
 -- CreateIndex
+CREATE INDEX "payment_profiles_bank_account_id_idx" ON "payment_profiles"("bank_account_id");
+
+-- CreateIndex
 CREATE INDEX "revaluation_profiles_entity_id_is_active_idx" ON "revaluation_profiles"("entity_id", "is_active");
 
 -- CreateIndex
@@ -2178,17 +2326,26 @@ CREATE INDEX "ic_transactions_counterparty_entity_id_status_idx" ON "ic_transact
 -- CreateIndex
 CREATE UNIQUE INDEX "ic_reconciliation_snapshots_pair_id_period_id_key" ON "ic_reconciliation_snapshots"("pair_id", "period_id");
 
+-- CreateIndex
+CREATE INDEX "bank_accounts_entity_id_is_active_idx" ON "bank_accounts"("entity_id", "is_active");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "bank_accounts_entity_id_account_number_key" ON "bank_accounts"("entity_id", "account_number");
+
+-- CreateIndex
+CREATE INDEX "tax_codes_entity_id_tax_type_is_active_idx" ON "tax_codes"("entity_id", "tax_type", "is_active");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "tax_codes_entity_id_code_key" ON "tax_codes"("entity_id", "code");
+
+-- CreateIndex
+CREATE INDEX "tax_rates_tax_code_id_is_current_idx" ON "tax_rates"("tax_code_id", "is_current");
+
 -- AddForeignKey
 ALTER TABLE "entities" ADD CONSTRAINT "entities_parent_id_fkey" FOREIGN KEY ("parent_id") REFERENCES "entities"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "login_audits" ADD CONSTRAINT "login_audits_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "entity_users" ADD CONSTRAINT "entity_users_entity_id_fkey" FOREIGN KEY ("entity_id") REFERENCES "entities"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "entity_users" ADD CONSTRAINT "entity_users_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "role_permissions" ADD CONSTRAINT "role_permissions_role_id_fkey" FOREIGN KEY ("role_id") REFERENCES "roles"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -2197,13 +2354,13 @@ ALTER TABLE "role_permissions" ADD CONSTRAINT "role_permissions_role_id_fkey" FO
 ALTER TABLE "role_permissions" ADD CONSTRAINT "role_permissions_permission_id_fkey" FOREIGN KEY ("permission_id") REFERENCES "permissions"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "user_roles" ADD CONSTRAINT "user_roles_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "role_assignments" ADD CONSTRAINT "role_assignments_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "user_roles" ADD CONSTRAINT "user_roles_role_id_fkey" FOREIGN KEY ("role_id") REFERENCES "roles"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "role_assignments" ADD CONSTRAINT "role_assignments_role_id_fkey" FOREIGN KEY ("role_id") REFERENCES "roles"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "user_roles" ADD CONSTRAINT "user_roles_entity_id_fkey" FOREIGN KEY ("entity_id") REFERENCES "entities"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "role_assignments" ADD CONSTRAINT "role_assignments_entity_id_fkey" FOREIGN KEY ("entity_id") REFERENCES "entities"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "periods" ADD CONSTRAINT "periods_entity_id_fkey" FOREIGN KEY ("entity_id") REFERENCES "entities"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -2302,6 +2459,9 @@ ALTER TABLE "ap_invoice_lines" ADD CONSTRAINT "ap_invoice_lines_invoice_id_fkey"
 ALTER TABLE "ap_invoice_lines" ADD CONSTRAINT "ap_invoice_lines_gl_account_id_fkey" FOREIGN KEY ("gl_account_id") REFERENCES "accounts"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "ap_invoice_lines" ADD CONSTRAINT "ap_invoice_lines_tax_code_id_fkey" FOREIGN KEY ("tax_code_id") REFERENCES "tax_codes"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "purchase_orders" ADD CONSTRAINT "purchase_orders_entity_id_fkey" FOREIGN KEY ("entity_id") REFERENCES "entities"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -2330,6 +2490,9 @@ ALTER TABLE "ap_payments" ADD CONSTRAINT "ap_payments_supplier_id_fkey" FOREIGN 
 
 -- AddForeignKey
 ALTER TABLE "ap_payments" ADD CONSTRAINT "ap_payments_payment_run_id_fkey" FOREIGN KEY ("payment_run_id") REFERENCES "payment_runs"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ap_payments" ADD CONSTRAINT "ap_payments_bank_account_id_fkey" FOREIGN KEY ("bank_account_id") REFERENCES "bank_accounts"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "payment_runs" ADD CONSTRAINT "payment_runs_entity_id_fkey" FOREIGN KEY ("entity_id") REFERENCES "entities"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -2365,10 +2528,16 @@ ALTER TABLE "ar_invoices" ADD CONSTRAINT "ar_invoices_entity_id_fkey" FOREIGN KE
 ALTER TABLE "ar_invoices" ADD CONSTRAINT "ar_invoices_customer_id_fkey" FOREIGN KEY ("customer_id") REFERENCES "customers"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "ar_invoices" ADD CONSTRAINT "ar_invoices_tax_code_id_fkey" FOREIGN KEY ("tax_code_id") REFERENCES "tax_codes"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "ar_receipts" ADD CONSTRAINT "ar_receipts_entity_id_fkey" FOREIGN KEY ("entity_id") REFERENCES "entities"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ar_receipts" ADD CONSTRAINT "ar_receipts_customer_id_fkey" FOREIGN KEY ("customer_id") REFERENCES "customers"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ar_receipts" ADD CONSTRAINT "ar_receipts_bank_account_id_fkey" FOREIGN KEY ("bank_account_id") REFERENCES "bank_accounts"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ar_allocations" ADD CONSTRAINT "ar_allocations_receipt_id_fkey" FOREIGN KEY ("receipt_id") REFERENCES "ar_receipts"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -2497,6 +2666,9 @@ ALTER TABLE "transfer_executions" ADD CONSTRAINT "transfer_executions_automation
 ALTER TABLE "transfer_execution_logs" ADD CONSTRAINT "transfer_execution_logs_execution_id_fkey" FOREIGN KEY ("execution_id") REFERENCES "transfer_executions"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "transfer_batch_items" ADD CONSTRAINT "transfer_batch_items_batch_id_fkey" FOREIGN KEY ("batch_id") REFERENCES "transfer_batches"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "ledger_setups" ADD CONSTRAINT "ledger_setups_entity_id_fkey" FOREIGN KEY ("entity_id") REFERENCES "entities"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -2617,6 +2789,9 @@ ALTER TABLE "journal_authorizations" ADD CONSTRAINT "journal_authorizations_reje
 ALTER TABLE "payment_profiles" ADD CONSTRAINT "payment_profiles_entity_id_fkey" FOREIGN KEY ("entity_id") REFERENCES "entities"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "payment_profiles" ADD CONSTRAINT "payment_profiles_bank_account_id_fkey" FOREIGN KEY ("bank_account_id") REFERENCES "bank_accounts"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "revaluation_profiles" ADD CONSTRAINT "revaluation_profiles_entity_id_fkey" FOREIGN KEY ("entity_id") REFERENCES "entities"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -2670,3 +2845,569 @@ ALTER TABLE "ic_transactions" ADD CONSTRAINT "ic_transactions_counterparty_journ
 -- AddForeignKey
 ALTER TABLE "ic_transactions" ADD CONSTRAINT "ic_transactions_reversal_of_id_fkey" FOREIGN KEY ("reversal_of_id") REFERENCES "ic_transactions"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
+-- AddForeignKey
+ALTER TABLE "bank_accounts" ADD CONSTRAINT "bank_accounts_entity_id_fkey" FOREIGN KEY ("entity_id") REFERENCES "entities"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "bank_accounts" ADD CONSTRAINT "bank_accounts_gl_account_id_fkey" FOREIGN KEY ("gl_account_id") REFERENCES "accounts"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "tax_codes" ADD CONSTRAINT "tax_codes_entity_id_fkey" FOREIGN KEY ("entity_id") REFERENCES "entities"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "tax_codes" ADD CONSTRAINT "tax_codes_input_tax_account_id_fkey" FOREIGN KEY ("input_tax_account_id") REFERENCES "accounts"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "tax_codes" ADD CONSTRAINT "tax_codes_output_tax_account_id_fkey" FOREIGN KEY ("output_tax_account_id") REFERENCES "accounts"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "tax_rates" ADD CONSTRAINT "tax_rates_tax_code_id_fkey" FOREIGN KEY ("tax_code_id") REFERENCES "tax_codes"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- 2. Integrity the Prisma schema cannot express
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- A tenant-wide role assignment has no entity; an entity assignment always has one.
+ALTER TABLE "role_assignments" ADD CONSTRAINT "role_assignments_scope_check" CHECK (
+  ("scope_type" = 'TENANT' AND "entity_id" IS NULL)
+  OR ("scope_type" = 'ENTITY' AND "entity_id" IS NOT NULL)
+);
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- 3. Row-level security
+-- ════════════════════════════════════════════════════════════════════════════
+--
+-- Rows are scoped by the setting app.current_entity_id, which the application
+-- sets with set_config(..., true) inside each transaction. app.bypass_rls =
+-- 'true' lets sign-in and admin code read across entities. FORCE applies the
+-- policies to the table owner too.
+
+CREATE FUNCTION app_current_entity_id()
+RETURNS text
+LANGUAGE plpgsql
+STABLE
+AS $$
+DECLARE
+  value_text text;
+BEGIN
+  value_text := current_setting('app.current_entity_id', true);
+  IF value_text IS NULL OR value_text = '' THEN
+    RETURN NULL;
+  END IF;
+
+  RETURN value_text;
+END;
+$$;
+
+-- Returns TRUE when the current transaction has set app.bypass_rls = 'true'.
+-- Used by RLS policies to allow admin/auth operations that need cross-entity reads
+-- without toggling RLS on/off at the table level (which is global and race-prone).
+CREATE FUNCTION app_rls_bypassed()
+RETURNS boolean
+LANGUAGE plpgsql
+STABLE
+AS $$
+BEGIN
+  RETURN coalesce(current_setting('app.bypass_rls', true), '') = 'true';
+END;
+$$;
+
+-- 3a. The entity tree. It is read before any entity is chosen (sign-in, access
+-- resolution), so RLS is enabled on it but not forced.
+ALTER TABLE entities ENABLE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy
+ON entities
+USING (
+  app_rls_bypassed()
+  OR (
+    app_current_entity_id() IS NOT NULL
+    AND (
+      id = app_current_entity_id()
+      OR parent_id = app_current_entity_id()
+    )
+  )
+)
+WITH CHECK (
+  app_rls_bypassed()
+  OR (
+    app_current_entity_id() IS NOT NULL
+    AND (
+      id = app_current_entity_id()
+      OR parent_id = app_current_entity_id()
+    )
+  )
+);
+
+-- 3b. Entity-scoped tables: a row is visible to its own entity only.
+ALTER TABLE "periods" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "periods" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "periods"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "accounts" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "accounts" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "accounts"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "journals" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "journals" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "journals"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "journal_types" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "journal_types" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "journal_types"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "account_period_balances" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "account_period_balances" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "account_period_balances"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "approval_rules" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "approval_rules" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "approval_rules"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "journal_approvals" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "journal_approvals" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "journal_approvals"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "audit_events" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "audit_events" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "audit_events"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "report_definitions" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "report_definitions" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "report_definitions"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "suppliers" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "suppliers" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "suppliers"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "ap_invoices" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "ap_invoices" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "ap_invoices"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "ar_invoices" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "ar_invoices" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "ar_invoices"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "ap_payments" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "ap_payments" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "ap_payments"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "purchase_orders" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "purchase_orders" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "purchase_orders"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "goods_received_notes" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "goods_received_notes" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "goods_received_notes"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "payment_runs" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "payment_runs" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "payment_runs"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "customers" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "customers" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "customers"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "ar_receipts" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "ar_receipts" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "ar_receipts"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "bank_statements" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "bank_statements" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "bank_statements"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "interface_definitions" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "interface_definitions" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "interface_definitions"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "connector_mappings" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "connector_mappings" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "connector_mappings"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "import_logs" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "import_logs" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "import_logs"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "pms_statistics" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "pms_statistics" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "pms_statistics"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "budget_definitions" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "budget_definitions" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "budget_definitions"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "consolidation_run_entities" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "consolidation_run_entities" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "consolidation_run_entities"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "recurring_journals" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "recurring_journals" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "recurring_journals"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "transfer_journal_ranges" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "transfer_journal_ranges" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "transfer_journal_ranges"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "ledger_setups" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "ledger_setups" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "ledger_setups"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "process_locks" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "process_locks" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "process_locks"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "period_close_statuses" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "period_close_statuses" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "period_close_statuses"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "analysis_dimensions" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "analysis_dimensions" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "analysis_dimensions"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "allocation_definitions" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "allocation_definitions" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "allocation_definitions"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "asset_categories" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "asset_categories" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "asset_categories"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "fixed_assets" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "fixed_assets" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "fixed_assets"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "depreciation_tables" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "depreciation_tables" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "depreciation_tables"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "authorization_stages" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "authorization_stages" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "authorization_stages"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "authorization_teams" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "authorization_teams" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "authorization_teams"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "authorization_delegations" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "authorization_delegations" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "authorization_delegations"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "rejection_codes" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "rejection_codes" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "rejection_codes"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "authorization_sets" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "authorization_sets" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "authorization_sets"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "journal_authorizations" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "journal_authorizations" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "journal_authorizations"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "payment_profiles" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "payment_profiles" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "payment_profiles"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "revaluation_profiles" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "revaluation_profiles" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "revaluation_profiles"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "year_end_configs" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "year_end_configs" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "year_end_configs"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "intercompany_account_pairs" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "intercompany_account_pairs" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "intercompany_account_pairs"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "bank_accounts" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "bank_accounts" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "bank_accounts"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+ALTER TABLE "tax_codes" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "tax_codes" FORCE ROW LEVEL SECURITY;
+CREATE POLICY entity_scope_policy ON "tax_codes"
+  USING (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()))
+  WITH CHECK (app_rls_bypassed() OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id()));
+
+-- 3c. Tables with their own rules.
+-- Account type definitions may be system/global within the tenant
+-- (entity_id IS NULL) or entity-specific. Reads can see both global
+-- and current-entity rows; writes still require an active entity context.
+ALTER TABLE account_type_definitions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE account_type_definitions FORCE ROW LEVEL SECURITY;
+CREATE POLICY account_type_definition_scope_policy ON account_type_definitions
+  USING (
+    app_rls_bypassed()
+    OR entity_id IS NULL
+    OR (app_current_entity_id() IS NOT NULL AND entity_id = app_current_entity_id())
+  )
+  WITH CHECK (
+    app_rls_bypassed()
+    OR (
+      app_current_entity_id() IS NOT NULL
+      AND (entity_id IS NULL OR entity_id = app_current_entity_id())
+    )
+  );
+
+-- ── Intercompany v2 RLS ──────────────────────────────────────────────────────
+-- IC tables allow access when the current entity is EITHER side of the pair.
+
+-- ic_entity_pairs: visible if current entity is entity_a or entity_b
+ALTER TABLE ic_entity_pairs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ic_entity_pairs FORCE ROW LEVEL SECURITY;
+CREATE POLICY ic_pair_scope_policy ON ic_entity_pairs
+  USING (
+    app_rls_bypassed()
+    OR (app_current_entity_id() IS NOT NULL
+        AND (entity_a_id = app_current_entity_id() OR entity_b_id = app_current_entity_id()))
+  )
+  WITH CHECK (
+    app_rls_bypassed()
+    OR (app_current_entity_id() IS NOT NULL
+        AND (entity_a_id = app_current_entity_id() OR entity_b_id = app_current_entity_id()))
+  );
+
+-- ic_account_mappings: visible via pair relationship (join to ic_entity_pairs)
+ALTER TABLE ic_account_mappings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ic_account_mappings FORCE ROW LEVEL SECURITY;
+CREATE POLICY ic_mapping_scope_policy ON ic_account_mappings
+  USING (
+    app_rls_bypassed()
+    OR (app_current_entity_id() IS NOT NULL
+        AND pair_id IN (
+          SELECT id FROM ic_entity_pairs
+          WHERE entity_a_id = app_current_entity_id() OR entity_b_id = app_current_entity_id()
+        ))
+  )
+  WITH CHECK (
+    app_rls_bypassed()
+    OR (app_current_entity_id() IS NOT NULL
+        AND pair_id IN (
+          SELECT id FROM ic_entity_pairs
+          WHERE entity_a_id = app_current_entity_id() OR entity_b_id = app_current_entity_id()
+        ))
+  );
+
+-- ic_transactions: visible if current entity is initiator or counterparty
+ALTER TABLE ic_transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ic_transactions FORCE ROW LEVEL SECURITY;
+CREATE POLICY ic_txn_scope_policy ON ic_transactions
+  USING (
+    app_rls_bypassed()
+    OR (app_current_entity_id() IS NOT NULL
+        AND (initiating_entity_id = app_current_entity_id() OR counterparty_entity_id = app_current_entity_id()))
+  )
+  WITH CHECK (
+    app_rls_bypassed()
+    OR (app_current_entity_id() IS NOT NULL
+        AND (initiating_entity_id = app_current_entity_id() OR counterparty_entity_id = app_current_entity_id()))
+  );
+
+-- ic_reconciliation_snapshots: visible via pair relationship
+ALTER TABLE ic_reconciliation_snapshots ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ic_reconciliation_snapshots FORCE ROW LEVEL SECURITY;
+CREATE POLICY ic_recon_scope_policy ON ic_reconciliation_snapshots
+  USING (
+    app_rls_bypassed()
+    OR (app_current_entity_id() IS NOT NULL
+        AND pair_id IN (
+          SELECT id FROM ic_entity_pairs
+          WHERE entity_a_id = app_current_entity_id() OR entity_b_id = app_current_entity_id()
+        ))
+  )
+  WITH CHECK (
+    app_rls_bypassed()
+    OR (app_current_entity_id() IS NOT NULL
+        AND pair_id IN (
+          SELECT id FROM ic_entity_pairs
+          WHERE entity_a_id = app_current_entity_id() OR entity_b_id = app_current_entity_id()
+        ))
+  );
+
+-- Role assignments are read before any entity is selected and include
+-- tenant-wide rows, so they are readable and writable only inside a
+-- transaction that sets app.bypass_rls (AccessService and the assignment
+-- admin code). A query that forgets the bypass gets no rows, not every row.
+ALTER TABLE "role_assignments" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "role_assignments" FORCE ROW LEVEL SECURITY;
+CREATE POLICY "role_assignments_bypass_only" ON "role_assignments"
+  USING (app_rls_bypassed())
+  WITH CHECK (app_rls_bypassed());
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- 4. The audit log cannot be changed or deleted
+-- ════════════════════════════════════════════════════════════════════════════
+
+CREATE FUNCTION prevent_audit_event_mutation()
+RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'audit_events is immutable; updates and deletes are not allowed';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_prevent_audit_event_update
+BEFORE UPDATE ON audit_events
+FOR EACH ROW
+EXECUTE FUNCTION prevent_audit_event_mutation();
+
+CREATE TRIGGER trg_prevent_audit_event_delete
+BEFORE DELETE ON audit_events
+FOR EACH ROW
+EXECUTE FUNCTION prevent_audit_event_mutation();
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- 5. Reporting: indexes and the period-balance view
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- Outstanding-invoice scans. Partial indexes: far smaller than the full
+-- (entity_id, status, due_date) index Prisma builds, because settled invoices
+-- dominate the table over time. Used by ageing, dunning and payment runs.
+CREATE INDEX idx_arinvoice_due_date_outstanding
+  ON ar_invoices (entity_id, due_date)
+  WHERE status NOT IN ('PAID', 'CANCELLED');
+
+CREATE INDEX idx_apinvoice_due_date_outstanding
+  ON ap_invoices (entity_id, due_date)
+  WHERE status NOT IN ('PAID', 'CANCELLED');
+
+-- ── Materialized View: Period Account Balances ───────────────────────────────
+-- Pre-joins Account + AccountPeriodBalance + Period for fast reporting.
+-- Used by Trial Balance, USALI, KPI, Balance Sheet and Cash Flow queries.
+--
+-- Column-name convention is load-bearing: the three id columns are aliased to
+-- quoted camelCase ("entityId", "periodId", "accountId") and every other column
+-- is unquoted snake_case. All consumers depend on exactly this shape —
+-- kpi/service.ts, consolidation/service.ts, budget/service.ts and
+-- jobs/report-generation-job.ts. Do not "normalise" these aliases.
+
+CREATE MATERIALIZED VIEW mv_period_account_balances AS
+SELECT
+  apb.entity_id                       AS "entityId",
+  apb.period_id                       AS "periodId",
+  apb.account_id                      AS "accountId",
+  p.year,
+  p.month,
+  p.name                              AS period_name,
+  p.status                            AS period_status,
+  a.code                              AS account_code,
+  a.name                              AS account_name,
+  a.type                              AS account_type,
+  a.normal_balance                    AS normal_balance,
+  a.usali_category                    AS usali_category,
+  a.usali_department                  AS usali_department,
+  a.level                             AS account_level,
+  a.is_active                         AS is_active,
+  apb.opening_balance,
+  apb.period_debits,
+  apb.period_credits,
+  apb.closing_balance
+FROM account_period_balances apb
+JOIN accounts a ON a.id = apb.account_id
+JOIN periods  p ON p.id = apb.period_id;
+
+-- Unique index is REQUIRED for REFRESH MATERIALIZED VIEW CONCURRENTLY
+-- (jobs/mv-refresh-job.ts). Without it the refresh takes an exclusive lock.
+CREATE UNIQUE INDEX idx_mv_pab_pk
+  ON mv_period_account_balances ("entityId", "periodId", "accountId");
+
+CREATE INDEX idx_mv_pab_entity_period
+  ON mv_period_account_balances ("entityId", "periodId");
+
+CREATE INDEX idx_mv_pab_entity_type
+  ON mv_period_account_balances ("entityId", "account_type");
+
+CREATE INDEX idx_mv_pab_entity_period_active
+  ON mv_period_account_balances ("entityId", "periodId")
+  WHERE is_active = true;

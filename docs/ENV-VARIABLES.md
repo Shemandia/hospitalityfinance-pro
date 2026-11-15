@@ -127,10 +127,11 @@ and `SEED_USER_PASSWORD`, the database setup scripts need `DATABASE_URL`.
 
 ### Development
 
-| Variable                     | Required by | Default | Description                                                              |
-| ---------------------------- | ----------- | ------- | ------------------------------------------------------------------------ |
-| `SEED_USER_PASSWORD`         |             |         | The demo users' password (pnpm dev:setup, db:seed).                      |
-| `TML_ALLOW_INSECURE_SANDBOX` |             | `false` | Tests only: run TML without the isolated sandbox. Ignored in production. |
+| Variable                     | Required by | Default | Description                                                                                                                 |
+| ---------------------------- | ----------- | ------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `SHADOW_DATABASE_URL`        |             |         | An empty scratch database (name it hfp_shadow) for db:check:migrations and creating migrations; its contents are discarded. |
+| `SEED_USER_PASSWORD`         |             |         | The demo users' password (pnpm dev:setup, db:seed).                                                                         |
+| `TML_ALLOW_INSECURE_SANDBOX` |             | `false` | Tests only: run TML without the isolated sandbox. Ignored in production.                                                    |
 
 <!-- api-config:end -->
 

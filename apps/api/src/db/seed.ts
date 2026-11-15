@@ -6,7 +6,6 @@ import { seedTransferDeskSystemData } from "./seed-transfer-desk.js";
 import { hashPassword, passwordPolicyErrors } from "../services/password-policy.js";
 import { SYSTEM_PERMISSIONS, SYSTEM_ROLES } from "../modules/access/system-catalog.js";
 import {
-  applyAccessMigration,
   ensureSystemCatalog,
   grantRoleAtEntity,
   grantTenantAdministrator
@@ -75,9 +74,6 @@ async function seedUser(email: string, keycloakId: string, name: string) {
 
 async function main(): Promise<void> {
   await prisma.$executeRaw`SELECT set_config('app.bypass_rls', 'true', false)`;
-  // Idempotent; also makes the seed usable on a database built with `db push`.
-  await applyAccessMigration(prisma);
-
   // ── System Account Type Definitions ──────────────────────────────────────
   const typeDefMap = new Map<string, string>();
   for (const atd of SYSTEM_ACCOUNT_TYPES) {

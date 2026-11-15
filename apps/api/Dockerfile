@@ -39,9 +39,9 @@ COPY --from=builder /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/apps/api/package.json ./apps/api/
 COPY --from=builder /app/apps/api/src/db/generated ./apps/api/src/db/generated
-COPY --from=builder /app/apps/api/src/db/migrations ./apps/api/src/db/migrations
-COPY --from=builder /app/apps/api/src/db/schema-registry.prisma ./apps/api/src/db/
-COPY --from=builder /app/apps/api/src/db/schema-tenant.prisma ./apps/api/src/db/
+# Schemas and migrations: provisioning and the migration runner apply them.
+COPY --from=builder /app/apps/api/src/db/registry ./apps/api/src/db/registry
+COPY --from=builder /app/apps/api/src/db/tenant ./apps/api/src/db/tenant
 COPY --from=builder /app/packages ./packages
 
 # Non-root user for security

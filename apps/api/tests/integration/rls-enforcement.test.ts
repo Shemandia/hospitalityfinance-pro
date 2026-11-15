@@ -3,7 +3,7 @@
  *
  * Verifies that RLS policies on the actual database correctly isolate
  * entity data. This test MUST run against a real PostgreSQL instance
- * with RLS policies applied (via db:setup:rls).
+ * built by the tenant migrations, which create the RLS policies.
  *
  * Every assertion runs as a non-owner application role (OPS-08). The role that
  * owns the tables bypasses RLS wherever it is not FORCEd, and a superuser

@@ -34,8 +34,8 @@ This preserves the existing API and accounting implementation while matching the
 
 Database-native RLS bootstrap is now available:
 
-- SQL policy file: `apps/api/src/db/sql/entity-rls.sql`
-- Setup command: `pnpm --filter @hfp/api db:setup:rls`
+- Policies: section 3 of the tenant baseline migration, `apps/api/src/db/tenant/migrations/0_baseline/migration.sql`
+- Applied with every other migration: `pnpm --filter @hfp/api db:migrate:deploy:tenant`
 
 Current runtime alignment:
 
