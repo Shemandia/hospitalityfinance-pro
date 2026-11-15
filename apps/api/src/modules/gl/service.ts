@@ -60,6 +60,10 @@ type PostingJournal = {
 };
 
 import { ServiceError } from "../../shared/service-error.js";
+import { appUrl } from "../../config.js";
+import { moduleLogger } from "../../shared/logger.js";
+
+const log = moduleLogger("gl-service");
 
 export class GLServiceError extends ServiceError {}
 
@@ -371,8 +375,8 @@ export class GLService {
 
     // Allow override with reason (for write-offs, corrections, etc.)
     if (sourceOverrideReason && sourceOverrideReason.trim().length > 0) {
-      console.info(
-        `[GLService] Source restriction override for entity=${entityId}, source=${source}, reason="${sourceOverrideReason}", accounts: ${violations.join("; ")}`
+      log.info(
+        `Source restriction override for entity=${entityId}, source=${source}, reason="${sourceOverrideReason}", accounts: ${violations.join("; ")}`
       );
       return;
     }
@@ -537,14 +541,12 @@ export class GLService {
         }
       } catch {
         // Authorization check failure should not block journal creation — log and continue
-        console.warn(
-          "[GLService] Multi-stage authorization check failed for journal",
-          result.journal.id
+        log.warn(
+          { journalId: result.journal.id },
+          "Multi-stage authorization check failed for journal"
         );
       }
     }
-
-    const appBaseUrl = process.env.APP_BASE_URL ?? "http://localhost:3000";
 
     const emailResults = await Promise.allSettled(
       result.approvalRecipients.map((recipient) =>
@@ -553,8 +555,12 @@ export class GLService {
           approverName: recipient.name,
           journalId: result.journal.id,
           entityId,
-          approveUrl: `${appBaseUrl}/approval/journals/${result.journal.id}?action=approve&approverId=${recipient.id}`,
-          rejectUrl: `${appBaseUrl}/approval/journals/${result.journal.id}?action=reject&approverId=${recipient.id}`
+          approveUrl: appUrl(
+            `approval/journals/${result.journal.id}?action=approve&approverId=${recipient.id}`
+          ),
+          rejectUrl: appUrl(
+            `approval/journals/${result.journal.id}?action=reject&approverId=${recipient.id}`
+          )
         })
       )
     );
@@ -562,10 +568,12 @@ export class GLService {
       (r): r is PromiseRejectedResult => r.status === "rejected"
     );
     if (emailFailures.length > 0) {
-      console.warn(
-        "[GLService] Approval email failures:",
-        emailFailures.length,
-        emailFailures.map((f) => f.reason?.message ?? "unknown")
+      log.warn(
+        {
+          failed: emailFailures.length,
+          reasons: emailFailures.map((f) => f.reason?.message ?? "unknown")
+        },
+        "Approval e-mails failed"
       );
     }
 

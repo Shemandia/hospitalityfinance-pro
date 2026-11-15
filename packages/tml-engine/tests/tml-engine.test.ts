@@ -8,15 +8,17 @@ import {
   type Sandbox
 } from "../src/index.js";
 
-// Allow the (insecure) Node vm fallback on dev machines without isolated-vm
-process.env.TML_ALLOW_INSECURE_SANDBOX ??= "true";
+// Allow the (insecure) Node vm fallback on dev machines without isolated-vm.
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 let activeSandbox: Sandbox | null = null;
 
 function sandbox(userFns: { name: string; params: string[]; body: string }[] = []): Sandbox {
-  activeSandbox = createSandbox(userFns, BUILTIN_FUNCTIONS_SOURCE, { timeoutMs: 2000 });
+  activeSandbox = createSandbox(userFns, BUILTIN_FUNCTIONS_SOURCE, {
+    timeoutMs: 2000,
+    allowInsecureFallback: true
+  });
   return activeSandbox;
 }
 
@@ -344,7 +346,7 @@ describe("sandbox timeout", () => {
     const sb = createSandbox(
       [{ name: "infinite", params: [], body: "while(true){}" }],
       BUILTIN_FUNCTIONS_SOURCE,
-      { timeoutMs: 100 }
+      { timeoutMs: 100, allowInsecureFallback: true }
     );
 
     const def: TmlDefinition = {

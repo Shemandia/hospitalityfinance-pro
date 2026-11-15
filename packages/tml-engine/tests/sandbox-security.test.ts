@@ -47,9 +47,9 @@ describe("sandbox identifier validation", () => {
   });
 
   it("accepts a normal function definition", () => {
-    vi.stubEnv("TML_ALLOW_INSECURE_SANDBOX", "true");
     const sb = createSandbox([{ name: "double", params: ["x"], body: "return x * 2;" }], "", {
-      ivmLoader: hasIvm ? undefined : failingLoader
+      ivmLoader: hasIvm ? undefined : failingLoader,
+      allowInsecureFallback: true
     });
     expect(sb.callFunction("double", [21])).toBe(42);
     sb.dispose();
@@ -58,25 +58,23 @@ describe("sandbox identifier validation", () => {
 
 describe("fail-closed behaviour", () => {
   it("throws SandboxUnavailableError when isolated-vm cannot load and no override is set", () => {
-    vi.stubEnv("TML_ALLOW_INSECURE_SANDBOX", "");
     expect(() => createSandbox([], "", { ivmLoader: failingLoader })).toThrow(
       SandboxUnavailableError
     );
   });
 
-  it("refuses the insecure fallback in production even with the flag set", () => {
-    vi.stubEnv("TML_ALLOW_INSECURE_SANDBOX", "true");
-    vi.stubEnv("NODE_ENV", "production");
-    expect(() => createSandbox([], "", { ivmLoader: failingLoader })).toThrow(
-      SandboxUnavailableError
-    );
-  });
-
-  it("allows the vm fallback only with the explicit flag outside production", () => {
+  it("ignores the environment: the flag alone does not allow the fallback", () => {
     vi.stubEnv("TML_ALLOW_INSECURE_SANDBOX", "true");
     vi.stubEnv("NODE_ENV", "test");
+    expect(() => createSandbox([], "", { ivmLoader: failingLoader })).toThrow(
+      SandboxUnavailableError
+    );
+  });
+
+  it("uses the vm fallback only when the caller allows it", () => {
     const sb = createSandbox([{ name: "id", params: ["x"], body: "return x;" }], "", {
-      ivmLoader: failingLoader
+      ivmLoader: failingLoader,
+      allowInsecureFallback: true
     });
     expect(sb.callFunction("id", ["ok"])).toBe("ok");
     sb.dispose();

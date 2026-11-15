@@ -14,12 +14,13 @@ import { createEntityScopeExtension } from "./entityScope.js";
 import { getRequestContext } from "./requestContext.js";
 import { registerRLSMiddleware } from "./rlsMiddleware.js";
 import { registerAuditMiddleware } from "./auditMiddleware.js";
+import { config } from "../config.js";
 
 // ── Pool (LRU-bounded) ──────────────────────────────────────────────────────
 
 type TenantClient = ReturnType<typeof createTenantClient>;
 
-const MAX_POOL_SIZE = Number(process.env.TENANT_POOL_MAX ?? 50);
+const maxPoolSize = () => config().TENANT_POOL_MAX;
 
 const pool = new Map<string, TenantClient>();
 const lastAccess = new Map<string, number>();
@@ -60,13 +61,13 @@ async function evictLRU(): Promise<void> {
 
 /**
  * Get or create a PrismaClient for a given tenant database URL.
- * Enforces MAX_POOL_SIZE by evicting the least-recently-used client.
+ * Enforces maxPoolSize() by evicting the least-recently-used client.
  */
 export function getTenantClient(tenantSlug: string, databaseUrl: string): TenantClient {
   let client = pool.get(tenantSlug);
   if (!client) {
     // Evict LRU if pool is full (fire-and-forget — eviction is async but non-blocking)
-    if (pool.size >= MAX_POOL_SIZE) {
+    if (pool.size >= maxPoolSize()) {
       void evictLRU();
     }
     client = createTenantClient(databaseUrl);

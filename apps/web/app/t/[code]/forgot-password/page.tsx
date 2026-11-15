@@ -14,9 +14,6 @@ import {
 } from "../../../../components/ui/card";
 import { Building2, Mail, ArrowLeft, CheckCircle2 } from "lucide-react";
 
-// Same origin: the web app proxies the API (lib/server/api-proxy.ts).
-const API_BASE = "";
-
 export default function ForgotPasswordPage() {
   const params = useParams();
   const tenantCode = typeof params.code === "string" ? params.code : "";
@@ -31,7 +28,7 @@ export default function ForgotPasswordPage() {
     setLoading(true);
 
     try {
-      const res = await fetch(`${API_BASE}/auth/forgot-password`, {
+      const res = await fetch(`/auth/forgot-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, tenantCode }),

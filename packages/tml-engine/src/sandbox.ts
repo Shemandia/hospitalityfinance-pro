@@ -3,8 +3,9 @@
  *
  * Executes user-defined JavaScript functions inside an isolated-vm V8
  * isolate. Fails closed if isolated-vm cannot be loaded — Node's vm
- * module is NOT a security boundary and is only available behind an
- * explicit non-production override (TML_ALLOW_INSECURE_SANDBOX=true).
+ * module is NOT a security boundary and is used only when the caller asks
+ * for it (allowInsecureFallback). The library reads no environment; the API
+ * decides from its configuration, and never allows it in production.
  */
 
 import { createRequire } from "node:module";
@@ -21,6 +22,11 @@ export interface Sandbox {
 export interface SandboxOptions {
   timeoutMs?: number;
   memoryMb?: number;
+  /**
+   * Run in Node's vm, which is not a security boundary, when isolated-vm
+   * cannot be loaded. Default false: fail closed. Never set in production.
+   */
+  allowInsecureFallback?: boolean;
   /** Test-only hook: override how isolated-vm is loaded. */
   ivmLoader?: () => unknown;
 }
@@ -37,7 +43,7 @@ export class SandboxUnavailableError extends Error {
     super(
       "isolated-vm is required to execute TML user functions but could not be loaded. " +
         "Refusing to fall back to Node's vm module (not a security boundary). " +
-        "Install isolated-vm, or set TML_ALLOW_INSECURE_SANDBOX=true in non-production environments only."
+        "Install isolated-vm, or set TML_ALLOW_INSECURE_SANDBOX=true for the API in non-production environments only."
     );
     this.name = "SandboxUnavailableError";
     this.cause = cause;
@@ -86,10 +92,6 @@ function loadIsolatedVm(): unknown {
   return nodeRequire("isolated-vm");
 }
 
-function insecureFallbackAllowed(): boolean {
-  return process.env.TML_ALLOW_INSECURE_SANDBOX === "true" && process.env.NODE_ENV !== "production";
-}
-
 /**
  * Create a sandbox with the given user functions and built-in function source.
  * Validates all user-function identifiers, then requires isolated-vm.
@@ -109,7 +111,7 @@ export function createSandbox(
   try {
     ivm = (options?.ivmLoader ?? loadIsolatedVm)();
   } catch (cause) {
-    if (insecureFallbackAllowed()) {
+    if (options?.allowInsecureFallback === true) {
       return createVmSandbox(fnSource, timeoutMs);
     }
     throw new SandboxUnavailableError(cause);

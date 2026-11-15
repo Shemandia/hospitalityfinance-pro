@@ -1,13 +1,10 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useSession } from "../../../../../components/auth-provider";
+import { useAuth, useSession } from "../../../../../components/auth-provider";
 import { useRouter, useParams } from "next/navigation";
 import { WizardLayout, WizardStepContent } from "../../../../../components/wizard-layout";
 import { COUNTRIES } from "../../../../../lib/countries";
-
-// Same origin: the web app proxies the API (lib/server/api-proxy.ts).
-const API_BASE = "";
 
 const STEPS = [
   { id: 1, name: "Organization Structure" },
@@ -134,6 +131,7 @@ type StepData = {
 
 export default function SetupPage() {
   const { data: session, status } = useSession();
+  const { reloadContext } = useAuth();
   const router = useRouter();
   const params = useParams();
   const tenantSlug =
@@ -195,6 +193,15 @@ export default function SetupPage() {
     return headers;
   }, [accessToken, tenantSlug]);
 
+  // The dashboard's guard decides from the access context loaded at sign-in.
+  // Reload it first: with the old "setup not finished" it sends the user
+  // straight back here, and this page sends them to the dashboard again, in a
+  // loop.
+  const openDashboard = useCallback(async () => {
+    await reloadContext();
+    router.replace(`/t/${tenantSlug}/dashboard`);
+  }, [reloadContext, router, tenantSlug]);
+
   // ── Load progress ───────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -203,7 +210,7 @@ export default function SetupPage() {
 
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/v1/setup/progress`, {
+        const res = await fetch(`/api/v1/setup/progress`, {
           credentials: "include",
           headers: apiHeaders()
         });
@@ -215,7 +222,7 @@ export default function SetupPage() {
         const { currentStep: step, completedSteps: completed, stepData } = json.data;
 
         if (json.data.isCompleted) {
-          router.replace(`/t/${tenantSlug}/dashboard`);
+          await openDashboard();
           return;
         }
 
@@ -267,7 +274,7 @@ export default function SetupPage() {
       }
       setLoading(false);
     })();
-  }, [status, accessToken, apiHeaders, router]);
+  }, [status, accessToken, apiHeaders, router, openDashboard]);
 
   // ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -326,7 +333,7 @@ export default function SetupPage() {
     setError(null);
     setSaving(true);
     try {
-      const url = `${API_BASE}/api/v1/setup/steps/${step}${saveOnly ? "?saveOnly=true" : ""}`;
+      const url = `/api/v1/setup/steps/${step}${saveOnly ? "?saveOnly=true" : ""}`;
       const res = await fetch(url, {
         method: "PUT",
         credentials: "include",
@@ -366,7 +373,7 @@ export default function SetupPage() {
     if (!ok) return;
     setSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/api/v1/setup/complete`, {
+      const res = await fetch(`/api/v1/setup/complete`, {
         method: "POST",
         credentials: "include",
         headers: apiHeaders(),
@@ -378,7 +385,7 @@ export default function SetupPage() {
         setSaving(false);
         return;
       }
-      router.replace(`/t/${tenantSlug}/dashboard`);
+      await openDashboard();
     } catch {
       setError("Cannot reach the API server.");
       setSaving(false);

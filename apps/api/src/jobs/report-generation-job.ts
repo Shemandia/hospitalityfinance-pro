@@ -20,14 +20,17 @@ import React from "react";
 import { prisma } from "../db/prisma.js";
 import { KPIService } from "../modules/kpi/service.js";
 import { sendEmail } from "../shared/email.js";
+import { config } from "../config.js";
+import { moduleLogger } from "../shared/logger.js";
+
+const log = moduleLogger("report-generation-job");
 
 const kpiService = new KPIService(prisma as unknown as PrismaClientType);
 
 // ── Upload helper ─────────────────────────────────────────────────────────────
 
 async function uploadOutput(reportRunId: string, buffer: Buffer): Promise<string> {
-  const bucket = process.env.AWS_S3_BUCKET;
-  const region = process.env.AWS_REGION;
+  const { AWS_S3_BUCKET: bucket, AWS_REGION: region } = config();
 
   if (bucket && region) {
     const s3 = new S3Client({ region });
@@ -120,7 +123,7 @@ export async function processReportRun(reportRunId: string): Promise<void> {
       });
     }
 
-    console.log(`[ReportJob] ${reportType} report ${reportRunId} generated successfully.`);
+    log.info(`${reportType} report ${reportRunId} generated successfully.`);
   } catch (error) {
     await prisma.reportRun.update({
       where: { id: reportRunId },

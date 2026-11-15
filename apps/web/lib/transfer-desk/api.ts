@@ -6,7 +6,7 @@
  */
 
 import type { ApiContext } from "../gl-api";
-import { API_BASE_URL, buildApiHeaders } from "../api-client";
+import { buildApiHeaders } from "../api-client";
 import type {
   Profile,
   ProfileVersion,
@@ -47,7 +47,7 @@ async function request<T>(
   path: string,
   init?: RequestInit
 ): Promise<Envelope<T>> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(path, {
     ...init,
     credentials: "include",
     headers: buildApiHeaders(context, init?.headers)
@@ -68,7 +68,7 @@ async function uploadRequest<T>(
   path: string,
   formData: FormData
 ): Promise<Envelope<T>> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(path, {
     method: "POST",
     credentials: "include",
     headers: buildApiHeaders(context, undefined, { json: false }),
@@ -241,7 +241,7 @@ export function startTest(context: ApiContext, profileId: string, file: File) {
  * Use with EventSource in the useTestStream hook.
  */
 export function getTestStreamUrl(profileId: string, testId: string): string {
-  return `${API_BASE_URL}${TD}/profiles/${profileId}/test/${testId}/stream`;
+  return `${TD}/profiles/${profileId}/test/${testId}/stream`;
 }
 
 export function getTestResults(context: ApiContext, profileId: string, testId: string) {

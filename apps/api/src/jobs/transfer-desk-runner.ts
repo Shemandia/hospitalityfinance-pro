@@ -27,13 +27,12 @@ import {
   runningTransferDeskWorkers,
   stopTransferDeskWorker
 } from "./transfer-desk-worker.js";
+import { startupConfig } from "../config.js";
+import { moduleLogger } from "../shared/logger.js";
 
-const raw = process.env.TRANSFER_DESK_TENANT_POLL_MS;
-const POLL_MS = raw ? Number(raw) : 60_000;
-if (!Number.isInteger(POLL_MS) || POLL_MS < 1) {
-  console.error(`[TransferDeskRunner] TRANSFER_DESK_TENANT_POLL_MS must be a positive integer.`);
-  process.exit(1);
-}
+const log = moduleLogger("transfer-desk-runner");
+
+const { TRANSFER_DESK_TENANT_POLL_MS: POLL_MS } = startupConfig("workers");
 
 async function startTenant(tenant: TenantRecord): Promise<void> {
   ensureTransferDeskWorker(tenant.slug, tenant.databaseUrl);
@@ -41,14 +40,13 @@ async function startTenant(tenant: TenantRecord): Promise<void> {
     const db = getTenantClient(tenant.slug, tenant.databaseUrl);
     const result = await syncAutomationSchedules(db, tenant.slug);
     if (result.synced > 0 || result.removed > 0) {
-      console.log(
-        `[TransferDeskRunner:${tenant.slug}] Synced ${result.synced} schedules, removed ${result.removed}`
+      log.info(
+        { tenantSlug: tenant.slug },
+        `Synced ${result.synced} schedules, removed ${result.removed}`
       );
     }
   } catch (err) {
-    console.warn(
-      `[TransferDeskRunner:${tenant.slug}] Schedule sync failed: ${(err as Error).message}`
-    );
+    log.warn({ tenantSlug: tenant.slug }, `Schedule sync failed: ${(err as Error).message}`);
   }
 }
 
@@ -65,7 +63,7 @@ async function reconcile(): Promise<void> {
   for (const slug of running) {
     if (!active.has(slug)) {
       await stopTransferDeskWorker(slug);
-      console.log(`[TransferDeskRunner:${slug}] Tenant no longer active; worker stopped`);
+      log.info({ tenantSlug: slug }, `Tenant no longer active; worker stopped`);
     }
   }
 }
@@ -77,7 +75,7 @@ async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   clearTimeout(timer);
-  console.log(`[TransferDeskRunner] ${signal} received; stopping workers`);
+  log.info(`${signal} received; stopping workers`);
   await disconnectAllTransferDeskWorkers();
   await disconnectAllTransferDeskQueues();
   await Promise.allSettled([disconnectAllTenants(), disconnectRegistry()]);
@@ -89,7 +87,7 @@ function scheduleNext(): void {
   timer = setTimeout(() => {
     reconcile()
       .catch((err) => {
-        console.error(`[TransferDeskRunner] Tenant refresh failed: ${(err as Error).message}`);
+        log.error(`Tenant refresh failed: ${(err as Error).message}`);
       })
       .finally(scheduleNext);
   }, POLL_MS);
@@ -102,13 +100,13 @@ process.on("SIGINT", () => void shutdown("SIGINT"));
 // with an error, so the supervisor restarts it with backoff.
 reconcile()
   .then(() => {
-    console.log(
-      `[TransferDeskRunner] Started; ${runningTransferDeskWorkers().length} tenant worker(s), ` +
+    log.info(
+      `Started; ${runningTransferDeskWorkers().length} tenant worker(s), ` +
         `checking for tenant changes every ${POLL_MS}ms`
     );
     scheduleNext();
   })
   .catch((err) => {
-    console.error(`[TransferDeskRunner] Could not start: ${(err as Error).message}`);
+    log.error(`Could not start: ${(err as Error).message}`);
     process.exit(1);
   });

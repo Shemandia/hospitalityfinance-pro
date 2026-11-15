@@ -20,6 +20,7 @@ import {
   updatePaymentProfileSchema,
   runCollectionSchema
 } from "./payment-profile-types.js";
+import { pageLimit } from "../../shared/pagination.js";
 
 const apService = new APService(prisma as unknown as PrismaClient);
 const paymentProfileService = new PaymentProfileService(prisma as unknown as PrismaClient);
@@ -253,22 +254,7 @@ export async function registerAPRouter(app: FastifyInstance): Promise<void> {
           try {
             const entityId = requireEntityId(request.entityId);
             const query = request.query as { limit?: string | number };
-            const limitValue =
-              typeof query.limit === "number"
-                ? query.limit
-                : typeof query.limit === "string"
-                  ? Number.parseInt(query.limit, 10)
-                  : 50;
-
-            if (!Number.isFinite(limitValue) || limitValue <= 0 || limitValue > 200) {
-              throw new APServiceError(
-                "AP_PAYMENT_RUN_INVALID_LIMIT",
-                "limit must be between 1 and 200.",
-                422
-              );
-            }
-
-            const data = await apService.listPaymentRuns(entityId, limitValue);
+            const data = await apService.listPaymentRuns(entityId, pageLimit(query.limit));
             return reply.send({ data, errors: [] });
           } catch (error) {
             return mapError(reply, error);

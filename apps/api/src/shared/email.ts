@@ -1,4 +1,8 @@
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
+import { config } from "../config.js";
+import { moduleLogger } from "./logger.js";
+
+const log = moduleLogger("email");
 
 function escapeHtml(str: string): string {
   return str
@@ -22,9 +26,11 @@ let sesClient: SESClient | null = null;
 function getSesClient(): SESClient | null {
   if (sesClient) return sesClient;
 
-  const region = process.env.AWS_SES_REGION;
-  const accessKeyId = process.env.AWS_SES_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.AWS_SES_SECRET_ACCESS_KEY;
+  const {
+    AWS_SES_REGION: region,
+    AWS_SES_ACCESS_KEY_ID: accessKeyId,
+    AWS_SES_SECRET_ACCESS_KEY: secretAccessKey
+  } = config();
 
   if (!region || !accessKeyId || !secretAccessKey) return null;
 
@@ -37,13 +43,15 @@ function getSesClient(): SESClient | null {
 
 function getFromEmail(): string {
   return (
-    process.env.SES_FROM_EMAIL ??
-    process.env.RESEND_FROM_EMAIL ??
-    "noreply@hospitalityfinancepro.com"
+    config().SES_FROM_EMAIL ?? config().RESEND_FROM_EMAIL ?? "noreply@hospitalityfinancepro.com"
   );
 }
 
-const isDev = process.env.NODE_ENV !== "production";
+const isDev = () => config().NODE_ENV !== "production";
+
+function plainText(html: string): string {
+  return html.replace(/<[^>]+>/g, "").trim();
+}
 
 // ── Generic email ────────────────────────────────────────────────────────────
 
@@ -58,10 +66,10 @@ export async function sendEmail(payload: GenericEmailPayload): Promise<void> {
   const from = getFromEmail();
 
   // Fallback 1: Try legacy Resend API (backwards compat)
-  const resendApiKey = process.env.RESEND_API_KEY;
+  const resendApiKey = config().RESEND_API_KEY;
   if (!client && resendApiKey) {
     const body = { from, to: [payload.to], subject: payload.subject, html: payload.html };
-    const response = await fetch("https://api.resend.com/emails", {
+    const response = await fetch(config().RESEND_API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${resendApiKey}` },
       body: JSON.stringify(body)
@@ -73,11 +81,13 @@ export async function sendEmail(payload: GenericEmailPayload): Promise<void> {
     return;
   }
 
-  // Fallback 2: No email provider configured — log to console
+  // Fallback 2: no e-mail provider. In development the message goes to the
+  // log instead, so sign-in and reset links can be followed.
   if (!client) {
-    if (isDev) {
-      console.log(
-        `\n📧 EMAIL (console fallback)\n  To: ${payload.to}\n  Subject: ${payload.subject}\n  ──────\n${payload.html.replace(/<[^>]+>/g, "").trim()}\n  ──────\n`
+    if (isDev()) {
+      log.info(
+        { to: payload.to, subject: payload.subject, body: plainText(payload.html) },
+        "E-mail not sent: no provider configured"
       );
     }
     return;
@@ -96,7 +106,7 @@ export async function sendEmail(payload: GenericEmailPayload): Promise<void> {
       })
     );
   } catch (err: any) {
-    // If SES domain is not verified or sandbox issue, fall back to console logging
+    // SES domain not verified, sandbox and similar: log instead of failing the caller
     const sesError = err?.name ?? err?.Code ?? "";
     const recoverableErrors = [
       "MessageRejected",
@@ -105,10 +115,17 @@ export async function sendEmail(payload: GenericEmailPayload): Promise<void> {
       "AccountSendingPaused"
     ];
 
-    if (recoverableErrors.includes(sesError) || isDev) {
-      console.warn(`⚠️  SES send failed (${sesError}): ${err.message}`);
-      console.log(
-        `📧 EMAIL (SES fallback)\n  To: ${payload.to}\n  Subject: ${payload.subject}\n  Body: ${payload.html.replace(/<[^>]+>/g, "").substring(0, 500)}`
+    if (recoverableErrors.includes(sesError) || isDev()) {
+      // The body can hold sign-in and reset links: it is logged only in development.
+      log.warn(
+        {
+          err,
+          sesError,
+          to: payload.to,
+          subject: payload.subject,
+          ...(isDev() ? { body: plainText(payload.html) } : {})
+        },
+        "SES send failed; e-mail not sent"
       );
       return;
     }

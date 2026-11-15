@@ -71,6 +71,9 @@ importers:
       jsonwebtoken:
         specifier: ^9.0.3
         version: 9.0.3
+      pino:
+        specifier: ^9.14.0
+        version: 9.14.0
       react:
         specifier: ^19.2.4
         version: 19.2.4

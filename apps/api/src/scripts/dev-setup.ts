@@ -30,6 +30,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PrismaClient as RegistryClient } from "../db/registry-client.js";
 import { passwordPolicyErrors } from "../services/password-policy.js";
+import { ConfigError, childProcessEnv, requireConfig } from "../config.js";
 
 const apiRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const DEMO_TENANT_SLUG = "demo-hotels";
@@ -40,10 +41,17 @@ function fail(message: string): never {
   process.exit(1);
 }
 
-function required(name: string, purpose: string): string {
-  const value = process.env[name];
-  if (!value) fail(`${name} is not set. ${purpose} Set it in apps/api/.env.`);
-  return value;
+/** The settings dev:setup needs, or a message naming every one that is missing. */
+function settings() {
+  try {
+    return requireConfig(
+      ["DATABASE_URL", "REGISTRY_DATABASE_URL", "SEED_USER_PASSWORD", "APP_BASE_URL"],
+      "dev:setup"
+    );
+  } catch (error) {
+    if (error instanceof ConfigError) fail(`${error.message}\nSet these in apps/api/.env.`);
+    throw error;
+  }
 }
 
 function databaseName(url: string, variable: string): string {
@@ -91,20 +99,22 @@ function run(label: string, args: string[], env: Record<string, string>): void {
   const result = spawnSync("pnpm", args, {
     cwd: apiRoot,
     stdio: "inherit",
-    env: { ...process.env, ...env }
+    env: childProcessEnv(env)
   });
   if (result.status !== 0) fail(`${label} failed (exit ${result.status ?? result.signal}).`);
 }
 
 async function main(): Promise<void> {
-  if (process.env.NODE_ENV === "production") {
+  const {
+    NODE_ENV,
+    DATABASE_URL: tenantUrl,
+    REGISTRY_DATABASE_URL: registryUrl,
+    SEED_USER_PASSWORD: password,
+    APP_BASE_URL: appBaseUrl
+  } = settings();
+  if (NODE_ENV === "production") {
     fail("refusing to run with NODE_ENV=production. This command seeds demo data and users.");
   }
-
-  const tenantUrl = required("DATABASE_URL", "It is the demo tenant's database.");
-  const registryUrl = required("REGISTRY_DATABASE_URL", "It is the tenant registry database.");
-  const password = required("SEED_USER_PASSWORD", "It becomes the demo users' password.");
-  const appBaseUrl = required("APP_BASE_URL", "It is the web app's address, for the sign-in link.");
 
   const problems = passwordPolicyErrors(password);
   if (problems.length > 0) {

@@ -15,16 +15,12 @@ import { invalidateTenantCache, listTenants } from "../../db/tenantRegistry.js";
 import { evictTenant } from "../../db/tenantPool.js";
 import { provisionTenantSchema } from "./types.js";
 import { ProvisioningService } from "./provisioning-service.js";
+import { requireConfig } from "../../config.js";
 
 // ── Platform API key auth ─────────────────────────────────────────────────────
 
-const PLATFORM_API_KEY = process.env.PLATFORM_API_KEY;
-if (!PLATFORM_API_KEY) {
-  throw new Error(
-    "FATAL: PLATFORM_API_KEY environment variable must be set. " +
-      "Generate a cryptographically random key (min 32 chars) for production."
-  );
-}
+// Throws at load when unset: tenant routes never run without their key.
+const { PLATFORM_API_KEY } = requireConfig(["PLATFORM_API_KEY"], "the tenant routes");
 
 async function requirePlatformKey(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const key = request.headers["x-platform-key"];

@@ -16,15 +16,12 @@ import {
 } from "../modules/access/setup.js";
 import { APService } from "../modules/ap/service.js";
 import { ARService } from "../modules/ar/service.js";
-
-if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL is required to seed.");
-}
+import { requireConfig } from "../config.js";
 
 // The seed writes rows for several entities, so it runs with the row-level
 // security bypass set for its whole session. One connection only: a session
 // setting lives on the connection that set it.
-const seedUrl = new URL(process.env.DATABASE_URL);
+const seedUrl = new URL(requireConfig(["DATABASE_URL"], "seed-uat").DATABASE_URL);
 seedUrl.searchParams.set("connection_limit", "1");
 const prisma = new PrismaClient({ datasourceUrl: seedUrl.toString() });
 

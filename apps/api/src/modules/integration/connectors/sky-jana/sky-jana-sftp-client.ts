@@ -1,5 +1,6 @@
 // ssh2-sftp-client is a CJS default export
 import SftpClientDefault from "ssh2-sftp-client";
+import { config } from "../../../../config.js";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const SftpClient = (SftpClientDefault as any).default ?? SftpClientDefault;
 
@@ -14,19 +15,20 @@ export interface SkyJanaSftpConfig {
 }
 
 export function getSkyJanaSftpConfig(): SkyJanaSftpConfig {
-  const host = process.env.SKY_JANA_SFTP_HOST;
-  const username = process.env.SKY_JANA_SFTP_USER;
+  const cfg = config();
+  const host = cfg.SKY_JANA_SFTP_HOST;
+  const username = cfg.SKY_JANA_SFTP_USER;
   if (!host || !username) {
     throw new Error("SKY_JANA_SFTP_HOST and SKY_JANA_SFTP_USER env vars are required");
   }
   return {
     host,
-    port: parseInt(process.env.SKY_JANA_SFTP_PORT ?? "22", 10),
+    port: cfg.SKY_JANA_SFTP_PORT,
     username,
-    password: process.env.SKY_JANA_SFTP_PASSWORD,
-    privateKey: process.env.SKY_JANA_SFTP_PRIVATE_KEY,
-    inboundPath: process.env.SKY_JANA_SFTP_INBOUND_PATH ?? "/inbound",
-    outboundPath: process.env.SKY_JANA_SFTP_OUTBOUND_PATH ?? "/outbound"
+    password: cfg.SKY_JANA_SFTP_PASSWORD,
+    privateKey: cfg.SKY_JANA_SFTP_PRIVATE_KEY,
+    inboundPath: cfg.SKY_JANA_SFTP_INBOUND_PATH,
+    outboundPath: cfg.SKY_JANA_SFTP_OUTBOUND_PATH
   };
 }
 

@@ -425,6 +425,10 @@ Nine work packages, in dependency order. Each closes named findings and is done 
 | Hosting target for scale-out            | WP-8      | Single server with PM2 cluster, or containers                        |
 | Load targets                            | WP-8      | Number of tenants, entities per tenant, journals per day             |
 
+**Decided 14 November 2026.** The platform encryption key lives in an environment variable on the server, with a documented rotation procedure. WP-0 and WP-A are merged into `main`. WP-1 runs before WP-2, as the dependency table says. Within WP-1, HC-38 (a system user per tenant) and HC-40 (a plans table in the registry) move to WP-2, which creates the system user at provisioning and owns the new registry migrations. The connector half of HC-34 moves to WP-5.
+
+**Decided 15 November 2026.** HC-35 (upload limit) and HC-37 (import concurrency) become platform settings in WP-1, `UPLOAD_MAX_MB` and `IMPORT_CONCURRENCY`. Their per-tenant values move to WP-2 with the plans table (HC-40), so WP-1 makes no registry schema change.
+
 ## 9. Verification evidence and limits
 
 Everything marked Reproduced or Measured was run on 11 November 2026 in a private copy of the repository against a throwaway PostgreSQL 16 database. Nothing was pushed or changed in GitHub.

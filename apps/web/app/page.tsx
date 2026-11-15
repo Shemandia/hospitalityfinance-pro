@@ -4,9 +4,6 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Building2, ArrowRight, Loader2 } from "lucide-react";
 
-// Same origin: the web app proxies the API (lib/server/api-proxy.ts).
-const API_BASE = "";
-
 export default function LandingPage() {
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
@@ -24,7 +21,7 @@ export default function LandingPage() {
 
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/auth/tenant/${trimmed}`);
+      const res = await fetch(`/auth/tenant/${trimmed}`);
       if (res.ok) {
         router.push(`/t/${trimmed}/login`);
       } else {

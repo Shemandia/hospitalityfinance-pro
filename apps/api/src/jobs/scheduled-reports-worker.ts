@@ -8,33 +8,18 @@
  *              (or: tsx src/jobs/scheduled-reports-worker.ts)
  */
 
-import { Queue, Worker } from "bullmq";
+import { createQueue, createWorker } from "./queues.js";
 import { forEachActiveTenant } from "../db/tenantScope.js";
 import { checkAndRunScheduledReports } from "./scheduled-reports.js";
+import { moduleLogger } from "../shared/logger.js";
+
+const log = moduleLogger("scheduled-reports-worker");
 
 const QUEUE_NAME = "scheduled-reports";
 
-// ── Redis connection (same pattern as report-generation-worker) ──────────────
-
-const redisUrl = process.env.REDIS_URL;
-const connection = redisUrl
-  ? (() => {
-      const parsed = new URL(redisUrl);
-      return {
-        host: parsed.hostname,
-        port: Number(parsed.port || 6379),
-        password: parsed.password || undefined
-      };
-    })()
-  : {
-      host: process.env.REDIS_HOST ?? "127.0.0.1",
-      port: Number(process.env.REDIS_PORT ?? 6379),
-      password: process.env.REDIS_PASSWORD ?? undefined
-    };
-
 // ── Set up the repeatable job ────────────────────────────────────────────────
 
-const queue = new Queue(QUEUE_NAME, { connection });
+const queue = createQueue(QUEUE_NAME);
 
 async function setupRepeatable(): Promise<void> {
   // Remove any stale repeatable jobs first, then add the current one
@@ -55,39 +40,36 @@ async function setupRepeatable(): Promise<void> {
     }
   );
 
-  console.log("[ScheduledReportsWorker] Repeatable job registered: every hour at :00.");
+  log.info("Repeatable job registered: every hour at :00.");
 }
 
 // ── Worker ───────────────────────────────────────────────────────────────────
 
-const worker = new Worker(
+const worker = createWorker(
   QUEUE_NAME,
   async (_job) => {
     const perTenant = await forEachActiveTenant(() => checkAndRunScheduledReports());
     return { enqueuedCount: perTenant.reduce((sum, t) => sum + t.result, 0) };
   },
-  {
-    connection,
-    concurrency: 1
-  }
+  { concurrency: 1 }
 );
 
 worker.on("completed", (job, result) => {
-  console.log(
-    `[ScheduledReportsWorker] Job ${job.id} completed — ` +
+  log.info(
+    `Job ${job.id} completed — ` +
       `enqueued ${(result as { enqueuedCount: number })?.enqueuedCount ?? 0} report(s).`
   );
 });
 
 worker.on("failed", (job, error) => {
-  console.error(`[ScheduledReportsWorker] Job ${job?.id ?? "unknown"} failed:`, error);
+  log.error({ err: error }, `Job ${job?.id ?? "unknown"} failed`);
 });
 
 // ── Bootstrap ────────────────────────────────────────────────────────────────
 
 setupRepeatable().catch((err) => {
-  console.error("[ScheduledReportsWorker] Failed to set up repeatable job:", err);
+  log.error({ err }, "Failed to set up repeatable job");
   process.exit(1);
 });
 
-console.log("Scheduled reports worker started.");
+log.info("Scheduled reports worker started.");

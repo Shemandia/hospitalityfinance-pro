@@ -8,6 +8,7 @@ import {
   payrollFileUploadSchema
 } from "../connectors/payroll/payroll-types.js";
 import { mapError, requireEntityId } from "./_shared.js";
+import { pageLimit, pageOffset } from "../../../shared/pagination.js";
 
 export function registerPayrollRoutes(router: FastifyInstance) {
   router.post(
@@ -57,7 +58,8 @@ export function registerPayrollRoutes(router: FastifyInstance) {
         const logs = await prisma.importLog.findMany({
           where: { entityId, connectorType: "PAYROLL" },
           orderBy: { createdAt: "desc" },
-          take: 200
+          take: pageLimit((request.query as { limit?: string }).limit),
+          skip: pageOffset((request.query as { offset?: string }).offset)
         });
         return reply.send({ data: logs, errors: [] });
       } catch (error) {

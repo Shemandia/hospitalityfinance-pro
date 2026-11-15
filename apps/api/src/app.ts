@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import rateLimit from "@fastify/rate-limit";
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyBaseLogger, type FastifyInstance } from "fastify";
 import { runWithContext, getRequestContext, updateRequestContext } from "./db/requestContext.js";
 import { registryPrisma } from "./db/prisma.js";
 import { requireAuth } from "./middleware/requireAuth.js";
 import { crossSiteRefusal } from "./middleware/csrf.js";
-import { logSerializers } from "./shared/log-redactor.js";
+import { logger } from "./shared/logger.js";
 import { registerGLRouter } from "./modules/gl/router.js";
 import { registerPeriodRouter } from "./modules/period/router.js";
 import { registerPeriodCloseRouter } from "./modules/period-close/router.js";
@@ -42,6 +42,7 @@ import { connectRedis } from "./db/redis.js";
 import { resolveChainEntityId } from "./modules/entity/chain.js";
 import { registerContextRouter } from "./modules/access/context.js";
 import { registerEntityRouter } from "./modules/entity/router.js";
+import { config } from "./config.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -50,18 +51,29 @@ declare module "fastify" {
   }
 }
 
+/** A caller-supplied request ID is used only when it looks like one. */
+const REQUEST_ID = /^[A-Za-z0-9._:-]{1,128}$/;
+
 export async function createApp(): Promise<FastifyInstance> {
   const app = Fastify({
-    logger: {
-      level: process.env.LOG_LEVEL ?? "info",
-      serializers: logSerializers
+    // One logger for the API and the workers; every line carries the request
+    // ID, tenant and entity (OPS-06).
+    logger: logger as FastifyBaseLogger,
+    // The request ID: the caller's X-Request-Id when it is a plain token,
+    // otherwise a new one. Fastify's own header handling is off so an
+    // arbitrary header value never reaches the logs.
+    requestIdHeader: false,
+    genReqId: (req) => {
+      const supplied = req.headers["x-request-id"];
+      return typeof supplied === "string" && REQUEST_ID.test(supplied) ? supplied : randomUUID();
     },
-    bodyLimit: 10 * 1024 * 1024, // 10 MB for file imports
+    // File imports arrive as request bodies (HC-35).
+    bodyLimit: config().UPLOAD_MAX_MB * 1024 * 1024,
     // The browser reaches the API through the web app's proxy (AUT-13). Its
     // X-Forwarded-* headers are believed only from these addresses, so the
     // client IP (rate limits, audit) and the host (cross-site check) are the
     // browser's. Default: the proxy runs on the same machine.
-    trustProxy: process.env.TRUST_PROXY ?? "loopback"
+    trustProxy: config().TRUST_PROXY
   });
 
   // A database or cache fault while access is being checked or changed is an
@@ -114,12 +126,9 @@ export async function createApp(): Promise<FastifyInstance> {
   await connectRedis();
 
   app.addHook("onRequest", (request, reply, done) => {
-    // Generate or accept request ID for end-to-end tracing
-    const requestId = (request.headers["x-request-id"] as string) || randomUUID();
+    // The request ID (genReqId above) goes back to the caller for tracing.
+    const requestId = request.id;
     reply.header("x-request-id", requestId);
-
-    // Attach to Fastify logger for structured log correlation
-    (request as any).requestId = requestId;
 
     // The rest of the request runs inside this scope (SEC-02, ARC-05): the
     // lifecycle continues from `done`, so every hook and the handler see this
@@ -169,7 +178,7 @@ export async function createApp(): Promise<FastifyInstance> {
     const status = dbOk ? (redisOk ? "ok" : "degraded") : "down";
     return {
       status,
-      version: process.env.APP_VERSION ?? "1.0.0",
+      version: config().APP_VERSION ?? "unknown",
       uptime: Math.floor((Date.now() - startTime) / 1000),
       checks: {
         database: dbOk ? "ok" : "down",
@@ -190,10 +199,10 @@ export async function createApp(): Promise<FastifyInstance> {
   });
 
   app.get("/api/v1/version", { config: { access: "public" } }, async () => ({
-    version: process.env.APP_VERSION ?? "1.0.0",
-    buildDate: process.env.BUILD_DATE ?? new Date().toISOString().split("T")[0],
+    version: config().APP_VERSION ?? "unknown",
+    buildDate: config().BUILD_DATE ?? "unknown",
     nodeVersion: process.version,
-    environment: process.env.NODE_ENV ?? "development"
+    environment: config().NODE_ENV
   }));
 
   app.get(

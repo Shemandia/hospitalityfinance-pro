@@ -1,8 +1,5 @@
 import type { ApiContext } from "./gl-api";
 
-// Same origin: the web app proxies the API (lib/server/api-proxy.ts).
-const API_BASE_URL = "";
-
 type Envelope<T> = {
   data: T;
   errors?: Array<{ code: string; message: string }>;
@@ -13,7 +10,7 @@ async function request<T>(
   path: string,
   init?: RequestInit
 ): Promise<Envelope<T>> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(path, {
     ...init,
     credentials: "include",
     headers: {

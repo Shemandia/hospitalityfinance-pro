@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { webConfig } from "../../../../lib/server/config";
 import {
   isPlatformLoginConfigured,
   verifyPlatformCredentials
@@ -23,7 +24,8 @@ function sleep(ms: number) {
  * or handles the raw key.
  */
 export async function POST(request: NextRequest) {
-  if (!isPlatformLoginConfigured() || !process.env.HFP_PLATFORM_KEY) {
+  const { HFP_PLATFORM_KEY, NODE_ENV } = webConfig();
+  if (!isPlatformLoginConfigured() || !HFP_PLATFORM_KEY) {
     return NextResponse.json(
       {
         error:
@@ -44,9 +46,9 @@ export async function POST(request: NextRequest) {
 
   // Set httpOnly cookie — never exposed to client JS
   const cookieStore = await cookies();
-  cookieStore.set(COOKIE_NAME, process.env.HFP_PLATFORM_KEY, {
+  cookieStore.set(COOKIE_NAME, HFP_PLATFORM_KEY, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: NODE_ENV === "production",
     sameSite: "strict",
     path: "/",
     maxAge: COOKIE_MAX_AGE

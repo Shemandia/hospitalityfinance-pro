@@ -26,12 +26,13 @@ import { PrismaClient } from "../db/client.js";
 import { PrismaClient as RegistryPrismaClient } from "../db/registry-client.js";
 import { execSync } from "node:child_process";
 import { resolve } from "node:path";
-import bcrypt from "bcrypt";
 import {
   applyAccessMigration,
   ensureSystemCatalog,
   grantTenantAdministrator
 } from "../modules/access/setup.js";
+import { hashPassword } from "../services/password-policy.js";
+import { childProcessEnv, config as appConfig, registryDatabaseUrl } from "../config.js";
 
 // ── Parse args ────────────────────────────────────────────────────────────────
 
@@ -117,12 +118,7 @@ function buildDbUrl(
 
 async function main() {
   const config = parseArgs();
-  const registryUrl = process.env.REGISTRY_DATABASE_URL ?? process.env.DATABASE_URL;
-
-  if (!registryUrl) {
-    console.error("REGISTRY_DATABASE_URL or DATABASE_URL must be set.");
-    process.exit(1);
-  }
+  const registryUrl = registryDatabaseUrl();
 
   const registry = new RegistryPrismaClient({ datasourceUrl: registryUrl });
 
@@ -137,10 +133,11 @@ async function main() {
 
   // 2. Determine tenant database name and URL
   const dbConn = parseDbUrl(registryUrl);
-  const tenantDbHost = process.env.TENANT_DB_HOST ?? dbConn.host;
-  const tenantDbPort = process.env.TENANT_DB_PORT ?? dbConn.port;
-  const tenantDbUser = process.env.TENANT_DB_USER ?? dbConn.user;
-  const tenantDbPassword = process.env.TENANT_DB_PASSWORD ?? dbConn.password;
+  const settings = appConfig();
+  const tenantDbHost = settings.TENANT_DB_HOST ?? dbConn.host;
+  const tenantDbPort = settings.TENANT_DB_PORT ?? dbConn.port;
+  const tenantDbUser = settings.TENANT_DB_USER ?? dbConn.user;
+  const tenantDbPassword = settings.TENANT_DB_PASSWORD ?? dbConn.password;
   const tenantDbName = `hfp_${config.slug.replace(/-/g, "_")}`;
   const tenantDbUrl = buildDbUrl(
     tenantDbUser,
@@ -185,7 +182,7 @@ async function main() {
   const apiRoot = resolve(import.meta.dirname ?? __dirname, "../..");
   execSync(`npx prisma migrate deploy`, {
     cwd: apiRoot,
-    env: { ...process.env, DATABASE_URL: tenantDbUrl },
+    env: childProcessEnv({ DATABASE_URL: tenantDbUrl }),
     stdio: "inherit"
   });
 
@@ -248,7 +245,7 @@ async function main() {
   // The grants table must be constrained and protected before the first grant.
   await applyAccessMigration(tenantClient);
   await ensureSystemCatalog(tenantClient);
-  const passwordHash = await bcrypt.hash(config.adminPassword, 12);
+  const passwordHash = await hashPassword(config.adminPassword);
   const adminUser = await tenantClient.user.upsert({
     where: { email: config.adminEmail.toLowerCase() },
     update: {

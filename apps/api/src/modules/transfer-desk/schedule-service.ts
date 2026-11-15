@@ -13,6 +13,9 @@
 import type { PrismaClient } from "../../db/client.js";
 import type { ScheduleCreateInput } from "./schedule-types.js";
 import { syncAutomationSchedules } from "../../jobs/automation-scheduler.js";
+import { moduleLogger } from "../../shared/logger.js";
+
+const log = moduleLogger("schedule-service");
 
 // ── Error ────────────────────────────────────────────────────────────────────
 
@@ -175,7 +178,7 @@ export class ScheduleService {
     // Sync BullMQ repeatable jobs with updated schedule state
     if (this.tenantSlug) {
       await syncAutomationSchedules(this.prisma as any, this.tenantSlug).catch((err) => {
-        console.warn(`[ScheduleService] Post-create sync failed: ${(err as Error).message}`);
+        log.warn(`Post-create sync failed: ${(err as Error).message}`);
       });
     }
 
@@ -215,7 +218,7 @@ export class ScheduleService {
     // Sync BullMQ repeatable jobs after removing schedule
     if (this.tenantSlug) {
       await syncAutomationSchedules(this.prisma as any, this.tenantSlug).catch((err) => {
-        console.warn(`[ScheduleService] Post-delete sync failed: ${(err as Error).message}`);
+        log.warn(`Post-delete sync failed: ${(err as Error).message}`);
       });
     }
 

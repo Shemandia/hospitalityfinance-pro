@@ -10,6 +10,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import { config, requireConfig } from "../config.js";
 
 // ── Interface ────────────────────────────────────────────────────────────────
 
@@ -109,9 +110,9 @@ export class S3StorageBackend implements StorageBackend {
 
   constructor() {
     this.client = new S3Client({
-      region: process.env.AWS_REGION ?? "eu-west-1"
+      region: requireConfig(["AWS_REGION"], "S3 storage").AWS_REGION
     });
-    this.bucket = process.env.TD_S3_BUCKET ?? "hfp-transfer-desk";
+    this.bucket = requireConfig(["TD_S3_BUCKET"], "S3 storage").TD_S3_BUCKET;
   }
 
   async read(key: string): Promise<string> {
@@ -139,11 +140,11 @@ let _instance: StorageBackend | null = null;
 
 export function getStorageBackend(): StorageBackend {
   if (!_instance) {
-    const backend = process.env.STORAGE_BACKEND ?? "local";
+    const backend = config().STORAGE_BACKEND;
     if (backend === "s3") {
       _instance = new S3StorageBackend();
     } else {
-      const basePath = process.env.TD_LOCAL_UPLOADS_PATH ?? "./uploads";
+      const basePath = config().TD_LOCAL_UPLOADS_PATH;
       _instance = new LocalStorageBackend(basePath);
     }
   }

@@ -37,6 +37,10 @@ import {
   resolveReviewMode,
   type StageContext
 } from "./transfer-desk-batch-stager.js";
+import { moduleLogger } from "../shared/logger.js";
+import { insecureTmlSandboxAllowed } from "../shared/tml-sandbox.js";
+
+const log = moduleLogger("transfer-desk-pipeline");
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -356,8 +360,8 @@ async function writeToTarget(
             await glService.postJournal(journal.entityId, (created as any).id, postUserId);
           } catch (postErr) {
             // Auto-post failure is non-fatal — journal stays as DRAFT
-            console.warn(
-              `[Pipeline] Auto-post failed for journal ${(created as any).id}: ${(postErr as Error).message}`
+            log.warn(
+              `Auto-post failed for journal ${(created as any).id}: ${(postErr as Error).message}`
             );
           }
         }
@@ -997,7 +1001,9 @@ function applyTransformation(
   let sandbox: Sandbox | null = null;
 
   if (hasTransformRules || hasUserFunctions) {
-    sandbox = createSandbox(definition.functions ?? [], BUILTIN_FUNCTIONS_SOURCE);
+    sandbox = createSandbox(definition.functions ?? [], BUILTIN_FUNCTIONS_SOURCE, {
+      allowInsecureFallback: insecureTmlSandboxAllowed()
+    });
   }
 
   try {

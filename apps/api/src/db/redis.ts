@@ -1,12 +1,18 @@
 /**
- * Shared Redis Client
+ * Redis: the one place connections are made (HC-32).
  *
- * Provides a singleton ioredis client for session management, refresh token
- * storage, and other auth-related operations. Reuses the same REDIS_URL /
- * REDIS_HOST / REDIS_PORT / REDIS_PASSWORD env vars used by BullMQ.
+ *   getRedisClient()          the shared ioredis client: sessions, the access cache
+ *   redisConnectionOptions()  connection options for BullMQ queues and workers
+ *                             (jobs/queues.ts builds every queue and worker with them)
+ *
+ * Both come from REDIS_URL, which the API and the workers require at startup.
+ * There is no fallback host: a missing REDIS_URL is an error, not a silent
+ * connection to some local Redis.
  */
 
 import RedisModule from "ioredis";
+import type { RedisOptions } from "ioredis";
+import { requireConfig } from "../config.js";
 
 // ioredis CJS default export workaround for ESM
 const RedisConstructor = (RedisModule as any).default ?? RedisModule;
@@ -14,30 +20,34 @@ type RedisClient = InstanceType<typeof RedisConstructor>;
 
 let client: RedisClient | null = null;
 
-export function getRedisClient(): RedisClient {
-  if (client) return client;
+function redisUrl(): URL {
+  return new URL(requireConfig(["REDIS_URL"], "Redis").REDIS_URL);
+}
 
-  const url = process.env.REDIS_URL;
-  if (url) {
-    client = new RedisConstructor(url, { maxRetriesPerRequest: null, lazyConnect: true });
-  } else {
-    if (process.env.NODE_ENV === "production" && !process.env.REDIS_HOST) {
-      throw new Error(
-        "FATAL: REDIS_URL or REDIS_HOST must be set in production. Native auth sessions require Redis."
-      );
-    }
-    const host = process.env.REDIS_HOST ?? "127.0.0.1";
-    const port = parseInt(process.env.REDIS_PORT ?? "6379", 10);
-    const password = process.env.REDIS_PASSWORD || undefined;
-    client = new RedisConstructor({
-      host,
-      port,
-      password,
-      maxRetriesPerRequest: null,
-      lazyConnect: true
-    });
+/**
+ * REDIS_URL as ioredis options: host, port, user, password, database number
+ * (the path, e.g. redis://host:6379/2) and TLS for rediss://.
+ */
+export function redisConnectionOptions(): RedisOptions {
+  const url = redisUrl();
+  const db = url.pathname.length > 1 ? Number(url.pathname.slice(1)) : 0;
+  if (!Number.isInteger(db) || db < 0) {
+    throw new Error(`REDIS_URL names database "${url.pathname.slice(1)}"; use a number.`);
   }
+  return {
+    host: url.hostname,
+    port: Number(url.port || 6379),
+    username: url.username ? decodeURIComponent(url.username) : undefined,
+    password: url.password ? decodeURIComponent(url.password) : undefined,
+    db,
+    ...(url.protocol === "rediss:" ? { tls: {} } : {}),
+    // BullMQ requires this for workers; harmless elsewhere.
+    maxRetriesPerRequest: null
+  };
+}
 
+export function getRedisClient(): RedisClient {
+  client ??= new RedisConstructor({ ...redisConnectionOptions(), lazyConnect: true });
   return client!;
 }
 

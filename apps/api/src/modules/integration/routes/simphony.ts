@@ -5,6 +5,7 @@ import { prisma } from "../../../db/prisma.js";
 import { requirePermission } from "../../../middleware/requirePermission.js";
 import { runSimphonyImport } from "../connectors/simphony/simphony-import-job.js";
 import { mapError, requireEntityId } from "./_shared.js";
+import { pageLimit, pageOffset } from "../../../shared/pagination.js";
 
 export function registerSimphonyRoutes(router: FastifyInstance) {
   router.post(
@@ -43,7 +44,8 @@ export function registerSimphonyRoutes(router: FastifyInstance) {
         const logs = await prisma.importLog.findMany({
           where: { entityId, connectorType: "SIMPHONY_POS" },
           orderBy: { createdAt: "desc" },
-          take: 200
+          take: pageLimit((request.query as { limit?: string }).limit),
+          skip: pageOffset((request.query as { offset?: string }).offset)
         });
         return reply.send({ data: logs, errors: [] });
       } catch (error) {

@@ -12,18 +12,7 @@ import { getRedisClient } from "../../db/redis.js";
 import { PrismaAccessDataSource } from "./prisma-source.js";
 import { RedisAccessCache, type AccessRedis } from "./redis-cache.js";
 import { AccessService } from "./service.js";
-
-const DEFAULT_CACHE_TTL_SECONDS = 300;
-
-function cacheTtlSeconds(): number {
-  const raw = process.env.ACCESS_CACHE_TTL_SECONDS;
-  if (raw === undefined || raw === "") return DEFAULT_CACHE_TTL_SECONDS;
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error("ACCESS_CACHE_TTL_SECONDS must be a positive integer");
-  }
-  return parsed;
-}
+import { config } from "../../config.js";
 
 let service: AccessService | null = null;
 
@@ -31,7 +20,9 @@ export function getAccessService(): AccessService {
   if (!service) {
     service = new AccessService(
       new PrismaAccessDataSource(prisma as unknown as PrismaClient),
-      new RedisAccessCache(getRedisClient() as AccessRedis, { ttlSeconds: cacheTtlSeconds() })
+      new RedisAccessCache(getRedisClient() as AccessRedis, {
+        ttlSeconds: config().ACCESS_CACHE_TTL_SECONDS
+      })
     );
   }
   return service;

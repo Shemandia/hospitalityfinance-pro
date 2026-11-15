@@ -23,16 +23,14 @@
  *     graceful shutdown.
  */
 
+import { config } from "../config.js";
 import { runWithContext, updateRequestContext } from "../db/requestContext.js";
 import { resolveTenant } from "../db/tenantRegistry.js";
 import { TenantUnavailableError } from "../db/tenantScope.js";
-import { Worker, type Job } from "bullmq";
+import type { Job, Worker } from "bullmq";
+import { createWorker } from "./queues.js";
 import { getTenantClient } from "../db/tenantPool.js";
-import {
-  getTransferDeskQueueName,
-  getTransferDeskRedisConnection,
-  type TransferDeskJobData
-} from "./transfer-desk-queue.js";
+import { getTransferDeskQueueName, type TransferDeskJobData } from "./transfer-desk-queue.js";
 import {
   executeImport,
   executeExport,
@@ -44,6 +42,9 @@ import {
 import { getStorageBackend } from "./transfer-desk-storage.js";
 import { executeAutomation, type AutomationStep } from "./automation-engine.js";
 import { sendEmail } from "../shared/email.js";
+import { moduleLogger } from "../shared/logger.js";
+
+const log = moduleLogger("transfer-desk-worker");
 
 // ── Per-tenant worker cache ────────────────────────────────────────────────
 
@@ -59,7 +60,7 @@ const workers = new Map<string, Worker<TransferDeskJobData>>();
 export function ensureTransferDeskWorker(tenantSlug: string, tenantDbUrl: string): void {
   if (workers.has(tenantSlug)) return;
 
-  const worker = new Worker<TransferDeskJobData>(
+  const worker = createWorker<TransferDeskJobData>(
     getTransferDeskQueueName(tenantSlug),
     // The job runs with its tenant bound, so anything that reaches the shared
     // prisma client lands in this tenant's database and no other.
@@ -71,29 +72,26 @@ export function ensureTransferDeskWorker(tenantSlug: string, tenantDbUrl: string
         return processJob(job, tenantSlug, tenantDbUrl);
       }),
     {
-      connection: getTransferDeskRedisConnection(),
-      concurrency: 1, // TODO: read from license entitlements (Starter=1, Pro=3, Enterprise=10)
+      // Platform-wide for now; per-tenant values come with the plans in WP-2 (HC-37).
+      concurrency: config().IMPORT_CONCURRENCY,
       autorun: true
     }
   );
 
   worker.on("completed", (job) => {
-    console.log(`[TransferDeskWorker:${tenantSlug}] Job ${job.id} completed`);
+    log.info({ tenantSlug }, `Job ${job.id} completed`);
   });
 
   worker.on("failed", (job, error) => {
-    console.error(
-      `[TransferDeskWorker:${tenantSlug}] Job ${job?.id ?? "unknown"} failed:`,
-      error.message
-    );
+    log.error({ err: error, tenantSlug }, `Job ${job?.id ?? "unknown"} failed`);
   });
 
   worker.on("error", (error) => {
-    console.error(`[TransferDeskWorker:${tenantSlug}] Worker error:`, error);
+    log.error({ err: error, tenantSlug }, `Worker error`);
   });
 
   workers.set(tenantSlug, worker);
-  console.log(`[TransferDeskWorker:${tenantSlug}] Worker started`);
+  log.info({ tenantSlug }, `Worker started`);
 }
 
 /**
@@ -112,7 +110,7 @@ async function processJob(
   // If this is an automation trigger from the scheduler (empty executionId),
   // load the automation and run all its steps via the automation engine.
   if (automationId && !executionId) {
-    console.log(`[TransferDeskWorker:${tenantSlug}] Running automation ${automationId}`);
+    log.info({ tenantSlug }, `Running automation ${automationId}`);
 
     const automation = await prisma.transferAutomation.findUnique({
       where: { id: automationId },
@@ -143,9 +141,7 @@ async function processJob(
     };
   }
 
-  console.log(
-    `[TransferDeskWorker:${tenantSlug}] Picked up execution ${executionId} (profile ${profileId})`
-  );
+  log.info({ tenantSlug }, `Picked up execution ${executionId} (profile ${profileId})`);
 
   // ── Mark RUNNING ────────────────────────────────────────────────────────
   try {
@@ -158,10 +154,7 @@ async function processJob(
       }
     });
   } catch (err) {
-    console.error(
-      `[TransferDeskWorker:${tenantSlug}] Failed to mark execution ${executionId} as RUNNING:`,
-      err
-    );
+    log.error({ err, tenantSlug }, `Failed to mark execution ${executionId} as RUNNING`);
     throw err;
   }
 
@@ -259,10 +252,7 @@ async function processJob(
       }
     });
   } catch (err) {
-    console.error(
-      `[TransferDeskWorker:${tenantSlug}] Failed to mark execution ${executionId} as ${finalStatus}:`,
-      err
-    );
+    log.error({ err, tenantSlug }, `Failed to mark execution ${executionId} as ${finalStatus}`);
     await markFailed(prisma, executionId, (err as Error).message);
     throw err;
   }
@@ -353,9 +343,7 @@ async function sendExecutionNotification(
       notifyEmails.map((email: string) => sendEmail({ to: email, subject, html }))
     );
   } catch (err) {
-    console.warn(
-      `[TransferDeskWorker:${tenantSlug}] Notification send failed: ${(err as Error).message}`
-    );
+    log.warn({ tenantSlug }, `Notification send failed: ${(err as Error).message}`);
   }
 }
 

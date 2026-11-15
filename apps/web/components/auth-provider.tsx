@@ -66,9 +66,6 @@ const AuthContext = createContext<AuthContextValue>({
   reloadContext: async () => {}
 });
 
-// Same origin: the web app proxies the API (lib/server/api-proxy.ts).
-const API_BASE = "";
-
 function userFrom(context: AccessContext): AuthUser {
   return {
     id: context.user.id,
@@ -92,7 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadContext = useCallback(async (): Promise<AuthStatus> => {
     try {
-      const res = await fetch(`${API_BASE}/api/v1/context`, { credentials: "include" });
+      const res = await fetch(`/api/v1/context`, { credentials: "include" });
       if (res.ok) {
         const context = ((await res.json()) as { data: AccessContext }).data;
         setState({
@@ -128,7 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(
     async (email: string, password: string, tenantCode: string) => {
       try {
-        const res = await fetch(`${API_BASE}/auth/login`, {
+        const res = await fetch(`/auth/login`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email, password, tenantCode }),
@@ -153,7 +150,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     try {
-      await fetch(`${API_BASE}/auth/logout`, { method: "POST", credentials: "include" });
+      await fetch(`/auth/logout`, { method: "POST", credentials: "include" });
     } catch {
       // Best-effort
     }
@@ -162,7 +159,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/auth/refresh`, {
+      const res = await fetch(`/auth/refresh`, {
         method: "POST",
         credentials: "include"
       });

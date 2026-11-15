@@ -12,6 +12,7 @@ import { executeReportSchema, drillDownSchema, reportTemplateSchema } from "./re
 import { executeReport, SYSTEM_DEFINITIONS } from "./report-engine.js";
 import { ReportingService } from "./service.js";
 import { mapError, requireEntityId } from "../../shared/router-utils.js";
+import { pageLimit } from "../../shared/pagination.js";
 
 const reportingService = new ReportingService(prisma as unknown as PrismaClient);
 
@@ -333,7 +334,7 @@ export async function registerReportingRouter(app: FastifyInstance): Promise<voi
                 definition: { select: { id: true, name: true, type: true } }
               },
               orderBy: { createdAt: "desc" },
-              take: Math.min(parseInt(limit ?? "50", 10), 200)
+              take: pageLimit(limit)
             });
             return reply.send({ data, errors: [] });
           } catch (error) {

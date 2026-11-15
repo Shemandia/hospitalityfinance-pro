@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { pageFields } from "../../shared/pagination.js";
 
 const decimalRegex = /^-?\d+(\.\d{1,8})?$/;
 
@@ -70,7 +71,7 @@ export const apInvoiceListQuerySchema = z.object({
     .optional(),
   supplierId: z.string().uuid().optional(),
   dueBefore: z.coerce.date().optional(),
-  limit: z.coerce.number().int().positive().max(200).default(100)
+  limit: pageFields.limit
 });
 
 export const paymentRunProposalSchema = z.object({

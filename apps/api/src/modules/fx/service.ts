@@ -12,6 +12,7 @@ import type {
 
 import { ServiceError } from "../../shared/service-error.js";
 import { entityActor } from "../access/actor.js";
+import { config } from "../../config.js";
 
 export class FXServiceError extends ServiceError {}
 
@@ -96,8 +97,7 @@ export class FXService {
   // ── ECB Import ────────────────────────────────────────────────────────────────
 
   async importEcbRates(): Promise<{ imported: number; date: string }> {
-    const ecbUrl =
-      process.env.ECB_RATES_URL ?? "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml";
+    const ecbUrl = config().ECB_RATES_URL;
 
     let xml: string;
     try {
@@ -228,9 +228,7 @@ export class FXService {
 
     if (missing.length > 0 && eurUsd) {
       try {
-        // Use open.er-api.com (free, no key required) as fallback
-        const fallbackUrl = `https://open.er-api.com/v6/latest/USD`;
-        const fbRes = await fetch(fallbackUrl, {
+        const fbRes = await fetch(config().FX_FALLBACK_RATES_URL, {
           signal: AbortSignal.timeout(10_000)
         });
         if (fbRes.ok) {

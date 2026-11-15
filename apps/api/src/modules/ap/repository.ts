@@ -449,7 +449,7 @@ export class APRepository {
     });
   }
 
-  listPaymentRuns(entityId: string, limit = 50) {
+  listPaymentRuns(entityId: string, limit: number) {
     return this.db.paymentRun.findMany({
       where: { entityId },
       take: limit,

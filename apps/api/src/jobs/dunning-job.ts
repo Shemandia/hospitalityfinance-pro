@@ -1,6 +1,9 @@
 import { prisma } from "../db/prisma.js";
 import { ARService } from "../modules/ar/service.js";
 import type { PrismaClient } from "../db/client.js";
+import { moduleLogger } from "../shared/logger.js";
+
+const log = moduleLogger("dunning-job");
 
 const arService = new ARService(prisma as unknown as PrismaClient);
 
@@ -17,11 +20,9 @@ export async function processDunningJob(data: { entityId: string }): Promise<{
   dunningEmailsSent: number;
   invoiceIds: string[];
 }> {
-  console.log(`[DunningJob] Running dunning for entity ${data.entityId}`);
+  log.info(`Running dunning for entity ${data.entityId}`);
   const result = await arService.runDunning(data.entityId);
-  console.log(
-    `[DunningJob] Entity ${data.entityId}: sent ${result.dunningEmailsSent} dunning emails`
-  );
+  log.info(`Entity ${data.entityId}: sent ${result.dunningEmailsSent} dunning emails`);
   return { entityId: data.entityId, ...result };
 }
 
@@ -46,14 +47,11 @@ export async function processDunningForAllEntities(): Promise<{
       entityResults.push({ entityId: entity.id, sent: result.dunningEmailsSent });
       totalSent += result.dunningEmailsSent;
     } catch (error) {
-      console.error(
-        `[DunningJob] Failed for entity ${entity.id} (${entity.name}):`,
-        error instanceof Error ? error.message : error
-      );
+      log.error({ err: error, entityId: entity.id }, `Dunning failed for entity ${entity.name}`);
       entityResults.push({ entityId: entity.id, sent: 0 });
     }
   }
 
-  console.log(`[DunningJob] Complete: ${totalSent} emails across ${entities.length} entities`);
+  log.info(`Complete: ${totalSent} emails across ${entities.length} entities`);
   return { totalSent, entityResults };
 }

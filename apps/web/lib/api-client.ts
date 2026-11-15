@@ -1,6 +1,3 @@
-export // Same origin: the web app proxies the API (lib/server/api-proxy.ts).
-const API_BASE_URL = "";
-
 export type FrontendApiContext = {
   accessToken?: string | null;
   entityId?: string | null;
@@ -55,10 +52,6 @@ export function buildApiHeaders(
   return merged;
 }
 
-function apiUrl(pathOrUrl: string): string {
-  return /^https?:\/\//i.test(pathOrUrl) ? pathOrUrl : `${API_BASE_URL}${pathOrUrl}`;
-}
-
 async function errorFromResponse(response: Response): Promise<FrontendApiError> {
   let body: ApiErrorBody | null = null;
   try {
@@ -85,7 +78,7 @@ export async function apiFetch(
   context?: FrontendApiContext | null,
   init?: RequestInit & { json?: boolean }
 ): Promise<Response> {
-  const response = await fetch(apiUrl(pathOrUrl), {
+  const response = await fetch(pathOrUrl, {
     ...init,
     credentials: "include",
     headers: buildApiHeaders(context, init?.headers, { json: init?.json ?? true })

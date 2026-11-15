@@ -1,40 +1,17 @@
-import { Queue } from "bullmq";
-import type { ConnectionOptions } from "bullmq";
+import type { Queue } from "bullmq";
+import { createQueue } from "./queues.js";
 import type { DunningJobData } from "./dunning-job.js";
+import { moduleLogger } from "../shared/logger.js";
+
+const log = moduleLogger("dunning-queue");
 
 const queueName = "ar-dunning";
 
-let redisConnection: ConnectionOptions | null = null;
 let dunningQueue: Queue<DunningJobData> | null = null;
-
-function getRedisConnection(): ConnectionOptions {
-  if (!redisConnection) {
-    const redisUrl = process.env.REDIS_URL;
-    if (redisUrl) {
-      const parsed = new URL(redisUrl);
-      redisConnection = {
-        host: parsed.hostname,
-        port: Number(parsed.port || 6379),
-        password: parsed.password || undefined
-      };
-      return redisConnection;
-    }
-
-    redisConnection = {
-      host: process.env.REDIS_HOST ?? "127.0.0.1",
-      port: Number(process.env.REDIS_PORT ?? 6379),
-      password: process.env.REDIS_PASSWORD ?? undefined
-    };
-  }
-
-  return redisConnection;
-}
 
 export function getDunningQueue(): Queue<DunningJobData> {
   if (!dunningQueue) {
-    dunningQueue = new Queue(queueName, {
-      connection: getRedisConnection()
-    });
+    dunningQueue = createQueue<DunningJobData>(queueName);
   }
 
   return dunningQueue;
@@ -67,7 +44,7 @@ export async function registerDunningSchedule(): Promise<void> {
     }
   );
 
-  console.log("[DunningQueue] Registered daily dunning schedule (08:00 UTC)");
+  log.info("Registered daily dunning schedule (08:00 UTC)");
 }
 
 /**

@@ -1,7 +1,7 @@
 /**
  * The supervisor's entry points each stay running (OPS-10).
  *
- * Each of the four scripts the worker supervisor forks is started here as its
+ * Each of the scripts the worker supervisor forks is started here as its
  * own process, the way the supervisor starts it, against a real registry
  * database, tenant database and Redis. Each must still be running after
  * several seconds: an entry point that only exports functions runs to its
@@ -9,21 +9,21 @@
  *
  * The transfer-desk process must also run a worker for each active tenant,
  * pick up a tenant added to the registry, and stop the worker of a tenant that
- * was deactivated.
+ * was deactivated. The mv-refresh process must process a refresh that the
+ * period service queues (OPS-11: nothing ran that queue).
  *
  * Needs TEST_REGISTRY_DATABASE_URL (a database with the registry schema),
  * TEST_DATABASE_URL and REDIS_URL.
  */
 
 import { fork, type ChildProcess } from "node:child_process";
-import { Queue } from "bullmq";
+import type { Queue } from "bullmq";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PrismaClient as RegistryClient } from "../../src/db/registry-client.js";
 import { workerEntryPoints } from "../../src/jobs/supervisor.js";
-import {
-  getTransferDeskQueueName,
-  getTransferDeskRedisConnection
-} from "../../src/jobs/transfer-desk-queue.js";
+import { getTransferDeskQueueName } from "../../src/jobs/transfer-desk-queue.js";
+import { createQueue } from "../../src/jobs/queues.js";
+import { MV_REFRESH_QUEUE } from "../../src/jobs/mv-refresh-job.js";
 
 const registryUrl = process.env.TEST_REGISTRY_DATABASE_URL;
 const tenantDbUrl = process.env.TEST_DATABASE_URL;
@@ -63,16 +63,16 @@ if (!registryUrl || !tenantDbUrl || !redisUrl) {
     function workerCount(slug: string): Promise<number> {
       let queue = queues.find((q) => q.name === getTransferDeskQueueName(slug));
       if (!queue) {
-        queue = new Queue(getTransferDeskQueueName(slug), {
-          connection: getTransferDeskRedisConnection()
-        });
+        queue = createQueue(getTransferDeskQueueName(slug));
         queues.push(queue);
       }
       return queue.getWorkers().then((w) => w.length);
     }
 
+    const tenantIds: Record<string, string> = {};
+
     async function addTenant(slug: string, code: string) {
-      await registry.tenant.create({
+      const tenant = await registry.tenant.create({
         data: {
           slug,
           tenantCode: code,
@@ -82,6 +82,7 @@ if (!registryUrl || !tenantDbUrl || !redisUrl) {
           provisionedAt: new Date()
         }
       });
+      tenantIds[slug] = tenant.id;
     }
 
     beforeAll(async () => {
@@ -144,6 +145,23 @@ if (!registryUrl || !tenantDbUrl || !redisUrl) {
     it("transfer-desk picks up a tenant added to the registry", async () => {
       await addTenant(slugs.added, (run.slice(-7) + "b").padStart(8, "b"));
       await until(async () => (await workerCount(slugs.added)) === 1, 10_000);
+    }, 15_000);
+
+    it("mv-refresh processes a refresh queued for a tenant", async () => {
+      // Shared queue: remove only this job, never obliterate it (a developer's
+      // workers may use the same Redis).
+      const queue = createQueue(MV_REFRESH_QUEUE);
+      const job = await queue.add(
+        "refresh",
+        { tenantId: tenantIds[slugs.first], reason: "integration test" },
+        { jobId: `it-mv-refresh-${run}`, attempts: 1 }
+      );
+      try {
+        await until(async () => (await job.getState()) === "completed", 10_000);
+      } finally {
+        await job.remove().catch(() => undefined);
+        await queue.close();
+      }
     }, 15_000);
 
     it("transfer-desk stops the worker of a deactivated tenant", async () => {

@@ -1,10 +1,15 @@
-import { createApp } from "./app.js";
-import { disconnectAllTenants } from "./db/tenantPool.js";
-import { disconnectRegistry } from "./db/tenantRegistry.js";
-import { disconnectRedis } from "./db/redis.js";
-import { disconnectAllTransferDeskQueues } from "./jobs/transfer-desk-queue.js";
+import { startupConfig } from "./config.js";
 
-const port = Number(process.env.PORT ?? 3001);
+// First, before any other module loads: exit naming every missing or invalid
+// setting, rather than failing inside whichever module needs it first.
+const { PORT: port } = startupConfig("api");
+
+const { logger: startLog } = await import("./shared/logger.js");
+const { createApp } = await import("./app.js");
+const { disconnectAllTenants } = await import("./db/tenantPool.js");
+const { disconnectRegistry } = await import("./db/tenantRegistry.js");
+const { disconnectRedis } = await import("./db/redis.js");
+const { disconnectAllTransferDeskQueues } = await import("./jobs/transfer-desk-queue.js");
 
 async function start(): Promise<void> {
   const app = await createApp();
@@ -50,6 +55,6 @@ async function start(): Promise<void> {
 }
 
 start().catch((error) => {
-  console.error(error);
+  startLog.fatal({ err: error }, "API failed to start");
   process.exit(1);
 });

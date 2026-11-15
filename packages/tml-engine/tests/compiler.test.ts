@@ -8,15 +8,17 @@ import {
   type Sandbox
 } from "../src/index.js";
 
-// Allow the (insecure) Node vm fallback on dev machines without isolated-vm
-process.env.TML_ALLOW_INSECURE_SANDBOX ??= "true";
+// Allow the (insecure) Node vm fallback on dev machines without isolated-vm.
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 let activeSandbox: Sandbox | null = null;
 
 function makeSandbox(def: ReturnType<typeof compileMappings>): Sandbox {
-  activeSandbox = createSandbox(def.functions ?? [], BUILTIN_FUNCTIONS_SOURCE, { timeoutMs: 2000 });
+  activeSandbox = createSandbox(def.functions ?? [], BUILTIN_FUNCTIONS_SOURCE, {
+    timeoutMs: 2000,
+    allowInsecureFallback: true
+  });
   return activeSandbox;
 }
 

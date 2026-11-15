@@ -23,6 +23,7 @@ import { resolveTenantById } from "../db/tenantRegistry.js";
 import { updateRequestContext } from "../db/requestContext.js";
 import { getRedisClient } from "../db/redis.js";
 import type { AccessTokenClaims } from "../services/auth.service.js";
+import { requireConfig } from "../config.js";
 
 type ErrorWithStatus = Error & { statusCode: number };
 type HeaderDecision = { error?: { statusCode: number; message: string } };
@@ -49,12 +50,8 @@ declare module "fastify" {
   }
 }
 
-if (!process.env.JWT_SECRET) {
-  throw new Error(
-    "FATAL: JWT_SECRET environment variable is not set. Refusing to start with an insecure default."
-  );
-}
-const JWT_SECRET = process.env.JWT_SECRET;
+// Throws at load when unset: the API never starts with an insecure default.
+const { JWT_SECRET } = requireConfig(["JWT_SECRET"], "the auth plugin");
 const JWT_ALGORITHM = "HS256" as const;
 
 function buildError(statusCode: number, message: string): ErrorWithStatus {

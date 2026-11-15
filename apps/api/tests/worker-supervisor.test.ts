@@ -18,7 +18,7 @@ const entry = (name: string): WorkerEntryPoint => ({
   name,
   script: resolve(fixtures, `${name}.mjs`)
 });
-const quiet = { log: () => {}, error: () => {} };
+const quiet = { info: () => {}, error: () => {} };
 
 function until(condition: () => boolean, timeoutMs = 10_000): Promise<void> {
   const started = Date.now();
@@ -53,13 +53,14 @@ describe("worker supervisor (OPS-10)", () => {
     return { supervisor, onFailure };
   }
 
-  it("lists four entry points, each a file that exists", () => {
+  it("lists five entry points, each a file that exists", () => {
     const entries = workerEntryPoints();
     expect(entries.map((e) => e.name)).toEqual([
       "report-generation",
       "dunning",
       "scheduled-reports",
-      "transfer-desk"
+      "transfer-desk",
+      "mv-refresh"
     ]);
     for (const e of entries) expect(existsSync(e.script), e.script).toBe(true);
   });
