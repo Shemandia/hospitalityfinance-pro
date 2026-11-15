@@ -20,7 +20,8 @@ COPY apps/api/ apps/api/
 RUN pnpm --filter @hfp/api db:generate
 
 # Build TypeScript
-RUN pnpm --filter @hfp/api build
+# "..." also builds the workspace packages the API imports.
+RUN pnpm --filter "@hfp/api..." build
 
 # Prune dev dependencies
 RUN pnpm prune --prod
@@ -51,4 +52,4 @@ USER hfp
 EXPOSE 4500
 
 ENTRYPOINT ["tini", "--"]
-CMD ["node", "apps/api/dist/index.js"]
+CMD ["node", "--conditions=production", "apps/api/dist/index.js"]

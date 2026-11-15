@@ -15,7 +15,8 @@ RUN pnpm install --frozen-lockfile
 COPY apps/api/ apps/api/
 
 RUN pnpm --filter @hfp/api db:generate
-RUN pnpm --filter @hfp/api build
+# "..." also builds the workspace packages the API imports.
+RUN pnpm --filter "@hfp/api..." build
 RUN pnpm prune --prod
 
 FROM node:22-alpine AS runtime
@@ -36,4 +37,4 @@ RUN addgroup -g 1001 -S hfp && adduser -S hfp -u 1001 -G hfp
 USER hfp
 
 ENTRYPOINT ["tini", "--"]
-CMD ["node", "apps/api/dist/jobs/worker-supervisor.js"]
+CMD ["node", "--conditions=production", "apps/api/dist/jobs/worker-supervisor.js"]

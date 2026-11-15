@@ -1,0 +1,13 @@
+{
+  // Compiles src for production (node --conditions=production); development
+  // and tests use the TypeScript sources directly.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "noEmit": false,
+    "sourceMap": false,
+    "declarationMap": false
+  },
+  "include": ["src/**/*"]
+}
