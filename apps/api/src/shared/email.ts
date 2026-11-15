@@ -62,7 +62,7 @@ export async function sendEmail(payload: GenericEmailPayload): Promise<void> {
   const resendApiKey = config().RESEND_API_KEY;
   if (!client && resendApiKey) {
     const body = { from, to: [payload.to], subject: payload.subject, html: payload.html };
-    const response = await fetch("https://api.resend.com/emails", {
+    const response = await fetch(config().RESEND_API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${resendApiKey}` },
       body: JSON.stringify(body)

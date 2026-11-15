@@ -153,6 +153,9 @@ const schema = z.object({
     .optional()
     .describe("Resend API key; e-mail goes through Resend when set."),
   RESEND_FROM_EMAIL: text().optional().describe("Sender address for Resend."),
+  RESEND_API_URL: url()
+    .default("https://api.resend.com/emails")
+    .describe("Resend's send endpoint."),
   AWS_SES_REGION: text().optional().describe("SES region; e-mail goes through SES when set."),
   AWS_SES_ACCESS_KEY_ID: text().optional().describe("SES access key."),
   AWS_SES_SECRET_ACCESS_KEY: text().optional().describe("SES secret key."),
@@ -162,6 +165,11 @@ const schema = z.object({
   ECB_RATES_URL: url()
     .default("https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml")
     .describe("Daily reference-rate feed."),
+  FX_FALLBACK_RATES_URL: url()
+    .default("https://open.er-api.com/v6/latest/USD")
+    .describe(
+      "USD-based rates for currencies the ECB feed does not publish; JSON with a rates object, as open.er-api.com returns."
+    ),
 
   // ── Connectors (move to per-tenant connections in WP-5) ──────────────────
   OHIP_HOSTNAME: url()
@@ -412,13 +420,14 @@ export const CONFIG_GROUPS: ReadonlyArray<{ title: string; keys: readonly Config
     keys: [
       "RESEND_API_KEY",
       "RESEND_FROM_EMAIL",
+      "RESEND_API_URL",
       "AWS_SES_REGION",
       "AWS_SES_ACCESS_KEY_ID",
       "AWS_SES_SECRET_ACCESS_KEY",
       "SES_FROM_EMAIL"
     ]
   },
-  { title: "Exchange rates", keys: ["ECB_RATES_URL"] },
+  { title: "Exchange rates", keys: ["ECB_RATES_URL", "FX_FALLBACK_RATES_URL"] },
   {
     title: "Connectors (move to per-tenant connections in WP-5)",
     keys: [
