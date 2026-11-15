@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useSession } from "../../../../../components/auth-provider";
+import { useAuth, useSession } from "../../../../../components/auth-provider";
 import { useRouter, useParams } from "next/navigation";
 import { WizardLayout, WizardStepContent } from "../../../../../components/wizard-layout";
 import { COUNTRIES } from "../../../../../lib/countries";
@@ -131,6 +131,7 @@ type StepData = {
 
 export default function SetupPage() {
   const { data: session, status } = useSession();
+  const { reloadContext } = useAuth();
   const router = useRouter();
   const params = useParams();
   const tenantSlug =
@@ -192,6 +193,15 @@ export default function SetupPage() {
     return headers;
   }, [accessToken, tenantSlug]);
 
+  // The dashboard's guard decides from the access context loaded at sign-in.
+  // Reload it first: with the old "setup not finished" it sends the user
+  // straight back here, and this page sends them to the dashboard again, in a
+  // loop.
+  const openDashboard = useCallback(async () => {
+    await reloadContext();
+    router.replace(`/t/${tenantSlug}/dashboard`);
+  }, [reloadContext, router, tenantSlug]);
+
   // ── Load progress ───────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -212,7 +222,7 @@ export default function SetupPage() {
         const { currentStep: step, completedSteps: completed, stepData } = json.data;
 
         if (json.data.isCompleted) {
-          router.replace(`/t/${tenantSlug}/dashboard`);
+          await openDashboard();
           return;
         }
 
@@ -264,7 +274,7 @@ export default function SetupPage() {
       }
       setLoading(false);
     })();
-  }, [status, accessToken, apiHeaders, router]);
+  }, [status, accessToken, apiHeaders, router, openDashboard]);
 
   // ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -375,7 +385,7 @@ export default function SetupPage() {
         setSaving(false);
         return;
       }
-      router.replace(`/t/${tenantSlug}/dashboard`);
+      await openDashboard();
     } catch {
       setError("Cannot reach the API server.");
       setSaving(false);
