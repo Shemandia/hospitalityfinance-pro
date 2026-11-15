@@ -67,7 +67,8 @@ export async function createApp(): Promise<FastifyInstance> {
       const supplied = req.headers["x-request-id"];
       return typeof supplied === "string" && REQUEST_ID.test(supplied) ? supplied : randomUUID();
     },
-    bodyLimit: 10 * 1024 * 1024, // 10 MB for file imports
+    // File imports arrive as request bodies (HC-35).
+    bodyLimit: config().UPLOAD_MAX_MB * 1024 * 1024,
     // The browser reaches the API through the web app's proxy (AUT-13). Its
     // X-Forwarded-* headers are believed only from these addresses, so the
     // client IP (rate limits, audit) and the host (cross-site check) are the

@@ -23,6 +23,7 @@
  *     graceful shutdown.
  */
 
+import { config } from "../config.js";
 import { runWithContext, updateRequestContext } from "../db/requestContext.js";
 import { resolveTenant } from "../db/tenantRegistry.js";
 import { TenantUnavailableError } from "../db/tenantScope.js";
@@ -71,7 +72,8 @@ export function ensureTransferDeskWorker(tenantSlug: string, tenantDbUrl: string
         return processJob(job, tenantSlug, tenantDbUrl);
       }),
     {
-      concurrency: 1, // TODO: read from license entitlements (Starter=1, Pro=3, Enterprise=10)
+      // Platform-wide for now; per-tenant values come with the plans in WP-2 (HC-37).
+      concurrency: config().IMPORT_CONCURRENCY,
       autorun: true
     }
   );

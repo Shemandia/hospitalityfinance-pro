@@ -137,6 +137,11 @@ const schema = z.object({
     .describe("Key the platform admin uses for tenant routes. Required by the API."),
 
   // ── Files ────────────────────────────────────────────────────────────────
+  UPLOAD_MAX_MB: positiveInt()
+    .default(10)
+    .describe(
+      "Largest request body the API accepts, in MB; file imports arrive this way. Per-tenant limits come with the plans in WP-2."
+    ),
   STORAGE_BACKEND: z
     .enum(["local", "s3"])
     .default("local")
@@ -198,6 +203,11 @@ const schema = z.object({
     .describe("Most rows in a page of a list; a larger requested page size gets this many."),
 
   // ── Workers ──────────────────────────────────────────────────────────────
+  IMPORT_CONCURRENCY: positiveInt()
+    .default(1)
+    .describe(
+      "Transfer Desk imports each tenant runs at once. Per-tenant values come with the plans in WP-2."
+    ),
   WORKER_MAX_CLEAN_EXITS: positiveInt()
     .default(3)
     .describe("Clean exits in a row after which the supervisor gives up on a worker."),
@@ -416,6 +426,7 @@ export const CONFIG_GROUPS: ReadonlyArray<{ title: string; keys: readonly Config
   {
     title: "Files",
     keys: [
+      "UPLOAD_MAX_MB",
       "STORAGE_BACKEND",
       "TD_LOCAL_UPLOADS_PATH",
       "TD_S3_BUCKET",
@@ -456,6 +467,9 @@ export const CONFIG_GROUPS: ReadonlyArray<{ title: string; keys: readonly Config
     ]
   },
   { title: "Lists", keys: ["PAGE_SIZE_DEFAULT", "PAGE_SIZE_MAX"] },
-  { title: "Workers", keys: ["WORKER_MAX_CLEAN_EXITS", "TRANSFER_DESK_TENANT_POLL_MS"] },
+  {
+    title: "Workers",
+    keys: ["IMPORT_CONCURRENCY", "WORKER_MAX_CLEAN_EXITS", "TRANSFER_DESK_TENANT_POLL_MS"]
+  },
   { title: "Development", keys: ["SEED_USER_PASSWORD", "TML_ALLOW_INSECURE_SANDBOX"] }
 ];
