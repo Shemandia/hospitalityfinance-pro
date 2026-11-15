@@ -36,7 +36,7 @@ export function apiInternalUrl(): string {
   if (!value) {
     throw new Error(
       "API_INTERNAL_URL is not set. Set it in apps/web/.env.local to the API's address " +
-        "as this server reaches it, for example http://127.0.0.1:4500."
+        "as this server reaches it (see apps/web/.env.example)."
     );
   }
   return value;

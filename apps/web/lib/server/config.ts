@@ -22,7 +22,7 @@ const schema = z.object({
     .string()
     .url()
     .optional()
-    .describe("The API's address as this server reaches it, e.g. http://127.0.0.1:4500."),
+    .describe("The API's address as this server reaches it: scheme, host and port."),
   HFP_PLATFORM_KEY: text()
     .optional()
     .describe("Platform machine key for the /platform pages; equals the API's PLATFORM_API_KEY."),
