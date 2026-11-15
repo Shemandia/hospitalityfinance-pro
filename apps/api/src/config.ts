@@ -189,6 +189,14 @@ const schema = z.object({
   SKY_JANA_SFTP_INBOUND_PATH: text().default("/inbound").describe("Sky Jana inbound folder."),
   SKY_JANA_SFTP_OUTBOUND_PATH: text().default("/outbound").describe("Sky Jana outbound folder."),
 
+  // ── Lists ────────────────────────────────────────────────────────────────
+  PAGE_SIZE_DEFAULT: positiveInt()
+    .default(100)
+    .describe("Rows in a page of a list when the request names no page size."),
+  PAGE_SIZE_MAX: positiveInt()
+    .default(500)
+    .describe("Most rows in a page of a list; a larger requested page size gets this many."),
+
   // ── Workers ──────────────────────────────────────────────────────────────
   WORKER_MAX_CLEAN_EXITS: positiveInt()
     .default(3)
@@ -447,6 +455,7 @@ export const CONFIG_GROUPS: ReadonlyArray<{ title: string; keys: readonly Config
       "SKY_JANA_SFTP_OUTBOUND_PATH"
     ]
   },
+  { title: "Lists", keys: ["PAGE_SIZE_DEFAULT", "PAGE_SIZE_MAX"] },
   { title: "Workers", keys: ["WORKER_MAX_CLEAN_EXITS", "TRANSFER_DESK_TENANT_POLL_MS"] },
   { title: "Development", keys: ["SEED_USER_PASSWORD", "TML_ALLOW_INSECURE_SANDBOX"] }
 ];

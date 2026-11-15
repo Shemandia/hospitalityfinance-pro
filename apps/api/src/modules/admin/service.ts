@@ -35,6 +35,7 @@ import {
 } from "../access/resolver.js";
 import { hashPassword } from "../../services/password-policy.js";
 import { appUrl } from "../../config.js";
+import { pageLimit } from "../../shared/pagination.js";
 
 const db = prisma as unknown as PrismaClient;
 
@@ -836,7 +837,7 @@ export async function listLoginAudits(
           : {})
     },
     orderBy: { createdAt: "desc" },
-    take: Math.min(filters.limit ?? 50, 200)
+    take: pageLimit(filters.limit)
   });
 }
 

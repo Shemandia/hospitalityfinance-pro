@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { pageFields } from "../../shared/pagination.js";
 
 export const currencyCreateSchema = z.object({
   code: z.string().length(3).toUpperCase(),
@@ -22,7 +23,7 @@ export const fxRateQuerySchema = z.object({
   toCurrency: z.string().length(3).optional(),
   rateType: z.enum(["SPOT", "AVERAGE", "BUDGET", "CLOSING"]).optional(),
   effectiveDate: z.coerce.date().optional(),
-  limit: z.coerce.number().int().positive().max(500).default(100)
+  limit: pageFields.limit
 });
 
 export const convertQuerySchema = z.object({

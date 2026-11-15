@@ -18,6 +18,7 @@ import {
   SUPPLIER_SYNC_TARGET_FIELDS
 } from "../transform-engine.js";
 import { mapError } from "./_shared.js";
+import { pageLimit, pageOffset } from "../../../shared/pagination.js";
 
 // ── Profile schemas ─────────────────────────────────────────────────────────
 
@@ -2129,8 +2130,8 @@ export function registerTransferDeskRoutes(router: FastifyInstance) {
           limit?: string;
           offset?: string;
         };
-        const take = Math.min(Number(limit) || 50, 200);
-        const skip = Math.min(Number(offset) || 0, 100000);
+        const take = pageLimit(limit);
+        const skip = pageOffset(offset);
         const data = await (prisma as unknown as PrismaClient).transferExecution.findMany({
           where: {
             ...(profileId ? { profileId } : {}),
@@ -2188,8 +2189,8 @@ export function registerTransferDeskRoutes(router: FastifyInstance) {
           offset?: string;
           statusFilter?: string;
         };
-        const take = Math.min(Number(limit) || 100, 1000);
-        const skip = Math.min(Number(offset) || 0, 1000000);
+        const take = pageLimit(limit);
+        const skip = pageOffset(offset);
         const db = prisma as unknown as PrismaClient;
         const [rows, total] = await Promise.all([
           db.transferExecutionLog.findMany({

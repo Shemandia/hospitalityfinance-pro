@@ -109,6 +109,13 @@ and `SEED_USER_PASSWORD`, the database setup scripts need `DATABASE_URL`.
 | `SKY_JANA_SFTP_INBOUND_PATH`  |             | `/inbound`                        | Sky Jana inbound folder.   |
 | `SKY_JANA_SFTP_OUTBOUND_PATH` |             | `/outbound`                       | Sky Jana outbound folder.  |
 
+### Lists
+
+| Variable            | Required by | Default | Description                                                                 |
+| ------------------- | ----------- | ------- | --------------------------------------------------------------------------- |
+| `PAGE_SIZE_DEFAULT` |             | `100`   | Rows in a page of a list when the request names no page size.               |
+| `PAGE_SIZE_MAX`     |             | `500`   | Most rows in a page of a list; a larger requested page size gets this many. |
+
 ### Workers
 
 | Variable                       | Required by | Default | Description                                                                  |

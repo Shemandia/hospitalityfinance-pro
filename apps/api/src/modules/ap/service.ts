@@ -21,6 +21,7 @@ import type {
   SupplierUpdateInput
 } from "./types.js";
 import { entityActor } from "../access/actor.js";
+import { pageLimit } from "../../shared/pagination.js";
 
 // PO matching removed — handled by external Material Management system
 
@@ -860,7 +861,7 @@ ${transactions
   }
 
   async listPaymentRuns(entityId: string, limit?: number) {
-    return this.repository(this.prisma).listPaymentRuns(entityId, limit ?? 50);
+    return this.repository(this.prisma).listPaymentRuns(entityId, pageLimit(limit));
   }
 
   async getPaymentRun(entityId: string, paymentRunId: string) {

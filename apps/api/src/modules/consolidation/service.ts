@@ -79,7 +79,7 @@ export class ConsolidationService {
     }
   }
 
-  listRuns(parentEntityId: string, take = 50, skip = 0) {
+  listRuns(parentEntityId: string, take: number, skip: number) {
     return this.prisma.consolidationRun.findMany({
       where: { parentEntityId },
       orderBy: [{ createdAt: "desc" }],

@@ -31,6 +31,7 @@ import {
 } from "./coa-import-service.js";
 
 import { RecurringJournalService } from "./recurring-service.js";
+import { pageLimit, pageOffset } from "../../shared/pagination.js";
 
 const recurringJournalSchema = z.object({
   name: z.string().min(1).max(200),
@@ -126,8 +127,8 @@ export async function registerGLRouter(app: FastifyInstance): Promise<void> {
           try {
             const entityId = requireEntityId(request.entityId);
             const query = request.query as Record<string, string | undefined>;
-            const limit = Math.min(Number(query.limit) || 100, 500);
-            const offset = Math.min(Number(query.offset) || 0, 100000);
+            const limit = pageLimit(query.limit);
+            const offset = pageOffset(query.offset);
             const data = await glService.getAccountLedger(entityId, request.params.id, {
               periodId: query.periodId,
               status: query.status,

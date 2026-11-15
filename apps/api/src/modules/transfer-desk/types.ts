@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { pageFields } from "../../shared/pagination.js";
 
 // ── Profile CRUD schemas ─────────────────────────────────────────────────────
 
@@ -48,8 +49,8 @@ export const profileListQuerySchema = z.object({
     .string()
     .transform((v) => v === "true")
     .optional(),
-  limit: z.coerce.number().int().min(1).max(500).default(100),
-  offset: z.coerce.number().int().min(0).default(0),
+  limit: pageFields.limit,
+  offset: pageFields.offset,
   search: z.string().max(200).optional()
 });
 

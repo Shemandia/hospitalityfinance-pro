@@ -7,6 +7,7 @@ import { runOperaCloudImport } from "../connectors/opera-cloud/opera-cloud-impor
 import { getOperaCloudCredentials } from "../connectors/opera-cloud/opera-cloud-auth.js";
 import { OperaCloudClient } from "../connectors/opera-cloud/opera-cloud-client.js";
 import { mapError, requireEntityId } from "./_shared.js";
+import { pageLimit, pageOffset } from "../../../shared/pagination.js";
 
 const operaImportSchema = z.object({
   hotelId: z.string().min(1),
@@ -47,8 +48,8 @@ export function registerOperaRoutes(router: FastifyInstance) {
         const data = await (prisma as unknown as PrismaClient).importLog.findMany({
           where: { entityId, connectorType: "OPERA_CLOUD" },
           orderBy: { createdAt: "desc" },
-          take: Math.min(parseInt(limit ?? "50", 10), 200),
-          skip: Math.min(parseInt(offset ?? "0", 10), 100000)
+          take: pageLimit(limit),
+          skip: pageOffset(offset)
         });
         return reply.send({ data, errors: [] });
       } catch (error) {

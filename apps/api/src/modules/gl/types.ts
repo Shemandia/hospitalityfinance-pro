@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { pageFields } from "../../shared/pagination.js";
 
 const decimalRegex = /^-?\d+(\.\d{1,8})?$/;
 
@@ -102,7 +103,7 @@ export const journalTypeUpdateSchema = journalTypeCreateSchema
 
 export const journalListQuerySchema = z.object({
   cursor: z.string().uuid().optional(),
-  limit: z.coerce.number().int().positive().max(100).default(50),
+  limit: pageFields.limit,
   status: z.enum(["DRAFT", "PENDING_APPROVAL", "POSTED", "REVERSED"]).optional(),
   source: z.enum(["MANUAL", "PMS", "POS", "PAYROLL", "FX_REVAL", "AP", "AR"]).optional(),
   journalTypeId: z.string().uuid().optional(),

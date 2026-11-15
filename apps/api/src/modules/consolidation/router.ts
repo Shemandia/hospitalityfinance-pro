@@ -6,6 +6,7 @@ import { requireAuth } from "../../middleware/requireAuth.js";
 import { requirePermission } from "../../middleware/requirePermission.js";
 import { ConsolidationService } from "./service.js";
 import { mapError } from "../../shared/router-utils.js";
+import { pageLimit, pageOffset } from "../../shared/pagination.js";
 
 const consolidationService = new ConsolidationService(prisma as unknown as PrismaClient);
 
@@ -32,7 +33,12 @@ export async function registerConsolidationRouter(app: FastifyInstance): Promise
                 errors: [{ code: "CONSOLIDATION_FORBIDDEN", message: "No access to this entity." }]
               });
             }
-            const data = await consolidationService.listRuns(request.params.parentEntityId);
+            const query = request.query as { limit?: string; offset?: string };
+            const data = await consolidationService.listRuns(
+              request.params.parentEntityId,
+              pageLimit(query.limit),
+              pageOffset(query.offset)
+            );
             return reply.send({ data, errors: [] });
           } catch (error) {
             return mapError(reply, error);
