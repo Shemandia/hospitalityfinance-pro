@@ -140,3 +140,19 @@ jobs:
           for i in $(seq 1 30); do curl -fs http://127.0.0.1:4599/health && break; sleep 1; done
           curl -fs http://127.0.0.1:4599/health || { cat api.log; exit 1; }
           kill %1
+
+      # The built worker supervisor must keep its workers running.
+      - name: Built workers start
+        working-directory: apps/api
+        env:
+          NODE_ENV: production
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+          REGISTRY_DATABASE_URL: ${{ env.TEST_REGISTRY_DATABASE_URL }}
+        run: |
+          node --conditions=production dist/jobs/worker-supervisor.js > workers.log 2>&1 &
+          sleep 12
+          kill -0 %1 || { echo "supervisor exited"; cat workers.log; exit 1; }
+          started=$(grep -c 'worker started\|Worker started\|Started;' workers.log || true)
+          echo "workers reporting started: $started"
+          [ "$started" -ge 5 ] || { cat workers.log; exit 1; }
+          kill %1
