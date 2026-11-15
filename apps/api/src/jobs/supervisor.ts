@@ -39,7 +39,8 @@ export function workerEntryPoints(): WorkerEntryPoint[] {
     { name: "report-generation", script: resolve(dir, `report-generation-worker${ext}`) },
     { name: "dunning", script: resolve(dir, `dunning-worker${ext}`) },
     { name: "scheduled-reports", script: resolve(dir, `scheduled-reports-worker${ext}`) },
-    { name: "transfer-desk", script: resolve(dir, `transfer-desk-runner${ext}`) }
+    { name: "transfer-desk", script: resolve(dir, `transfer-desk-runner${ext}`) },
+    { name: "mv-refresh", script: resolve(dir, `mv-refresh-worker${ext}`) }
   ];
 }
 

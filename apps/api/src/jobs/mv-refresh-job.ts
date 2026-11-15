@@ -10,30 +10,31 @@
  * The CONCURRENTLY keyword allows reads during refresh (requires unique index).
  */
 
-import { createQueue, createWorker } from "./queues.js";
+import { createQueue } from "./queues.js";
 import { prisma } from "../db/prisma.js";
 import { currentTenantId, forEachActiveTenant, runForTenantId } from "../db/tenantScope.js";
 import { withBypassRLS } from "../db/rls-bypass.js";
 
-const QUEUE_NAME = "mv-refresh";
+export const MV_REFRESH_QUEUE = "mv-refresh";
 
 // ── Queue (exported so other modules can enqueue refreshes) ─────────────────
 
-type MVRefreshJob = { tenantId?: string; reason?: string; requestedAt?: string };
+export type MVRefreshJob = { tenantId?: string; reason?: string; requestedAt?: string };
 
 let queue: ReturnType<typeof createQueue<MVRefreshJob>> | null = null;
 
 /** Built on first use, so importing this module opens no connection. */
-function mvRefreshQueue() {
-  queue ??= createQueue<MVRefreshJob>(QUEUE_NAME);
+export function mvRefreshQueue() {
+  queue ??= createQueue<MVRefreshJob>(MV_REFRESH_QUEUE);
   return queue;
 }
 
 /**
- * Enqueue a materialized view refresh.
- * Deduplicated by jobId to avoid concurrent refreshes.
+ * Enqueues a refresh of the bound tenant's view. One pending refresh per
+ * tenant: the job ID is the tenant's, so a second request while one waits is
+ * dropped. The job is removed when it finishes; a kept job would hold the ID
+ * and silently drop every later request for that tenant.
  */
-/** Enqueues a refresh of the bound tenant's view. One pending refresh per tenant. */
 export async function enqueueMVRefresh(reason: string): Promise<void> {
   const tenantId = currentTenantId();
   await mvRefreshQueue().add(
@@ -41,9 +42,8 @@ export async function enqueueMVRefresh(reason: string): Promise<void> {
     { tenantId, reason, requestedAt: new Date().toISOString() },
     {
       jobId: `mv-refresh-${tenantId}`,
-      removeOnComplete: 20,
-      removeOnFail: 20,
-      // Debounce: if a refresh is already queued, skip
+      removeOnComplete: true,
+      removeOnFail: true,
       attempts: 1
     }
   );
@@ -91,57 +91,4 @@ export async function refreshMaterializedView(): Promise<{ durationMs: number }>
 
   const durationMs = Date.now() - start;
   return { durationMs };
-}
-
-// ── Worker (only starts when this file is run directly) ─────────────────────
-
-if (process.argv[1]?.includes("mv-refresh-job")) {
-  async function setupRepeatable(): Promise<void> {
-    const existing = await mvRefreshQueue().getRepeatableJobs();
-    for (const job of existing) {
-      await mvRefreshQueue().removeRepeatableByKey(job.key);
-    }
-
-    await mvRefreshQueue().add(
-      "refresh-scheduled",
-      { reason: "scheduled", requestedAt: new Date().toISOString() },
-      {
-        repeat: {
-          pattern: "*/15 * * * *" // every 15 minutes
-        },
-        removeOnComplete: 20,
-        removeOnFail: 20
-      }
-    );
-
-    console.log("[MVRefreshWorker] Repeatable job registered: every 15 minutes.");
-  }
-
-  const worker = createWorker<MVRefreshJob>(
-    QUEUE_NAME,
-    async (job) => {
-      console.log(`[MVRefreshWorker] Refreshing MV — reason: ${job.data?.reason ?? "unknown"}`);
-      // A refresh names its tenant; the scheduled safety net refreshes every tenant.
-      const tenantId: string | undefined = job.data?.tenantId;
-      if (tenantId) return runForTenantId(tenantId, () => refreshMaterializedView());
-      return forEachActiveTenant(() => refreshMaterializedView());
-    },
-    { concurrency: 1 }
-  );
-
-  worker.on("completed", (job, result) => {
-    const r = result as { durationMs: number } | undefined;
-    console.log(`[MVRefreshWorker] Job ${job.id} completed in ${r?.durationMs ?? "?"}ms.`);
-  });
-
-  worker.on("failed", (job, error) => {
-    console.error(`[MVRefreshWorker] Job ${job?.id ?? "unknown"} failed:`, error);
-  });
-
-  setupRepeatable().catch((err) => {
-    console.error("[MVRefreshWorker] Failed to set up repeatable job:", err);
-    process.exit(1);
-  });
-
-  console.log("MV refresh worker started.");
 }
