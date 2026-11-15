@@ -18,6 +18,7 @@ import {
   type Sandbox,
   type TmlRecord
 } from "@hfp/tml-engine";
+import { insecureTmlSandboxAllowed } from "../../shared/tml-sandbox.js";
 
 // ── Error ────────────────────────────────────────────────────────────────────
 
@@ -197,7 +198,8 @@ export class TestRunnerService {
           const tmlDef = compileMappings(tmlMappings);
           if (tmlDef.functions && tmlDef.functions.length > 0) {
             sandbox = createSandbox(tmlDef.functions, BUILTIN_FUNCTIONS_SOURCE, {
-              timeoutMs: 5000
+              timeoutMs: 5000,
+              allowInsecureFallback: insecureTmlSandboxAllowed()
             });
           }
 

@@ -38,6 +38,7 @@ import {
   type StageContext
 } from "./transfer-desk-batch-stager.js";
 import { moduleLogger } from "../shared/logger.js";
+import { insecureTmlSandboxAllowed } from "../shared/tml-sandbox.js";
 
 const log = moduleLogger("transfer-desk-pipeline");
 
@@ -1000,7 +1001,9 @@ function applyTransformation(
   let sandbox: Sandbox | null = null;
 
   if (hasTransformRules || hasUserFunctions) {
-    sandbox = createSandbox(definition.functions ?? [], BUILTIN_FUNCTIONS_SOURCE);
+    sandbox = createSandbox(definition.functions ?? [], BUILTIN_FUNCTIONS_SOURCE, {
+      allowInsecureFallback: insecureTmlSandboxAllowed()
+    });
   }
 
   try {
