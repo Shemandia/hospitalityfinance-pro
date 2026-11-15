@@ -123,6 +123,14 @@ export async function resolveTenantByCode(tenantCode: string): Promise<TenantRec
 }
 
 /**
+ * The cached record of a tenant, without refreshing the cache. For checks on
+ * a hot path; undefined when the tenant is not in the cache.
+ */
+export function cachedTenant(slug: string): TenantRecord | undefined {
+  return tenantCache.get(slug);
+}
+
+/**
  * Resolve tenant by ID.
  */
 export async function resolveTenantById(id: string): Promise<TenantRecord | null> {

@@ -15,6 +15,7 @@ import { hashPassword, passwordPolicyErrors } from "./password-policy.js";
 import type { Prisma } from "../db/client.js";
 import { requireConfig } from "../config.js";
 import { appConnectionUrl } from "../db/tenant-location.js";
+import { assertSchemaServiceable } from "../db/schema-version.js";
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
@@ -159,6 +160,7 @@ export class AuthService {
     // 1. Resolve tenant from code
     const tenant = await resolveTenantByCode(tenantCode);
     if (!tenant) throw new AuthError("Invalid credentials");
+    assertSchemaServiceable(tenant);
 
     // 2. Get tenant prisma client
     const tenantPrisma = getTenantClient(tenant.slug, tenant.databaseUrl);
@@ -428,6 +430,7 @@ export class AuthService {
   ): Promise<{ token: string; userId: string } | null> {
     const tenant = await resolveTenantByCode(tenantCode);
     if (!tenant) return null; // Don't reveal tenant existence
+    assertSchemaServiceable(tenant);
 
     const tenantPrisma = getTenantClient(tenant.slug, tenant.databaseUrl);
     const user = await tenantPrisma.user.findUnique({
@@ -455,6 +458,7 @@ export class AuthService {
   async resetPassword(token: string, newPassword: string, tenantCode: string) {
     const tenant = await resolveTenantByCode(tenantCode);
     if (!tenant) throw new AuthError("Invalid reset token", 400, "INVALID_TOKEN");
+    assertSchemaServiceable(tenant);
 
     const tenantPrisma = getTenantClient(tenant.slug, tenant.databaseUrl);
     const tokenHash = crypto.createHash("sha256").update(token).digest("hex");

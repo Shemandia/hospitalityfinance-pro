@@ -14,6 +14,7 @@
 
 import { getRequestContext, runWithContext } from "./requestContext.js";
 import { listTenants, resolveTenantById, type TenantRecord } from "./tenantRegistry.js";
+import { assertSchemaServiceable } from "./schema-version.js";
 
 /** A database call was made with no tenant bound. A programming error; never retried. */
 export class TenantNotBoundError extends Error {
@@ -34,10 +35,16 @@ export class TenantUnavailableError extends Error {
   }
 }
 
-type TenantBinding = Pick<TenantRecord, "id" | "slug" | "databaseUrl">;
+type TenantBinding = Pick<TenantRecord, "id" | "slug" | "databaseUrl"> &
+  Partial<Pick<TenantRecord, "schemaVersion">>;
 
-/** Runs `fn` with `tenant` bound, and nothing else from the caller's context. */
-export function runForTenant<T>(tenant: TenantBinding, fn: () => Promise<T>): Promise<T> {
+/**
+ * Runs `fn` with `tenant` bound, and nothing else from the caller's context.
+ * A tenant behind this release's schema is refused (TenantMaintenanceError):
+ * its jobs wait, and retry, until the migration runner has run.
+ */
+export async function runForTenant<T>(tenant: TenantBinding, fn: () => Promise<T>): Promise<T> {
+  assertSchemaServiceable({ slug: tenant.slug, schemaVersion: tenant.schemaVersion ?? null });
   return runWithContext(
     { tenantId: tenant.id, tenantSlug: tenant.slug, tenantDbUrl: tenant.databaseUrl },
     fn

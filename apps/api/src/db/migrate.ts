@@ -41,9 +41,13 @@ export function schemaPath(kind: SchemaKind): string {
   return resolve(srcDb, kind, "schema.prisma");
 }
 
-/** Migration names in the order they apply. The last is the release's version. */
-export function migrationNames(kind: SchemaKind): string[] {
-  return readdirSync(resolve(srcDb, kind, "migrations"), { withFileTypes: true })
+/**
+ * Migration names in the order they apply. The last is the release's version.
+ * `schema` names another schema.prisma, whose migrations folder is read
+ * instead (tests use it to stand in for a later release).
+ */
+export function migrationNames(kind: SchemaKind, schema: string = schemaPath(kind)): string[] {
+  return readdirSync(resolve(dirname(schema), "migrations"), { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
     .sort((a, b) => a.localeCompare(b, "en", { numeric: true }));
@@ -58,12 +62,16 @@ const URL_VARIABLE: Record<SchemaKind, string> = {
  * Applies the pending migrations of `kind` to the database at `url`. Throws
  * with Prisma's output when a migration fails.
  */
-export async function deployMigrations(kind: SchemaKind, url: string): Promise<string> {
+export async function deployMigrations(
+  kind: SchemaKind,
+  url: string,
+  schema: string = schemaPath(kind)
+): Promise<string> {
   const prisma = resolve(API_ROOT, "node_modules/prisma/build/index.js");
   try {
     const { stdout } = await run(
       process.execPath,
-      [prisma, "migrate", "deploy", "--schema", schemaPath(kind)],
+      [prisma, "migrate", "deploy", "--schema", schema],
       {
         cwd: API_ROOT,
         env: childProcessEnv({ [URL_VARIABLE[kind]]: url }),
@@ -87,12 +95,15 @@ type RawQuery = { $queryRawUnsafe<T = unknown>(sql: string): Promise<T> };
  * triggers those migrations create. Provisioning checks it before it writes
  * the first user.
  */
-export async function assertTenantSecurity(db: RawQuery): Promise<void> {
+export async function assertTenantSecurity(
+  db: RawQuery,
+  expected: string[] = migrationNames("tenant")
+): Promise<void> {
   const applied = await db.$queryRawUnsafe<Array<{ migration_name: string }>>(
     "select migration_name from _prisma_migrations where finished_at is not null and rolled_back_at is null"
   );
   const have = new Set(applied.map((row) => row.migration_name));
-  const pending = migrationNames("tenant").filter((name) => !have.has(name));
+  const pending = expected.filter((name) => !have.has(name));
   if (pending.length > 0) {
     throw new Error(`Tenant database is missing migrations: ${pending.join(", ")}`);
   }
@@ -111,4 +122,33 @@ export async function assertTenantSecurity(db: RawQuery): Promise<void> {
       `Tenant database security is incomplete (functions ${row?.functions}/2, policies ${row?.policies}, audit triggers ${row?.triggers}/2).`
     );
   }
+}
+
+/**
+ * Marks migrations that failed in the database at `url` as rolled back, so
+ * `migrate deploy` will try them again (otherwise it refuses: P3009). Safe for
+ * our migrations: Prisma sends each migration file as one multi-statement
+ * query, which PostgreSQL runs as one implicit transaction, so a failed one
+ * left nothing behind. (A migration that must run outside a transaction, such
+ * as CREATE INDEX CONCURRENTLY, needs its own file and care.) Returns the
+ * names it marked.
+ */
+export async function clearFailedMigrations(
+  kind: SchemaKind,
+  db: RawQuery,
+  url: string,
+  schema: string = schemaPath(kind)
+): Promise<string[]> {
+  const failed = await db.$queryRawUnsafe<Array<{ migration_name: string }>>(
+    "select migration_name from _prisma_migrations where finished_at is null and rolled_back_at is null"
+  );
+  const prisma = resolve(API_ROOT, "node_modules/prisma/build/index.js");
+  for (const { migration_name } of failed) {
+    await run(
+      process.execPath,
+      [prisma, "migrate", "resolve", "--rolled-back", migration_name, "--schema", schema],
+      { cwd: API_ROOT, env: childProcessEnv({ [URL_VARIABLE[kind]]: url }), timeout: 120_000 }
+    );
+  }
+  return failed.map((row) => row.migration_name);
 }

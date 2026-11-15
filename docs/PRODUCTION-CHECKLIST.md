@@ -4,7 +4,7 @@
 
 - [ ] PostgreSQL 16+ (RDS Multi-AZ recommended)
   - Run `pnpm --filter @hfp/api run db:migrate:deploy:registry`
-  - Run `pnpm --filter @hfp/api run db:migrate:deploy:tenant` for each tenant database
+  - Run `pnpm --filter @hfp/api run db:migrate:tenants` (every tenant database; exits 1 on any failure)
   - Provision each tenant through the platform; provisioning creates its roles, permissions and first administrator. Do not run `db:seed` (demo data; it refuses `NODE_ENV=production`)
 
 - [ ] Redis 7+ (ElastiCache recommended)

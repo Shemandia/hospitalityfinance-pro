@@ -43,6 +43,7 @@ import { getStorageBackend } from "./transfer-desk-storage.js";
 import { executeAutomation, type AutomationStep } from "./automation-engine.js";
 import { sendEmail } from "../shared/email.js";
 import { moduleLogger } from "../shared/logger.js";
+import { assertSchemaServiceable } from "../db/schema-version.js";
 
 const log = moduleLogger("transfer-desk-worker");
 
@@ -68,6 +69,8 @@ export function ensureTransferDeskWorker(tenantSlug: string, tenantDbUrl: string
       runWithContext({ tenantSlug, tenantDbUrl }, async () => {
         const tenant = await resolveTenant(tenantSlug);
         if (!tenant || !tenant.isActive) throw new TenantUnavailableError(tenantSlug);
+        // Behind this release's schema: postponed by createWorker, not failed.
+        assertSchemaServiceable(tenant);
         updateRequestContext({ tenantId: tenant.id });
         return processJob(job, tenantSlug, tenantDbUrl);
       }),

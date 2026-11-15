@@ -26,6 +26,12 @@ enum ProvisioningStatus {
   FAILED
 }
 
+enum MigrationRunStatus {
+  SUCCEEDED
+  FAILED
+  SKIPPED
+}
+
 enum ProvisioningStepStatus {
   PENDING
   IN_PROGRESS
@@ -72,6 +78,7 @@ model Tenant {
   // Relations
   entitlement       TenantEntitlement?
   provisioningSteps TenantProvisioningStep[]
+  migrationRuns     TenantMigrationRun[]
 
   @@map("tenants")
 }
@@ -111,4 +118,23 @@ model TenantProvisioningStep {
 
   @@index([tenantId])
   @@map("tenant_provisioning_steps")
+}
+
+// One tenant's result in one run of the tenant migration runner (WP-2 item 3,
+// db:migrate:tenants). A run is every row with the same run_id.
+model TenantMigrationRun {
+  id          String             @id @default(uuid())
+  runId       String             @map("run_id")
+  tenantId    String             @map("tenant_id")
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fromVersion String?            @map("from_version")
+  toVersion   String             @map("to_version")
+  status      MigrationRunStatus
+  error       String?
+  startedAt   DateTime           @default(now()) @map("started_at")
+  finishedAt  DateTime?          @map("finished_at")
+
+  @@index([runId])
+  @@index([tenantId, startedAt])
+  @@map("tenant_migration_runs")
 }
