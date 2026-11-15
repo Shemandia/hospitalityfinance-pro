@@ -4,6 +4,8 @@ module.exports = {
       name: "hfp-api",
       cwd: "./apps/api",
       script: "./dist/index.js",
+      // Compiled workspace packages (their "production" export).
+      node_args: "--conditions=production",
       exec_mode: "fork",
       instances: 1,
       autorestart: true,
@@ -33,6 +35,8 @@ module.exports = {
       name: "hfp-workers",
       cwd: "./apps/api",
       script: "./dist/jobs/worker-supervisor.js",
+      // Compiled workspace packages (their "production" export).
+      node_args: "--conditions=production",
       exec_mode: "fork",
       instances: 1,
       autorestart: true,

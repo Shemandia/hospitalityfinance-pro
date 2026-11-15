@@ -20,7 +20,7 @@
 - [ ] API (`apps/api`)
   - `pnpm install --frozen-lockfile`
   - `pnpm --filter @hfp/api run build`
-  - `node dist/index.js` or `pm2 start ecosystem.config.cjs --only hfp-api`
+  - `node --conditions=production dist/index.js` (from `apps/api`) or `pm2 start ecosystem.config.cjs --only hfp-api`
   - Set all env variables per `docs/ENV-VARIABLES.md`
   - Set `JWT_SECRET`, `COOKIE_SECURE=true`, `TRUST_PROXY` (the web server's address) and `REDIS_URL`; keep the API port closed to the outside
   - Verify: `GET /health` returns `{ status: "ok" }`

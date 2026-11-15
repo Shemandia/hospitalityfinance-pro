@@ -1,0 +1,13 @@
+{
+  // The production build: src only, into dist/ (dist/index.js, dist/jobs/...).
+  // tsconfig.json also covers the tests, for type checking.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "composite": false,
+    "incremental": false,
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts"]
+}

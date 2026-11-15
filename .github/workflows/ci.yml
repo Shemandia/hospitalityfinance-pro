@@ -125,3 +125,18 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      # The built API must start the way production starts it (compiled code,
+      # compiled workspace packages, generated clients beside it).
+      - name: Built API starts
+        working-directory: apps/api
+        env:
+          NODE_ENV: production
+          PORT: "4599"
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+          REGISTRY_DATABASE_URL: ${{ env.TEST_REGISTRY_DATABASE_URL }}
+        run: |
+          node --conditions=production dist/index.js > api.log 2>&1 &
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:4599/health && break; sleep 1; done
+          curl -fs http://127.0.0.1:4599/health || { cat api.log; exit 1; }
+          kill %1
