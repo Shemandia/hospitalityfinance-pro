@@ -151,8 +151,19 @@ These are read by the test suites only, not by the application.
 
 ## Web (`apps/web/.env.local`)
 
-| Variable           | Description                                                                                      | Example                 |
-| ------------------ | ------------------------------------------------------------------------------------------------ | ----------------------- |
+Every setting the web server reads is declared in `apps/web/lib/server/config.ts`; no other web file reads `process.env` (Next.js's own `NODE_ENV` and `NEXT_RUNTIME` aside). The server checks its settings when it starts (`instrumentation.ts`) and exits naming every one that is missing or invalid. None of them reaches the browser, and one build runs in any environment.
+
+| Variable                       | Required | Default | Description                                                                                                     |
+| ------------------------------ | -------- | ------- | --------------------------------------------------------------------------------------------------------------- |
+| `PORT`                         |          | `3001`  | Port for `pnpm dev` and `pnpm start` (`scripts/next.mjs`). The standalone server in Docker reads it too.        |
+| `API_INTERNAL_URL`             | yes      |         | The API as the web server reaches it, e.g. `http://127.0.0.1:4500`. Never sent to the browser.                  |
+| `HFP_PLATFORM_KEY`             |          |         | Platform machine key for the `/platform` pages; must equal the API's `PLATFORM_API_KEY`.                        |
+| `PLATFORM_ADMIN_USERNAME`      |          |         | Platform operator user name. Set together with the hash, or neither.                                            |
+| `PLATFORM_ADMIN_PASSWORD_HASH` |          |         | Platform operator password as `scrypt:<salt-hex>:<hash-hex>`; `apps/web/.env.example` shows how to generate it. |
+
+The browser calls `/api/v1/*` and `/auth/*` on the web app itself, which proxies them to `API_INTERNAL_URL` (`lib/server/api-proxy.ts`). There is no browser-visible API address, no allowed-origin list and no CORS. `NEXT_PUBLIC_API_BASE_URL`, `API_BASE_URL` and `NEXT_PUBLIC_APP_URL` are no longer read.
+
+------------------ | ------------------------------------------------------------------------------------------------ | ----------------------- |
 | `API_INTERNAL_URL` | The API as the web server reaches it; read at request time. Required. Never sent to the browser. | `http://127.0.0.1:4500` |
 
 The browser calls `/api/v1/*` and `/auth/*` on the web app itself, which proxies them to `API_INTERNAL_URL` (`lib/server/api-proxy.ts`). There is no browser-visible API address, no allowed-origin list and no CORS. `NEXT_PUBLIC_API_BASE_URL`, `API_BASE_URL` and `NEXT_PUBLIC_APP_URL` are no longer read.

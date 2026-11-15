@@ -11,6 +11,8 @@
  * time, so one build runs in any environment.
  */
 
+import { webConfig } from "./config";
+
 /** Headers that describe one hop, not the request; never forwarded. */
 const HOP_BY_HOP = new Set([
   "connection",
@@ -30,7 +32,7 @@ const NOT_FOR_API = new Set(["content-security-policy", "x-nonce"]);
 
 /** The API's address as this server reaches it. Required. */
 export function apiInternalUrl(): string {
-  const value = process.env.API_INTERNAL_URL;
+  const value = webConfig().API_INTERNAL_URL;
   if (!value) {
     throw new Error(
       "API_INTERNAL_URL is not set. Set it in apps/web/.env.local to the API's address " +

@@ -14,9 +14,6 @@ import {
 } from "../../../../components/ui/card";
 import { Building2, Lock, CheckCircle2, ArrowLeft } from "lucide-react";
 
-// Same origin: the web app proxies the API (lib/server/api-proxy.ts).
-const API_BASE = "";
-
 export default function ResetPasswordPage() {
   const params = useParams();
   const searchParams = useSearchParams();
@@ -45,7 +42,7 @@ export default function ResetPasswordPage() {
 
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/auth/reset-password`, {
+      const res = await fetch(`/auth/reset-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token, password, tenantCode }),

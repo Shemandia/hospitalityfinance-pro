@@ -27,6 +27,8 @@ RUN apk add --no-cache tini
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+# The standalone server listens on PORT (its own default is 3000).
+ENV PORT=3001
 WORKDIR /app
 
 # Copy Next.js standalone build

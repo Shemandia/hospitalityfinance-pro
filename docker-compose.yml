@@ -55,8 +55,9 @@ services:
       redis:
         condition: service_healthy
 
-  # Background workers: reports, dunning, scheduled reports and Transfer Desk
-  # imports. The API only enqueues; without this service nothing runs (OPS-10).
+  # Background workers: reports, dunning, scheduled reports, Transfer Desk
+  # imports and materialized-view refreshes. The API only enqueues; without
+  # this service nothing runs (OPS-10).
   workers:
     build:
       context: .
@@ -86,8 +87,10 @@ services:
       - "127.0.0.1:3001:3001"
     environment:
       NODE_ENV: production
+      PORT: "3001"
       # The browser calls the web app; it proxies the API on the internal network.
       API_INTERNAL_URL: http://api:4500
+      HFP_PLATFORM_KEY: ${PLATFORM_API_KEY:?Set PLATFORM_API_KEY in .env}
     depends_on:
       - api
 

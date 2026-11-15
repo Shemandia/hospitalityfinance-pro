@@ -15,9 +15,6 @@ import {
 } from "../../../../components/ui/card";
 import { Building2, Lock, ShieldAlert } from "lucide-react";
 
-// Same origin: the web app proxies the API (lib/server/api-proxy.ts).
-const API_BASE = "";
-
 export default function ChangePasswordPage() {
   const params = useParams();
   const router = useRouter();
@@ -51,7 +48,7 @@ export default function ChangePasswordPage() {
 
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/auth/change-password`, {
+      const res = await fetch(`/auth/change-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ currentPassword, newPassword, tenantCode }),

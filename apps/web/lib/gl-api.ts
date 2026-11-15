@@ -1,6 +1,3 @@
-// Same origin: the web app proxies the API (lib/server/api-proxy.ts).
-const API_BASE_URL = "";
-
 type Envelope<T> = {
   data: T;
   errors?: Array<{ code: string; message: string }>;
@@ -90,7 +87,7 @@ async function request<T>(
   path: string,
   init?: RequestInit
 ): Promise<Envelope<T>> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(path, {
     ...init,
     credentials: "include",
     headers: {
@@ -427,7 +424,7 @@ export async function getReportHistory(
 }
 
 export function getReportDownloadUrl(runId: string): string {
-  return `${API_BASE_URL}/api/v1/reports/runs/${runId}/download`;
+  return `/api/v1/reports/runs/${runId}/download`;
 }
 
 export async function getReportTypes(context: ApiContext) {
@@ -517,25 +514,25 @@ export async function confirmAPPaymentRun(
 }
 
 export function getPaymentRunDownloadUrl(runId: string): string {
-  return `${API_BASE_URL}/api/v1/ap/payment-runs/${runId}/download`;
+  return `/api/v1/ap/payment-runs/${runId}/download`;
 }
 
 export function getPaymentVoucherUrl(runId: string, supplierId: string): string {
-  return `${API_BASE_URL}/api/v1/ap/payment-runs/${runId}/voucher/${supplierId}`;
+  return `/api/v1/ap/payment-runs/${runId}/voucher/${supplierId}`;
 }
 
 // ── Report PDF URLs ──────────────────────────────────────────────────────────
 
 export function getUSALIPdfUrl(periodId: string): string {
-  return `${API_BASE_URL}/api/v1/kpi/usali-comparative/pdf?periodId=${periodId}`;
+  return `/api/v1/kpi/usali-comparative/pdf?periodId=${periodId}`;
 }
 
 export function getBalanceSheetPdfUrl(periodId: string): string {
-  return `${API_BASE_URL}/api/v1/kpi/balance-sheet/pdf?periodId=${periodId}`;
+  return `/api/v1/kpi/balance-sheet/pdf?periodId=${periodId}`;
 }
 
 export function getCashFlowPdfUrl(periodId: string): string {
-  return `${API_BASE_URL}/api/v1/kpi/cash-flow/pdf?periodId=${periodId}`;
+  return `/api/v1/kpi/cash-flow/pdf?periodId=${periodId}`;
 }
 
 // ── AR ────────────────────────────────────────────────────────────────────────

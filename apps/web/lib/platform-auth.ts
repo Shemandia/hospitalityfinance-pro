@@ -1,4 +1,5 @@
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { webConfig } from "./server/config";
 
 /**
  * Platform admin credential verification (server-only).
@@ -52,8 +53,8 @@ function timingSafeStringEqual(a: string, b: string): boolean {
  * Fails closed: missing or malformed configuration always rejects.
  */
 export function verifyPlatformCredentials(username: string, password: string): boolean {
-  const configuredUser = process.env.PLATFORM_ADMIN_USERNAME;
-  const configuredHash = process.env.PLATFORM_ADMIN_PASSWORD_HASH;
+  const { PLATFORM_ADMIN_USERNAME: configuredUser, PLATFORM_ADMIN_PASSWORD_HASH: configuredHash } =
+    webConfig();
   if (!configuredUser || !configuredHash) return false;
   if (!username || !password) return false;
 
@@ -64,5 +65,6 @@ export function verifyPlatformCredentials(username: string, password: string): b
 
 /** True when the operator account is configured on this server. */
 export function isPlatformLoginConfigured(): boolean {
-  return !!process.env.PLATFORM_ADMIN_USERNAME && !!process.env.PLATFORM_ADMIN_PASSWORD_HASH;
+  const cfg = webConfig();
+  return !!cfg.PLATFORM_ADMIN_USERNAME && !!cfg.PLATFORM_ADMIN_PASSWORD_HASH;
 }

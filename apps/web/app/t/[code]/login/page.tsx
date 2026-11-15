@@ -18,9 +18,6 @@ import {
 } from "../../../../components/ui/card";
 import { Building2, Lock, Loader2 } from "lucide-react";
 
-// Same origin: the web app proxies the API (lib/server/api-proxy.ts).
-const API_BASE = "";
-
 type TenantInfo = {
   id: string;
   slug?: string;
@@ -58,7 +55,7 @@ export default function TenantLoginPage() {
 
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/auth/tenant/${tenantCode}`);
+        const res = await fetch(`/auth/tenant/${tenantCode}`);
         if (res.ok) {
           const data = await res.json();
           if (data.data) setTenantInfo(data.data);

@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
+import { webConfig } from "../../../../lib/server/config";
 import { apiInternalUrl } from "../../../../lib/server/api-proxy";
 
-const PLATFORM_KEY = process.env.HFP_PLATFORM_KEY;
-
 export async function GET(_request: Request, { params }: { params: Promise<{ slug: string }> }) {
+  const PLATFORM_KEY = webConfig().HFP_PLATFORM_KEY;
   const { slug } = await params;
 
   if (!PLATFORM_KEY) {

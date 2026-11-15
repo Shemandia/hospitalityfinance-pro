@@ -6,9 +6,6 @@ import { useRouter, useParams } from "next/navigation";
 import { WizardLayout, WizardStepContent } from "../../../../../components/wizard-layout";
 import { COUNTRIES } from "../../../../../lib/countries";
 
-// Same origin: the web app proxies the API (lib/server/api-proxy.ts).
-const API_BASE = "";
-
 const STEPS = [
   { id: 1, name: "Organization Structure" },
   { id: 2, name: "Department Structure" },
@@ -203,7 +200,7 @@ export default function SetupPage() {
 
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/v1/setup/progress`, {
+        const res = await fetch(`/api/v1/setup/progress`, {
           credentials: "include",
           headers: apiHeaders()
         });
@@ -326,7 +323,7 @@ export default function SetupPage() {
     setError(null);
     setSaving(true);
     try {
-      const url = `${API_BASE}/api/v1/setup/steps/${step}${saveOnly ? "?saveOnly=true" : ""}`;
+      const url = `/api/v1/setup/steps/${step}${saveOnly ? "?saveOnly=true" : ""}`;
       const res = await fetch(url, {
         method: "PUT",
         credentials: "include",
@@ -366,7 +363,7 @@ export default function SetupPage() {
     if (!ok) return;
     setSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/api/v1/setup/complete`, {
+      const res = await fetch(`/api/v1/setup/complete`, {
         method: "POST",
         credentials: "include",
         headers: apiHeaders(),
