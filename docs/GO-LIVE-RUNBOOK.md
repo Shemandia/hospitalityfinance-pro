@@ -119,19 +119,27 @@ psql "$REGISTRY_DATABASE_URL" -c "SELECT 1;"
 
 ### 5. Run Tenant Migrations and Setup
 
-Tenant migrations currently run one tenant database at a time. An automated "migrate all tenants from registry" command is not implemented yet.
-
-For each tenant database, set `DATABASE_URL` to that tenant database and keep `REGISTRY_DATABASE_URL` pointed at the registry database:
+Each release migrates the registry first, then every tenant database:
 
 ```bash
-export REGISTRY_DATABASE_URL="postgresql://hfp:<password>@db.example.com:5432/hfp_registry"
-
-export DATABASE_URL="postgresql://hfp:<password>@db.example.com:5432/hfp_tenant_a"
-pnpm --filter @hfp/api run db:setup:tenant
-
-export DATABASE_URL="postgresql://hfp:<password>@db.example.com:5432/hfp_tenant_b"
-pnpm --filter @hfp/api run db:setup:tenant
+pnpm --filter @hfp/api run db:migrate:deploy:registry
+pnpm --filter @hfp/api run db:migrate:tenants --dry-run   # what would change
+pnpm --filter @hfp/api run db:migrate:tenants
 ```
+
+`db:migrate:tenants` walks every provisioned tenant in the registry, oldest
+first, and applies its pending migrations as that tenant's owner role, then
+re-grants the application role and records the new schema version. Each
+attempt is recorded in the registry table `tenant_migration_runs`. It stops at
+the first failure and exits 1 (`--keep-going` carries on past failures); fix
+the cause, then `--resume` continues the same run. Only one run at a time.
+A tenant behind the running release answers 503 ("being updated") and its
+jobs are postponed, so switch traffic to a new release only after this
+command has succeeded; other tenants are not affected by one that fails.
+
+Tenants are created by provisioning, which applies the migrations itself. A
+tenant database built before WP-2 has no migration history: the runner skips
+it, and it must be adopted (`db:adopt-tenant`) before it can be migrated.
 
 Do not run `db:seed` here: it creates a demo tenant and demo users, and refuses
 to run with `NODE_ENV=production`. A production tenant gets its roles and

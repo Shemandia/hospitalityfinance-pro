@@ -22,7 +22,7 @@ export const ALLOW = {
   console: [
     // Command-line programs: the terminal is their interface.
     /^apps\/api\/src\/scripts\//,
-    /^apps\/api\/src\/db\/(seed|seed-transfer-desk|demo-seed|setupAuditImmutability|setupEntityRls|setupPerformance)\.ts$/
+    /^apps\/api\/src\/db\/(seed|seed-transfer-desk|demo-seed)\.ts$/
   ],
   localhost: []
 };

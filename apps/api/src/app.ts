@@ -43,6 +43,7 @@ import { resolveChainEntityId } from "./modules/entity/chain.js";
 import { registerContextRouter } from "./modules/access/context.js";
 import { registerEntityRouter } from "./modules/entity/router.js";
 import { config } from "./config.js";
+import { TenantMaintenanceError } from "./db/schema-version.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -90,6 +91,15 @@ export async function createApp(): Promise<FastifyInstance> {
           }
         ]
       });
+    }
+    if (error instanceof TenantMaintenanceError) {
+      return reply
+        .code(503)
+        .header("Retry-After", "120")
+        .send({
+          data: null,
+          errors: [{ code: error.code, message: error.message }]
+        });
     }
     return reply.send(error);
   });

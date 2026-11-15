@@ -10,6 +10,7 @@ import {
   updateYearEndConfigSchema,
   runYearEndCleardownSchema
 } from "./year-end-types.js";
+import { signedInUserId } from "../access/system-user.js";
 
 function mapError(reply: FastifyReply, error: unknown) {
   if (error instanceof ZodError) {
@@ -118,7 +119,7 @@ export async function registerPeriodCloseRouter(app: FastifyInstance): Promise<v
                 errors: [{ code: "MISSING_ENTITY", message: "X-Entity-ID required." }]
               });
             const payload = runYearEndCleardownSchema.parse(request.body);
-            const actorId = (request as any).user?.id ?? (request as any).user?.sub ?? "system";
+            const actorId = signedInUserId(request);
             const data = await runYearEndCleardown(
               prisma as unknown as PrismaClient,
               entityId,

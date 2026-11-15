@@ -48,11 +48,15 @@ jobs:
       TEST_SECOND_DATABASE_URL: postgresql://hfp:hfp_ci@localhost:5432/hfp_test_b
       # A registry database, for the worker entry-point tests (OPS-10).
       TEST_REGISTRY_DATABASE_URL: postgresql://hfp:hfp_ci@localhost:5432/hfp_registry_test
+      # Scratch database for the schema/migrations drift check (WP-2).
+      SHADOW_DATABASE_URL: postgresql://hfp:hfp_ci@localhost:5432/hfp_shadow
       REDIS_URL: redis://localhost:6379
       JWT_SECRET: ci-only-secret-not-used-outside-this-workflow
       # The API and the workers will not start without these (apps/api/src/config.ts).
       APP_BASE_URL: http://web.ci.invalid
       PLATFORM_API_KEY: ci-only-platform-key-not-used-outside-this-workflow
+      # 32 bytes, base64; seals tenant role passwords in the registry (WP-2).
+      PLATFORM_ENCRYPTION_KEY: Y2ktb25seS1lbmNyeXB0aW9uLWtleS0zMi1ieXRlcyE=
 
     steps:
       - name: Checkout
@@ -79,11 +83,9 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      # The tenant migration chain cannot build an empty database yet (OPS-04).
-      # Until WP-2 replaces it with a clean baseline, the test database is built
-      # the same way provisioning builds a tenant. Replace with `migrate deploy`
-      # and add the migrate-from-empty check when WP-2 lands.
-      - name: Create application role and test database
+      # Test databases are built from empty by the migrations, exactly as
+      # provisioning builds a tenant (WP-2, ARC-03).
+      - name: Create application role and test databases
         env:
           PGPASSWORD: postgres_ci
         run: |
@@ -91,7 +93,12 @@ jobs:
             -c "CREATE ROLE hfp LOGIN PASSWORD 'hfp_ci' NOSUPERUSER NOBYPASSRLS CREATEDB CREATEROLE" \
             -c "CREATE DATABASE hfp_test OWNER hfp" \
             -c "CREATE DATABASE hfp_test_b OWNER hfp" \
-            -c "CREATE DATABASE hfp_registry_test OWNER hfp"
+            -c "CREATE DATABASE hfp_registry_test OWNER hfp" \
+            -c "CREATE DATABASE hfp_shadow OWNER hfp"
+
+      # Fails when a schema.prisma and its migrations disagree.
+      - name: Migrations match the schemas
+        run: pnpm --filter @hfp/api db:check:migrations
 
       - name: Prepare test database
         run: pnpm --filter @hfp/api db:setup:test
@@ -104,7 +111,7 @@ jobs:
           DATABASE_URL: ${{ env.TEST_SECOND_DATABASE_URL }}
 
       - name: Prepare test registry database
-        run: pnpm --filter @hfp/api exec prisma db push --schema src/db/schema-registry.prisma --skip-generate
+        run: pnpm --filter @hfp/api db:migrate:deploy:registry
         env:
           REGISTRY_DATABASE_URL: ${{ env.TEST_REGISTRY_DATABASE_URL }}
 
@@ -112,8 +119,9 @@ jobs:
         run: pnpm test
 
       # Run explicitly so a missing database fails the job instead of skipping.
+      # Files in parallel here; locally, test:integration runs them one at a time.
       - name: Integration tests
-        run: pnpm --filter @hfp/api test:integration
+        run: pnpm --filter @hfp/api test:integration:parallel
 
       - name: Build
         run: pnpm build
@@ -131,4 +139,20 @@ jobs:
           node --conditions=production dist/index.js > api.log 2>&1 &
           for i in $(seq 1 30); do curl -fs http://127.0.0.1:4599/health && break; sleep 1; done
           curl -fs http://127.0.0.1:4599/health || { cat api.log; exit 1; }
+          kill %1
+
+      # The built worker supervisor must keep its workers running.
+      - name: Built workers start
+        working-directory: apps/api
+        env:
+          NODE_ENV: production
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+          REGISTRY_DATABASE_URL: ${{ env.TEST_REGISTRY_DATABASE_URL }}
+        run: |
+          node --conditions=production dist/jobs/worker-supervisor.js > workers.log 2>&1 &
+          sleep 12
+          kill -0 %1 || { echo "supervisor exited"; cat workers.log; exit 1; }
+          started=$(grep -c 'worker started\|Worker started\|Started;' workers.log || true)
+          echo "workers reporting started: $started"
+          [ "$started" -ge 5 ] || { cat workers.log; exit 1; }
           kill %1

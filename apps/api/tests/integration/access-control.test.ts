@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Prisma } from "../../src/db/client.js";
-import { splitSqlStatements } from "../../src/db/sqlRunner.js";
+import { splitSqlStatements } from "../../src/db/sql-split.js";
 import { PrismaAccessDataSource } from "../../src/modules/access/prisma-source.js";
 import { RedisAccessCache } from "../../src/modules/access/redis-cache.js";
 import { AccessInfrastructureError, AccessService } from "../../src/modules/access/service.js";
@@ -34,7 +34,7 @@ import { disconnectTestPrisma, getTestPrisma } from "./helpers.js";
 type Tx = Prisma.TransactionClient;
 
 const MIGRATION_FILE = fileURLToPath(
-  new URL("../../src/db/migrations/20261111000000_role_assignments/migration.sql", import.meta.url)
+  new URL("../../src/db/tenant/legacy/20261111000000_role_assignments.sql", import.meta.url)
 );
 
 const redisUrl = process.env.TEST_REDIS_URL ?? process.env.REDIS_URL;

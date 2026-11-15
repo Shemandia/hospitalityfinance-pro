@@ -16,11 +16,12 @@ import {
   createICAccountPairSchema,
   updateICAccountPairSchema
 } from "./types.js";
+import { signedInUserId } from "../access/system-user.js";
 
 const icService = new IntercompanyService(prisma as unknown as PrismaClient);
 
 function getActorId(request: any): string {
-  return request.user?.id ?? request.user?.sub ?? "system";
+  return signedInUserId(request);
 }
 
 function getEntityId(request: any, reply: FastifyReply): string | null {

@@ -19,6 +19,7 @@ import {
 } from "../transform-engine.js";
 import { mapError } from "./_shared.js";
 import { pageLimit, pageOffset } from "../../../shared/pagination.js";
+import { signedInUserId } from "../../access/system-user.js";
 
 // ── Profile schemas ─────────────────────────────────────────────────────────
 
@@ -1348,7 +1349,7 @@ export function registerTransferDeskRoutes(router: FastifyInstance) {
               automationId: automation.id,
               automationStepOrder: step.stepOrder,
               status: "QUEUED",
-              triggeredBy: (request as any).userId ?? "system",
+              triggeredBy: signedInUserId(request),
               runtimeParams: (body.runtimeParams ?? undefined) as any
             }
           });

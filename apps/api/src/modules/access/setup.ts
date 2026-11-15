@@ -1,14 +1,13 @@
 /**
- * Setting up access in a tenant database: the table, the catalogue and the
- * first administrator. Used by tenant provisioning, the provisioning script
- * and the seed, so that all three produce the same starting point.
+ * Setting up access in a tenant database: the catalogue and the first
+ * administrator. Used by tenant provisioning, the provisioning scripts and
+ * the seed, so that all of them produce the same starting point. The
+ * role_assignments table, its constraints and its row-level security come
+ * with the tenant migrations.
  */
 
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import type { Prisma, PrismaClient } from "../../db/client.js";
 import { withBypassRLS } from "../../db/rls-bypass.js";
-import { splitSqlStatements } from "../../db/sqlRunner.js";
 import { grantRole } from "./grants.js";
 import {
   SYSTEM_PERMISSIONS,
@@ -18,27 +17,6 @@ import {
 } from "./system-catalog.js";
 
 type Db = PrismaClient | Prisma.TransactionClient;
-
-const ACCESS_MIGRATION = fileURLToPath(
-  new URL("../../db/migrations/20261111000000_role_assignments/migration.sql", import.meta.url)
-);
-
-/**
- * Applies the role_assignments migration. `prisma db push` creates the table
- * from the schema but not its CHECK constraint, its NULL-safe unique index or
- * its row-level security; this adds them. Safe to re-run. Every statement
- * runs in one transaction and any failure stops it: a tenant must not come up
- * with the table unprotected.
- */
-export async function applyAccessMigration(client: PrismaClient): Promise<void> {
-  const statements = splitSqlStatements(await readFile(ACCESS_MIGRATION, "utf-8"));
-  await client.$transaction(
-    async (tx) => {
-      for (const statement of statements) await tx.$executeRawUnsafe(statement);
-    },
-    { timeout: 60_000 }
-  );
-}
 
 /**
  * Writes the permission catalogue and the starting roles. Existing roles keep

@@ -15,6 +15,8 @@ import { getRequestContext } from "./requestContext.js";
 import { registerRLSMiddleware } from "./rlsMiddleware.js";
 import { registerAuditMiddleware } from "./auditMiddleware.js";
 import { config } from "../config.js";
+import { cachedTenant } from "./tenantRegistry.js";
+import { assertSchemaServiceable } from "./schema-version.js";
 
 // ── Pool (LRU-bounded) ──────────────────────────────────────────────────────
 
@@ -64,6 +66,10 @@ async function evictLRU(): Promise<void> {
  * Enforces maxPoolSize() by evicting the least-recently-used client.
  */
 export function getTenantClient(tenantSlug: string, databaseUrl: string): TenantClient {
+  // Last line of defence behind the request and job checks: no connection to
+  // a tenant whose database is behind this release's schema.
+  const known = cachedTenant(tenantSlug);
+  if (known) assertSchemaServiceable(known);
   let client = pool.get(tenantSlug);
   if (!client) {
     // Evict LRU if pool is full (fire-and-forget — eviction is async but non-blocking)

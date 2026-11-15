@@ -9,11 +9,7 @@
 
 import { PrismaClient, Prisma } from "../db/client.js";
 import { randomUUID } from "node:crypto";
-import {
-  applyAccessMigration,
-  ensureSystemCatalog,
-  grantRoleAtEntity
-} from "../modules/access/setup.js";
+import { ensureSystemCatalog, grantRoleAtEntity } from "../modules/access/setup.js";
 import { APService } from "../modules/ap/service.js";
 import { ARService } from "../modules/ar/service.js";
 import { requireConfig } from "../config.js";
@@ -38,8 +34,6 @@ const ADMIN_USER_ID = "a15c0667-e920-4e66-8b15-e1a561b965c4";
 async function main() {
   console.log("=== HospitalityFinance Pro — UAT Seed ===\n");
   await prisma.$executeRaw`SELECT set_config('app.bypass_rls', 'true', false)`;
-  await applyAccessMigration(prisma);
-
   // ── 1. Entities ─────────────────────────────────────────────────────────
 
   console.log("1. Seeding entities...");

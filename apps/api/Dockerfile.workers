@@ -31,6 +31,10 @@ COPY --from=builder /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/apps/api/package.json ./apps/api/
 COPY --from=builder /app/apps/api/src/db/generated ./apps/api/src/db/generated
+# Schemas and migrations: the workers read the release's tenant schema version
+# from them (a tenant behind it is under maintenance), as the API does.
+COPY --from=builder /app/apps/api/src/db/registry ./apps/api/src/db/registry
+COPY --from=builder /app/apps/api/src/db/tenant ./apps/api/src/db/tenant
 COPY --from=builder /app/packages ./packages
 
 RUN addgroup -g 1001 -S hfp && adduser -S hfp -u 1001 -G hfp

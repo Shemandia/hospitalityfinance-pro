@@ -1,43 +1,24 @@
 import { PrismaClient } from "../../db/client.js";
-import { execSync } from "node:child_process";
-import { resolve } from "node:path";
 import { registryPrisma } from "../../db/prisma.js";
 import { generateTenantCode } from "../../db/generateTenantCode.js";
 import { sendWelcomeEmail } from "../../shared/email.js";
 import {
-  applyAccessMigration,
-  ensureSystemCatalog,
-  grantTenantAdministrator
-} from "../access/setup.js";
+  createDatabase,
+  migrateDatabase,
+  planTenantDatabase,
+  secureDatabase,
+  tenantUrls
+} from "./tenant-database.js";
+import { ensureSystemCatalog, grantTenantAdministrator } from "../access/setup.js";
 import {
   PROVISIONING_STEPS,
   type ProvisionTenantInput,
   type ProvisioningStepName
 } from "./types.js";
 import { hashPassword } from "../../services/password-policy.js";
-import { appUrl, childProcessEnv, config, registryDatabaseUrl } from "../../config.js";
+import { appUrl } from "../../config.js";
 
 type SSEWriter = (event: string, data: Record<string, unknown>) => void;
-
-function parseDbUrl(url: string) {
-  const u = new URL(url);
-  return {
-    host: u.hostname,
-    port: u.port || "5432",
-    user: u.username,
-    password: u.password
-  };
-}
-
-function buildDbUrl(
-  user: string,
-  password: string,
-  host: string,
-  port: string,
-  dbName: string
-): string {
-  return `postgresql://${user}:${password}@${host}:${port}/${dbName}`;
-}
 
 export class ProvisioningService {
   /**
@@ -46,7 +27,6 @@ export class ProvisioningService {
    */
   async provision(input: ProvisionTenantInput, sse: SSEWriter): Promise<void> {
     const { tenant, entitlements, adminUser } = input;
-    const tenantDbName = `hfp_${tenant.slug.replace(/-/g, "_")}`;
 
     // Check slug uniqueness
     const existing = await registryPrisma.tenant.findUnique({
@@ -62,31 +42,20 @@ export class ProvisioningService {
       return;
     }
 
-    // Determine DB connection details
-    const registryUrl = registryDatabaseUrl();
-    const dbConn = parseDbUrl(registryUrl);
-    const settings = config();
-    const tenantDbHost = settings.TENANT_DB_HOST ?? dbConn.host;
-    const tenantDbPort = settings.TENANT_DB_PORT ?? dbConn.port;
-    const tenantDbUser = settings.TENANT_DB_USER ?? dbConn.user;
-    const tenantDbPassword = settings.TENANT_DB_PASSWORD ?? dbConn.password;
-    const tenantDbUrl = buildDbUrl(
-      tenantDbUser,
-      tenantDbPassword,
-      tenantDbHost,
-      tenantDbPort,
-      tenantDbName
-    );
+    // The database's location and the two roles' passwords are fixed now, and
+    // recorded sealed in the registry, so a retry uses the same ones.
+    const tenantCode = await generateTenantCode(tenant.slug);
+    const location = planTenantDatabase(tenant.slug, tenantCode);
+    const urls = tenantUrls(location);
 
     // Create tenant record + entitlement + provisioning steps in one transaction
     const tenantRecord = await registryPrisma.$transaction(async (tx) => {
-      const tenantCode = await generateTenantCode(tenant.slug);
       const t = await tx.tenant.create({
         data: {
           name: tenant.name,
           slug: tenant.slug,
           tenantCode,
-          databaseUrl: tenantDbUrl,
+          ...location,
           domain: tenant.domain ?? null,
           adminEmail: tenant.adminEmail,
           countryCode: tenant.countryCode,
@@ -126,92 +95,29 @@ export class ProvisioningService {
 
     // Execute each provisioning step
     await this.executeStep(tenantRecord.id, "creating_database", sse, async () => {
-      const identifierRegex = /^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/;
-      if (!identifierRegex.test(tenantDbName)) {
-        throw new Error(`Invalid database name: ${tenantDbName}`);
-      }
-      if (!identifierRegex.test(tenantDbUser)) {
-        throw new Error(`Invalid database user: ${tenantDbUser}`);
-      }
-      try {
-        await registryPrisma.$executeRawUnsafe(
-          `CREATE DATABASE "${tenantDbName}" OWNER "${tenantDbUser}"`
-        );
-      } catch (error: any) {
-        if (!error.message?.includes("already exists")) throw error;
-      }
+      // The owner and application roles, then the database, owned by the owner.
+      await createDatabase(location);
     });
 
     await this.executeStep(tenantRecord.id, "running_migrations", sse, async () => {
-      const apiRoot = resolve(import.meta.dirname ?? __dirname, "../../..");
-      execSync("npx prisma db push --schema src/db/schema-tenant.prisma --skip-generate", {
-        cwd: apiRoot,
-        env: childProcessEnv({ DATABASE_URL: tenantDbUrl }),
-        stdio: "pipe",
-        timeout: 60_000
+      // The tenant baseline and every later migration, as the owner, recorded
+      // in the database's own history (ARC-03). Security functions, policies,
+      // constraints and the system user come with the migrations.
+      const schemaVersion = await migrateDatabase(location);
+      await registryPrisma.tenant.update({
+        where: { id: tenantRecord.id },
+        data: { schemaVersion }
       });
     });
 
     await this.executeStep(tenantRecord.id, "applying_security", sse, async () => {
-      const tenantClient = new PrismaClient({ datasourceUrl: tenantDbUrl });
-      try {
-        const { readFileSync } = await import("node:fs");
-        const apiRoot = resolve(import.meta.dirname ?? __dirname, "../../..");
-        const sqlDir = resolve(apiRoot, "src/db/sql");
-        const performanceSql = readFileSync(resolve(sqlDir, "performance.sql"), "utf-8");
-        const rlsSql = readFileSync(resolve(sqlDir, "entity-rls.sql"), "utf-8");
-        for (const file of [performanceSql, rlsSql]) {
-          // Split on semicolons but respect $$ dollar-quoted blocks (PL/pgSQL)
-          const statements: string[] = [];
-          let current = "";
-          let inDollarBlock = false;
-          for (const line of file.split("\n")) {
-            const trimmed = line.trim();
-            if (trimmed.startsWith("--") && !inDollarBlock) continue;
-            if (trimmed.includes("$$")) {
-              inDollarBlock = !inDollarBlock;
-            }
-            current += line + "\n";
-            if (!inDollarBlock && trimmed.endsWith(";")) {
-              const stmt = current.trim().replace(/;$/, "").trim();
-              if (stmt.length > 0) statements.push(stmt);
-              current = "";
-            }
-          }
-          if (current.trim().length > 0) {
-            const stmt = current.trim().replace(/;$/, "").trim();
-            if (stmt.length > 0) statements.push(stmt);
-          }
-          for (const stmt of statements) {
-            try {
-              await tenantClient.$executeRawUnsafe(stmt);
-            } catch (sqlErr: any) {
-              // Skip statements referencing tables/relations that don't exist yet
-              // or indexes/views that already exist. Prisma wraps PG errors in
-              // different structures, so check message string as fallback.
-              const msg = sqlErr?.message ?? "";
-              const code = sqlErr?.code ?? sqlErr?.meta?.code ?? "";
-              if (
-                code === "42P01" ||
-                code === "42P07" ||
-                msg.includes("does not exist") ||
-                msg.includes("already exists")
-              )
-                continue;
-              throw sqlErr;
-            }
-          }
-        }
-        // Not skippable like the statements above: the grants table must be
-        // constrained and protected before the first administrator is written.
-        await applyAccessMigration(tenantClient);
-      } finally {
-        await tenantClient.$disconnect();
-      }
+      // The application role's data rights; then refuse to go on, rather than
+      // create users, if a policy is missing or the role can do more.
+      await secureDatabase(location);
     });
 
     await this.executeStep(tenantRecord.id, "creating_auth", sse, async () => {
-      const tenantClient = new PrismaClient({ datasourceUrl: tenantDbUrl });
+      const tenantClient = new PrismaClient({ datasourceUrl: urls.app });
       try {
         // The catalogue and the starting roles, then the first administrator.
         await ensureSystemCatalog(tenantClient);
@@ -243,11 +149,12 @@ export class ProvisioningService {
 
     await this.executeStep(tenantRecord.id, "seeding_data", sse, async () => {
       // Create the setup progress record so the tenant admin gets the wizard on first login
-      const tenantClient = new PrismaClient({ datasourceUrl: tenantDbUrl });
+      const tenantClient = new PrismaClient({ datasourceUrl: urls.app });
       try {
+        // Keyed by slug: the setup service and the access context read it so.
         await tenantClient.tenantSetupProgress.create({
           data: {
-            tenantId: tenantRecord.id,
+            tenantId: tenant.slug,
             currentStep: 1,
             isCompleted: false,
             stepData: {},

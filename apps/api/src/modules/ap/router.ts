@@ -21,6 +21,7 @@ import {
   runCollectionSchema
 } from "./payment-profile-types.js";
 import { pageLimit } from "../../shared/pagination.js";
+import { signedInUserId } from "../access/system-user.js";
 
 const apService = new APService(prisma as unknown as PrismaClient);
 const paymentProfileService = new PaymentProfileService(prisma as unknown as PrismaClient);
@@ -546,7 +547,7 @@ export async function registerAPRouter(app: FastifyInstance): Promise<void> {
                 errors: [{ code: "MISSING_ENTITY", message: "X-Entity-ID required." }]
               });
             const payload = runCollectionSchema.parse(request.body);
-            const actorId = (request as any).user?.id ?? (request as any).user?.sub ?? "system";
+            const actorId = signedInUserId(request);
             const data = await paymentProfileService.runCollection(entityId, payload, actorId);
             return reply.code(201).send({ data, errors: [] });
           } catch (error) {

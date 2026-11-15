@@ -40,7 +40,7 @@ Run registry and tenant setup:
 ```powershell
 pnpm --filter @hfp/api run db:generate
 pnpm --filter @hfp/api run db:migrate:deploy:registry
-pnpm --filter @hfp/api run db:setup:tenant
+pnpm --filter @hfp/api run db:migrate:deploy:tenant
 ```
 
 For a development machine, `pnpm dev:setup` does all of this and seeds a demo
@@ -95,30 +95,31 @@ pnpm build
 
 Run production database setup:
 
+Each release migrates the registry first, then every tenant database:
+
 ```bash
 pnpm --filter @hfp/api run db:migrate:deploy:registry
-pnpm --filter @hfp/api run db:setup:tenant
+pnpm --filter @hfp/api run db:migrate:tenants --dry-run   # what would change
+pnpm --filter @hfp/api run db:migrate:tenants
 ```
+
+`db:migrate:tenants` walks every provisioned tenant in the registry, oldest
+first, and applies its pending migrations as that tenant's owner role, then
+re-grants the application role and records the new schema version. Each
+attempt is recorded in the registry table `tenant_migration_runs`. It stops at
+the first failure and exits 1 (`--keep-going` carries on past failures); fix
+the cause, then `--resume` continues the same run. Only one run at a time.
+A tenant behind the running release answers 503 ("being updated") and its
+jobs are postponed, so switch traffic to a new release only after this
+command has succeeded; other tenants are not affected by one that fails.
+
+Tenants are created by provisioning, which applies the migrations itself. A
+tenant database built before WP-2 has no migration history: the runner skips
+it, and it must be adopted (`db:adopt-tenant`) before it can be migrated.
 
 Do not run `db:seed` in production: it creates demo users and refuses
 `NODE_ENV=production`. Tenants get their roles, permissions and first
 administrator from provisioning.
-
-Tenant migrations currently run one tenant database at a time. An automated "migrate all tenants from registry" command is not implemented yet.
-
-For each tenant database, run `db:setup:tenant` with `DATABASE_URL` pointing at that tenant database. Keep `REGISTRY_DATABASE_URL` pointed at the registry database for tenant registry operations.
-
-Manual tenant pattern:
-
-```bash
-export REGISTRY_DATABASE_URL="postgresql://hfp:<password>@localhost:5432/hfp_registry"
-
-export DATABASE_URL="postgresql://hfp:<password>@localhost:5432/hfp_tenant_a"
-pnpm --filter @hfp/api run db:setup:tenant
-
-export DATABASE_URL="postgresql://hfp:<password>@localhost:5432/hfp_tenant_b"
-pnpm --filter @hfp/api run db:setup:tenant
-```
 
 ## PM2 Production Startup
 

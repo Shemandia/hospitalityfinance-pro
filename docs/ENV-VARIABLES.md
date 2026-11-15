@@ -30,15 +30,13 @@ and `SEED_USER_PASSWORD`, the database setup scripts need `DATABASE_URL`.
 
 ### Databases
 
-| Variable                | Required by                              | Default | Description                                                                                                          |
-| ----------------------- | ---------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`          |                                          |         | A tenant database, for setup scripts and the seed; the registry fallback outside production. Never a default tenant. |
-| `REGISTRY_DATABASE_URL` | api in production, workers in production |         | The tenant registry database. Required in production.                                                                |
-| `TENANT_POOL_MAX`       |                                          | `50`    | Most tenant database clients kept open at once.                                                                      |
-| `TENANT_DB_HOST`        |                                          |         | Provisioning: host for new tenant databases (default: the registry's).                                               |
-| `TENANT_DB_PORT`        |                                          |         | Provisioning: port for new tenant databases (default: the registry's).                                               |
-| `TENANT_DB_USER`        |                                          |         | Provisioning: role that owns new tenant databases (default: the registry's).                                         |
-| `TENANT_DB_PASSWORD`    |                                          |         | Provisioning: that role's password (default: the registry's).                                                        |
+| Variable                | Required by                              | Default | Description                                                                                                                           |
+| ----------------------- | ---------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`          |                                          |         | A tenant database, for setup scripts and the seed; the registry fallback outside production. Never a default tenant.                  |
+| `REGISTRY_DATABASE_URL` | api in production, workers in production |         | The tenant registry database. Required in production.                                                                                 |
+| `TENANT_POOL_MAX`       |                                          | `50`    | Most tenant database clients kept open at once.                                                                                       |
+| `TENANT_DB_HOST`        |                                          |         | Provisioning: server for new tenant databases (default: the registry's). The registry's role creates their roles and databases there. |
+| `TENANT_DB_PORT`        |                                          |         | Provisioning: port for new tenant databases (default: the registry's).                                                                |
 
 ### Redis
 
@@ -49,17 +47,19 @@ and `SEED_USER_PASSWORD`, the database setup scripts need `DATABASE_URL`.
 
 ### Sign-in and sessions
 
-| Variable                   | Required by | Default  | Description                                                         |
-| -------------------------- | ----------- | -------- | ------------------------------------------------------------------- |
-| `JWT_SECRET`               | api         |          | Signs session tokens. Required by the API.                          |
-| `JWT_ACCESS_EXPIRY`        |             | `900`    | Access token lifetime, seconds.                                     |
-| `JWT_REFRESH_EXPIRY`       |             | `604800` | Refresh token lifetime, seconds.                                    |
-| `BCRYPT_SALT_ROUNDS`       |             | `12`     | bcrypt cost for password hashes.                                    |
-| `MAX_FAILED_ATTEMPTS`      |             | `5`      | Failed sign-ins before the account locks.                           |
-| `LOCKOUT_DURATION_MINUTES` |             | `15`     | How long a locked account stays locked.                             |
-| `COOKIE_SECURE`            |             | `false`  | Mark session cookies Secure. Always on in production.               |
-| `COOKIE_DOMAIN`            |             |          | Domain attribute for session cookies; normally unset.               |
-| `PLATFORM_API_KEY`         | api         |          | Key the platform admin uses for tenant routes. Required by the API. |
+| Variable                           | Required by  | Default  | Description                                                                                                                                                                                                 |
+| ---------------------------------- | ------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `JWT_SECRET`                       | api          |          | Signs session tokens. Required by the API.                                                                                                                                                                  |
+| `JWT_ACCESS_EXPIRY`                |              | `900`    | Access token lifetime, seconds.                                                                                                                                                                             |
+| `JWT_REFRESH_EXPIRY`               |              | `604800` | Refresh token lifetime, seconds.                                                                                                                                                                            |
+| `BCRYPT_SALT_ROUNDS`               |              | `12`     | bcrypt cost for password hashes.                                                                                                                                                                            |
+| `MAX_FAILED_ATTEMPTS`              |              | `5`      | Failed sign-ins before the account locks.                                                                                                                                                                   |
+| `LOCKOUT_DURATION_MINUTES`         |              | `15`     | How long a locked account stays locked.                                                                                                                                                                     |
+| `COOKIE_SECURE`                    |              | `false`  | Mark session cookies Secure. Always on in production.                                                                                                                                                       |
+| `COOKIE_DOMAIN`                    |              |          | Domain attribute for session cookies; normally unset.                                                                                                                                                       |
+| `PLATFORM_API_KEY`                 | api          |          | Key the platform admin uses for tenant routes. Required by the API.                                                                                                                                         |
+| `PLATFORM_ENCRYPTION_KEY`          | api, workers |          | Encrypts tenant database passwords in the registry (AES-256-GCM). 32 random bytes, base64: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))". Rotation: docs/SECRETS-ROTATION.md. |
+| `PLATFORM_ENCRYPTION_KEY_PREVIOUS` |              |          | During a key rotation only: the key being replaced, so values it sealed can still be opened until db:reseal-secrets has re-sealed them. docs/SECRETS-ROTATION.md.                                           |
 
 ### Files
 
@@ -127,10 +127,11 @@ and `SEED_USER_PASSWORD`, the database setup scripts need `DATABASE_URL`.
 
 ### Development
 
-| Variable                     | Required by | Default | Description                                                              |
-| ---------------------------- | ----------- | ------- | ------------------------------------------------------------------------ |
-| `SEED_USER_PASSWORD`         |             |         | The demo users' password (pnpm dev:setup, db:seed).                      |
-| `TML_ALLOW_INSECURE_SANDBOX` |             | `false` | Tests only: run TML without the isolated sandbox. Ignored in production. |
+| Variable                     | Required by | Default | Description                                                                                                                 |
+| ---------------------------- | ----------- | ------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `SHADOW_DATABASE_URL`        |             |         | An empty scratch database (name it hfp_shadow) for db:check:migrations and creating migrations; its contents are discarded. |
+| `SEED_USER_PASSWORD`         |             |         | The demo users' password (pnpm dev:setup, db:seed).                                                                         |
+| `TML_ALLOW_INSECURE_SANDBOX` |             | `false` | Tests only: run TML without the isolated sandbox. Ignored in production.                                                    |
 
 <!-- api-config:end -->
 

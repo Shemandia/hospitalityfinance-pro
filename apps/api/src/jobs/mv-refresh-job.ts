@@ -13,7 +13,6 @@
 import { createQueue } from "./queues.js";
 import { prisma } from "../db/prisma.js";
 import { currentTenantId, forEachActiveTenant, runForTenantId } from "../db/tenantScope.js";
-import { withBypassRLS } from "../db/rls-bypass.js";
 
 export const MV_REFRESH_QUEUE = "mv-refresh";
 
@@ -54,41 +53,22 @@ export async function enqueueMVRefresh(reason: string): Promise<void> {
 /**
  * Rebuild mv_period_account_balances.
  *
- * MUST run with RLS bypassed. The view aggregates account_period_balances,
- * accounts and periods — all entity-scoped tables whose policies require
- * app_current_entity_id() to be set. PostgreSQL applies those policies while
- * refreshing (the `hfp` role owns the tables but has no BYPASSRLS and RLS is
- * FORCEd), so a refresh from this scheduled job — which has no entity context —
- * rebuilt the view with ZERO rows.
+ * Calls refresh_period_balances() (tenant migration
+ * 1_system_user_and_view_refresh). Only the view's owner may refresh it, and
+ * the API and the workers connect as the tenant's application role, which owns
+ * nothing; the function runs with the owner's rights and does only the
+ * refresh. It also lifts row-level security for the refresh alone: the view
+ * aggregates entity-scoped tables, and refreshed without that it would be
+ * rebuilt empty (no entity is bound in this job), which once made every KPI,
+ * balance sheet and cash flow silently return nothing.
  *
- * The failure was silent and total: the refresh reported success, and every
- * KPI, balance sheet, cash flow, consolidation and budget-variance query that
- * reads the view then returned nothing. Verified directly against Postgres:
- * refreshing without context yielded 0 rows, with bypass 1,267.
- *
- * A tenant-wide reporting view has no single entity context by definition, so
- * bypass is the correct scope here rather than a workaround.
+ * Not CONCURRENTLY: a function call runs inside a transaction, where
+ * PostgreSQL forbids it. The rebuild briefly blocks readers of the view.
  */
 export async function refreshMaterializedView(): Promise<{ durationMs: number }> {
   const start = Date.now();
-
-  // Refresh inside a transaction so the bypass and the REFRESH are guaranteed
-  // to execute on the SAME connection. Setting the bypass in one $executeRaw
-  // and refreshing in another is unsafe: Prisma pools connections, so the
-  // REFRESH could land on a connection that never saw the bypass and would
-  // silently rebuild the view empty again.
-  //
-  // The transaction requirement is why this is no longer CONCURRENTLY —
-  // PostgreSQL forbids REFRESH … CONCURRENTLY inside a transaction block. The
-  // cost is an ACCESS EXCLUSIVE lock on the view for the duration of the
-  // rebuild, which blocks readers; the benefit is a view that actually has
-  // rows in it. If the database role is later granted BYPASSRLS (or the view
-  // is owned by such a role), the bypass becomes unnecessary and CONCURRENTLY
-  // can be restored — the unique index it needs already exists.
-  await withBypassRLS(prisma, async (tx: any) => {
-    await tx.$executeRawUnsafe("REFRESH MATERIALIZED VIEW mv_period_account_balances");
-  });
-
+  // A statement, not a query: the function returns void, which Prisma cannot read.
+  await prisma.$executeRawUnsafe("SELECT refresh_period_balances()");
   const durationMs = Date.now() - start;
   return { durationMs };
 }
