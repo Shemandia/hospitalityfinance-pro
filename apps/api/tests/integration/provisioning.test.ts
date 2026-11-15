@@ -91,7 +91,8 @@ if (!env.ready) {
     }, 300_000);
 
     afterAll(async () => {
-      await app?.$disconnect();
+      // The application role's connection is still open: the drop must end it
+      // (which needs that role's rights; CI once failed on exactly this).
       await owner?.$disconnect();
       const t = await registry.tenant.findUnique({ where: { slug } });
       if (t?.dbName && t.ownerRole && t.appRole) {
@@ -101,6 +102,7 @@ if (!env.ready) {
           appRole: t.appRole
         });
       }
+      await app?.$disconnect().catch(() => undefined);
       if (t) {
         await registry.tenantProvisioningStep.deleteMany({ where: { tenantId: t.id } });
         await registry.tenantEntitlement.deleteMany({ where: { tenantId: t.id } });

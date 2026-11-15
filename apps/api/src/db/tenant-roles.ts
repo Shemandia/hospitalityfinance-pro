@@ -177,9 +177,9 @@ export async function assertApplicationRoleRights(db: Query, appRole: string): P
 /**
  * Drops a tenant database and both its roles, as the platform role (for
  * tests, a failed first provisioning, and offboarding after the retention
- * period). The platform role holds the owner role without its rights, so it
- * first takes them; only the owner may drop the database. Connections to the
- * database are ended. Safe to repeat.
+ * period). The platform role holds the tenant's roles without their rights, so
+ * it first takes them: only the owner may drop the database, and ending the
+ * application role's open sessions needs that role's rights. Safe to repeat.
  */
 export async function dropTenantDatabase(
   platform: Exec & Query,
@@ -190,8 +190,22 @@ export async function dropTenantDatabase(
     platform,
     `select exists (select 1 from pg_roles where rolname = '${names.ownerRole}') as found`
   );
-  if (ownerExists) {
-    await platform.$executeRawUnsafe(`GRANT ${owner} TO CURRENT_USER WITH INHERIT TRUE, SET TRUE`);
+  // The owner's rights to drop the database; the application role's too, because
+  // DROP ... WITH (FORCE) ends that role's open sessions, which needs its rights.
+  for (const [role, name] of [
+    [owner, names.ownerRole],
+    [ident(names.appRole), names.appRole]
+  ] as const) {
+    const present =
+      role === owner
+        ? ownerExists
+        : await exists(
+            platform,
+            `select exists (select 1 from pg_roles where rolname = '${name}') as found`
+          );
+    if (present) {
+      await platform.$executeRawUnsafe(`GRANT ${role} TO CURRENT_USER WITH INHERIT TRUE, SET TRUE`);
+    }
   }
   await platform.$executeRawUnsafe(`DROP DATABASE IF EXISTS ${ident(names.dbName)} WITH (FORCE)`);
   await platform.$executeRawUnsafe(`DROP ROLE IF EXISTS ${ident(names.appRole)}`);
