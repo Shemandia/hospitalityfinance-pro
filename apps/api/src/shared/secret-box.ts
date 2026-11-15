@@ -14,7 +14,7 @@
  */
 
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { requireConfig } from "../config.js";
+import { config, requireConfig } from "../config.js";
 
 const VERSION = "v1";
 
@@ -47,6 +47,26 @@ function platformKey(): Buffer {
   return parseKey(PLATFORM_ENCRYPTION_KEY);
 }
 
+/**
+ * The keys values may be opened with: the platform key and, during a
+ * rotation, PLATFORM_ENCRYPTION_KEY_PREVIOUS.
+ */
+function openingKeys(): Buffer[] {
+  const previous = config().PLATFORM_ENCRYPTION_KEY_PREVIOUS;
+  return previous ? [platformKey(), parseKey(previous)] : [platformKey()];
+}
+
+/** The id of the key that sealed `sealed`. */
+export function sealedWith(sealed: string): string | undefined {
+  const parts = sealed.split(".");
+  return parts.length === 5 && parts[0] === VERSION ? parts[1] : undefined;
+}
+
+/** The current platform key's id. */
+export function platformKeyId(): string {
+  return keyId(platformKey());
+}
+
 /** Seals `plain` with `key` (default: the platform key). */
 export function seal(plain: string, key: Buffer = platformKey()): string {
   const iv = randomBytes(12);
@@ -61,8 +81,15 @@ export function seal(plain: string, key: Buffer = platformKey()): string {
   ].join(".");
 }
 
-/** Opens a value sealed by `seal`. Throws on another key, a damaged value or tampering. */
-export function open(sealed: string, key: Buffer = platformKey()): string {
+/**
+ * Opens a value sealed by `seal`, with `key` or else whichever configured key
+ * sealed it. Throws on an unknown key, a damaged value or tampering.
+ */
+export function open(sealed: string, key?: Buffer): string {
+  if (!key) {
+    const id = sealedWith(sealed);
+    key = openingKeys().find((k) => keyId(k) === id) ?? platformKey();
+  }
   const parts = sealed.split(".");
   if (parts.length !== 5 || parts[0] !== VERSION) {
     throw new SecretBoxError("Not a sealed value.");

@@ -131,6 +131,14 @@ const schema = z.object({
   PLATFORM_API_KEY: text()
     .optional()
     .describe("Key the platform admin uses for tenant routes. Required by the API."),
+  PLATFORM_ENCRYPTION_KEY_PREVIOUS: text()
+    .refine((v) => Buffer.from(v, "base64").length === 32, {
+      message: "must be 32 bytes, base64-encoded"
+    })
+    .optional()
+    .describe(
+      "During a key rotation only: the key being replaced, so values it sealed can still be opened until db:reseal-secrets has re-sealed them. docs/SECRETS-ROTATION.md."
+    ),
   PLATFORM_ENCRYPTION_KEY: text()
     .refine((v) => Buffer.from(v, "base64").length === 32, {
       message: "must be 32 bytes, base64-encoded"
@@ -434,7 +442,8 @@ export const CONFIG_GROUPS: ReadonlyArray<{ title: string; keys: readonly Config
       "COOKIE_SECURE",
       "COOKIE_DOMAIN",
       "PLATFORM_API_KEY",
-      "PLATFORM_ENCRYPTION_KEY"
+      "PLATFORM_ENCRYPTION_KEY",
+      "PLATFORM_ENCRYPTION_KEY_PREVIOUS"
     ]
   },
   {

@@ -56,15 +56,87 @@ deployed environment.
 
 ## PLATFORM_ENCRYPTION_KEY
 
-Seals each tenant's database role passwords in the registry (AES-256-GCM,
-`apps/api/src/shared/secret-box.ts`). The API and the workers refuse to start
-without it. Each sealed value names the key that sealed it, so a value sealed
-with another key fails with a message naming both keys.
+### What it protects
 
-- Generate: `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`.
-- Keep it outside the database, and back it up separately from database
-  backups: without it no tenant provisioned since WP-2 can be reached, and a
-  backup that holds both the registry and the key gives away every tenant.
-- Rotation (re-sealing every value under a new key without downtime) arrives
-  with WP-2 item 5. Until then, do not change the key on a system that has
-  tenants provisioned since WP-2.
+Each tenant provisioned since WP-2 has two PostgreSQL roles, an owner and an
+application role. Their passwords are stored in the registry (`tenants.owner_password_enc`,
+`tenants.app_password_enc`) sealed with this key: AES-256-GCM,
+`apps/api/src/shared/secret-box.ts`. A sealed value names the key that sealed
+it (`v1.<key id>.…`, the key id being the first 8 hex characters of the key's
+SHA-256). The API and the workers refuse to start without the key; they open
+the passwords in memory only.
+
+The key protects nothing else. Tenant data is not encrypted with it.
+
+### Generating and storing it
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+```
+
+- Put it where the API and the workers read their settings (`apps/api/.env`,
+  the PM2 environment, or the container environment), readable only by the
+  service user (`chmod 600`).
+- Never in the database, the repository or a ticket.
+
+### Backing it up
+
+- Keep a copy in the organisation's secret store (password manager vault or
+  cloud secret manager), labelled with its key id and the date it became
+  current. To see the id of a key:
+  `node -e "const c=require('crypto');console.log(c.createHash('sha256').update(Buffer.from(process.argv[1],'base64')).digest('hex').slice(0,8))" "<key>"`
+- Keep it **separate from database backups.** A registry backup is harmless
+  without the key; the two together give access to every tenant database.
+- Keep every retired key for as long as registry backups sealed with it are
+  retained: restoring such a backup needs the key that sealed it (or a
+  password reset, below).
+
+### Rotating it
+
+No downtime; the passwords themselves do not change.
+
+1. Generate a new key and store it in the secret store.
+2. Configure every API and worker process with
+   `PLATFORM_ENCRYPTION_KEY=<new>` and `PLATFORM_ENCRYPTION_KEY_PREVIOUS=<old>`,
+   and restart them. They now open values sealed with either key and seal new
+   values with the new one.
+3. Re-seal every stored password with the new key:
+   `pnpm --filter @hfp/api db:reseal-secrets`
+   (prints each tenant with the key id it moved from; safe to repeat; exits 1
+   if any tenant failed).
+4. Remove `PLATFORM_ENCRYPTION_KEY_PREVIOUS` and restart.
+5. Keep the old key in the secret store, marked retired, while backups sealed
+   with it exist.
+
+### Rotating the database passwords themselves
+
+`pnpm --filter @hfp/api db:reset-tenant-passwords [--tenant <slug>]...` gives
+each tenant's two roles new random passwords (set as SCRAM verifiers by the
+registry's role, which administers them) and seals them with the current key.
+Open connections keep working; new connections use the new passwords once the
+services' registry cache refreshes, within a minute, or after a restart.
+
+### If the key is lost
+
+Lost means: no process has it and no copy exists.
+
+- **Effect.** The sealed passwords cannot be opened, so the API and the
+  workers cannot reach any tenant provisioned since WP-2: those tenants fail
+  until it is fixed (each is logged as "Tenant database location unusable";
+  the others keep working). **No tenant data is lost**: the databases and
+  their contents are untouched, and tenants built before WP-2 are not affected.
+- **Recovery**, in minutes:
+  1. Generate a new key, store it, set it as `PLATFORM_ENCRYPTION_KEY`
+     (no `_PREVIOUS`).
+  2. `pnpm --filter @hfp/api db:reset-tenant-passwords`: new passwords for
+     every tenant's roles, sealed with the new key. This needs the registry's
+     role (the one that created the tenant roles), not the old key.
+  3. Restart the API and the workers.
+- Registry backups taken before the loss hold passwords sealed with the lost
+  key; after restoring one, run step 2 again.
+
+### If the key leaks
+
+Treat the tenant database passwords as known: rotate the key (above), then
+run `db:reset-tenant-passwords` so the leaked key opens nothing that is still
+valid.
