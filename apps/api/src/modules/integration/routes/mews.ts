@@ -5,6 +5,7 @@ import { prisma } from "../../../db/prisma.js";
 import { requirePermission } from "../../../middleware/requirePermission.js";
 import { runMewsImport } from "../connectors/mews/mews-import-job.js";
 import { mapError, requireEntityId } from "./_shared.js";
+import { pageLimit, pageOffset } from "../../../shared/pagination.js";
 
 export function registerMewsRoutes(router: FastifyInstance) {
   router.post(
@@ -43,7 +44,8 @@ export function registerMewsRoutes(router: FastifyInstance) {
         const logs = await prisma.importLog.findMany({
           where: { entityId, connectorType: "MEWS_PMS" },
           orderBy: { createdAt: "desc" },
-          take: 200
+          take: pageLimit((request.query as { limit?: string }).limit),
+          skip: pageOffset((request.query as { offset?: string }).offset)
         });
         return reply.send({ data: logs, errors: [] });
       } catch (error) {

@@ -13,6 +13,7 @@ import {
   autoMatchStatement
 } from "../connectors/bank/reconciliation-service.js";
 import { mapError, requireEntityId } from "./_shared.js";
+import { pageLimit, pageOffset } from "../../../shared/pagination.js";
 
 const bankImportSchema = z.object({
   format: z.enum(["MT940", "OFX"]),
@@ -64,7 +65,8 @@ export function registerBankRoutes(router: FastifyInstance) {
             _count: { select: { transactions: true } }
           },
           orderBy: { createdAt: "desc" },
-          take: 50
+          take: pageLimit((request.query as { limit?: string }).limit),
+          skip: pageOffset((request.query as { offset?: string }).offset)
         });
         return reply.send({ data, errors: [] });
       } catch (error) {
