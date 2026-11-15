@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-generated.mjs",
+    "start": "node --conditions=production dist/index.js",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --exclude 'tests/integration/**'",
@@ -34,7 +34,7 @@
     "dunning:worker": "tsx src/jobs/dunning-worker.ts",
     "scheduled-reports:worker": "tsx src/jobs/scheduled-reports-worker.ts",
     "workers": "tsx src/jobs/worker-supervisor.ts",
-    "workers:prod": "node dist/jobs/worker-supervisor.js"
+    "workers:prod": "node --conditions=production dist/jobs/worker-supervisor.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.907.0",
