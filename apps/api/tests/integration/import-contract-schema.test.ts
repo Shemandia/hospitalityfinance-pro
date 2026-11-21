@@ -63,7 +63,13 @@ if (!base) {
       previousRelease = mkdtempSync(join(tmpdir(), "hfp-previous-"));
       cpSync(dirname(schemaPath("tenant")), previousRelease, {
         recursive: true,
-        filter: (p) => !p.includes(MIGRATION)
+        // Every migration before this one: the release this one upgrades from.
+        filter: (p) => {
+          const name = /migrations[\\/]([^\\/]+)/.exec(p)?.[1];
+          return (
+            !name || name === "migration_lock.toml" || parseInt(name, 10) < parseInt(MIGRATION, 10)
+          );
+        }
       });
       await admin.$executeRawUnsafe(`CREATE DATABASE "${name}"`);
       await deployMigrations("tenant", url.toString(), join(previousRelease, "schema.prisma"));
