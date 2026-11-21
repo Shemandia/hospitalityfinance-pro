@@ -1,5 +1,7 @@
 "use client";
 
+import { useReportPeriodId } from "../../../../../../components/period-provider";
+import { PeriodNotice } from "../../../../../../components/period-gate";
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useApiContext } from "../../../../../../components/use-api-context";
@@ -218,7 +220,12 @@ export default function BudgetVariancePage() {
   // ── Selectors ─────────────────────────────────────────────────────────────
 
   const [selectedDefId, setSelectedDefId] = useState<string>("NONE");
-  const [selectedPeriodId, setSelectedPeriodId] = useState<string>("NONE");
+  // Starts on the period chosen in the top bar; can be changed here before running.
+  const {
+    periodId: selectedPeriodId,
+    setPeriodId: setSelectedPeriodId,
+    followsGlobal
+  } = useReportPeriodId("NONE");
   const [activeDefId, setActiveDefId] = useState<string | null>(null);
   const [activePeriodId, setActivePeriodId] = useState<string | null>(null);
 
@@ -287,6 +294,7 @@ export default function BudgetVariancePage() {
 
   return (
     <div className="p-6 space-y-5">
+      {followsGlobal && <PeriodNotice />}
       {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>

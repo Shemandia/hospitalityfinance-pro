@@ -156,3 +156,30 @@ export function useSelectedPeriod(): SelectedPeriod & { refetch: () => void } {
     ? { state: "ready", month, period, periods, refetch }
     : { state: "missing", month, period: null, periods, refetch };
 }
+
+/**
+ * For a page with its own period picker (a report): it starts on the global
+ * period and can be changed on the page without changing the global one. A
+ * choice made for one entity is dropped when another entity is selected.
+ * Returns `none` (the page's "no period" value) when the global month has no
+ * period for this entity and nothing was chosen on the page.
+ */
+export function useReportPeriodId(none = "NONE"): {
+  periodId: string;
+  setPeriodId: (id: string) => void;
+  /** True when the page shows the global period, not one chosen on the page. */
+  followsGlobal: boolean;
+} {
+  const apiContext = useApiContext();
+  const entityId = apiContext?.entityId ?? null;
+  const selected = useSelectedPeriod();
+  const [local, setLocal] = useState<{ entityId: string | null; id: string } | null>(null);
+
+  const own = local && local.entityId === entityId ? local.id : null;
+  const globalId = selected.state === "ready" ? selected.period.id : none;
+  return {
+    periodId: own ?? globalId,
+    setPeriodId: useCallback((id: string) => setLocal({ entityId, id }), [entityId]),
+    followsGlobal: own === null
+  };
+}
