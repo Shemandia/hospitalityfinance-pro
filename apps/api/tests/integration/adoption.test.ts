@@ -38,6 +38,7 @@ import { API_ROOT, deployMigrations, migrationNames, schemaPath } from "../../sr
 import { appConnectionUrl, ownerConnectionUrl } from "../../src/db/tenant-location.js";
 import { dropTenantDatabase, tenantRoleNames } from "../../src/db/tenant-roles.js";
 import { AdoptionRefused, adoptTenant } from "../../src/db/tenant-adoption.js";
+import { whenRunnerFree } from "./runner-lock.js";
 
 if (!env.ready) {
   describe("tenant adoption", () => {
@@ -153,7 +154,7 @@ if (!env.ready) {
     }, 300_000);
 
     it("adopts the legacy database", async () => {
-      const report = await adoptTenant(tenants.legacy.slug);
+      const report = await whenRunnerFree(() => adoptTenant(tenants.legacy.slug));
       expect(report.adopted).toBe(true);
       expect(report.legacy).toBe(true);
 
