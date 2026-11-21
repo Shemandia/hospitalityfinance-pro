@@ -209,7 +209,7 @@ if (!environmentReady || !redisUrl) {
           tx.entity.create({
             data: {
               name: `Admin IT ${name} ${run}`,
-              code: `${name}${run}`.slice(0, 20),
+              code: `AS${name}${run}`.slice(0, 20),
               type,
               countryCode: "TZ",
               parentId
