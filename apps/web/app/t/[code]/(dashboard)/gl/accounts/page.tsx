@@ -4,6 +4,8 @@ import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useApiContext } from "../../../../../../components/use-api-context";
 import { useTenantHref } from "../../../../../../hooks/use-tenant-router";
+import { QueryError } from "../../../../../../components/query-error";
+import { TableSkeleton } from "../../../../../../components/page-skeletons";
 import {
   ChevronRight,
   ChevronDown,
@@ -577,7 +579,9 @@ export default function AccountsPage() {
   const {
     data: treeRes,
     isLoading,
-    error: loadError
+    isError,
+    error: loadError,
+    refetch
   } = useQuery({
     queryKey: ["gl-accounts", ctx?.tenantSlug, ctx?.entityId],
     queryFn: () => getGLAccountTree(ctx!),

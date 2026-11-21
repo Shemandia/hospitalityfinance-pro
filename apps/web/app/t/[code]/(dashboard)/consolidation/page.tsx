@@ -1,5 +1,6 @@
 "use client";
 
+import { DEFAULT_LOCALE } from "../../../../../lib/format";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useMemo } from "react";
 import { useApiContext } from "../../../../../components/use-api-context";
@@ -44,7 +45,7 @@ import {
 const fmt = (v: string | number) => {
   const n = Number(v);
   if (isNaN(n)) return "—";
-  return n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  return n.toLocaleString(DEFAULT_LOCALE, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 };
 
 const TYPE_ORDER = ["ASSET", "LIABILITY", "EQUITY", "REVENUE", "EXPENSE"];

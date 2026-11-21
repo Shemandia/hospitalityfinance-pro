@@ -1,6 +1,12 @@
 "use client";
 
-import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
+import {
+  flexRender,
+  getCoreRowModel,
+  getPaginationRowModel,
+  useReactTable,
+  type ColumnDef
+} from "@tanstack/react-table";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useTenantHref, useTenantRouter } from "../../../../../../hooks/use-tenant-router";
@@ -35,6 +41,8 @@ import {
 import { Separator } from "../../../../../../components/ui/separator";
 import { Download, CheckCircle, XCircle, X, RotateCcw, Send } from "lucide-react";
 import Link from "next/link";
+import { QueryError } from "../../../../../../components/query-error";
+import { TableSkeleton } from "../../../../../../components/page-skeletons";
 
 type JournalRow = {
   id: string;
@@ -218,7 +226,9 @@ export default function GLJournalsPage() {
   const table = useReactTable({
     data: journalsQuery.data ?? [],
     columns,
-    getCoreRowModel: getCoreRowModel()
+    getCoreRowModel: getCoreRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    initialState: { pagination: { pageSize: 20 } }
   });
 
   function exportCsv(rows: JournalRow[]) {
@@ -299,19 +309,18 @@ export default function GLJournalsPage() {
             </TableHeader>
             <TableBody>
               {journalsQuery.isLoading ? (
-                <>
-                  {Array.from({ length: 5 }).map((_, i) => (
-                    <TableRow key={i}>
-                      <TableCell colSpan={6}>
-                        <div className="h-8 w-full animate-pulse rounded bg-muted" />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </>
+                <TableRow>
+                  <TableCell colSpan={6} className="p-4">
+                    <TableSkeleton rows={6} cols={6} />
+                  </TableCell>
+                </TableRow>
               ) : journalsQuery.isError ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8 text-destructive text-sm">
-                    {(journalsQuery.error as Error).message}
+                  <TableCell colSpan={6} className="p-4">
+                    <QueryError
+                      message={(journalsQuery.error as Error).message}
+                      onRetry={() => journalsQuery.refetch()}
+                    />
                   </TableCell>
                 </TableRow>
               ) : table.getRowModel().rows.length === 0 ? (
@@ -339,6 +348,64 @@ export default function GLJournalsPage() {
               )}
             </TableBody>
           </Table>
+          {!journalsQuery.isLoading &&
+            !journalsQuery.isError &&
+            (journalsQuery.data?.length ?? 0) > 0 && (
+              <div className="flex items-center justify-between border-t px-4 py-3">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span>Rows per page</span>
+                  <Select
+                    value={String(table.getState().pagination.pageSize)}
+                    onValueChange={(v) => table.setPageSize(Number(v))}
+                  >
+                    <SelectTrigger className="h-7 w-[70px] text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[10, 20, 50].map((s) => (
+                        <SelectItem key={s} value={String(s)}>
+                          {s}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <span>
+                    {table.getState().pagination.pageIndex * table.getState().pagination.pageSize +
+                      1}
+                    –
+                    {Math.min(
+                      (table.getState().pagination.pageIndex + 1) *
+                        table.getState().pagination.pageSize,
+                      journalsQuery.data?.length ?? 0
+                    )}{" "}
+                    of {journalsQuery.data?.length ?? 0}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7"
+                    onClick={() => table.previousPage()}
+                    disabled={!table.getCanPreviousPage()}
+                  >
+                    Previous
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount() || 1}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7"
+                    onClick={() => table.nextPage()}
+                    disabled={!table.getCanNextPage()}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            )}
         </CardContent>
       </Card>
 

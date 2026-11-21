@@ -1,5 +1,6 @@
 "use client";
 
+import { DEFAULT_LOCALE } from "../../../../../../../lib/format";
 import { useState, useMemo } from "react";
 import { useParams } from "next/navigation";
 import { useTenantHref } from "../../../../../../../hooks/use-tenant-router";
@@ -59,7 +60,10 @@ const SOURCE_LABELS: Record<string, string> = {
 
 function fmtAmount(value: number): string {
   if (value === 0) return "\u2014";
-  return value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return value.toLocaleString(DEFAULT_LOCALE, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
 }
 
 function fmtDate(dateStr: string): string {
@@ -276,7 +280,7 @@ export default function AccountLedgerPage() {
               <TrendingUp size={14} /> Page Debits
             </p>
             <p className="text-3xl font-bold text-emerald-600 tabular-nums">
-              {pageTotals.totalDebit.toLocaleString("en-US", {
+              {pageTotals.totalDebit.toLocaleString(DEFAULT_LOCALE, {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2
               })}
@@ -290,7 +294,7 @@ export default function AccountLedgerPage() {
               <History size={14} /> Page Credits
             </p>
             <p className="text-3xl font-bold text-slate-800 tabular-nums">
-              {pageTotals.totalCredit.toLocaleString("en-US", {
+              {pageTotals.totalCredit.toLocaleString(DEFAULT_LOCALE, {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2
               })}
@@ -497,13 +501,13 @@ export default function AccountLedgerPage() {
                     Page Totals
                   </td>
                   <td className="px-6 py-4 text-right tabular-nums border-t-2 border-emerald-500 text-emerald-600">
-                    {pageTotals.totalDebit.toLocaleString("en-US", {
+                    {pageTotals.totalDebit.toLocaleString(DEFAULT_LOCALE, {
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2
                     })}
                   </td>
                   <td className="px-6 py-4 text-right tabular-nums border-t-2 border-emerald-500 text-slate-800">
-                    {pageTotals.totalCredit.toLocaleString("en-US", {
+                    {pageTotals.totalCredit.toLocaleString(DEFAULT_LOCALE, {
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2
                     })}

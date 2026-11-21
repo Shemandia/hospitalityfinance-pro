@@ -1,5 +1,6 @@
 "use client";
 
+import { DEFAULT_LOCALE } from "../../../../../../lib/format";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useApiContext } from "../../../../../../components/use-api-context";
@@ -26,7 +27,7 @@ import { Scale, Download, CheckCircle2, AlertTriangle, FileText } from "lucide-r
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 const fmt = (v: string | number) =>
-  Number(v).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  Number(v).toLocaleString(DEFAULT_LOCALE, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
 function exportCSV(report: BalanceSheetResult, periodName: string) {
   const rows: string[][] = [

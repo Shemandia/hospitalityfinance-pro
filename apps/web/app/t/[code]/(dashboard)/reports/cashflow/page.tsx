@@ -1,5 +1,6 @@
 "use client";
 
+import { DEFAULT_LOCALE } from "../../../../../../lib/format";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useApiContext } from "../../../../../../components/use-api-context";
@@ -21,7 +22,7 @@ import { Activity, Download, TrendingUp, TrendingDown, Minus, FileText } from "l
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 const fmt = (v: string | number) =>
-  Number(v).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  Number(v).toLocaleString(DEFAULT_LOCALE, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
 function amountColor(v: string) {
   const n = Number(v);

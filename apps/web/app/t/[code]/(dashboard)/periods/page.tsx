@@ -41,6 +41,8 @@ import {
   type PeriodStatus
 } from "../../../../../lib/gl-api";
 import { useApiContext } from "../../../../../components/use-api-context";
+import { QueryError } from "../../../../../components/query-error";
+import { TableSkeleton } from "../../../../../components/page-skeletons";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -444,7 +446,9 @@ export default function PeriodsPage() {
   const {
     data: periodsRes,
     isLoading,
-    error: loadError
+    isError,
+    error: loadError,
+    refetch
   } = useQuery({
     queryKey: ["periods", ctx?.tenantSlug, ctx?.entityId],
     queryFn: () => getPeriodList(ctx!),

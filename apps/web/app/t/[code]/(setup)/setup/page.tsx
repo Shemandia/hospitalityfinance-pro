@@ -1,10 +1,18 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useAuth, useSession } from "../../../../../components/auth-provider";
 import { useRouter, useParams } from "next/navigation";
 import { WizardLayout, WizardStepContent } from "../../../../../components/wizard-layout";
 import { COUNTRIES } from "../../../../../lib/countries";
+import { useQuery } from "@tanstack/react-query";
+import { useApiContext } from "../../../../../components/use-api-context";
+import {
+  getSetupRoles,
+  getSetupDepartments,
+  getSetupCurrencies
+} from "../../../../../lib/setup-api";
+import { getSupportedTimezones } from "../../../../../lib/timezones";
 
 const STEPS = [
   { id: 1, name: "Organization Structure" },
@@ -13,21 +21,6 @@ const STEPS = [
   { id: 4, name: "Fiscal Periods" },
   { id: 5, name: "Currencies & Exchange Rates" },
   { id: 6, name: "Invite Users" }
-];
-
-const USALI_DEPARTMENTS = [
-  { name: "Rooms", code: "ROOMS" },
-  { name: "Food & Beverage", code: "F_AND_B" },
-  { name: "Spa", code: "SPA" },
-  { name: "Golf", code: "GOLF" },
-  { name: "Parking", code: "PARKING" },
-  { name: "Telecommunications", code: "TELECOM" },
-  { name: "Admin & General", code: "ADMIN_GENERAL" },
-  { name: "Sales & Marketing", code: "SALES_MARKETING" },
-  { name: "Property Ops & Maintenance", code: "PROPERTY_OPS" },
-  { name: "Utilities", code: "UTILITIES" },
-  { name: "Management Fees", code: "MGMT_FEES" },
-  { name: "Non-Operating", code: "NON_OPERATING" }
 ];
 
 const MONTH_NAMES = [
@@ -45,43 +38,7 @@ const MONTH_NAMES = [
   "December"
 ];
 
-const CURRENCIES = [
-  "USD",
-  "EUR",
-  "GBP",
-  "AED",
-  "SAR",
-  "QAR",
-  "TZS",
-  "KES",
-  "ZAR",
-  "INR",
-  "CNY",
-  "JPY",
-  "SGD",
-  "THB",
-  "MYR",
-  "IDR",
-  "PHP",
-  "AUD",
-  "NZD",
-  "CAD",
-  "CHF",
-  "SEK",
-  "NOK",
-  "DKK",
-  "BRL",
-  "MXN",
-  "EGP",
-  "MAD",
-  "TND",
-  "BHD",
-  "KWD",
-  "OMR",
-  "JOD"
-];
-
-const USER_ROLES = ["ADMIN", "CONTROLLER", "ACCOUNTANT", "VIEWER"];
+const FALLBACK_CURRENCIES = ["USD", "EUR", "GBP", "TZS", "KES", "ZAR", "AED", "SAR"];
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -146,6 +103,7 @@ export default function SetupPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const redirectedRef = useRef(false);
 
   // Step 1
   const [corporateName, setCorporateName] = useState("");
@@ -159,9 +117,8 @@ export default function SetupPage() {
   ]);
 
   // Step 2
-  const [departments, setDepartments] = useState<Department[]>(
-    USALI_DEPARTMENTS.map((d) => ({ ...d, enabled: true }))
-  );
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [departmentsInitialized, setDepartmentsInitialized] = useState(false);
   const [customDeptName, setCustomDeptName] = useState("");
   const [customDeptCode, setCustomDeptCode] = useState("");
 
@@ -181,6 +138,37 @@ export default function SetupPage() {
   ]);
 
   const accessToken = session?.accessToken;
+  const apiContext = useApiContext();
+  const timezones = getSupportedTimezones();
+  const rolesQuery = useQuery({
+    queryKey: ["setup-roles", tenantSlug],
+    queryFn: () => getSetupRoles(apiContext!),
+    enabled: !!apiContext && !loading
+  });
+  const departmentsQuery = useQuery({
+    queryKey: ["setup-departments", tenantSlug],
+    queryFn: () => getSetupDepartments(apiContext!),
+    enabled: !!apiContext && !loading
+  });
+  const currenciesQuery = useQuery({
+    queryKey: ["setup-currencies", tenantSlug],
+    queryFn: () => getSetupCurrencies(apiContext!),
+    enabled: !!apiContext && !loading
+  });
+  const roleOptions = (rolesQuery.data ?? [])
+    .map((r) => String(r.code ?? r.name ?? "").toUpperCase())
+    .filter(Boolean);
+  const currencyOptions = (currenciesQuery.data ?? [])
+    .map((c) => String(c.code).toUpperCase())
+    .filter(Boolean);
+  const availableCurrencies = currencyOptions.length ? currencyOptions : FALLBACK_CURRENCIES;
+  const departmentOptions = (departmentsQuery.data ?? [])
+    .map((d) => ({
+      name: String(d.name ?? d.code ?? ""),
+      code: String(d.code ?? d.name ?? "").toUpperCase(),
+      enabled: d.isActive !== false
+    }))
+    .filter((d) => d.code);
 
   const apiHeaders = useCallback((): HeadersInit => {
     const headers: HeadersInit = {
@@ -222,7 +210,10 @@ export default function SetupPage() {
         const { currentStep: step, completedSteps: completed, stepData } = json.data;
 
         if (json.data.isCompleted) {
-          await openDashboard();
+          if (!redirectedRef.current) {
+            redirectedRef.current = true;
+            await openDashboard();
+          }
           return;
         }
 
@@ -248,7 +239,10 @@ export default function SetupPage() {
             setCorporateName(tenantInfo.name ?? "");
             if (tenantInfo.countryCode) setCorporateCountry(tenantInfo.countryCode);
           }
-          if (sd.step2?.departments?.length) setDepartments(sd.step2.departments);
+          if (sd.step2?.departments?.length) {
+            setDepartments(sd.step2.departments as Department[]);
+            setDepartmentsInitialized(true);
+          }
           if (sd.step3) setImportMethod(sd.step3.importMethod ?? "USALI_TEMPLATE");
           if (sd.step4) {
             setFiscalYearStartMonth(sd.step4.fiscalYearStartMonth ?? 1);
@@ -275,6 +269,24 @@ export default function SetupPage() {
       setLoading(false);
     })();
   }, [status, accessToken, apiHeaders, router, openDashboard]);
+
+  useEffect(() => {
+    if (departmentsInitialized) return;
+    if (departmentsQuery.isLoading) return;
+    if (departments.length > 0) {
+      setDepartmentsInitialized(true);
+      return;
+    }
+    if (departmentOptions.length > 0) {
+      setDepartments(departmentOptions);
+    }
+    setDepartmentsInitialized(true);
+  }, [
+    departmentsInitialized,
+    departmentsQuery.isLoading,
+    departments.length,
+    departmentOptions.length
+  ]);
 
   // ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -578,25 +590,7 @@ export default function SetupPage() {
                     onChange={(e) => setCorporateTimezone(e.target.value)}
                     className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
                   >
-                    {[
-                      "UTC",
-                      "Africa/Dar_es_Salaam",
-                      "Africa/Nairobi",
-                      "Africa/Johannesburg",
-                      "Asia/Dubai",
-                      "Asia/Riyadh",
-                      "Asia/Singapore",
-                      "Asia/Bangkok",
-                      "Asia/Tokyo",
-                      "Europe/London",
-                      "Europe/Paris",
-                      "Europe/Zurich",
-                      "America/New_York",
-                      "America/Chicago",
-                      "America/Los_Angeles",
-                      "Australia/Sydney",
-                      "Pacific/Auckland"
-                    ].map((tz) => (
+                    {timezones.map((tz) => (
                       <option key={tz} value={tz}>
                         {tz}
                       </option>
@@ -614,7 +608,7 @@ export default function SetupPage() {
                     onChange={(e) => setFunctionalCurrency(e.target.value)}
                     className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
                   >
-                    {CURRENCIES.map((c) => (
+                    {availableCurrencies.map((c) => (
                       <option key={c} value={c}>
                         {c}
                       </option>
@@ -630,7 +624,7 @@ export default function SetupPage() {
                     onChange={(e) => setReportingCurrency(e.target.value)}
                     className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
                   >
-                    {CURRENCIES.map((c) => (
+                    {availableCurrencies.map((c) => (
                       <option key={c} value={c}>
                         {c}
                       </option>
@@ -719,7 +713,7 @@ export default function SetupPage() {
                         onChange={(e) => updateProperty(idx, "currency", e.target.value)}
                         className="mt-1 w-full rounded-md border px-3 py-1.5 text-sm"
                       >
-                        {CURRENCIES.map((c) => (
+                        {availableCurrencies.map((c) => (
                           <option key={c} value={c}>
                             {c}
                           </option>
@@ -733,25 +727,7 @@ export default function SetupPage() {
                         onChange={(e) => updateProperty(idx, "timezone", e.target.value)}
                         className="mt-1 w-full rounded-md border px-3 py-1.5 text-sm"
                       >
-                        {[
-                          "UTC",
-                          "Africa/Dar_es_Salaam",
-                          "Africa/Nairobi",
-                          "Africa/Johannesburg",
-                          "Asia/Dubai",
-                          "Asia/Riyadh",
-                          "Asia/Singapore",
-                          "Asia/Bangkok",
-                          "Asia/Tokyo",
-                          "Europe/London",
-                          "Europe/Paris",
-                          "Europe/Zurich",
-                          "America/New_York",
-                          "America/Chicago",
-                          "America/Los_Angeles",
-                          "Australia/Sydney",
-                          "Pacific/Auckland"
-                        ].map((tz) => (
+                        {timezones.map((tz) => (
                           <option key={tz} value={tz}>
                             {tz}
                           </option>
@@ -772,7 +748,7 @@ export default function SetupPage() {
           stepNumber={2}
           totalSteps={6}
           title="Department Structure"
-          description="Select USALI departments and add custom ones"
+          description="Select departments for this tenant and add custom ones"
           onBack={handleBack}
           onNext={handleNext}
           onSave={handleSave}
@@ -781,6 +757,14 @@ export default function SetupPage() {
           isNextDisabled={departments.filter((d) => d.enabled).length === 0}
         >
           <div className="space-y-4">
+            {departmentsQuery.isLoading && (
+              <p className="text-sm text-slate-500">Loading departments…</p>
+            )}
+            {!departmentsQuery.isLoading && departments.length === 0 && (
+              <p className="text-sm text-slate-500">
+                No departments available. Add a custom department below.
+              </p>
+            )}
             <div className="grid grid-cols-2 gap-2">
               {departments.map((dept) => (
                 <label
@@ -1000,23 +984,25 @@ export default function SetupPage() {
                 Additional Currencies
               </label>
               <div className="grid grid-cols-4 gap-2">
-                {CURRENCIES.filter((c) => c !== functionalCurrency).map((cur) => (
-                  <label
-                    key={cur}
-                    className="flex items-center gap-1.5 rounded border p-2 text-sm cursor-pointer hover:bg-slate-50"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={additionalCurrencies.includes(cur)}
-                      onChange={(e) => {
-                        setAdditionalCurrencies((prev) =>
-                          e.target.checked ? [...prev, cur] : prev.filter((c) => c !== cur)
-                        );
-                      }}
-                    />
-                    {cur}
-                  </label>
-                ))}
+                {availableCurrencies
+                  .filter((c) => c !== functionalCurrency)
+                  .map((cur) => (
+                    <label
+                      key={cur}
+                      className="flex items-center gap-1.5 rounded border p-2 text-sm cursor-pointer hover:bg-slate-50"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={additionalCurrencies.includes(cur)}
+                        onChange={(e) => {
+                          setAdditionalCurrencies((prev) =>
+                            e.target.checked ? [...prev, cur] : prev.filter((c) => c !== cur)
+                          );
+                        }}
+                      />
+                      {cur}
+                    </label>
+                  ))}
               </div>
             </div>
           </div>
@@ -1089,9 +1075,9 @@ export default function SetupPage() {
                     onChange={(e) => updateUser(idx, "role", e.target.value)}
                     className="mt-1 w-full rounded-md border px-3 py-1.5 text-sm"
                   >
-                    {USER_ROLES.map((r) => (
+                    {(roleOptions.length ? roleOptions : ["ACCOUNTANT"]).map((r) => (
                       <option key={r} value={r}>
-                        {r.charAt(0) + r.slice(1).toLowerCase()}
+                        {r.replace(/_/g, " ")}
                       </option>
                     ))}
                   </select>

@@ -1,5 +1,6 @@
 "use client";
 
+import { DEFAULT_LOCALE } from "../../../../../../lib/format";
 import { useQuery } from "@tanstack/react-query";
 import { useState, useMemo } from "react";
 import { useApiContext } from "../../../../../../components/use-api-context";
@@ -32,7 +33,7 @@ import {
 // ── Formatters ────────────────────────────────────────────────────────────────
 
 const fmt = (v: string | number) =>
-  Number(v).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  Number(v).toLocaleString(DEFAULT_LOCALE, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
 const fmtPct = (v: string | number) => `${Number(v).toFixed(1)}%`;
 

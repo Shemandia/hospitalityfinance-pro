@@ -17,6 +17,8 @@ import {
   getPaymentVoucherUrl,
   getSuppliers
 } from "../../../../../../lib/gl-api";
+import { QueryError } from "../../../../../../components/query-error";
+import { TableSkeleton } from "../../../../../../components/page-skeletons";
 
 type PaymentRunSummary = {
   id: string;
@@ -107,6 +109,8 @@ export default function APPaymentRunsPage() {
   const canPropose = can("PAYMENT_RUN_CREATE");
   const router = useTenantRouter();
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(20);
   const [startDate, setStartDate] = useState(() => {
     const d = new Date();
     d.setDate(1);
@@ -143,6 +147,8 @@ export default function APPaymentRunsPage() {
     },
     enabled: Boolean(apiContext)
   });
+  const runs = (runsQuery.data ?? []) as PaymentRunSummary[];
+  const pagedRuns = runs.slice(page * pageSize, (page + 1) * pageSize);
 
   const detailQuery = useQuery({
     queryKey: ["ap-payment-run", apiContext?.tenantSlug, apiContext?.entityId, selectedRunId],
@@ -606,7 +612,7 @@ export default function APPaymentRunsPage() {
               </tr>
             </thead>
             <tbody>
-              {(runsQuery.data ?? []).map((run) => (
+              {pagedRuns.map((run) => (
                 <tr
                   key={run.id}
                   onClick={() => router.push(`/ap/payment-runs/${run.id}`)}
@@ -676,10 +682,92 @@ export default function APPaymentRunsPage() {
               ))}
             </tbody>
           </table>
-          {runsQuery.isLoading ? <p>Loading payment runs...</p> : null}
-          {runsQuery.isError ? (
-            <p style={{ color: "#b91c1c" }}>{(runsQuery.error as Error).message}</p>
+          {runsQuery.isLoading ? (
+            <div style={{ padding: "1rem" }}>
+              <TableSkeleton rows={6} cols={5} />
+            </div>
           ) : null}
+          {runsQuery.isError ? (
+            <div style={{ padding: "1rem" }}>
+              <QueryError
+                message={(runsQuery.error as Error).message}
+                onRetry={() => runsQuery.refetch()}
+              />
+            </div>
+          ) : null}
+          {!runsQuery.isLoading && !runsQuery.isError && runs.length > 0 && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                borderTop: "1px solid #e2e8f0",
+                padding: "0.75rem 1rem",
+                fontSize: "0.75rem",
+                color: "#64748b"
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <span>Rows per page</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setPage(0);
+                  }}
+                  style={{
+                    height: "1.75rem",
+                    borderRadius: "4px",
+                    border: "1px solid #e2e8f0",
+                    padding: "0 0.5rem"
+                  }}
+                >
+                  {[10, 20, 50].map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+                <span>
+                  {page * pageSize + 1}–{Math.min((page + 1) * pageSize, runs.length)} of{" "}
+                  {runs.length}
+                </span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <button
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  disabled={page === 0}
+                  style={{
+                    height: "1.75rem",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "4px",
+                    padding: "0 0.5rem",
+                    background: "white",
+                    cursor: page === 0 ? "not-allowed" : "pointer"
+                  }}
+                >
+                  Previous
+                </button>
+                <span>
+                  Page {page + 1} of {Math.max(1, Math.ceil(runs.length / pageSize))}
+                </span>
+                <button
+                  onClick={() => setPage((p) => p + 1)}
+                  disabled={(page + 1) * pageSize >= runs.length}
+                  style={{
+                    height: "1.75rem",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "4px",
+                    padding: "0 0.5rem",
+                    background: "white",
+                    cursor: (page + 1) * pageSize >= runs.length ? "not-allowed" : "pointer"
+                  }}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

@@ -53,6 +53,8 @@ import {
   Loader2,
   CircleSlash
 } from "lucide-react";
+import { QueryError } from "../../../../../../components/query-error";
+import { TableSkeleton } from "../../../../../../components/page-skeletons";
 
 const STATUS_STYLES: Record<
   TransferExecutionStatus,
@@ -109,6 +111,8 @@ export default function TransferDeskHistoryListPage() {
   const qc = useQueryClient();
 
   const [statusFilter, setStatusFilter] = useState<TransferExecutionStatus | "ALL">("ALL");
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(20);
 
   const executionsQ = useQuery({
     queryKey: ["td-executions", apiContext?.tenantSlug, apiContext?.entityId, statusFilter],
@@ -135,6 +139,7 @@ export default function TransferDeskHistoryListPage() {
   }
 
   const executions = executionsQ.data ?? [];
+  const pagedExecutions = executions.slice(page * pageSize, (page + 1) * pageSize);
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-4">
@@ -234,7 +239,7 @@ export default function TransferDeskHistoryListPage() {
                   </TableCell>
                 </TableRow>
               ) : (
-                executions.map((e) => {
+                pagedExecutions.map((e) => {
                   const style = STATUS_STYLES[e.status];
                   const Icon = style.icon;
                   return (
@@ -299,6 +304,54 @@ export default function TransferDeskHistoryListPage() {
               )}
             </TableBody>
           </Table>
+          {!executionsQ.isLoading && !executionsQ.isError && executions.length > 0 && (
+            <div className="flex items-center justify-between border-t px-4 py-3">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span>Rows per page</span>
+                <select
+                  className="h-7 rounded border px-2 text-xs"
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setPage(0);
+                  }}
+                >
+                  {[10, 20, 50].map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+                <span>
+                  {page * pageSize + 1}–{Math.min((page + 1) * pageSize, executions.length)} of{" "}
+                  {executions.length}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7"
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  disabled={page === 0}
+                >
+                  Previous
+                </Button>
+                <span className="text-xs text-muted-foreground">
+                  Page {page + 1} of {Math.max(1, Math.ceil(executions.length / pageSize))}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7"
+                  onClick={() => setPage((p) => p + 1)}
+                  disabled={(page + 1) * pageSize >= executions.length}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

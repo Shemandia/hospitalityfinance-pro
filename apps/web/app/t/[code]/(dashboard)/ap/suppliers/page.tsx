@@ -542,6 +542,8 @@ export default function SuppliersPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [showInactive, setShowInactive] = useState(false);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(20);
 
   // ── Queries ──────────────────────────────────────────────────────────────
 
@@ -588,6 +590,7 @@ export default function SuppliersPage() {
         s.name.toLowerCase().includes(search.toLowerCase()) ||
         s.code.toLowerCase().includes(search.toLowerCase())
     );
+  const pagedSuppliers = suppliers.slice(page * pageSize, (page + 1) * pageSize);
 
   function openCreate() {
     setEditingSupplier(null);
@@ -633,7 +636,10 @@ export default function SuppliersPage() {
         <div className="flex items-center gap-3">
           <Input
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(0);
+            }}
             placeholder="Search by name or code…"
             className="max-w-xs"
           />
@@ -641,7 +647,10 @@ export default function SuppliersPage() {
             <input
               type="checkbox"
               checked={showInactive}
-              onChange={(e) => setShowInactive(e.target.checked)}
+              onChange={(e) => {
+                setShowInactive(e.target.checked);
+                setPage(0);
+              }}
               className="h-4 w-4 rounded border-border"
             />
             Show inactive
@@ -691,7 +700,7 @@ export default function SuppliersPage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  suppliers.map((s) => (
+                  pagedSuppliers.map((s) => (
                     <TableRow
                       key={s.id}
                       className="cursor-pointer hover:bg-muted/40"
@@ -732,6 +741,54 @@ export default function SuppliersPage() {
                 )}
               </TableBody>
             </Table>
+            {!suppliersQ.isLoading && !suppliersQ.isError && suppliers.length > 0 && (
+              <div className="flex items-center justify-between border-t px-4 py-3">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span>Rows per page</span>
+                  <select
+                    className="h-7 rounded border px-2 text-xs"
+                    value={pageSize}
+                    onChange={(e) => {
+                      setPageSize(Number(e.target.value));
+                      setPage(0);
+                    }}
+                  >
+                    {[10, 20, 50].map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                  <span>
+                    {page * pageSize + 1}–{Math.min((page + 1) * pageSize, suppliers.length)} of{" "}
+                    {suppliers.length}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7"
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                    disabled={page === 0}
+                  >
+                    Previous
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    Page {page + 1} of {Math.max(1, Math.ceil(suppliers.length / pageSize))}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7"
+                    onClick={() => setPage((p) => p + 1)}
+                    disabled={(page + 1) * pageSize >= suppliers.length}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

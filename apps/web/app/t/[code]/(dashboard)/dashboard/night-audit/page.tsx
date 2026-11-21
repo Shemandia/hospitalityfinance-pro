@@ -17,6 +17,7 @@ import type { JournalSummary } from "../../../../../../lib/gl-api";
 import { Button } from "../../../../../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../../../../components/ui/card";
 import { Badge } from "../../../../../../components/ui/badge";
+import { Skeleton } from "../../../../../../components/ui/skeleton";
 import { fmt, fmtPct } from "../../../../../../lib/format";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -299,7 +300,11 @@ export default function NightAuditDashboard() {
             </CardHeader>
             <CardContent>
               {isLoading ? (
-                <p className="text-sm text-muted-foreground">Loading...</p>
+                <div className="space-y-2 py-2">
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-3/4" />
+                  <Skeleton className="h-4 w-1/2" />
+                </div>
               ) : revenueSummary.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No revenue data available.</p>
               ) : (
@@ -385,7 +390,11 @@ export default function NightAuditDashboard() {
             </CardHeader>
             <CardContent>
               {draftsQ.isLoading ? (
-                <p className="text-sm text-muted-foreground">Loading...</p>
+                <div className="space-y-2 py-2">
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-3/4" />
+                  <Skeleton className="h-4 w-1/2" />
+                </div>
               ) : draftJournals.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
                   All journals have been posted. Nothing pending.
@@ -499,7 +508,11 @@ export default function NightAuditDashboard() {
             </CardHeader>
             <CardContent className="space-y-3">
               {logsQ.isLoading ? (
-                <p className="text-sm text-muted-foreground">Loading...</p>
+                <div className="space-y-2 py-2">
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-3/4" />
+                  <Skeleton className="h-4 w-1/2" />
+                </div>
               ) : !latestLog ? (
                 <p className="text-sm text-muted-foreground">No import logs found.</p>
               ) : (

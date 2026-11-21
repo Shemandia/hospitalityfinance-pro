@@ -707,6 +707,8 @@ export default function APInvoicesPage() {
   const apiContext = useApiContext();
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(20);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -780,6 +782,11 @@ export default function APInvoicesPage() {
   const glAccounts: FlatAccount[] = useMemo(
     () => flattenPostable((accountTreeQ.data?.data as unknown as AccountNode[]) ?? []),
     [accountTreeQ.data]
+  );
+
+  const pagedInvoices = useMemo(
+    () => invoices.slice(page * pageSize, (page + 1) * pageSize),
+    [invoices, page, pageSize]
   );
 
   const summary = useMemo(() => {
@@ -888,7 +895,13 @@ export default function APInvoicesPage() {
               <FileText className="h-5 w-5" /> Accounts Payable Invoices
             </CardTitle>
             <div className="flex items-center gap-2">
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <Select
+                value={statusFilter}
+                onValueChange={(v) => {
+                  setStatusFilter(v);
+                  setPage(0);
+                }}
+              >
                 <SelectTrigger className="w-44">
                   <SelectValue />
                 </SelectTrigger>
@@ -954,7 +967,7 @@ export default function APInvoicesPage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  invoices.map((inv) => {
+                  pagedInvoices.map((inv) => {
                     const days = daysUntil(inv.dueDate);
                     const isOverdue = !["PAID", "CANCELLED"].includes(inv.status) && days < 0;
                     const isDueSoon =
@@ -994,6 +1007,58 @@ export default function APInvoicesPage() {
                 )}
               </TableBody>
             </Table>
+            {!invoicesQ.isLoading && !invoicesQ.isError && invoices.length > 0 && (
+              <div className="flex items-center justify-between border-t px-4 py-3">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span>Rows per page</span>
+                  <Select
+                    value={String(pageSize)}
+                    onValueChange={(v) => {
+                      setPageSize(Number(v));
+                      setPage(0);
+                    }}
+                  >
+                    <SelectTrigger className="h-7 w-[70px] text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[10, 20, 50].map((s) => (
+                        <SelectItem key={s} value={String(s)}>
+                          {s}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <span>
+                    {page * pageSize + 1}–{Math.min((page + 1) * pageSize, invoices.length)} of{" "}
+                    {invoices.length}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7"
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                    disabled={page === 0}
+                  >
+                    Previous
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    Page {page + 1} of {Math.max(1, Math.ceil(invoices.length / pageSize))}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7"
+                    onClick={() => setPage((p) => p + 1)}
+                    disabled={(page + 1) * pageSize >= invoices.length}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
