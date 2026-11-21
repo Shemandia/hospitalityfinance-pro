@@ -7,6 +7,7 @@ import type {
 } from "./types.js";
 
 import { ServiceError } from "../../shared/service-error.js";
+import { importPolicyData, suspenseProblem, unknownSourceSystem } from "./types.js";
 
 // ── Error ────────────────────────────────────────────────────────────────────
 
@@ -93,6 +94,11 @@ export class ProfileService {
       );
     }
 
+    const suspense = suspenseProblem(input.unmappedPolicy, input.suspenseAccountCode);
+    if (suspense) throw new ProfileServiceError("PROFILE_SUSPENSE_ACCOUNT_REQUIRED", suspense, 400);
+    const unknownSource = await unknownSourceSystem(this.prisma as any, input.sourceSystemCode);
+    if (unknownSource) throw new ProfileServiceError("SOURCE_SYSTEM_NOT_FOUND", unknownSource, 400);
+
     const validationErrors = validateProfileShape({
       profileType: input.profileType,
       sourceComponent: input.sourceComponent,
@@ -114,6 +120,7 @@ export class ProfileService {
         sourceParams: (input.sourceParams as any) ?? null,
         targetParams: (input.targetParams as any) ?? null,
         savePayload: input.savePayload ?? "NONE",
+        ...importPolicyData(input),
         isValid: validationErrors.length === 0,
         isActive: true,
         version: 1,
@@ -219,6 +226,16 @@ export class ProfileService {
       );
     }
 
+    const suspense = suspenseProblem(
+      input.unmappedPolicy ?? existing.unmappedPolicy,
+      input.suspenseAccountCode !== undefined
+        ? input.suspenseAccountCode
+        : existing.suspenseAccountCode
+    );
+    if (suspense) throw new ProfileServiceError("PROFILE_SUSPENSE_ACCOUNT_REQUIRED", suspense, 400);
+    const unknownSource = await unknownSourceSystem(db, input.sourceSystemCode);
+    if (unknownSource) throw new ProfileServiceError("SOURCE_SYSTEM_NOT_FOUND", unknownSource, 400);
+
     // Merge for validation
     const merged = {
       profileType: input.profileType ?? existing.profileType,
@@ -244,6 +261,7 @@ export class ProfileService {
     if (input.filterId !== undefined) updateData.filterId = input.filterId;
     if (input.targetParams !== undefined) updateData.targetParams = input.targetParams as any;
     if (input.savePayload !== undefined) updateData.savePayload = input.savePayload;
+    Object.assign(updateData, importPolicyData(input));
 
     // Merge wizard step data into sourceParams (JSON column)
     // This keeps all wizard config in one place alongside __status, __fsdSchema, etc.

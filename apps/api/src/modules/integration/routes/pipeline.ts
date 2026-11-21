@@ -17,6 +17,12 @@ import {
   SUPPLIER_SYNC_TARGET_FIELDS
 } from "../transform-engine.js";
 import { mapError } from "./_shared.js";
+import {
+  importPolicyData,
+  importPolicyFields,
+  suspenseProblem,
+  unknownSourceSystem
+} from "../../integrations/types.js";
 import { DOCUMENT_FIELDS } from "@hfp/posting-contract";
 import { pageLimit, pageMeta, pageOffset } from "../../../shared/pagination.js";
 import { signedInUserId } from "../../access/system-user.js";
@@ -35,7 +41,8 @@ const profileCreateSchema = z.object({
   filterId: z.string().uuid().optional(),
   sourceParams: z.record(z.unknown()).optional(),
   targetParams: z.record(z.unknown()).optional(),
-  savePayload: z.enum(["NONE", "INPUT", "OUTPUT", "BOTH"]).optional()
+  savePayload: z.enum(["NONE", "INPUT", "OUTPUT", "BOTH"]).optional(),
+  ...importPolicyFields
 });
 type ProfileCreateInput = z.infer<typeof profileCreateSchema>;
 
@@ -115,6 +122,100 @@ export function registerIntegrationRoutes(router: FastifyInstance) {
         },
         errors: []
       });
+    }
+  );
+
+  // ── Source systems (import plan section 3) ───────────────────────────────
+  // The systems that send documents to the ledger: tenant data, one code per
+  // system, named on each ledger import profile and on every journal it
+  // posts. A code never changes once in use; a system is deactivated, not
+  // deleted.
+
+  const sourceSystemCreate = z.object({
+    code: z
+      .string()
+      .trim()
+      .regex(
+        /^[A-Z0-9][A-Z0-9_-]{0,19}$/,
+        "A code of capital letters, digits, - or _, at most 20 characters."
+      ),
+    name: z.string().trim().min(1).max(100)
+  });
+  const sourceSystemUpdate = z
+    .object({
+      name: z.string().trim().min(1).max(100).optional(),
+      isActive: z.boolean().optional()
+    })
+    .refine((v) => v.name !== undefined || v.isActive !== undefined, "Nothing to change.");
+
+  router.get(
+    "/source-systems",
+    { preHandler: [requirePermission("INTEGRATIONS_READ")] },
+    async (_request, reply) => {
+      const rows = await (prisma as unknown as PrismaClient).sourceSystem.findMany({
+        orderBy: { code: "asc" }
+      });
+      return reply.send({ data: rows, errors: [] });
+    }
+  );
+
+  router.post(
+    "/source-systems",
+    { preHandler: [requirePermission("INTEGRATIONS_CONFIG")] },
+    async (request, reply) => {
+      const parsed = sourceSystemCreate.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          data: null,
+          errors: [{ code: "VALIDATION_ERROR", message: parsed.error.issues[0]!.message }]
+        });
+      }
+      try {
+        const created = await (prisma as unknown as PrismaClient).sourceSystem.create({
+          data: parsed.data
+        });
+        return reply.code(201).send({ data: created, errors: [] });
+      } catch (error) {
+        if ((error as { code?: string })?.code === "P2002") {
+          return reply.code(409).send({
+            data: null,
+            errors: [
+              {
+                code: "SOURCE_SYSTEM_EXISTS",
+                message: `A source system ${parsed.data.code} exists already.`
+              }
+            ]
+          });
+        }
+        throw error;
+      }
+    }
+  );
+
+  router.put<{ Params: { code: string } }>(
+    "/source-systems/:code",
+    { preHandler: [requirePermission("INTEGRATIONS_CONFIG")] },
+    async (request, reply) => {
+      const parsed = sourceSystemUpdate.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          data: null,
+          errors: [{ code: "VALIDATION_ERROR", message: parsed.error.issues[0]!.message }]
+        });
+      }
+      const db = prisma as unknown as PrismaClient;
+      const existing = await db.sourceSystem.findUnique({ where: { code: request.params.code } });
+      if (!existing) {
+        return reply.code(404).send({
+          data: null,
+          errors: [{ code: "NOT_FOUND", message: "Source system not found." }]
+        });
+      }
+      const updated = await db.sourceSystem.update({
+        where: { code: request.params.code },
+        data: parsed.data
+      });
+      return reply.send({ data: updated, errors: [] });
     }
   );
 
@@ -1824,6 +1925,23 @@ export function registerIntegrationRoutes(router: FastifyInstance) {
     async (request, reply) => {
       try {
         const payload = profileCreateSchema.parse(request.body);
+        const suspense = suspenseProblem(payload.unmappedPolicy, payload.suspenseAccountCode);
+        if (suspense) {
+          return reply.code(400).send({
+            data: null,
+            errors: [{ code: "PROFILE_SUSPENSE_ACCOUNT_REQUIRED", message: suspense }]
+          });
+        }
+        const unknownSource = await unknownSourceSystem(
+          prisma as unknown as PrismaClient,
+          (payload as { sourceSystemCode?: string | null }).sourceSystemCode
+        );
+        if (unknownSource) {
+          return reply.code(400).send({
+            data: null,
+            errors: [{ code: "SOURCE_SYSTEM_NOT_FOUND", message: unknownSource }]
+          });
+        }
         const validationErrors = validateProfileShape(payload);
         const db = prisma as unknown as PrismaClient;
         const created = await db.integrationProfile.create({
@@ -1840,6 +1958,7 @@ export function registerIntegrationRoutes(router: FastifyInstance) {
             sourceParams: payload.sourceParams as any,
             targetParams: payload.targetParams as any,
             savePayload: (payload.savePayload ?? "NONE") as any,
+            ...importPolicyData(payload),
             isValid: validationErrors.length === 0,
             createdById: (request.user as { sub?: string } | undefined)?.sub
           }
@@ -1884,6 +2003,23 @@ export function registerIntegrationRoutes(router: FastifyInstance) {
           sourceParams: (payload.sourceParams ?? existing.sourceParams) as any,
           targetParams: (payload.targetParams ?? existing.targetParams) as any
         };
+        const suspense = suspenseProblem(merged.unmappedPolicy, merged.suspenseAccountCode);
+        if (suspense) {
+          return reply.code(400).send({
+            data: null,
+            errors: [{ code: "PROFILE_SUSPENSE_ACCOUNT_REQUIRED", message: suspense }]
+          });
+        }
+        const unknownSource = await unknownSourceSystem(
+          prisma as unknown as PrismaClient,
+          (payload as { sourceSystemCode?: string | null }).sourceSystemCode
+        );
+        if (unknownSource) {
+          return reply.code(400).send({
+            data: null,
+            errors: [{ code: "SOURCE_SYSTEM_NOT_FOUND", message: unknownSource }]
+          });
+        }
         const validationErrors = validateProfileShape(merged as ProfileCreateInput);
         const updated = await db.integrationProfile.update({
           where: { id: request.params.id },
@@ -1900,6 +2036,7 @@ export function registerIntegrationRoutes(router: FastifyInstance) {
             sourceParams: payload.sourceParams as any,
             targetParams: payload.targetParams as any,
             savePayload: payload.savePayload as any,
+            ...importPolicyData(payload),
             isValid: validationErrors.length === 0,
             version: { increment: 1 }
           }

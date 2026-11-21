@@ -153,6 +153,7 @@ GET    /api/v1/integrations/profiles  ->  entity  INTEGRATIONS_READ
 GET    /api/v1/integrations/profiles/:id  ->  entity  INTEGRATIONS_READ
 GET    /api/v1/integrations/profiles/:id/versions  ->  entity  INTEGRATIONS_READ
 GET    /api/v1/integrations/simphony/logs  ->  entity  INTEGRATION_READ
+GET    /api/v1/integrations/source-systems  ->  entity  INTEGRATIONS_READ
 GET    /api/v1/integrations/transformations  ->  entity  INTEGRATIONS_READ
 GET    /api/v1/integrations/transformations/:id  ->  entity  INTEGRATIONS_READ
 GET    /api/v1/intercompany/account-pairs  ->  entity  IC_READ
@@ -329,6 +330,7 @@ POST   /api/v1/integrations/profiles/:id/execute  ->  entity  INTEGRATIONS_RUN |
 POST   /api/v1/integrations/profiles/:id/validate  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
 POST   /api/v1/integrations/simphony/import  ->  entity  INTEGRATION_IMPORT
 POST   /api/v1/integrations/sky-jana/sync  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integrations/source-systems  ->  entity  INTEGRATIONS_CONFIG
 POST   /api/v1/integrations/transformations  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
 POST   /api/v1/intercompany/account-pairs  ->  entity  IC_CONFIG
 POST   /api/v1/intercompany/journals  ->  entity  IC_CREATE
@@ -399,6 +401,7 @@ PUT    /api/v1/integrations/formats/:id  ->  entity  INTEGRATIONS_CONFIG | INTEG
 PUT    /api/v1/integrations/interfaces/:id  ->  entity  INTEGRATION_CONFIG
 PUT    /api/v1/integrations/lookups/:id  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
 PUT    /api/v1/integrations/profiles/:id  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
+PUT    /api/v1/integrations/source-systems/:code  ->  entity  INTEGRATIONS_CONFIG
 PUT    /api/v1/integrations/transformations/:id  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
 PUT    /api/v1/intercompany/account-pairs/:id  ->  entity  IC_CONFIG
 PUT    /api/v1/intercompany/v2/mappings/:id  ->  entity  IC_CONFIG
