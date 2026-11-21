@@ -95,12 +95,12 @@ function qs(params: Record<string, string | number | boolean | undefined>): stri
   return s ? `?${s}` : "";
 }
 
-const TD = "/api/v1/integrations/builder";
+const BUILDER = "/api/v1/integrations/builder";
 
 // ── Profile CRUD ─────────────────────────────────────────────────────────────
 
 export function createProfile(context: ApiContext, input: ProfileCreateInput) {
-  return request<Profile>(context, `${TD}/profiles`, {
+  return request<Profile>(context, `${BUILDER}/profiles`, {
     method: "POST",
     body: JSON.stringify(input)
   });
@@ -109,16 +109,16 @@ export function createProfile(context: ApiContext, input: ProfileCreateInput) {
 export function listProfiles(context: ApiContext, filters: ProfileListFilters = {}) {
   return request<Profile[]>(
     context,
-    `${TD}/profiles${qs(filters as Record<string, string | number | undefined>)}`
+    `${BUILDER}/profiles${qs(filters as Record<string, string | number | undefined>)}`
   );
 }
 
 export function getProfile(context: ApiContext, profileId: string) {
-  return request<Profile>(context, `${TD}/profiles/${profileId}`);
+  return request<Profile>(context, `${BUILDER}/profiles/${profileId}`);
 }
 
 export function updateProfile(context: ApiContext, profileId: string, input: ProfileUpdateInput) {
-  return request<Profile>(context, `${TD}/profiles/${profileId}`, {
+  return request<Profile>(context, `${BUILDER}/profiles/${profileId}`, {
     method: "PUT",
     body: JSON.stringify(input)
   });
@@ -129,24 +129,24 @@ export function changeProfileStatus(
   profileId: string,
   input: ProfileStatusChangeInput
 ) {
-  return request<Profile>(context, `${TD}/profiles/${profileId}/status`, {
+  return request<Profile>(context, `${BUILDER}/profiles/${profileId}/status`, {
     method: "PATCH",
     body: JSON.stringify(input)
   });
 }
 
 export function deleteProfile(context: ApiContext, profileId: string) {
-  return request<{ id: string }>(context, `${TD}/profiles/${profileId}`, {
+  return request<{ id: string }>(context, `${BUILDER}/profiles/${profileId}`, {
     method: "DELETE"
   });
 }
 
 export function listProfileVersions(context: ApiContext, profileId: string) {
-  return request<ProfileVersion[]>(context, `${TD}/profiles/${profileId}/versions`);
+  return request<ProfileVersion[]>(context, `${BUILDER}/profiles/${profileId}/versions`);
 }
 
 export function getProfileVersion(context: ApiContext, profileId: string, versionId: string) {
-  return request<ProfileVersion>(context, `${TD}/profiles/${profileId}/versions/${versionId}`);
+  return request<ProfileVersion>(context, `${BUILDER}/profiles/${profileId}/versions/${versionId}`);
 }
 
 // ── FSD Auto-Detection & Validation ──────────────────────────────────────────
@@ -154,14 +154,14 @@ export function getProfileVersion(context: ApiContext, profileId: string, versio
 export async function autoDetectFormat(context: ApiContext, file: File) {
   const buffer = await file.arrayBuffer();
   const base64 = btoa(new Uint8Array(buffer).reduce((s, b) => s + String.fromCharCode(b), ""));
-  return request<FormatDetectionResult>(context, `${TD}/fsd/auto-detect`, {
+  return request<FormatDetectionResult>(context, `${BUILDER}/fsd/auto-detect`, {
     method: "POST",
     body: JSON.stringify({ file: base64, filename: file.name })
   });
 }
 
 export function validateFsdSchema(context: ApiContext, schema: FsdSchemaInput) {
-  return request<SchemaValidationResult>(context, `${TD}/fsd/validate-schema`, {
+  return request<SchemaValidationResult>(context, `${BUILDER}/fsd/validate-schema`, {
     method: "POST",
     body: JSON.stringify(schema)
   });
@@ -175,7 +175,7 @@ export async function parsePreview(
 ) {
   const buffer = await file.arrayBuffer();
   const base64 = btoa(new Uint8Array(buffer).reduce((s, b) => s + String.fromCharCode(b), ""));
-  return request<ParsePreviewResult>(context, `${TD}/fsd/parse-preview`, {
+  return request<ParsePreviewResult>(context, `${BUILDER}/fsd/parse-preview`, {
     method: "POST",
     body: JSON.stringify({
       file: base64,
@@ -189,25 +189,25 @@ export async function parsePreview(
 // ── TML Mapping ──────────────────────────────────────────────────────────────
 
 export function listTargetFields(context: ApiContext) {
-  return request<HfpTargetField[]>(context, `${TD}/mappings/target-fields`);
+  return request<HfpTargetField[]>(context, `${BUILDER}/mappings/target-fields`);
 }
 
 export function listPrebuiltFunctions(context: ApiContext) {
-  return request<PrebuiltFunction[]>(context, `${TD}/mappings/functions`);
+  return request<PrebuiltFunction[]>(context, `${BUILDER}/mappings/functions`);
 }
 
 // ── Lookup Tables ────────────────────────────────────────────────────────────
 
 export function listLookupTables(context: ApiContext) {
-  return request<LookupTable[]>(context, `${TD}/lookup-tables`);
+  return request<LookupTable[]>(context, `${BUILDER}/lookup-tables`);
 }
 
 export function getLookupTable(context: ApiContext, tableId: string) {
-  return request<LookupTable>(context, `${TD}/lookup-tables/${tableId}`);
+  return request<LookupTable>(context, `${BUILDER}/lookup-tables/${tableId}`);
 }
 
 export function createLookupTable(context: ApiContext, input: LookupTableCreateInput) {
-  return request<LookupTable>(context, `${TD}/lookup-tables`, {
+  return request<LookupTable>(context, `${BUILDER}/lookup-tables`, {
     method: "POST",
     body: JSON.stringify(input)
   });
@@ -218,7 +218,7 @@ export function updateLookupTable(
   tableId: string,
   input: LookupTableUpdateInput
 ) {
-  return request<LookupTable>(context, `${TD}/lookup-tables/${tableId}`, {
+  return request<LookupTable>(context, `${BUILDER}/lookup-tables/${tableId}`, {
     method: "PUT",
     body: JSON.stringify(input)
   });
@@ -233,7 +233,11 @@ export function updateLookupTable(
 export function startTest(context: ApiContext, profileId: string, file: File) {
   const formData = new FormData();
   formData.append("file", file);
-  return uploadRequest<{ testId: string }>(context, `${TD}/profiles/${profileId}/test`, formData);
+  return uploadRequest<{ testId: string }>(
+    context,
+    `${BUILDER}/profiles/${profileId}/test`,
+    formData
+  );
 }
 
 /**
@@ -241,28 +245,28 @@ export function startTest(context: ApiContext, profileId: string, file: File) {
  * Use with EventSource in the useTestStream hook.
  */
 export function getTestStreamUrl(profileId: string, testId: string): string {
-  return `${TD}/profiles/${profileId}/test/${testId}/stream`;
+  return `${BUILDER}/profiles/${profileId}/test/${testId}/stream`;
 }
 
 export function getTestResults(context: ApiContext, profileId: string, testId: string) {
-  return request<TestResults>(context, `${TD}/profiles/${profileId}/test/${testId}/results`);
+  return request<TestResults>(context, `${BUILDER}/profiles/${profileId}/test/${testId}/results`);
 }
 
 // ── Automation Schedule ──────────────────────────────────────────────────────
 
 export function getSchedule(context: ApiContext, profileId: string) {
-  return request<Schedule | null>(context, `${TD}/profiles/${profileId}/schedule`);
+  return request<Schedule | null>(context, `${BUILDER}/profiles/${profileId}/schedule`);
 }
 
 export function createSchedule(context: ApiContext, profileId: string, input: ScheduleCreateInput) {
-  return request<Schedule>(context, `${TD}/profiles/${profileId}/schedule`, {
+  return request<Schedule>(context, `${BUILDER}/profiles/${profileId}/schedule`, {
     method: "POST",
     body: JSON.stringify(input)
   });
 }
 
 export function deleteSchedule(context: ApiContext, profileId: string) {
-  return request<{ id: string }>(context, `${TD}/profiles/${profileId}/schedule`, {
+  return request<{ id: string }>(context, `${BUILDER}/profiles/${profileId}/schedule`, {
     method: "DELETE"
   });
 }
@@ -277,12 +281,12 @@ export async function listHeldBatches(
   if (filters?.status) params.set("status", filters.status);
   if (filters?.profileId) params.set("profileId", filters.profileId);
   const suffix = params.toString() ? `?${params.toString()}` : "";
-  const res = await request<HeldBatchSummary[]>(ctx, `${TD}/batches${suffix}`);
+  const res = await request<HeldBatchSummary[]>(ctx, `${BUILDER}/batches${suffix}`);
   return res.data;
 }
 
 export async function getHeldBatch(ctx: ApiContext, batchId: string): Promise<HeldBatchDetail> {
-  const res = await request<HeldBatchDetail>(ctx, `${TD}/batches/${batchId}`);
+  const res = await request<HeldBatchDetail>(ctx, `${BUILDER}/batches/${batchId}`);
   return res.data;
 }
 
@@ -292,7 +296,7 @@ export async function rejectBatchItem(
   itemId: string,
   reason?: string
 ): Promise<void> {
-  await request(ctx, `${TD}/batches/${batchId}/items/${itemId}/reject`, {
+  await request(ctx, `${BUILDER}/batches/${batchId}/items/${itemId}/reject`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ reason })
@@ -304,16 +308,16 @@ export async function restoreBatchItem(
   batchId: string,
   itemId: string
 ): Promise<void> {
-  await request(ctx, `${TD}/batches/${batchId}/items/${itemId}/restore`, { method: "POST" });
+  await request(ctx, `${BUILDER}/batches/${batchId}/items/${itemId}/restore`, { method: "POST" });
 }
 
 export async function commitHeldBatch(ctx: ApiContext, batchId: string): Promise<CommitSummary> {
-  const res = await request<CommitSummary>(ctx, `${TD}/batches/${batchId}/commit`, {
+  const res = await request<CommitSummary>(ctx, `${BUILDER}/batches/${batchId}/commit`, {
     method: "POST"
   });
   return res.data;
 }
 
 export async function discardHeldBatch(ctx: ApiContext, batchId: string): Promise<void> {
-  await request(ctx, `${TD}/batches/${batchId}/discard`, { method: "POST" });
+  await request(ctx, `${BUILDER}/batches/${batchId}/discard`, { method: "POST" });
 }

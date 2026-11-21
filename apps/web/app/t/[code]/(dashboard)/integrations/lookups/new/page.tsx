@@ -14,7 +14,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useApiContext } from "../../../../../../../components/use-api-context";
 import { useTenantHref } from "../../../../../../../hooks/use-tenant-router";
 import {
-  createTransferLookupTable,
+  createIntegrationLookupTable,
   type LookupTableCreateInput
 } from "../../../../../../../lib/gl-api";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../../../../../components/ui/card";
@@ -37,7 +37,7 @@ export default function NewLookupTablePage() {
   const [newColName, setNewColName] = useState("");
 
   const saveMutation = useMutation({
-    mutationFn: (input: LookupTableCreateInput) => createTransferLookupTable(apiCtx!, input),
+    mutationFn: (input: LookupTableCreateInput) => createIntegrationLookupTable(apiCtx!, input),
     onSuccess: (result) => {
       const id = result?.data?.id;
       if (id) {

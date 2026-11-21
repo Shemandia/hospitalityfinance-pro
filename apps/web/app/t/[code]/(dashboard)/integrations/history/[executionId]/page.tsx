@@ -9,8 +9,8 @@
  *   - Per-record log table (paginated, filterable by SUCCESS/FAILED/SKIPPED)
  *   - Cancel button for QUEUED / RUNNING executions (CONTROLLER+)
  *
- * Backend: getTransferExecution (TD-API-003), getTransferExecutionLogs
- * (TD-API-004), cancelTransferExecution (TD-API-006).
+ * Backend: getIntegrationExecution (TD-API-003), getIntegrationExecutionLogs
+ * (TD-API-004), cancelIntegrationExecution (TD-API-006).
  *
  * Polls every 2 seconds while the execution is QUEUED or RUNNING.
  */
@@ -23,9 +23,9 @@ import { useApiContext } from "../../../../../../../components/use-api-context";
 import { usePermissions } from "../../../../../../../components/use-permissions";
 import { useTenantHref } from "../../../../../../../hooks/use-tenant-router";
 import {
-  getTransferExecution,
-  getTransferExecutionLogs,
-  cancelTransferExecution,
+  getIntegrationExecution,
+  getIntegrationExecutionLogs,
+  cancelIntegrationExecution,
   type IntegrationExecutionSummary,
   type IntegrationExecutionLog,
   type IntegrationExecutionStatus
@@ -117,10 +117,10 @@ export default function IntegrationExecutionDetailPage() {
   const [cancelError, setCancelError] = useState<string | null>(null);
 
   const executionQ = useQuery<IntegrationExecutionSummary | null>({
-    queryKey: ["td-execution", apiContext?.tenantSlug, apiContext?.entityId, executionId],
+    queryKey: ["integrations-execution", apiContext?.tenantSlug, apiContext?.entityId, executionId],
     queryFn: async () => {
       if (!apiContext || !executionId) return null;
-      const res = await getTransferExecution(apiContext, executionId);
+      const res = await getIntegrationExecution(apiContext, executionId);
       return (res.data as unknown as IntegrationExecutionSummary) ?? null;
     },
     enabled: Boolean(apiContext && executionId) && role.canIntegrationUser,
@@ -134,7 +134,7 @@ export default function IntegrationExecutionDetailPage() {
 
   const logsQ = useQuery({
     queryKey: [
-      "td-execution-logs",
+      "integrations-execution-logs",
       apiContext?.tenantSlug,
       apiContext?.entityId,
       executionId,
@@ -143,7 +143,7 @@ export default function IntegrationExecutionDetailPage() {
     queryFn: async () => {
       if (!apiContext || !executionId)
         return { rows: [] as IntegrationExecutionLog[], total: 0, take: 0, skip: 0 };
-      const res = await getTransferExecutionLogs(apiContext, executionId, {
+      const res = await getIntegrationExecutionLogs(apiContext, executionId, {
         limit: 200,
         statusFilter: logStatusFilter === "ALL" ? undefined : logStatusFilter
       });
@@ -160,11 +160,11 @@ export default function IntegrationExecutionDetailPage() {
   const cancelMut = useMutation({
     mutationFn: () => {
       if (!apiContext) throw new Error("No API context");
-      return cancelTransferExecution(apiContext, executionId);
+      return cancelIntegrationExecution(apiContext, executionId);
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["td-execution", apiContext?.tenantSlug] });
-      qc.invalidateQueries({ queryKey: ["td-executions"] });
+      qc.invalidateQueries({ queryKey: ["integrations-execution", apiContext?.tenantSlug] });
+      qc.invalidateQueries({ queryKey: ["integrations-executions"] });
     },
     onError: (e: Error) => setCancelError(e.message)
   });

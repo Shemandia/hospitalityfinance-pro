@@ -10,7 +10,7 @@
  * triggered by. Clicking a row navigates to the execution detail page
  * (UI-URL-020).
  *
- * Backend: listTransferExecutions (TD-API-002).
+ * Backend: listIntegrationExecutions (TD-API-002).
  */
 
 import Link from "next/link";
@@ -20,7 +20,7 @@ import { useApiContext } from "../../../../../../components/use-api-context";
 import { usePermissions } from "../../../../../../components/use-permissions";
 import { useTenantHref } from "../../../../../../hooks/use-tenant-router";
 import {
-  listTransferExecutions,
+  listIntegrationExecutions,
   type IntegrationExecutionSummary,
   type IntegrationExecutionStatus
 } from "../../../../../../lib/gl-api";
@@ -120,7 +120,7 @@ export default function IntegrationHistoryListPage() {
 
   const executionsQ = useQuery({
     queryKey: [
-      "td-executions",
+      "integrations-executions",
       apiContext?.tenantSlug,
       apiContext?.entityId,
       statusFilter,
@@ -129,7 +129,7 @@ export default function IntegrationHistoryListPage() {
     ],
     queryFn: async (): Promise<Page<IntegrationExecutionSummary>> => {
       if (!apiContext) return { rows: [], total: 0 };
-      const res = await listTransferExecutions(apiContext, {
+      const res = await listIntegrationExecutions(apiContext, {
         status: statusFilter === "ALL" ? undefined : statusFilter,
         limit: pageSize,
         offset
@@ -178,7 +178,7 @@ export default function IntegrationHistoryListPage() {
         <Button
           size="sm"
           variant="outline"
-          onClick={() => qc.invalidateQueries({ queryKey: ["td-executions"] })}
+          onClick={() => qc.invalidateQueries({ queryKey: ["integrations-executions"] })}
           disabled={executionsQ.isFetching}
           className="gap-1.5"
         >

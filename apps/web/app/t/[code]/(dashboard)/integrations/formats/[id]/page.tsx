@@ -52,8 +52,8 @@ import {
   AlertTriangle
 } from "lucide-react";
 import {
-  getTransferFormat,
-  updateTransferFormat,
+  getIntegrationFormat,
+  updateIntegrationFormat,
   type IntegrationFormatDetail,
   type FormatClassification
 } from "../../../../../../../lib/gl-api";
@@ -116,7 +116,7 @@ export default function FormatDetailPage() {
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["transfer-format", formatId],
-    queryFn: () => getTransferFormat(apiCtx!, formatId)
+    queryFn: () => getIntegrationFormat(apiCtx!, formatId)
   });
 
   const format = data?.data;
@@ -230,7 +230,7 @@ export default function FormatDetailPage() {
 
   const saveMutation = useMutation({
     mutationFn: () =>
-      updateTransferFormat(apiCtx!, formatId, {
+      updateIntegrationFormat(apiCtx!, formatId, {
         name: formatName.trim(),
         description: description.trim() || undefined,
         fsdXml: codeValue

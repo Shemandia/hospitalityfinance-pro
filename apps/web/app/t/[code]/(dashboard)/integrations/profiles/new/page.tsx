@@ -11,7 +11,7 @@ import { usePermissions } from "../../../../../../../components/use-permissions"
 import { WizardContainer } from "../../../../../../../components/integrations/wizard/WizardContainer";
 import { Lock } from "lucide-react";
 
-export default function NewTransferProfilePage() {
+export default function NewIntegrationProfilePage() {
   const role = usePermissions();
 
   if (!role.canIntegrationDesigner) {

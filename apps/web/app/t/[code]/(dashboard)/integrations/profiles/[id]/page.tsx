@@ -21,8 +21,8 @@ import { useApiContext } from "../../../../../../../components/use-api-context";
 import { usePermissions } from "../../../../../../../components/use-permissions";
 import { useTenantHref, useTenantRouter } from "../../../../../../../hooks/use-tenant-router";
 import {
-  getTransferProfile,
-  executeTransferProfile,
+  getIntegrationProfile,
+  executeIntegrationProfile,
   type IntegrationProfileDetail,
   type IntegrationProfileType
 } from "../../../../../../../lib/gl-api";
@@ -68,10 +68,10 @@ export default function IntegrationProfileDetailPage() {
   );
 
   const profileQ = useQuery<IntegrationProfileDetail | null>({
-    queryKey: ["td-profile", apiContext?.tenantSlug, apiContext?.entityId, profileId],
+    queryKey: ["integrations-profile", apiContext?.tenantSlug, apiContext?.entityId, profileId],
     queryFn: async () => {
       if (!apiContext || !profileId) return null;
-      const res = await getTransferProfile(apiContext, profileId);
+      const res = await getIntegrationProfile(apiContext, profileId);
       return (res.data as unknown as IntegrationProfileDetail) ?? null;
     },
     enabled: Boolean(apiContext && profileId) && role.canIntegrationUser
@@ -80,7 +80,7 @@ export default function IntegrationProfileDetailPage() {
   const executeMut = useMutation({
     mutationFn: () => {
       if (!apiContext) throw new Error("No API context");
-      return executeTransferProfile(apiContext, profileId);
+      return executeIntegrationProfile(apiContext, profileId);
     },
     onSuccess: (res) => {
       const data = res.data as { executionId: string; jobId: string; status: string };
@@ -88,7 +88,7 @@ export default function IntegrationProfileDetailPage() {
         type: "success",
         message: `Queued (execution ${data.executionId.slice(0, 8)}). Redirecting…`
       });
-      qc.invalidateQueries({ queryKey: ["td-executions"] });
+      qc.invalidateQueries({ queryKey: ["integrations-executions"] });
       setTimeout(() => {
         router.push(`/integrations/history/${data.executionId}`);
       }, 600);

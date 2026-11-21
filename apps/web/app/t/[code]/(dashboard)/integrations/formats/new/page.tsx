@@ -49,7 +49,7 @@ import {
 } from "lucide-react";
 import {
   detectFormatFromFile,
-  createTransferFormat,
+  createIntegrationFormat,
   type DetectedField,
   type DetectionResult,
   type FormatClassification
@@ -280,7 +280,7 @@ export default function FormatCreationWizard() {
 
   const createMutation = useMutation({
     mutationFn: () =>
-      createTransferFormat(apiCtx!, {
+      createIntegrationFormat(apiCtx!, {
         name: state.formatName.trim(),
         description: state.description.trim() || undefined,
         classification: state.classification,

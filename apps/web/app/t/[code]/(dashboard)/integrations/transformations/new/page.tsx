@@ -14,8 +14,8 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useApiContext } from "../../../../../../../components/use-api-context";
 import { useTenantHref } from "../../../../../../../hooks/use-tenant-router";
 import {
-  createTransferTransformation,
-  listTransferFormats,
+  createIntegrationTransformation,
+  listIntegrationFormats,
   type TransformationCreateInput,
   type IntegrationFormatSummary
 } from "../../../../../../../lib/gl-api";
@@ -52,12 +52,13 @@ export default function NewTransformationPage() {
 
   const { data: formatsData } = useQuery({
     queryKey: ["transfer-formats"],
-    queryFn: () => listTransferFormats(apiCtx!)
+    queryFn: () => listIntegrationFormats(apiCtx!)
   });
   const formats: IntegrationFormatSummary[] = formatsData?.data ?? [];
 
   const saveMutation = useMutation({
-    mutationFn: (input: TransformationCreateInput) => createTransferTransformation(apiCtx!, input),
+    mutationFn: (input: TransformationCreateInput) =>
+      createIntegrationTransformation(apiCtx!, input),
     onSuccess: (result) => {
       const id = result?.data?.id;
       if (id) {

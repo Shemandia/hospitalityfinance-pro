@@ -13,7 +13,7 @@ import { useApiContext } from "../../../../../../components/use-api-context";
 import { usePermissions } from "../../../../../../components/use-permissions";
 import { useTenantHref } from "../../../../../../hooks/use-tenant-router";
 import {
-  listTransferTransformations,
+  listIntegrationTransformations,
   type IntegrationTransformationSummary
 } from "../../../../../../lib/gl-api";
 import { Card, CardContent } from "../../../../../../components/ui/card";
@@ -36,7 +36,7 @@ export default function TransformationsListPage() {
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["transfer-transformations"],
-    queryFn: () => listTransferTransformations(apiCtx!)
+    queryFn: () => listIntegrationTransformations(apiCtx!)
   });
 
   const transformations = data?.data ?? [];

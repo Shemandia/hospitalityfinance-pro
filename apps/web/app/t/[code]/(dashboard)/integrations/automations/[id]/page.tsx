@@ -19,10 +19,10 @@ import { useApiContext } from "../../../../../../../components/use-api-context";
 import { usePermissions } from "../../../../../../../components/use-permissions";
 import { useTenantHref } from "../../../../../../../hooks/use-tenant-router";
 import {
-  getTransferAutomation,
-  updateTransferAutomation,
-  runTransferAutomation,
-  listTransferProfiles,
+  getIntegrationAutomation,
+  updateIntegrationAutomation,
+  runIntegrationAutomation,
+  listIntegrationProfiles,
   type IntegrationAutomationDetail,
   type IntegrationProfileSummary
 } from "../../../../../../../lib/gl-api";
@@ -70,12 +70,12 @@ export default function AutomationDetailPage() {
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["transfer-automation", params.id],
-    queryFn: () => getTransferAutomation(apiCtx!, params.id!)
+    queryFn: () => getIntegrationAutomation(apiCtx!, params.id!)
   });
 
   const { data: profilesData } = useQuery({
     queryKey: ["transfer-profiles"],
-    queryFn: () => listTransferProfiles(apiCtx!)
+    queryFn: () => listIntegrationProfiles(apiCtx!)
   });
 
   const automation: IntegrationAutomationDetail | null = data?.data ?? null;
@@ -125,7 +125,7 @@ export default function AutomationDetailPage() {
   const saveMutation = useMutation({
     mutationFn: () => {
       if (!automation) throw new Error("No automation");
-      return updateTransferAutomation(apiCtx!, automation.id, {
+      return updateIntegrationAutomation(apiCtx!, automation.id, {
         name: editName ?? undefined,
         description: editDescription ?? undefined,
         steps: editSteps?.map((s, i) => ({
@@ -150,7 +150,7 @@ export default function AutomationDetailPage() {
 
   // Run now mutation
   const runMutation = useMutation({
-    mutationFn: () => runTransferAutomation(apiCtx!, params.id!),
+    mutationFn: () => runIntegrationAutomation(apiCtx!, params.id!),
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: ["transfer-automation", params.id]
@@ -161,7 +161,7 @@ export default function AutomationDetailPage() {
   // Toggle enabled
   const toggleEnabledMutation = useMutation({
     mutationFn: () =>
-      updateTransferAutomation(apiCtx!, params.id!, {
+      updateIntegrationAutomation(apiCtx!, params.id!, {
         isEnabled: !automation?.isEnabled
       }),
     onSuccess: () => {

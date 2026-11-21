@@ -19,8 +19,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useApiContext } from "../../../../../../../components/use-api-context";
 import { useTenantHref } from "../../../../../../../hooks/use-tenant-router";
 import {
-  getTransferTransformation,
-  updateTransferTransformation,
+  getIntegrationTransformation,
+  updateIntegrationTransformation,
   type IntegrationTransformationDetail
 } from "../../../../../../../lib/gl-api";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../../../../../components/ui/card";
@@ -186,7 +186,7 @@ export default function TransformationDetailPage() {
 
   const { data, isLoading } = useQuery({
     queryKey: ["transfer-transformation", id],
-    queryFn: () => getTransferTransformation(apiCtx!, id)
+    queryFn: () => getIntegrationTransformation(apiCtx!, id)
   });
 
   const transformation: IntegrationTransformationDetail | null = data?.data ?? null;
@@ -232,7 +232,7 @@ export default function TransformationDetailPage() {
   // Save mutation
   const saveMutation = useMutation({
     mutationFn: () =>
-      updateTransferTransformation(apiCtx!, id, {
+      updateIntegrationTransformation(apiCtx!, id, {
         rulesJson: rules
       }),
     onSuccess: () => {

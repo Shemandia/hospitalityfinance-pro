@@ -14,8 +14,8 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useApiContext } from "../../../../../../../components/use-api-context";
 import { useTenantHref } from "../../../../../../../hooks/use-tenant-router";
 import {
-  createTransferAutomation,
-  listTransferProfiles,
+  createIntegrationAutomation,
+  listIntegrationProfiles,
   type AutomationCreateInput,
   type IntegrationProfileSummary
 } from "../../../../../../../lib/gl-api";
@@ -82,12 +82,12 @@ export default function NewAutomationPage() {
 
   const { data: profilesData } = useQuery({
     queryKey: ["transfer-profiles"],
-    queryFn: () => listTransferProfiles(apiCtx!)
+    queryFn: () => listIntegrationProfiles(apiCtx!)
   });
   const profiles: IntegrationProfileSummary[] = profilesData?.data ?? [];
 
   const saveMutation = useMutation({
-    mutationFn: (input: AutomationCreateInput) => createTransferAutomation(apiCtx!, input),
+    mutationFn: (input: AutomationCreateInput) => createIntegrationAutomation(apiCtx!, input),
     onSuccess: (result) => {
       const id = result?.data?.id;
       if (id) {

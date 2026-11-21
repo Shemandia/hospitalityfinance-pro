@@ -2872,7 +2872,7 @@ export type IntegrationFormatDetail = IntegrationFormatSummary & {
   createdById: string | null;
 };
 
-export function listTransferFormats(
+export function listIntegrationFormats(
   context: ApiContext,
   filters: { classification?: FormatClassification } = {}
 ) {
@@ -2885,7 +2885,7 @@ export function listTransferFormats(
   );
 }
 
-export function getTransferFormat(context: ApiContext, formatId: string) {
+export function getIntegrationFormat(context: ApiContext, formatId: string) {
   return request<IntegrationFormatDetail>(context, `/api/v1/integrations/formats/${formatId}`);
 }
 
@@ -2939,14 +2939,14 @@ export type FormatUpdateInput = {
   guiState?: unknown;
 };
 
-export function createTransferFormat(context: ApiContext, input: FormatCreateInput) {
+export function createIntegrationFormat(context: ApiContext, input: FormatCreateInput) {
   return request<IntegrationFormatDetail>(context, "/api/v1/integrations/formats", {
     method: "POST",
     body: JSON.stringify(input)
   });
 }
 
-export function updateTransferFormat(
+export function updateIntegrationFormat(
   context: ApiContext,
   formatId: string,
   input: FormatUpdateInput
@@ -3018,7 +3018,7 @@ export type TransformationUpdateInput = {
   functionsJson?: unknown;
 };
 
-export function listTransferTransformations(
+export function listIntegrationTransformations(
   context: ApiContext,
   filters: { sourceComponent?: string; targetComponent?: string } = {}
 ) {
@@ -3032,14 +3032,14 @@ export function listTransferTransformations(
   );
 }
 
-export function getTransferTransformation(context: ApiContext, id: string) {
+export function getIntegrationTransformation(context: ApiContext, id: string) {
   return request<IntegrationTransformationDetail>(
     context,
     `/api/v1/integrations/transformations/${id}`
   );
 }
 
-export function createTransferTransformation(
+export function createIntegrationTransformation(
   context: ApiContext,
   input: TransformationCreateInput
 ) {
@@ -3049,7 +3049,7 @@ export function createTransferTransformation(
   });
 }
 
-export function updateTransferTransformation(
+export function updateIntegrationTransformation(
   context: ApiContext,
   id: string,
   input: TransformationUpdateInput
@@ -3153,7 +3153,7 @@ export type AutomationUpdateInput = {
   }>;
 };
 
-export function listTransferAutomations(
+export function listIntegrationAutomations(
   context: ApiContext,
   params: { limit?: number; offset?: number } = {}
 ) {
@@ -3166,18 +3166,18 @@ export function listTransferAutomations(
   );
 }
 
-export function getTransferAutomation(context: ApiContext, id: string) {
+export function getIntegrationAutomation(context: ApiContext, id: string) {
   return request<IntegrationAutomationDetail>(context, `/api/v1/integrations/automations/${id}`);
 }
 
-export function createTransferAutomation(context: ApiContext, input: AutomationCreateInput) {
+export function createIntegrationAutomation(context: ApiContext, input: AutomationCreateInput) {
   return request<IntegrationAutomationDetail>(context, "/api/v1/integrations/automations", {
     method: "POST",
     body: JSON.stringify(input)
   });
 }
 
-export function updateTransferAutomation(
+export function updateIntegrationAutomation(
   context: ApiContext,
   id: string,
   input: AutomationUpdateInput
@@ -3188,13 +3188,13 @@ export function updateTransferAutomation(
   });
 }
 
-export function deleteTransferAutomation(context: ApiContext, id: string) {
+export function deleteIntegrationAutomation(context: ApiContext, id: string) {
   return request<{ id: string; deleted: true }>(context, `/api/v1/integrations/automations/${id}`, {
     method: "DELETE"
   });
 }
 
-export function runTransferAutomation(
+export function runIntegrationAutomation(
   context: ApiContext,
   id: string,
   runtimeParams?: Record<string, unknown>
@@ -3281,22 +3281,22 @@ export type LookupRowInput = {
   }>;
 };
 
-export function listTransferLookupTables(context: ApiContext) {
+export function listIntegrationLookupTables(context: ApiContext) {
   return request<IntegrationLookupTableSummary[]>(context, `/api/v1/integrations/lookups`);
 }
 
-export function getTransferLookupTable(context: ApiContext, id: string) {
+export function getIntegrationLookupTable(context: ApiContext, id: string) {
   return request<IntegrationLookupTableDetail>(context, `/api/v1/integrations/lookups/${id}`);
 }
 
-export function createTransferLookupTable(context: ApiContext, input: LookupTableCreateInput) {
+export function createIntegrationLookupTable(context: ApiContext, input: LookupTableCreateInput) {
   return request<IntegrationLookupTableDetail>(context, "/api/v1/integrations/lookups", {
     method: "POST",
     body: JSON.stringify(input)
   });
 }
 
-export function updateTransferLookupTable(
+export function updateIntegrationLookupTable(
   context: ApiContext,
   id: string,
   input: LookupTableUpdateInput
@@ -3314,7 +3314,7 @@ export function saveLookupTableRows(context: ApiContext, id: string, rows: Looku
   });
 }
 
-export function deleteTransferLookupTable(context: ApiContext, id: string) {
+export function deleteIntegrationLookupTable(context: ApiContext, id: string) {
   return request<{ id: string; deleted: true }>(context, `/api/v1/integrations/lookups/${id}`, {
     method: "DELETE"
   });
@@ -3388,7 +3388,7 @@ export type IntegrationProfileInput = {
   savePayload?: "NONE" | "INPUT" | "OUTPUT" | "BOTH";
 };
 
-export function listTransferProfiles(
+export function listIntegrationProfiles(
   context: ApiContext,
   filters: { profileType?: IntegrationProfileType; isActive?: boolean; isSystem?: boolean } = {}
 ) {
@@ -3403,18 +3403,18 @@ export function listTransferProfiles(
   );
 }
 
-export function getTransferProfile(context: ApiContext, profileId: string) {
+export function getIntegrationProfile(context: ApiContext, profileId: string) {
   return request<IntegrationProfileDetail>(context, `/api/v1/integrations/profiles/${profileId}`);
 }
 
-export function createTransferProfile(context: ApiContext, payload: IntegrationProfileInput) {
+export function createIntegrationProfile(context: ApiContext, payload: IntegrationProfileInput) {
   return request<IntegrationProfileDetail>(context, `/api/v1/integrations/profiles`, {
     method: "POST",
     body: JSON.stringify(payload)
   });
 }
 
-export function updateTransferProfile(
+export function updateIntegrationProfile(
   context: ApiContext,
   profileId: string,
   payload: Partial<IntegrationProfileInput>
@@ -3425,7 +3425,7 @@ export function updateTransferProfile(
   });
 }
 
-export function deleteTransferProfile(context: ApiContext, profileId: string) {
+export function deleteIntegrationProfile(context: ApiContext, profileId: string) {
   return request<{ id: string; isActive: false }>(
     context,
     `/api/v1/integrations/profiles/${profileId}`,
@@ -3433,7 +3433,7 @@ export function deleteTransferProfile(context: ApiContext, profileId: string) {
   );
 }
 
-export function cloneTransferProfile(context: ApiContext, profileId: string, newName: string) {
+export function cloneIntegrationProfile(context: ApiContext, profileId: string, newName: string) {
   return request<IntegrationProfileDetail>(
     context,
     `/api/v1/integrations/profiles/${profileId}/clone`,
@@ -3481,7 +3481,7 @@ export type IntegrationExecutionLog = {
   errorMessage: string | null;
 };
 
-export function executeTransferProfile(
+export function executeIntegrationProfile(
   context: ApiContext,
   profileId: string,
   payload: {
@@ -3497,7 +3497,7 @@ export function executeTransferProfile(
   );
 }
 
-export function listTransferExecutions(
+export function listIntegrationExecutions(
   context: ApiContext,
   filters: {
     profileId?: string;
@@ -3518,14 +3518,14 @@ export function listTransferExecutions(
   );
 }
 
-export function getTransferExecution(context: ApiContext, executionId: string) {
+export function getIntegrationExecution(context: ApiContext, executionId: string) {
   return request<IntegrationExecutionSummary>(
     context,
     `/api/v1/integrations/executions/${executionId}`
   );
 }
 
-export function getTransferExecutionLogs(
+export function getIntegrationExecutionLogs(
   context: ApiContext,
   executionId: string,
   params: { limit?: number; offset?: number; statusFilter?: "SUCCESS" | "FAILED" | "SKIPPED" } = {}
@@ -3541,7 +3541,7 @@ export function getTransferExecutionLogs(
   );
 }
 
-export function cancelTransferExecution(context: ApiContext, executionId: string) {
+export function cancelIntegrationExecution(context: ApiContext, executionId: string) {
   return request<IntegrationExecutionSummary>(
     context,
     `/api/v1/integrations/executions/${executionId}/cancel`,

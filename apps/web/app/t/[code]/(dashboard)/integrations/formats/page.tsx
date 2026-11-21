@@ -14,7 +14,7 @@ import { useApiContext } from "../../../../../../components/use-api-context";
 import { usePermissions } from "../../../../../../components/use-permissions";
 import { useTenantHref } from "../../../../../../hooks/use-tenant-router";
 import {
-  listTransferFormats,
+  listIntegrationFormats,
   type IntegrationFormatSummary,
   type FormatClassification
 } from "../../../../../../lib/gl-api";
@@ -63,7 +63,7 @@ export default function FormatsListPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ["transfer-formats", classFilter === "all" ? undefined : classFilter],
     queryFn: () =>
-      listTransferFormats(apiCtx!, {
+      listIntegrationFormats(apiCtx!, {
         classification: classFilter === "all" ? undefined : (classFilter as FormatClassification)
       })
   });

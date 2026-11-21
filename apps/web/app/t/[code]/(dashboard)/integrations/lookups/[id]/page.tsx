@@ -20,7 +20,7 @@ import { useApiContext } from "../../../../../../../components/use-api-context";
 import { usePermissions } from "../../../../../../../components/use-permissions";
 import { useTenantHref } from "../../../../../../../hooks/use-tenant-router";
 import {
-  getTransferLookupTable,
+  getIntegrationLookupTable,
   saveLookupTableRows,
   importLookupTableCsv,
   type IntegrationLookupTableDetail,
@@ -63,7 +63,7 @@ export default function LookupTableDetailPage() {
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["transfer-lookup", params.id],
-    queryFn: () => getTransferLookupTable(apiCtx!, params.id!)
+    queryFn: () => getIntegrationLookupTable(apiCtx!, params.id!)
   });
 
   const table: IntegrationLookupTableDetail | null = data?.data ?? null;

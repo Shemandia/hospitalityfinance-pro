@@ -92,7 +92,7 @@ export function TransformConfigPanel({
   // ── Lookup tables query ─────────────────────────────────────────────────
 
   const lookupTablesQ = useQuery({
-    queryKey: ["td-lookup-tables", apiContext?.tenantSlug],
+    queryKey: ["integrations-lookup-tables", apiContext?.tenantSlug],
     queryFn: () =>
       apiContext ? listLookupTables(apiContext) : Promise.resolve({ data: [] as LookupTable[] }),
     enabled: draft.type === "lookup" && Boolean(apiContext),
@@ -102,7 +102,7 @@ export function TransformConfigPanel({
   // ── Pre-built functions query ───────────────────────────────────────────
 
   const functionsQ = useQuery({
-    queryKey: ["td-prebuilt-functions", apiContext?.tenantSlug],
+    queryKey: ["integrations-prebuilt-functions", apiContext?.tenantSlug],
     queryFn: () =>
       apiContext
         ? listPrebuiltFunctions(apiContext)

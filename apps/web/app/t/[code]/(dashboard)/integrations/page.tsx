@@ -17,7 +17,7 @@ import { useQuery } from "@tanstack/react-query";
 import { usePermissions } from "../../../../../components/use-permissions";
 import { useApiContext } from "../../../../../components/use-api-context";
 import { useTenantHref } from "../../../../../hooks/use-tenant-router";
-import { listTransferProfiles, type IntegrationProfileSummary } from "../../../../../lib/gl-api";
+import { listIntegrationProfiles, type IntegrationProfileSummary } from "../../../../../lib/gl-api";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../../../components/ui/card";
 import { Badge } from "../../../../../components/ui/badge";
 import { Button } from "../../../../../components/ui/button";
@@ -170,7 +170,7 @@ export default function IntegrationLandingPage() {
 
   const { data: profileData, isLoading: profilesLoading } = useQuery({
     queryKey: ["transfer-profiles", "system"],
-    queryFn: () => listTransferProfiles(apiCtx!, { isSystem: true, isActive: true })
+    queryFn: () => listIntegrationProfiles(apiCtx!, { isSystem: true, isActive: true })
   });
 
   const systemProfiles: IntegrationProfileSummary[] = profileData?.data ?? [];

@@ -13,7 +13,7 @@ import { useApiContext } from "../../../../../../components/use-api-context";
 import { usePermissions } from "../../../../../../components/use-permissions";
 import { useTenantHref } from "../../../../../../hooks/use-tenant-router";
 import {
-  listTransferAutomations,
+  listIntegrationAutomations,
   type IntegrationAutomationSummary
 } from "../../../../../../lib/gl-api";
 import { Card, CardContent } from "../../../../../../components/ui/card";
@@ -43,7 +43,7 @@ export default function AutomationsListPage() {
     queryKey: ["transfer-automations", apiCtx?.tenantSlug, offset, pageSize],
     queryFn: async () =>
       pageFrom(
-        (await listTransferAutomations(apiCtx!, { limit: pageSize, offset })) as {
+        (await listIntegrationAutomations(apiCtx!, { limit: pageSize, offset })) as {
           data: IntegrationAutomationSummary[];
           meta?: Record<string, unknown>;
         }

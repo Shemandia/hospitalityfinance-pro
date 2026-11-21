@@ -20,7 +20,7 @@ import type { WizardFormData } from "../../../../../../../../lib/integrations/ho
 import type { Profile } from "../../../../../../../../lib/integrations/types";
 import { ArrowLeft, Lock, ListChecks } from "lucide-react";
 
-export default function EditTransferProfilePage() {
+export default function EditIntegrationProfilePage() {
   const params = useParams();
   const profileId = params.id as string;
   const apiContext = useApiContext();
@@ -28,7 +28,12 @@ export default function EditTransferProfilePage() {
   const role = usePermissions();
 
   const profileQ = useQuery({
-    queryKey: ["td-profile-edit", apiContext?.tenantSlug, apiContext?.entityId, profileId],
+    queryKey: [
+      "integrations-profile-edit",
+      apiContext?.tenantSlug,
+      apiContext?.entityId,
+      profileId
+    ],
     queryFn: async () => {
       const res = await getProfile(apiContext!, profileId);
       return res.data as Profile;

@@ -12,7 +12,7 @@ import { useApiContext } from "../../../../../../components/use-api-context";
 import { usePermissions } from "../../../../../../components/use-permissions";
 import { useTenantHref } from "../../../../../../hooks/use-tenant-router";
 import {
-  listTransferLookupTables,
+  listIntegrationLookupTables,
   type IntegrationLookupTableSummary
 } from "../../../../../../lib/gl-api";
 import { Card, CardContent } from "../../../../../../components/ui/card";
@@ -35,7 +35,7 @@ export default function LookupsListPage() {
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["transfer-lookups"],
-    queryFn: () => listTransferLookupTables(apiCtx!)
+    queryFn: () => listIntegrationLookupTables(apiCtx!)
   });
 
   const tables: IntegrationLookupTableSummary[] = data?.data ?? [];

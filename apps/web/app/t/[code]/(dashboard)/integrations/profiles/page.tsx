@@ -108,7 +108,7 @@ export default function IntegrationProfileListPage() {
 
   const profilesQ = useQuery({
     queryKey: [
-      "td-profiles",
+      "integrations-profiles",
       apiContext?.tenantSlug,
       apiContext?.entityId,
       typeFilter,
