@@ -60,7 +60,7 @@ Rules enforced by the posting service, each with a stable error code:
 
 - `journals`: add `document_date date`, `source_system varchar(20)`, `source_document_ref varchar(100)`.
 - Add a partial unique index on `(entity_id, source_system, source_document_ref)`, where both are set.
-- Existing journals: `document_date` is backfilled from `posted_at`, or else `created_at`, then made `NOT NULL`.
+- Existing journals: `document_date` is backfilled from `posted_at`, or else `created_at`, kept inside the journal's period (the period's last day when the date falls outside it). The database requires it (a `NOT NULL` check) and a trigger refuses a date outside the journal's period. Prisma keeps the field optional for now: about 30 places create journals (AP, AR, FX, intercompany, assets, allocation, year-end, the connectors), and WP-U gives each its own business date; until then the trigger fills the date when a caller leaves it out. The posting service always sets it.
 - New table `source_systems` (`code`, `name`, `is_active`): tenant-wide, with codes defined by the tenant. Templates add `OPERA`, `SIMPHONY` and `JANA` when they are installed, never in code.
 - `entities.code`: required and unique per tenant (a backfill check refuses the migration while any entity has no code or a duplicate code, and names them).
 - `transfer_profiles`: add `atomicity` (`PER_DOCUMENT` default, or `WHOLE_FILE`), `unmapped_policy` (`REJECT`, `HOLD` or `SUSPENSE`), `suspense_account_code`, `fx_rate_type` and `source_system_code`.
@@ -124,13 +124,15 @@ The old SAF and Jana file-import routes and services are deleted only after thei
 
 ## 7. Delivery steps (each one committed and pushed, gated on its tests)
 
-1. Migration for section 3, with integration tests:
-   - an unbalanced document is refused;
-   - a duplicate is refused by the database even when two posts run concurrently;
-   - a document with no period for its month is refused, and so is one whose period is closed;
-   - a document dated in a prior open period lands in that period.
+1. Migration for section 3, with integration tests of what the database enforces:
+   - upgrading refuses while an entity has no code or a duplicate code, and names them; existing journals get document dates inside their periods;
+   - a duplicate is refused by the database even when two posts run concurrently, while the same reference may post for another entity or source system;
+   - the source system and reference come together, and the source system must exist;
+   - a missing document date is filled inside the period, and a date outside it is refused;
+   - entity codes are required and unique (also through the entity API: 400 and 409);
+   - a `SUSPENSE` policy needs a suspense account.
 2. The `@hfp/posting-contract` package: schema, types, and unit tests on valid and invalid documents.
-3. The posting service (validate, resolve, post in one transaction) and the audited reverse-and-replace action, with integration tests on real Postgres with row security, as the application role.
+3. The posting service (validate, resolve, post in one transaction) and the audited reverse-and-replace action, with integration tests on real Postgres with row security, as the application role: an unbalanced document is refused; a duplicate is reported as a duplicate; a document with no period for its month, or whose period is not open, is refused; a document dated in a prior open period lands in that period.
 4. The pipeline stages from section 4; the direct-write branch is removed; the old tests are migrated.
 5. Unmapped policies and the profile fields, with tests for each policy.
 6. Templates, the install command and provisioning hook, sample files and parity tests: Opera, then Jana, then Simphony.

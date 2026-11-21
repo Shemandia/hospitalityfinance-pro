@@ -304,9 +304,10 @@ model TenantSetupProgress {
 model Entity {
   id                 String     @id @default(uuid())
   name               String
-  /// Short business-unit code (e.g. "JUM", "DIFC", "PALM"). Unique within parent group.
+  /// Short business-unit code (e.g. "JUM", "DIFC", "PALM"). Required and unique in
+  /// the tenant: imported documents name their entity by this code.
   /// Equivalent to SunSystems "Business Unit" code. Used in reports and consolidation.
-  code               String?    @db.VarChar(20)
+  code               String     @unique @db.VarChar(20)
   type               EntityType
   functionalCurrency String     @default("USD") @map("functional_currency")
   reportingCurrency  String     @default("USD") @map("reporting_currency")
@@ -728,6 +729,14 @@ model Journal {
   isAutoReversible          Boolean                @default(false) @map("is_auto_reversible")
   /// Self-reference to the original journal this entry reverses (for auto-reversal tracking)
   reversalOfId              String?                @map("reversal_of_id")
+  /// Business date of the transaction; always inside the period (database trigger).
+  /// Optional here only so that code which does not know it yet can leave it out:
+  /// the database fills it (trg_journal_document_date) and requires it.
+  documentDate              DateTime?              @map("document_date") @db.Date
+  /// Tenant-defined source system code (source_systems.code), with sourceDocumentRef.
+  sourceSystem              String?                @map("source_system") @db.VarChar(20)
+  /// The source's own document reference: posts once per entity and source system.
+  sourceDocumentRef         String?                @map("source_document_ref") @db.VarChar(100)
   createdAt                 DateTime               @default(now()) @map("created_at")
   updatedAt                 DateTime               @updatedAt @map("updated_at")
   entity                    Entity                 @relation(fields: [entityId], references: [id])
@@ -738,6 +747,8 @@ model Journal {
   authorizationSet          AuthorizationSet?      @relation(fields: [authorizationSetId], references: [id])
   reversalOf                Journal?               @relation("JournalReversal", fields: [reversalOfId], references: [id])
   reversals                 Journal[]              @relation("JournalReversal")
+  sourceSystemRef           SourceSystem?          @relation(fields: [sourceSystem], references: [code], onDelete: Restrict)
+  transferLogs              TransferExecutionLog[]
   lines                     JournalLine[]
   approvals                 JournalApproval[]
   authorizations            JournalAuthorization[]
@@ -746,6 +757,7 @@ model Journal {
   icTxnInitiatorJournals    ICTransaction[]        @relation("ICTxnInitiatorJournal")
   icTxnCounterpartyJournals ICTransaction[]        @relation("ICTxnCounterpartyJournal")
 
+  @@unique([entityId, sourceSystem, sourceDocumentRef])
   @@index([entityId, periodId, status])
   @@index([entityId, createdAt])
   @@index([entityId, journalTypeId])
@@ -1530,35 +1542,44 @@ enum SavePayloadOption {
 // ── TD-DB-003: transfer_profiles ─────────────────────────────────────────────
 
 model TransferProfile {
-  id               String             @id @default(uuid())
-  name             String             @unique
-  description      String?
-  profileType      ProfileType        @map("profile_type")
+  id                  String             @id @default(uuid())
+  name                String             @unique
+  description         String?
+  profileType         ProfileType        @map("profile_type")
   /// External component (e.g. "OPERA_CLOUD"); free-text to allow custom systems
-  sourceComponent  String?            @map("source_component")
+  sourceComponent     String?            @map("source_component")
   /// HFP target component (GL_JOURNAL, AP_INVOICE, AR_INVOICE, etc.)
-  targetComponent  String?            @map("target_component")
-  sourceFormatId   String?            @map("source_format_id")
-  targetFormatId   String?            @map("target_format_id")
-  transformationId String?            @map("transformation_id")
-  filterId         String?            @map("filter_id")
+  targetComponent     String?            @map("target_component")
+  sourceFormatId      String?            @map("source_format_id")
+  targetFormatId      String?            @map("target_format_id")
+  transformationId    String?            @map("transformation_id")
+  filterId            String?            @map("filter_id")
   /// Runtime parameters (JSONB) — e.g. ledger, posting_options, file_handling
-  sourceParams     Json?              @map("source_params")
-  targetParams     Json?              @map("target_params")
+  sourceParams        Json?              @map("source_params")
+  targetParams        Json?              @map("target_params")
   /// Whether this profile passes its own validation rules; false blocks execute
-  isValid          Boolean            @default(false) @map("is_valid")
+  isValid             Boolean            @default(false) @map("is_valid")
   /// Increments on every save; profile_versions captures the snapshot
-  version          Int                @default(1)
+  version             Int                @default(1)
   /// System profiles ship with every tenant and cannot be deleted
-  isSystem         Boolean            @default(false) @map("is_system")
+  isSystem            Boolean            @default(false) @map("is_system")
   /// Soft delete flag
-  isActive         Boolean            @default(true) @map("is_active")
+  isActive            Boolean            @default(true) @map("is_active")
   /// Save behavior: NONE / INPUT / OUTPUT / BOTH
-  savePayload      SavePayloadOption  @default(NONE) @map("save_payload")
-  reviewMode       TransferReviewMode @default(HOLD) @map("review_mode")
-  createdById      String?            @map("created_by")
-  createdAt        DateTime           @default(now()) @map("created_at")
-  updatedAt        DateTime           @updatedAt @map("updated_at")
+  savePayload         SavePayloadOption  @default(NONE) @map("save_payload")
+  reviewMode          TransferReviewMode @default(HOLD) @map("review_mode")
+  /// One transaction per document (default) or one for the whole file.
+  atomicity           ImportAtomicity    @default(PER_DOCUMENT)
+  /// What happens to source codes with no mapping.
+  unmappedPolicy      UnmappedPolicy     @default(REJECT) @map("unmapped_policy")
+  /// Account code that takes unmapped amounts when unmappedPolicy is SUSPENSE.
+  suspenseAccountCode String?            @map("suspense_account_code") @db.VarChar(30)
+  /// Rate type used when a document carries no rate.
+  fxRateType          FXRateType?        @map("fx_rate_type")
+  sourceSystemCode    String?            @map("source_system_code") @db.VarChar(20)
+  createdById         String?            @map("created_by")
+  createdAt           DateTime           @default(now()) @map("created_at")
+  updatedAt           DateTime           @updatedAt @map("updated_at")
 
   sourceFormat    TransferFormat?          @relation("TransferProfileSourceFormat", fields: [sourceFormatId], references: [id])
   targetFormat    TransferFormat?          @relation("TransferProfileTargetFormat", fields: [targetFormatId], references: [id])
@@ -1568,6 +1589,7 @@ model TransferProfile {
   journalRanges   TransferJournalRange[]
   executions      TransferExecution[]
   automationSteps TransferAutomationStep[]
+  sourceSystem    SourceSystem?            @relation(fields: [sourceSystemCode], references: [code], onDelete: Restrict)
 
   @@index([profileType, isActive])
   @@map("transfer_profiles")
@@ -1950,10 +1972,16 @@ model TransferExecutionLog {
   transformedData Json?              @map("transformed_data")
   errorCode       String?            @map("error_code")
   errorMessage    String?            @map("error_message") @db.Text
+  /// The canonical document this record belongs to (its sourceDocumentRef).
+  documentRef     String?            @map("document_ref") @db.VarChar(100)
+  /// The journal the document created.
+  journalId       String?            @map("journal_id")
 
   execution TransferExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  journal   Journal?          @relation(fields: [journalId], references: [id])
 
   @@index([executionId, recordIndex])
+  @@index([journalId])
   @@index([executionId, status])
   @@map("transfer_execution_logs")
 }
@@ -2881,4 +2909,31 @@ model TaxRate {
 
   @@index([taxCodeId, isCurrent])
   @@map("tax_rates")
+}
+
+/// A system that sends documents to the ledger (a PMS, a POS, a materials
+/// system). Tenant data: the codes are the tenant's, not an enum in code.
+model SourceSystem {
+  id        String   @id @default(uuid())
+  code      String   @unique @db.VarChar(20)
+  name      String   @db.VarChar(100)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  journals Journal[]
+  profiles TransferProfile[]
+
+  @@map("source_systems")
+}
+
+enum ImportAtomicity {
+  PER_DOCUMENT
+  WHOLE_FILE
+}
+
+enum UnmappedPolicy {
+  REJECT
+  HOLD
+  SUSPENSE
 }

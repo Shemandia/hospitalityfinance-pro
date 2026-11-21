@@ -67,6 +67,7 @@ if (!process.env.TEST_DATABASE_URL) {
         const parent = await tx.entity.create({
           data: {
             name: `Group ${unique}`,
+            code: `CG${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`.toUpperCase(),
             type: "CORPORATE",
             countryCode: "TZ",
             functionalCurrency: "USD",
@@ -77,6 +78,7 @@ if (!process.env.TEST_DATABASE_URL) {
         const child = await tx.entity.create({
           data: {
             name: `TZS Property ${unique}`,
+            code: `CT${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`.toUpperCase(),
             type: "PROPERTY",
             countryCode: "TZ",
             functionalCurrency: "TZS",
@@ -289,6 +291,7 @@ if (!process.env.TEST_DATABASE_URL) {
         const child = await tx.entity.create({
           data: {
             name: `USD Property ${Date.now()}`,
+            code: `CU${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`.toUpperCase(),
             type: "PROPERTY",
             countryCode: "TZ",
             functionalCurrency: "USD",

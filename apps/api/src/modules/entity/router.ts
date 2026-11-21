@@ -66,6 +66,50 @@ function notFound(reply: FastifyReply) {
 }
 
 /**
+ * An entity's code: required, at most 20 characters, unique in the tenant
+ * (the database enforces uniqueness). Imported documents name their entity
+ * by it. Null when the value is not a usable code.
+ */
+function entityCode(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const code = value.trim();
+  return code.length > 0 && code.length <= 20 ? code : null;
+}
+
+function invalidCode(reply: FastifyReply) {
+  return reply.code(400).send({
+    data: null,
+    errors: [{ code: "ENTITY_CODE_REQUIRED", message: "A code of 1 to 20 characters is required." }]
+  });
+}
+
+/** Runs a write that sets an entity code; a code already in use answers 409. */
+async function withUniqueCode<T>(
+  reply: FastifyReply,
+  code: string | undefined,
+  write: () => Promise<T>
+) {
+  try {
+    return await write();
+  } catch (error) {
+    const e = error as { code?: string; meta?: { target?: unknown } };
+    if (e.code === "P2002" && JSON.stringify(e.meta?.target ?? "").includes("code")) {
+      reply.code(409).send({
+        data: null,
+        errors: [
+          {
+            code: "ENTITY_CODE_TAKEN",
+            message: `The code ${code} is already used by another entity.`
+          }
+        ]
+      });
+      return null;
+    }
+    throw error;
+  }
+}
+
+/**
  * Runs a change to the entity tree, which can change any user's access, with
  * the tenant's access cache invalidated around it.
  */
@@ -210,24 +254,31 @@ export async function registerEntityRouter(app: FastifyInstance): Promise<void> 
         }
       }
 
-      const entity = await changeEntityTree(request, () =>
-        prisma.entity.create({
-          data: {
-            name: b.name,
-            code: b.code ?? null,
-            type: b.type,
-            parentId: b.parentId ?? null,
-            functionalCurrency: b.functionalCurrency ?? "USD",
-            reportingCurrency: b.reportingCurrency ?? "USD",
-            timezone: b.timezone ?? "UTC",
-            countryCode: b.countryCode,
-            address: b.address,
-            city: b.city,
-            postalCode: b.postalCode,
-            maxProperties: b.type === "GROUP" ? (b.maxProperties ?? 0) : 0
-          }
-        })
+      // After the access checks: a caller out of reach learns nothing more.
+      const code = entityCode(b.code);
+      if (!code) return invalidCode(reply);
+
+      const entity = await withUniqueCode(reply, code, () =>
+        changeEntityTree(request, () =>
+          prisma.entity.create({
+            data: {
+              name: b.name,
+              code,
+              type: b.type,
+              parentId: b.parentId ?? null,
+              functionalCurrency: b.functionalCurrency ?? "USD",
+              reportingCurrency: b.reportingCurrency ?? "USD",
+              timezone: b.timezone ?? "UTC",
+              countryCode: b.countryCode,
+              address: b.address,
+              city: b.city,
+              postalCode: b.postalCode,
+              maxProperties: b.type === "GROUP" ? (b.maxProperties ?? 0) : 0
+            }
+          })
+        )
       );
+      if (!entity) return reply;
 
       // No membership to record: the creator already holds ADMIN_ENTITIES at
       // the parent (or tenant-wide), and that grant reaches the new entity.
@@ -286,26 +337,34 @@ export async function registerEntityRouter(app: FastifyInstance): Promise<void> 
         }
       }
 
-      const entity = await changeEntityTree(request, () =>
-        prisma.entity.update({
-          where: { id: request.params.id },
-          data: {
-            ...(b.name !== undefined && { name: b.name }),
-            ...(b.code !== undefined && { code: b.code }),
-            ...(b.parentId !== undefined && { parentId: b.parentId }),
-            ...(b.functionalCurrency !== undefined && { functionalCurrency: b.functionalCurrency }),
-            ...(b.reportingCurrency !== undefined && { reportingCurrency: b.reportingCurrency }),
-            ...(b.timezone !== undefined && { timezone: b.timezone }),
-            ...(b.countryCode !== undefined && { countryCode: b.countryCode }),
-            ...(b.address !== undefined && { address: b.address }),
-            ...(b.city !== undefined && { city: b.city }),
-            ...(b.postalCode !== undefined && { postalCode: b.postalCode }),
-            ...(b.isActive !== undefined && { isActive: b.isActive }),
-            ...(b.maxProperties !== undefined &&
-              existing.type === "GROUP" && { maxProperties: b.maxProperties })
-          }
-        })
+      const code = b.code === undefined ? undefined : entityCode(b.code);
+      if (code === null) return invalidCode(reply);
+
+      const entity = await withUniqueCode(reply, code, () =>
+        changeEntityTree(request, () =>
+          prisma.entity.update({
+            where: { id: request.params.id },
+            data: {
+              ...(b.name !== undefined && { name: b.name }),
+              ...(code !== undefined && { code }),
+              ...(b.parentId !== undefined && { parentId: b.parentId }),
+              ...(b.functionalCurrency !== undefined && {
+                functionalCurrency: b.functionalCurrency
+              }),
+              ...(b.reportingCurrency !== undefined && { reportingCurrency: b.reportingCurrency }),
+              ...(b.timezone !== undefined && { timezone: b.timezone }),
+              ...(b.countryCode !== undefined && { countryCode: b.countryCode }),
+              ...(b.address !== undefined && { address: b.address }),
+              ...(b.city !== undefined && { city: b.city }),
+              ...(b.postalCode !== undefined && { postalCode: b.postalCode }),
+              ...(b.isActive !== undefined && { isActive: b.isActive }),
+              ...(b.maxProperties !== undefined &&
+                existing.type === "GROUP" && { maxProperties: b.maxProperties })
+            }
+          })
+        )
       );
+      if (!entity) return reply;
       return { data: entity, errors: [] };
     }
   );

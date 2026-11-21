@@ -53,6 +53,7 @@ if (!process.env.TEST_DATABASE_URL) {
         const entity = await tx.entity.create({
           data: {
             name: `BW Test ${unique}`,
+            code: `BW${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`.toUpperCase(),
             type: "PROPERTY",
             countryCode: "TZ",
             functionalCurrency: "TZS"
@@ -177,6 +178,7 @@ if (!process.env.TEST_DATABASE_URL) {
         const other = await tx.entity.create({
           data: {
             name: `BW Other ${Date.now()}`,
+            code: `BO${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`.toUpperCase(),
             type: "PROPERTY",
             countryCode: "TZ",
             functionalCurrency: "TZS"

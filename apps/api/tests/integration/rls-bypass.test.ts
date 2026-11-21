@@ -171,8 +171,8 @@ if (!process.env.TEST_DATABASE_URL) {
             await asAppRole(tx);
             // Raw, so it is on the bypass transaction whatever the middleware does.
             await tx.$executeRaw`
-              INSERT INTO entities (id, name, type, country_code, updated_at)
-              VALUES (${uncommittedId}, ${`Bypass IT uncommitted ${run}`}, 'PROPERTY'::"EntityType", 'TZ', now())`;
+              INSERT INTO entities (id, code, name, type, country_code, updated_at)
+              VALUES (${uncommittedId}, ${`BU${run}`.slice(0, 20)}, ${`Bypass IT uncommitted ${run}`}, 'PROPERTY'::"EntityType", 'TZ', now())`;
             // A model query on another connection could not see that row.
             const found = await tx.entity.findUnique({
               where: { id: uncommittedId },
