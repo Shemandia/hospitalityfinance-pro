@@ -1,5 +1,6 @@
 "use client";
 
+import { DEFAULT_LOCALE } from "../../../../../../lib/format";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useApiContext } from "../../../../../../components/use-api-context";
@@ -46,7 +47,7 @@ import { Play, Loader2, Copy, Database, Search, ChevronDown, ChevronRight } from
 
 function formatNumber(value: number | null | undefined): string {
   if (value == null) return "";
-  return value.toLocaleString("en-US", {
+  return value.toLocaleString(DEFAULT_LOCALE, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   });

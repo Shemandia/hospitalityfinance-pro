@@ -37,6 +37,8 @@ import {
 import { Input } from "../../../../../../components/ui/input";
 import { Label } from "../../../../../../components/ui/label";
 import { Camera, CheckCircle, AlertTriangle } from "lucide-react";
+import { QueryError } from "../../../../../../components/query-error";
+import { ListPageSkeleton, TableSkeleton } from "../../../../../../components/page-skeletons";
 
 type PeriodItem = { id: string; name?: string; year: number; month: number; status: string };
 
@@ -52,7 +54,13 @@ export default function ICReconciliationPage() {
   const [snapshotPeriodId, setSnapshotPeriodId] = useState("");
   const [snapshotNotes, setSnapshotNotes] = useState("");
 
-  const { data: recon, isLoading } = useQuery({
+  const {
+    data: recon,
+    isLoading,
+    isError,
+    error,
+    refetch
+  } = useQuery({
     queryKey: ["ic-reconciliation"],
     queryFn: () => getICReconciliation(ctx),
     select: (r) => r.data
@@ -121,7 +129,9 @@ export default function ICReconciliationPage() {
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <p className="text-muted-foreground py-8 text-center">Loading...</p>
+            <TableSkeleton rows={6} cols={6} />
+          ) : isError ? (
+            <QueryError message={(error as Error)?.message} onRetry={() => refetch()} />
           ) : pairs.length === 0 ? (
             <p className="text-muted-foreground py-8 text-center">No entity pairs configured.</p>
           ) : (

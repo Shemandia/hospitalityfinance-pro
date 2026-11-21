@@ -71,7 +71,25 @@ export const apInvoiceListQuerySchema = z.object({
     .optional(),
   supplierId: z.string().uuid().optional(),
   dueBefore: z.coerce.date().optional(),
-  limit: pageFields.limit
+  limit: pageFields.limit,
+  offset: pageFields.offset
+});
+
+export const supplierListQuerySchema = z.object({
+  /** Matches the name or the code, ignoring case. */
+  search: z.string().trim().min(1).max(100).optional(),
+  /** Which suppliers: all of them (the default), the active or the inactive ones. */
+  status: z.enum(["all", "active", "inactive"]).default("all"),
+  /** Without a limit every matching supplier is returned (pickers need the whole list). */
+  limit: z.coerce.number().int().positive().optional(),
+  offset: pageFields.offset
+});
+
+export type SupplierListQuery = z.infer<typeof supplierListQuerySchema>;
+
+export const paymentRunListQuerySchema = z.object({
+  limit: pageFields.limit,
+  offset: pageFields.offset
 });
 
 export const paymentRunProposalSchema = z.object({

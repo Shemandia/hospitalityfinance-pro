@@ -37,6 +37,8 @@ import {
 import { useTenantHref } from "../../../../../hooks/use-tenant-router";
 import Link from "next/link";
 import { Plus, RotateCcw, Eye } from "lucide-react";
+import { QueryError } from "../../../../../components/query-error";
+import { ListPageSkeleton, TableSkeleton } from "../../../../../components/page-skeletons";
 
 const STATUS_COLORS: Record<string, string> = {
   DRAFT: "bg-gray-100 text-gray-800",
@@ -60,7 +62,13 @@ export default function IntercompanyTransactionsPage() {
   const [reverseTarget, setReverseTarget] = useState<ICTransactionSummary2 | null>(null);
   const [reverseReason, setReverseReason] = useState("");
 
-  const { data: txns = [], isLoading } = useQuery({
+  const {
+    data: txns = [],
+    isLoading,
+    isError,
+    error,
+    refetch
+  } = useQuery({
     queryKey: ["ic-transactions"],
     queryFn: () => getICTransactions(ctx),
     select: (r) => r.data ?? []
@@ -130,7 +138,9 @@ export default function IntercompanyTransactionsPage() {
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <p className="text-muted-foreground py-8 text-center">Loading...</p>
+            <TableSkeleton rows={6} cols={6} />
+          ) : isError ? (
+            <QueryError message={(error as Error)?.message} onRetry={() => refetch()} />
           ) : filtered.length === 0 ? (
             <p className="text-muted-foreground py-8 text-center">No transactions found.</p>
           ) : (

@@ -1,5 +1,7 @@
 "use client";
 
+import { useSelectedPeriod } from "../../../../../../components/period-provider";
+import { PeriodNotice } from "../../../../../../components/period-gate";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useTenantRouter } from "../../../../../../hooks/use-tenant-router";
@@ -22,8 +24,9 @@ import type {
 } from "../../../../../../lib/gl-api";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../../../../components/ui/card";
 import { Badge } from "../../../../../../components/ui/badge";
+import { Skeleton } from "../../../../../../components/ui/skeleton";
 import { Button } from "../../../../../../components/ui/button";
-import { fmt, fmtPct } from "../../../../../../lib/format";
+import { fmt, fmtPct, DEFAULT_LOCALE } from "../../../../../../lib/format";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -67,7 +70,7 @@ function fmtVariance(v: number | string): string {
   const n = typeof v === "string" ? parseFloat(v) : v;
   if (isNaN(n)) return "--";
   const sign = n > 0 ? "+" : "";
-  return `${sign}${n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  return `${sign}${n.toLocaleString(DEFAULT_LOCALE, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 
 function fmtVariancePct(v: number): string {
@@ -119,24 +122,11 @@ export default function ControllerDashboard() {
   const router = useTenantRouter();
   const apiContext = useApiContext();
 
-  // Periods
-  const periodsQ = useQuery({
-    queryKey: ["periods"],
-    queryFn: () => getPeriods(apiContext!),
-    enabled: !!apiContext
-  });
-
-  const periods = (periodsQ.data?.data ?? []) as Period[];
-  const currentPeriod = useMemo(
-    () =>
-      periods.find((p) => p.status === "OPEN") ??
-      periods.sort((a, b) => {
-        if (a.year !== b.year) return b.year - a.year;
-        return b.month - a.month;
-      })[0],
-    [periods]
-  );
-
+  // The period chosen in the top bar, resolved to this entity's own period.
+  const selectedPeriod = useSelectedPeriod();
+  const periods = selectedPeriod.periods as unknown as Period[];
+  const currentPeriod =
+    selectedPeriod.state === "ready" ? (selectedPeriod.period as unknown as Period) : undefined;
   const periodId = currentPeriod?.id ?? "";
 
   // RevPAR / KPIs
@@ -224,7 +214,8 @@ export default function ControllerDashboard() {
     return { assets, liabEquity, balanced: diff < 0.01 };
   }, [bs]);
 
-  const isLoading = periodsQ.isLoading || revparQ.isLoading || usaliQ.isLoading || bsQ.isLoading;
+  const isLoading =
+    selectedPeriod.state === "loading" || revparQ.isLoading || usaliQ.isLoading || bsQ.isLoading;
 
   if (!apiContext) {
     return (
@@ -232,6 +223,10 @@ export default function ControllerDashboard() {
         Please sign in to view the Controller dashboard.
       </div>
     );
+  }
+
+  if (selectedPeriod.state !== "ready" && selectedPeriod.state !== "loading") {
+    return <PeriodNotice />;
   }
 
   return (
@@ -303,7 +298,11 @@ export default function ControllerDashboard() {
             </CardHeader>
             <CardContent>
               {usaliQ.isLoading ? (
-                <p className="text-sm text-muted-foreground">Loading...</p>
+                <div className="space-y-2 py-2">
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-3/4" />
+                  <Skeleton className="h-4 w-1/2" />
+                </div>
               ) : !usali?.departments || usali.departments.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No USALI data available.</p>
               ) : (
@@ -627,7 +626,11 @@ export default function ControllerDashboard() {
             </CardHeader>
             <CardContent>
               {pendingQ.isLoading ? (
-                <p className="text-sm text-muted-foreground">Loading...</p>
+                <div className="space-y-2 py-2">
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-3/4" />
+                  <Skeleton className="h-4 w-1/2" />
+                </div>
               ) : pendingJournals.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No journals awaiting approval.</p>
               ) : (
@@ -674,13 +677,17 @@ export default function ControllerDashboard() {
               <CardTitle className="text-base">Period Status</CardTitle>
             </CardHeader>
             <CardContent>
-              {periodsQ.isLoading ? (
-                <p className="text-sm text-muted-foreground">Loading...</p>
+              {selectedPeriod.state === "loading" ? (
+                <div className="space-y-2 py-2">
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-3/4" />
+                  <Skeleton className="h-4 w-1/2" />
+                </div>
               ) : periods.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No periods found.</p>
               ) : (
                 <div className="space-y-2">
-                  {periods
+                  {[...periods]
                     .sort((a, b) => {
                       if (a.year !== b.year) return b.year - a.year;
                       return b.month - a.month;

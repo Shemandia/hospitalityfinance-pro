@@ -28,6 +28,9 @@ import {
   Hotel
 } from "lucide-react";
 import { COUNTRIES, getCitiesForCountry } from "../../../../../../lib/countries";
+import { getSupportedTimezones } from "../../../../../../lib/timezones";
+import { QueryError } from "../../../../../../components/query-error";
+import { ListPageSkeleton } from "../../../../../../components/page-skeletons";
 
 type FormState = EntityPayload & { id?: string };
 
@@ -45,23 +48,7 @@ const EMPTY_FORM: FormState = {
   postalCode: ""
 };
 
-const TIMEZONES = [
-  "UTC",
-  "America/New_York",
-  "America/Chicago",
-  "America/Denver",
-  "America/Los_Angeles",
-  "Europe/London",
-  "Europe/Paris",
-  "Europe/Berlin",
-  "Asia/Dubai",
-  "Asia/Qatar",
-  "Asia/Singapore",
-  "Asia/Tokyo",
-  "Australia/Sydney",
-  "Africa/Nairobi",
-  "Africa/Dar_es_Salaam"
-];
+const TIMEZONES = getSupportedTimezones();
 
 const CURRENCIES = [
   "USD",
@@ -86,7 +73,13 @@ export default function PropertiesPage() {
   const [search, setSearch] = useState("");
   const [showInfo, setShowInfo] = useState(true);
 
-  const { data: entitiesRes, isLoading } = useQuery({
+  const {
+    data: entitiesRes,
+    isLoading,
+    isError,
+    error,
+    refetch
+  } = useQuery({
     queryKey: ["entities"],
     queryFn: () => getEntities(api!),
     enabled: !!api
@@ -167,7 +160,7 @@ export default function PropertiesPage() {
     });
   };
 
-  if (!api) return <p className="text-slate-400 p-8">Loading session...</p>;
+  if (!api) return <ListPageSkeleton />;
 
   return (
     <div className="p-6 lg:p-10 max-w-5xl mx-auto space-y-8">
@@ -205,6 +198,19 @@ export default function PropertiesPage() {
           Filters
         </button>
       </div>
+
+      {isLoading ? (
+        <ListPageSkeleton />
+      ) : isError ? (
+        <QueryError
+          message={(error as Error)?.message ?? "Failed to load properties."}
+          onRetry={() => refetch()}
+        />
+      ) : filteredGroups.length === 0 && filteredProperties.length === 0 ? (
+        <div className="bg-white border border-slate-100 rounded-4xl p-12 text-center text-slate-500">
+          No properties or groups found.
+        </div>
+      ) : null}
 
       {/* ── Form Panel ──────────────────────────────────────────────────── */}
       {editing && (

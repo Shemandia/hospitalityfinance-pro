@@ -1,5 +1,7 @@
 "use client";
 
+import { useSelectedPeriod } from "../../../../../../components/period-provider";
+import { PeriodInUse, PeriodNotice } from "../../../../../../components/period-gate";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useApiContext } from "../../../../../../components/use-api-context";
@@ -109,19 +111,10 @@ function SectionHeader({ title }: { title: string }) {
 export default function GMDashboardPage() {
   const apiContext = useApiContext();
   const tenantHref = useTenantHref();
-  const [periodId, setPeriodId] = useState("");
-
-  // Periods
-  const periodsQ = useQuery({
-    queryKey: ["periods", apiContext?.tenantSlug, apiContext?.entityId],
-    queryFn: () => (apiContext ? getPeriods(apiContext) : Promise.resolve({ data: [] })),
-    enabled: Boolean(apiContext),
-    select: (r: any) => (r.data as unknown as Period[]) ?? []
-  });
-  const periods = periodsQ.data ?? [];
-  const activePeriodId =
-    periodId || periods.find((p) => p.status === "OPEN")?.id || periods[0]?.id || "";
-  const activePeriod = periods.find((p) => p.id === activePeriodId);
+  // The period chosen in the top bar, resolved to this entity's own period.
+  const selectedPeriod = useSelectedPeriod();
+  const activePeriod = selectedPeriod.state === "ready" ? selectedPeriod.period : undefined;
+  const activePeriodId = activePeriod?.id ?? "";
 
   // RevPAR
   const revparQ = useQuery({
@@ -164,7 +157,11 @@ export default function GMDashboardPage() {
   const gopPct = revpar ? parseFloat(revpar.gopPct) : 0;
   const totalRevenue = usali ? parseFloat(usali.totalRevenue) : 0;
 
-  const isLoading = periodsQ.isLoading || revparQ.isLoading;
+  const isLoading = selectedPeriod.state === "loading" || revparQ.isLoading;
+
+  if (selectedPeriod.state !== "ready" && selectedPeriod.state !== "loading") {
+    return <PeriodNotice />;
+  }
 
   return (
     <div className="space-y-4">
@@ -176,19 +173,7 @@ export default function GMDashboardPage() {
           </div>
           <div className="ml-auto flex items-center gap-2">
             <span className="text-sm text-muted-foreground">Period:</span>
-            <Select value={activePeriodId} onValueChange={setPeriodId}>
-              <SelectTrigger className="h-8 w-52">
-                <SelectValue placeholder="Select period" />
-              </SelectTrigger>
-              <SelectContent>
-                {periods.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.name}
-                    {p.status === "OPEN" ? " (Open)" : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <PeriodInUse />
           </div>
         </CardContent>
       </Card>

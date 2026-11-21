@@ -32,6 +32,8 @@ import {
   type AccountTypeCategory,
   type NormalBalance
 } from "../../../../../../lib/gl-api";
+import { QueryError } from "../../../../../../components/query-error";
+import { TableSkeleton } from "../../../../../../components/page-skeletons";
 
 const CATEGORY_LABELS: Record<AccountTypeCategory, string> = {
   BALANCE_SHEET: "Balance Sheet",
@@ -65,7 +67,13 @@ export default function AccountTypesPage() {
   const ctx = useApiContext();
   const queryClient = useQueryClient();
 
-  const { data: res, isLoading } = useQuery({
+  const {
+    data: res,
+    isLoading,
+    isError,
+    error,
+    refetch
+  } = useQuery({
     queryKey: ["account-type-defs", ctx?.tenantSlug, ctx?.entityId],
     queryFn: () => getAccountTypeDefinitions(ctx!),
     enabled: !!ctx
@@ -182,10 +190,15 @@ export default function AccountTypesPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {isLoading && (
-            <div className="py-16 text-center text-sm text-muted-foreground">Loading...</div>
-          )}
-          {!isLoading && (
+          {isLoading ? (
+            <div className="p-4">
+              <TableSkeleton rows={6} cols={7} />
+            </div>
+          ) : isError ? (
+            <div className="p-4">
+              <QueryError message={(error as Error)?.message} onRetry={() => refetch()} />
+            </div>
+          ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>

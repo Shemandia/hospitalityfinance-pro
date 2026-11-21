@@ -18,7 +18,7 @@ import {
   SUPPLIER_SYNC_TARGET_FIELDS
 } from "../transform-engine.js";
 import { mapError } from "./_shared.js";
-import { pageLimit, pageOffset } from "../../../shared/pagination.js";
+import { pageLimit, pageMeta, pageOffset } from "../../../shared/pagination.js";
 
 // ── Profile schemas ─────────────────────────────────────────────────────────
 
@@ -1042,26 +1042,35 @@ export function registerTransferDeskRoutes(router: FastifyInstance) {
     { preHandler: [requirePermission("TRANSFER_DESK_READ")] },
     async (request, reply) => {
       try {
-        const data = await (prisma as unknown as PrismaClient).transferAutomation.findMany({
-          include: {
-            steps: {
-              select: { id: true, stepOrder: true, profileId: true, failOnError: true },
-              orderBy: { stepOrder: "asc" }
+        const { limit, offset } = request.query as { limit?: string; offset?: string };
+        const take = pageLimit(limit);
+        const skip = pageOffset(offset);
+        const db = prisma as unknown as PrismaClient;
+        const [data, total] = await Promise.all([
+          db.transferAutomation.findMany({
+            take,
+            skip,
+            include: {
+              steps: {
+                select: { id: true, stepOrder: true, profileId: true, failOnError: true },
+                orderBy: { stepOrder: "asc" }
+              },
+              schedules: {
+                select: {
+                  id: true,
+                  cronExpression: true,
+                  timezone: true,
+                  isActive: true,
+                  nextRunAt: true
+                }
+              },
+              _count: { select: { steps: true, schedules: true, executions: true } }
             },
-            schedules: {
-              select: {
-                id: true,
-                cronExpression: true,
-                timezone: true,
-                isActive: true,
-                nextRunAt: true
-              }
-            },
-            _count: { select: { steps: true, schedules: true, executions: true } }
-          },
-          orderBy: { updatedAt: "desc" }
-        });
-        return reply.send({ data, errors: [] });
+            orderBy: [{ updatedAt: "desc" }, { id: "asc" }]
+          }),
+          db.transferAutomation.count()
+        ]);
+        return reply.send({ data, meta: pageMeta(total, take, skip), errors: [] });
       } catch (error) {
         return mapError(reply, error);
       }
@@ -2132,20 +2141,25 @@ export function registerTransferDeskRoutes(router: FastifyInstance) {
         };
         const take = pageLimit(limit);
         const skip = pageOffset(offset);
-        const data = await (prisma as unknown as PrismaClient).transferExecution.findMany({
-          where: {
-            ...(profileId ? { profileId } : {}),
-            ...(status ? { status: status as any } : {})
-          },
-          orderBy: { createdAt: "desc" },
-          take,
-          skip,
-          include: {
-            profile: { select: { id: true, name: true, profileType: true } },
-            automation: { select: { id: true, name: true } }
-          }
-        });
-        return reply.send({ data, errors: [] });
+        const where = {
+          ...(profileId ? { profileId } : {}),
+          ...(status ? { status: status as any } : {})
+        };
+        const db = prisma as unknown as PrismaClient;
+        const [data, total] = await Promise.all([
+          db.transferExecution.findMany({
+            where,
+            orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+            take,
+            skip,
+            include: {
+              profile: { select: { id: true, name: true, profileType: true } },
+              automation: { select: { id: true, name: true } }
+            }
+          }),
+          db.transferExecution.count({ where })
+        ]);
+        return reply.send({ data, meta: pageMeta(total, take, skip), errors: [] });
       } catch (error) {
         return mapError(reply, error);
       }

@@ -15,7 +15,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApiContext } from "../../../../../../components/use-api-context";
 import { usePermissions } from "../../../../../../components/use-permissions";
 import { useTenantHref } from "../../../../../../hooks/use-tenant-router";
@@ -25,6 +25,8 @@ import {
   type TransferExecutionStatus
 } from "../../../../../../lib/gl-api";
 import { Card, CardContent } from "../../../../../../components/ui/card";
+import { TablePager } from "../../../../../../components/table-pager";
+import { pageFrom, usePaging, type Page } from "../../../../../../lib/paging";
 import { Badge } from "../../../../../../components/ui/badge";
 import { Button } from "../../../../../../components/ui/button";
 import {
@@ -53,6 +55,8 @@ import {
   Loader2,
   CircleSlash
 } from "lucide-react";
+import { QueryError } from "../../../../../../components/query-error";
+import { TableSkeleton } from "../../../../../../components/page-skeletons";
 
 const STATUS_STYLES: Record<
   TransferExecutionStatus,
@@ -109,17 +113,30 @@ export default function TransferDeskHistoryListPage() {
   const qc = useQueryClient();
 
   const [statusFilter, setStatusFilter] = useState<TransferExecutionStatus | "ALL">("ALL");
+  const { page, pageSize, offset, setPage, setPageSize } = usePaging([
+    statusFilter,
+    apiContext?.entityId
+  ]);
 
   const executionsQ = useQuery({
-    queryKey: ["td-executions", apiContext?.tenantSlug, apiContext?.entityId, statusFilter],
-    queryFn: async () => {
-      if (!apiContext) return [];
+    queryKey: [
+      "td-executions",
+      apiContext?.tenantSlug,
+      apiContext?.entityId,
+      statusFilter,
+      offset,
+      pageSize
+    ],
+    queryFn: async (): Promise<Page<TransferExecutionSummary>> => {
+      if (!apiContext) return { rows: [], total: 0 };
       const res = await listTransferExecutions(apiContext, {
         status: statusFilter === "ALL" ? undefined : statusFilter,
-        limit: 100
+        limit: pageSize,
+        offset
       });
-      return (res.data as unknown as TransferExecutionSummary[]) ?? [];
+      return pageFrom(res as { data: TransferExecutionSummary[]; meta?: Record<string, unknown> });
     },
+    placeholderData: keepPreviousData,
     enabled: Boolean(apiContext) && role.canTransferDeskUser,
     // Poll every 5 seconds so QUEUED → RUNNING → COMPLETED transitions appear live
     refetchInterval: 5000
@@ -134,7 +151,8 @@ export default function TransferDeskHistoryListPage() {
     );
   }
 
-  const executions = executionsQ.data ?? [];
+  const executions = executionsQ.data?.rows ?? [];
+  const total = executionsQ.data?.total ?? 0;
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-4">
@@ -187,7 +205,7 @@ export default function TransferDeskHistoryListPage() {
             </SelectContent>
           </Select>
           <span className="text-xs text-slate-400 ml-auto">
-            {executions.length} execution{executions.length !== 1 ? "s" : ""}
+            {total} execution{total !== 1 ? "s" : ""}
           </span>
         </CardContent>
       </Card>
@@ -299,6 +317,16 @@ export default function TransferDeskHistoryListPage() {
               )}
             </TableBody>
           </Table>
+          {!executionsQ.isLoading && !executionsQ.isError && total > 0 && (
+            <TablePager
+              page={page}
+              pageSize={pageSize}
+              total={total}
+              onPage={setPage}
+              onPageSize={setPageSize}
+              busy={executionsQ.isFetching && executionsQ.isPlaceholderData}
+            />
+          )}
         </CardContent>
       </Card>
 
