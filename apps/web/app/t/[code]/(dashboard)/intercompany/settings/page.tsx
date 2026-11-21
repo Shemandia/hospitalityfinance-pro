@@ -43,6 +43,8 @@ import {
 } from "../../../../../../components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../../../../../components/ui/tabs";
 import { Plus, Trash2, Settings, Link2 } from "lucide-react";
+import { QueryError } from "../../../../../../components/query-error";
+import { ListPageSkeleton, TableSkeleton } from "../../../../../../components/page-skeletons";
 
 type EntityItem = { id: string; name: string; code?: string };
 
@@ -71,7 +73,13 @@ export default function ICConfigurationPage() {
     select: (r) => (r.data ?? []) as EntityItem[]
   });
 
-  const { data: pairs = [], isLoading: pairsLoading } = useQuery({
+  const {
+    data: pairs = [],
+    isLoading: pairsLoading,
+    isError: pairsError,
+    error: pairsErr,
+    refetch: refetchPairs
+  } = useQuery({
     queryKey: ["ic-entity-pairs"],
     queryFn: () => getICEntityPairs(ctx),
     select: (r) => r.data ?? []
@@ -159,7 +167,9 @@ export default function ICConfigurationPage() {
             </CardHeader>
             <CardContent>
               {pairsLoading ? (
-                <p className="text-muted-foreground py-4 text-center">Loading...</p>
+                <TableSkeleton rows={4} cols={6} />
+              ) : pairsError ? (
+                <QueryError message={(pairsErr as Error)?.message} onRetry={() => refetchPairs()} />
               ) : pairs.length === 0 ? (
                 <p className="text-muted-foreground py-4 text-center">
                   No entity pairs configured yet.

@@ -3,15 +3,25 @@
 import { useQuery, useQueries } from "@tanstack/react-query";
 import { useState, useMemo } from "react";
 import { QueryError } from "../../../../../components/query-error";
+import { useSelectedPeriod } from "../../../../../components/period-provider";
+import { PeriodNotice } from "../../../../../components/period-gate";
+import { PERIOD_STATUS_LABEL } from "../../../../../lib/period";
 import { DashboardSkeleton } from "../../../../../components/page-skeletons";
 import { ResponsiveBar } from "@nivo/bar";
 import { ResponsiveLine } from "@nivo/line";
 import { ResponsivePie } from "@nivo/pie";
+import {
+  categoryAxisHeight,
+  categoryAxisWidth,
+  needsHorizontalBars,
+  useElementWidth,
+  wrappedTick
+} from "../../../../../components/chart-ticks";
+import { labelInkOn, revenueMixSlices, type RevenueMixSlice } from "../../../../../lib/revenue-mix";
 import { useApiContext } from "../../../../../components/use-api-context";
 import {
   getBalanceSheet,
   getCashFlow,
-  getPeriods,
   getRevPAR,
   getRevPARTrend,
   getUSALI,
@@ -26,19 +36,11 @@ import type { CurrencyExposureRow, EntitySummary } from "../../../../../lib/gl-a
 import { Button } from "../../../../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../../../components/ui/card";
 import { Badge } from "../../../../../components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "../../../../../components/ui/select";
 import { Separator } from "../../../../../components/ui/separator";
 import { fmt, fmtPct } from "../../../../../lib/format";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type Period = { id: string; name: string; status: string; year: number; month: number };
 type RevPARData = {
   occupancyPct: number;
   adr: string;
@@ -103,7 +105,11 @@ type APInvoice = {
 
 type PortfolioEntity = { id: string; name: string };
 
-const COLORS = ["#0e7c7b", "#0369a1", "#7c3aed", "#b45309", "#047857", "#dc2626"];
+/** Where chart category labels wrap: names are never cut (see components/chart-ticks). */
+const DEPT_LABEL_CHARS = 14;
+const AR_LABEL_CHARS = 18;
+/** At most this many ticks on a value axis, so the numbers never run together. */
+const VALUE_TICKS = 5;
 
 function pctColor(n: number) {
   if (n >= 35) return "text-emerald-600";
@@ -154,7 +160,7 @@ function SectionHeader({ title }: { title: string }) {
 
 function ARAgeingChart({ rows }: { rows: AgeingRow[] }) {
   const barData = rows.map((r) => ({
-    customer: r.customerName.slice(0, 16),
+    customer: r.customerName,
     "0–30": parseFloat(r.bucket0to30),
     "31–60": parseFloat(r.bucket31to60),
     "61–90": parseFloat(r.bucket61to90),
@@ -196,16 +202,28 @@ function ARAgeingChart({ rows }: { rows: AgeingRow[] }) {
             No outstanding AR invoices.
           </p>
         ) : (
-          <div className="h-52">
+          <div className="h-60">
             <ResponsiveBar
               data={barData}
               keys={["0–30", "31–60", "61–90", "91+"]}
               indexBy="customer"
               layout="horizontal"
-              margin={{ top: 4, right: 16, bottom: 24, left: 110 }}
+              margin={{
+                top: 4,
+                right: 16,
+                bottom: 48,
+                left: categoryAxisWidth(
+                  barData.map((d) => d.customer),
+                  AR_LABEL_CHARS
+                )
+              }}
               padding={0.3}
               colors={["#059669", "#d97706", "#ea580c", "#dc2626"]}
-              axisBottom={{ format: (v) => `${(Number(v) / 1000).toFixed(0)}k` }}
+              axisLeft={{ renderTick: wrappedTick(AR_LABEL_CHARS) }}
+              axisBottom={{
+                format: (v) => `${(Number(v) / 1000).toFixed(0)}k`,
+                tickValues: VALUE_TICKS
+              }}
               tooltip={({ id, value, indexValue }) => (
                 <div className="bg-white border border-border rounded px-2 py-1 text-xs shadow">
                   {indexValue} · {id}: <strong>{fmt(value)}</strong>
@@ -219,7 +237,7 @@ function ARAgeingChart({ rows }: { rows: AgeingRow[] }) {
                   itemHeight: 14,
                   dataFrom: "keys",
                   symbolSize: 10,
-                  translateY: 24
+                  translateY: 46
                 }
               ]}
             />
@@ -338,17 +356,21 @@ function BankBalanceSummary({ bs }: { bs: BalanceSheetData | null | undefined })
 // ── Revenue vs Budget Sparklines ──────────────────────────────────────────────
 
 function RevenueBudgetChart({ usaliComparative }: { usaliComparative: any }) {
-  if (!usaliComparative) return null;
-  const depts = usaliComparative.departments ?? [];
-  if (depts.length === 0) return null;
+  const [boxRef, boxWidth] = useElementWidth<HTMLDivElement>();
+  const depts = usaliComparative?.departments ?? [];
 
   const barData = depts.map((d: any) => ({
-    dept: d.name.slice(0, 12),
+    dept: d.name as string,
     Actual: parseFloat(d.revenue),
     Budget: parseFloat(d.budgetRevenue)
   }));
+  const names: string[] = barData.map((d: { dept: string }) => d.dept);
+  const hasBudget = usaliComparative?.hasBudget;
+  // On a narrow card the departments no longer fit side by side: lay the bars down.
+  const horizontal = needsHorizontalBars(boxWidth, names.length, DEPT_LABEL_CHARS);
+  const thousands = (v: string | number) => `${(Number(v) / 1000).toFixed(0)}k`;
 
-  const hasBudget = usaliComparative.hasBudget;
+  if (!usaliComparative || depts.length === 0) return null;
 
   return (
     <Card>
@@ -363,17 +385,45 @@ function RevenueBudgetChart({ usaliComparative }: { usaliComparative: any }) {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="h-52">
+        <div
+          ref={boxRef}
+          style={{
+            height: horizontal ? Math.max(256, names.length * (hasBudget ? 44 : 30) + 56) : 256
+          }}
+        >
           <ResponsiveBar
             data={barData}
             keys={hasBudget ? ["Actual", "Budget"] : ["Actual"]}
             indexBy="dept"
-            margin={{ top: 8, right: 16, bottom: 40, left: 60 }}
+            layout={horizontal ? "horizontal" : "vertical"}
+            margin={
+              horizontal
+                ? {
+                    top: hasBudget ? 28 : 8,
+                    right: 16,
+                    bottom: 28,
+                    left: categoryAxisWidth(names, DEPT_LABEL_CHARS)
+                  }
+                : {
+                    top: hasBudget ? 28 : 8,
+                    right: 16,
+                    bottom: categoryAxisHeight(names, DEPT_LABEL_CHARS),
+                    left: 60
+                  }
+            }
             padding={0.25}
             groupMode="grouped"
             colors={["#0e7c7b", "#d1d5db"]}
-            axisLeft={{ format: (v) => `${(Number(v) / 1000).toFixed(0)}k` }}
-            axisBottom={{ tickRotation: -20 }}
+            axisLeft={
+              horizontal
+                ? { renderTick: wrappedTick(DEPT_LABEL_CHARS) }
+                : { format: thousands, tickValues: VALUE_TICKS }
+            }
+            axisBottom={
+              horizontal
+                ? { format: thousands, tickValues: VALUE_TICKS }
+                : { renderTick: wrappedTick(DEPT_LABEL_CHARS) }
+            }
             tooltip={({ id, value, indexValue }) => (
               <div className="bg-white border border-border rounded px-2 py-1 text-xs shadow">
                 {indexValue} · {id}: <strong>{fmt(value)}</strong>
@@ -388,13 +438,75 @@ function RevenueBudgetChart({ usaliComparative }: { usaliComparative: any }) {
                       itemWidth: 70,
                       itemHeight: 14,
                       dataFrom: "keys",
-                      symbolSize: 10
+                      symbolSize: 10,
+                      translateY: -24
                     }
                   ]
                 : []
             }
           />
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Revenue Mix ───────────────────────────────────────────────────────────────
+
+/**
+ * Revenue by department as a doughnut with a legend beneath it. The names are
+ * in the legend, not on link labels beside the pie, which the card's edge cut
+ * off; each slice shows its share, the legend shows name and share.
+ */
+function RevenueMixPie({ data, innerRadius }: { data: RevenueMixSlice[]; innerRadius: number }) {
+  const total = data.reduce((sum, d) => sum + d.value, 0);
+  const share = (value: number) => (total > 0 ? `${((value / total) * 100).toFixed(0)}%` : "–");
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">Revenue Mix</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="h-48">
+          <ResponsivePie
+            data={data}
+            margin={{ top: 8, right: 8, bottom: 8, left: 8 }}
+            innerRadius={innerRadius}
+            padAngle={1.5}
+            colors={{ datum: "data.color" }}
+            enableArcLinkLabels={false}
+            arcLabel={(d) => share(d.value)}
+            arcLabelsTextColor={(d) => labelInkOn(d.color)}
+            arcLabelsSkipAngle={12}
+            tooltip={({ datum }) => (
+              <div className="bg-white border border-border rounded px-2 py-1 text-xs shadow max-w-64">
+                {datum.label}: <strong>{fmt(datum.value)}</strong>
+                {datum.data.members ? (
+                  <div className="text-muted-foreground">{datum.data.members.join(", ")}</div>
+                ) : null}
+              </div>
+            )}
+          />
+        </div>
+        <ul className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs">
+          {data.map((d) => (
+            <li key={d.id} className="flex items-center gap-2 min-w-0">
+              <span
+                className="h-2.5 w-2.5 rounded-sm shrink-0"
+                style={{ backgroundColor: d.color }}
+                aria-hidden
+              />
+              <span className="flex-1 min-w-0 text-slate-600">
+                {d.label}
+                {d.members ? (
+                  <span className="block text-[11px] text-slate-400">{d.members.join(", ")}</span>
+                ) : null}
+              </span>
+              <span className="tabular-nums text-slate-500">{share(d.value)}</span>
+            </li>
+          ))}
+        </ul>
       </CardContent>
     </Card>
   );
@@ -653,19 +765,11 @@ function CovenantRatios({
 export default function DashboardPage() {
   const apiContext = useApiContext();
   const [roleView, setRoleView] = useState<"GM" | "CONTROLLER" | "CFO">("GM");
-  const [periodId, setPeriodId] = useState("");
 
-  const periodsQ = useQuery({
-    queryKey: ["periods", apiContext?.tenantSlug, apiContext?.entityId],
-    queryFn: () => (apiContext ? getPeriods(apiContext) : Promise.resolve({ data: [] })),
-    enabled: Boolean(apiContext),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    select: (r: any) => (r.data as unknown as Period[]) ?? []
-  });
-  const periods = periodsQ.data ?? [];
-  const activePeriodId =
-    periodId || periods.find((p) => p.status === "OPEN")?.id || periods[0]?.id || "";
-  const activePeriod = periods.find((p) => p.id === activePeriodId);
+  // The period chosen in the top bar, resolved to this entity's own period.
+  const selectedPeriod = useSelectedPeriod();
+  const activePeriod = selectedPeriod.state === "ready" ? selectedPeriod.period : undefined;
+  const activePeriodId = activePeriod?.id ?? "";
 
   // Common queries
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -837,14 +941,7 @@ export default function DashboardPage() {
       ].filter((d) => d.value > 0)
     : [];
 
-  const revenuePieData = (usali?.departments ?? [])
-    .filter((d) => parseFloat(d.revenue) > 0)
-    .map((d, i) => ({
-      id: d.name,
-      label: d.name,
-      value: parseFloat(d.revenue),
-      color: COLORS[i % COLORS.length]
-    }));
+  const revenuePieData = revenueMixSlices(usali?.departments ?? []);
 
   const trendPoints = trendQ.data ?? [];
   const revparLineData =
@@ -876,18 +973,22 @@ export default function DashboardPage() {
   const portfolioSummaries = portfolioQueries.map((q) => q.data ?? null);
 
   // Show skeleton while core data loads
-  if (periodsQ.isLoading || (revparQ.isLoading && !revpar)) {
+  if (selectedPeriod.state === "loading" || (revparQ.isLoading && !revpar)) {
     return <DashboardSkeleton />;
   }
 
+  // No period for the chosen month (or none at all): say so, show nothing else.
+  if (selectedPeriod.state !== "ready") {
+    return <PeriodNotice />;
+  }
+
   // Show error state if core queries failed
-  const coreError = periodsQ.error || revparQ.error || usaliQ.error;
-  if (coreError && !periodsQ.data?.length) {
+  const coreError = revparQ.error || usaliQ.error;
+  if (coreError && !revpar) {
     return (
       <QueryError
         message={(coreError as Error).message}
         onRetry={() => {
-          periodsQ.refetch();
           revparQ.refetch();
           usaliQ.refetch();
         }}
@@ -915,24 +1016,9 @@ export default function DashboardPage() {
               </Button>
             ))}
           </div>
-          <div className="ml-auto flex items-center gap-2.5">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70">
-              Period
-            </span>
-            <Select value={activePeriodId} onValueChange={setPeriodId}>
-              <SelectTrigger className="h-8 w-52">
-                <SelectValue placeholder="Select period" />
-              </SelectTrigger>
-              <SelectContent>
-                {periods.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.name}
-                    {p.status === "OPEN" ? " (Open)" : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <p className="ml-auto text-xs text-muted-foreground">
+            {selectedPeriod.period.name} · {PERIOD_STATUS_LABEL[selectedPeriod.period.status]}
+          </p>
         </CardContent>
       </Card>
 
@@ -1065,31 +1151,7 @@ export default function DashboardPage() {
           {usali ? (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {revenuePieData.length > 0 ? (
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base">Revenue Mix</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="h-60">
-                      <ResponsivePie
-                        data={revenuePieData}
-                        margin={{ top: 16, right: 80, bottom: 16, left: 80 }}
-                        innerRadius={0.45}
-                        padAngle={1.5}
-                        colors={{ datum: "data.color" }}
-                        arcLabel={(d) =>
-                          `${((d.value / parseFloat(usali.totalRevenue)) * 100).toFixed(0)}%`
-                        }
-                        arcLabelsSkipAngle={12}
-                        tooltip={({ datum }) => (
-                          <div className="bg-white border border-border rounded px-2 py-1 text-xs shadow">
-                            {datum.label}: <strong>{fmt(datum.value)}</strong>
-                          </div>
-                        )}
-                      />
-                    </div>
-                  </CardContent>
-                </Card>
+                <RevenueMixPie data={revenuePieData} innerRadius={0.45} />
               ) : null}
               <Card>
                 <CardHeader className="pb-2">
@@ -1201,49 +1263,34 @@ export default function DashboardPage() {
           <SectionHeader title="Departmental Analysis" />
 
           {usali ? (
-            <div className="grid grid-cols-2 gap-4">
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Revenue Mix</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="h-60">
-                    <ResponsivePie
-                      data={revenuePieData}
-                      margin={{ top: 16, right: 80, bottom: 16, left: 80 }}
-                      innerRadius={0.4}
-                      padAngle={1.5}
-                      colors={{ datum: "data.color" }}
-                      arcLabel={(d) =>
-                        `${((d.value / parseFloat(usali.totalRevenue)) * 100).toFixed(0)}%`
-                      }
-                      arcLabelsSkipAngle={12}
-                      tooltip={({ datum }) => (
-                        <div className="bg-white border border-border rounded px-2 py-1 text-xs shadow">
-                          {datum.label}: <strong>{fmt(datum.value)}</strong>
-                        </div>
-                      )}
-                    />
-                  </div>
-                </CardContent>
-              </Card>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <RevenueMixPie data={revenuePieData} innerRadius={0.4} />
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base">Department Income %</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="h-60">
+                  <div style={{ height: Math.max(240, usali.departments.length * 32) }}>
                     <ResponsiveBar
                       data={usali.departments.map((d) => ({
-                        dept: d.name.slice(0, 12),
+                        dept: d.name,
                         pct: parseFloat(d.incomePct)
                       }))}
                       keys={["pct"]}
                       indexBy="dept"
                       layout="horizontal"
-                      margin={{ top: 8, right: 16, bottom: 8, left: 100 }}
+                      margin={{
+                        top: 8,
+                        right: 16,
+                        bottom: 28,
+                        left: categoryAxisWidth(
+                          usali.departments.map((d) => d.name),
+                          DEPT_LABEL_CHARS
+                        )
+                      }}
                       colors={["#0e7c7b"]}
-                      axisBottom={{ format: (v) => `${v}%` }}
+                      axisLeft={{ renderTick: wrappedTick(DEPT_LABEL_CHARS) }}
+                      axisBottom={{ format: (v) => `${v}%`, tickValues: VALUE_TICKS }}
                       tooltip={({ value }) => (
                         <div className="bg-white border border-border rounded px-2 py-1 text-xs shadow">
                           {fmt(value, 1)}%

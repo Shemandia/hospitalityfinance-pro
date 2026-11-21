@@ -212,7 +212,7 @@ export class GLRepository {
     });
   }
 
-  listJournals(entityId: string, query: JournalListQuery) {
+  private journalListWhere(entityId: string, query: JournalListQuery) {
     const searchFilters = query.search
       ? {
           OR: [
@@ -221,23 +221,32 @@ export class GLRepository {
           ]
         }
       : {};
+    return {
+      entityId,
+      status: query.status,
+      source: query.source,
+      journalTypeId: query.journalTypeId,
+      periodId: query.periodId,
+      ...searchFilters
+    };
+  }
 
+  /** The journals matching the list's filters, all pages together. */
+  countJournals(entityId: string, query: JournalListQuery): Promise<number> {
+    return this.db.journal.count({ where: this.journalListWhere(entityId, query) });
+  }
+
+  listJournals(entityId: string, query: JournalListQuery) {
     return (this.db.journal as any).findMany({
-      where: {
-        entityId,
-        status: query.status,
-        source: query.source,
-        journalTypeId: query.journalTypeId,
-        periodId: query.periodId,
-        ...searchFilters
-      },
+      where: this.journalListWhere(entityId, query),
       take: query.limit,
+      // A cursor (older clients) or an offset (pages with a total).
       ...(query.cursor
         ? {
             skip: 1,
             cursor: { id: query.cursor }
           }
-        : {}),
+        : { skip: query.offset }),
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       include: {
         _count: { select: { lines: true, approvals: true } }

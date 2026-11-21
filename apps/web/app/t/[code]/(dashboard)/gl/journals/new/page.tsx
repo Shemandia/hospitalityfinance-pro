@@ -1,5 +1,6 @@
 "use client";
 
+import { DEFAULT_LOCALE } from "../../../../../../../lib/format";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useMemo, useRef, useState, useEffect } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
@@ -341,7 +342,7 @@ export default function NewJournalPage() {
   });
 
   const fmtAmount = (n: number) =>
-    n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    n.toLocaleString(DEFAULT_LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
     <div className="max-w-6xl mx-auto pb-20 px-0 sm:px-0">

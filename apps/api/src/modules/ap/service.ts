@@ -14,6 +14,7 @@ import { APRepository } from "./repository.js";
 import type {
   APInvoiceCreateInput,
   APInvoiceListQuery,
+  SupplierListQuery,
   APInvoiceUpdateInput,
   PaymentRunConfirmInput,
   PaymentRunProposalInput,
@@ -334,6 +335,10 @@ ${transactions
     return this.repository(this.prisma).listSuppliers(entityId);
   }
 
+  pageSuppliers(entityId: string, query: SupplierListQuery & { limit: number }) {
+    return this.repository(this.prisma).pageSuppliers(entityId, query);
+  }
+
   async getSupplier(entityId: string, supplierId: string) {
     const supplier = await this.repository(this.prisma).getSupplier(entityId, supplierId);
     if (!supplier) {
@@ -383,6 +388,17 @@ ${transactions
 
   async listInvoices(entityId: string, query: APInvoiceListQuery) {
     return this.repository(this.prisma).listInvoices(entityId, query);
+  }
+
+  /** One page of invoices, how many match, and figures over all of them. */
+  async pageInvoices(entityId: string, query: APInvoiceListQuery, now = new Date()) {
+    const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const repo = this.repository(this.prisma);
+    // One after the other: the RLS middleware binds the entity for one query at a time.
+    const rows = await repo.listInvoices(entityId, query);
+    const total = await repo.countInvoices(entityId, query);
+    const summary = await repo.summarizeInvoices(entityId, query, today);
+    return { rows, total, summary };
   }
 
   async getInvoice(entityId: string, invoiceId: string) {
@@ -862,6 +878,14 @@ ${transactions
 
   async listPaymentRuns(entityId: string, limit?: number) {
     return this.repository(this.prisma).listPaymentRuns(entityId, pageLimit(limit));
+  }
+
+  async pagePaymentRuns(entityId: string, limit: number, offset: number) {
+    const repo = this.repository(this.prisma);
+    // One after the other: the RLS middleware binds the entity for one query at a time.
+    const rows = await repo.listPaymentRuns(entityId, limit, offset);
+    const total = await repo.countPaymentRuns(entityId);
+    return { rows, total };
   }
 
   async getPaymentRun(entityId: string, paymentRunId: string) {

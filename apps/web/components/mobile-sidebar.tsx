@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { Menu, X } from "lucide-react";
 import { SidebarNav } from "./sidebar-nav";
-import { EntitySwitcher } from "./entity-switcher";
 
 export function MobileSidebarToggle() {
   const [open, setOpen] = useState(false);
@@ -72,10 +71,6 @@ export function MobileSidebarToggle() {
           >
             <X className="h-5 w-5" />
           </button>
-        </div>
-
-        <div className="px-1">
-          <EntitySwitcher />
         </div>
 
         {/* Reuse the same nav — clicks will close via popstate */}

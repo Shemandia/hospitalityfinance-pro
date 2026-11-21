@@ -116,9 +116,18 @@ async function request<T>(
 
 export async function getGLJournals(
   context: ApiContext,
-  params: { status?: string; periodId?: string; limit?: number; search?: string } = {}
+  params: {
+    status?: string;
+    periodId?: string;
+    limit?: number;
+    offset?: number;
+    search?: string;
+  } = {}
 ) {
   const search = new URLSearchParams();
+  if (params.offset) {
+    search.set("offset", String(params.offset));
+  }
   if (params.status) {
     search.set("status", params.status);
   }
@@ -260,7 +269,7 @@ export async function deleteEntity(context: ApiContext, id: string) {
   return request<null>(context, `/api/v1/entities/${id}`, { method: "DELETE" });
 }
 
-export type PeriodStatus = "OPEN" | "CLOSED" | "LOCKED";
+export type PeriodStatus = "OPEN" | "SOFT_CLOSE" | "CLOSED" | "LOCKED";
 
 export type Period = {
   id: string;
@@ -452,10 +461,16 @@ export async function getTrialBalance(
   );
 }
 
-export async function getAPPaymentRuns(context: ApiContext, params: { limit?: number } = {}) {
+export async function getAPPaymentRuns(
+  context: ApiContext,
+  params: { limit?: number; offset?: number } = {}
+) {
   const search = new URLSearchParams();
   if (params.limit) {
     search.set("limit", String(params.limit));
+  }
+  if (params.offset) {
+    search.set("offset", String(params.offset));
   }
 
   return request<Array<Record<string, unknown>>>(
@@ -1029,12 +1044,13 @@ export type Supplier = {
 
 export function getAPInvoices(
   context: ApiContext,
-  params?: { status?: string; supplierId?: string; limit?: number }
+  params?: { status?: string; supplierId?: string; limit?: number; offset?: number }
 ) {
   const qs = new URLSearchParams();
   if (params?.status) qs.set("status", params.status);
   if (params?.supplierId) qs.set("supplierId", params.supplierId);
   if (params?.limit) qs.set("limit", String(params.limit));
+  if (params?.offset) qs.set("offset", String(params.offset));
   return request<APInvoice[]>(context, `/api/v1/ap/invoices${qs.toString() ? `?${qs}` : ""}`);
 }
 
@@ -1076,9 +1092,26 @@ export function deleteAPInvoice(context: ApiContext, id: string) {
   });
 }
 
-export function getSuppliers(context: ApiContext) {
-  return request<Supplier[]>(context, "/api/v1/ap/suppliers");
+/** All suppliers, or with `limit` one page of them (search by name or code, active / inactive). */
+export function getSuppliers(
+  context: ApiContext,
+  params?: {
+    search?: string;
+    status?: "all" | "active" | "inactive";
+    limit?: number;
+    offset?: number;
+  }
+) {
+  const qs = new URLSearchParams();
+  if (params?.search) qs.set("search", params.search);
+  if (params?.status && params.status !== "all") qs.set("status", params.status);
+  if (params?.limit) qs.set("limit", String(params.limit));
+  if (params?.offset) qs.set("offset", String(params.offset));
+  return request<Supplier[]>(context, `/api/v1/ap/suppliers${qs.toString() ? `?${qs}` : ""}`);
 }
+
+/** Figures over every AP invoice a list's filters match (GET /ap/invoices meta.summary). */
+export type APInvoiceSummary = { functionalValue: string; overdue: number; dueThisWeek: number };
 
 export function getSupplier(context: ApiContext, id: string) {
   return request<Supplier>(context, `/api/v1/ap/suppliers/${id}`);
@@ -3139,10 +3172,16 @@ export type AutomationUpdateInput = {
   }>;
 };
 
-export function listTransferAutomations(context: ApiContext) {
+export function listTransferAutomations(
+  context: ApiContext,
+  params: { limit?: number; offset?: number } = {}
+) {
+  const qs = new URLSearchParams();
+  if (params.limit) qs.set("limit", String(params.limit));
+  if (params.offset) qs.set("offset", String(params.offset));
   return request<TransferAutomationSummary[]>(
     context,
-    `/api/v1/integration/transfer-desk/automations`
+    `/api/v1/integration/transfer-desk/automations${qs.toString() ? `?${qs}` : ""}`
   );
 }
 

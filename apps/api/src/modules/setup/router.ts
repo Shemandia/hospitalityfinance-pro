@@ -3,6 +3,7 @@ import { ZodError } from "zod";
 import { requireAuth } from "../../middleware/requireAuth.js";
 import { requirePermission } from "../../middleware/requirePermission.js";
 import { SetupService } from "./service.js";
+import { setupTemplates } from "./templates.js";
 
 export async function registerSetupRouter(app: FastifyInstance): Promise<void> {
   const service = new SetupService();
@@ -10,6 +11,14 @@ export async function registerSetupRouter(app: FastifyInstance): Promise<void> {
   app.register(
     async (router) => {
       router.addHook("preHandler", requireAuth);
+
+      // Starting data for the wizard: USALI departments and currencies. Only
+      // the person doing setup needs it: the same permission as saving a step.
+      router.get(
+        "/templates",
+        { preHandler: [requirePermission("ADMIN_SETTINGS", { scope: "tenant" })] },
+        async () => ({ data: setupTemplates(), errors: [] })
+      );
 
       router.get("/progress", { config: { access: "session" } }, async (request, reply) => {
         const tenantSlug = request.tenantSlug ?? (request.user as any)?.tenantSlug;

@@ -21,6 +21,7 @@ import {
 } from "../../../../../../../lib/gl-api";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../../../../../components/ui/card";
 import { Button } from "../../../../../../../components/ui/button";
+import { getSupportedTimezones } from "../../../../../../../lib/timezones";
 import { Badge } from "../../../../../../../components/ui/badge";
 import {
   Select,
@@ -361,12 +362,11 @@ export default function NewAutomationPage() {
                       }
                       className="rounded-md border px-2 py-1.5 text-sm"
                     >
-                      <option value="UTC">UTC</option>
-                      <option value="Africa/Dar_es_Salaam">Africa/Dar_es_Salaam</option>
-                      <option value="Africa/Nairobi">Africa/Nairobi</option>
-                      <option value="Europe/London">Europe/London</option>
-                      <option value="America/New_York">America/New_York</option>
-                      <option value="Asia/Dubai">Asia/Dubai</option>
+                      {getSupportedTimezones().map((tz) => (
+                        <option key={tz} value={tz}>
+                          {tz}
+                        </option>
+                      ))}
                     </select>
                     <Button
                       variant="ghost"
