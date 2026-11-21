@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
 import { ErrorBoundary } from "../../../../components/error-boundary";
 import { SetupGuard } from "../../../../components/setup-guard";
-import { UserFooter } from "../../../../components/user-footer";
+import { UserMenu } from "../../../../components/user-menu";
 import { Building2, Search, Bell } from "lucide-react";
 import { SidebarNav } from "../../../../components/sidebar-nav";
-import { EntitySwitcher } from "../../../../components/entity-switcher";
+import { PropertySwitcher } from "../../../../components/property-switcher";
 import { MobileSidebarToggle } from "../../../../components/mobile-sidebar";
 
 export default async function DashboardLayout({
@@ -38,47 +38,33 @@ export default async function DashboardLayout({
           {/* Divider */}
           <div className="mx-5 h-px bg-slate-100" />
 
-          {/* Entity Switcher */}
-          <div className="pt-4 px-1">
-            <EntitySwitcher />
-          </div>
-
           {/* Navigation */}
           <SidebarNav />
-
-          {/* User footer (client component) */}
-          <UserFooter />
         </aside>
 
         {/* ── Main area ────────────────────────────────────────────────────── */}
         <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
-          {/* Top bar */}
-          <header className="h-14 lg:h-16 bg-white border-b border-slate-100 flex items-center justify-between px-4 lg:px-8 shrink-0 z-30">
-            <div className="flex items-center gap-3">
-              {/* Mobile hamburger */}
+          {/* Top bar: property | search | notifications, account */}
+          <header className="h-14 lg:h-16 bg-white border-b border-slate-100 flex items-center gap-2 sm:gap-4 px-3 sm:px-4 lg:px-8 shrink-0 z-30">
+            <div className="flex flex-1 basis-0 items-center gap-2 min-w-0">
               <MobileSidebarToggle />
+              <PropertySwitcher />
+            </div>
 
-              {/* Mobile brand (visible only on small screens) */}
-              <div className="flex items-center gap-2 lg:hidden">
-                <div className="h-8 w-8 rounded-lg flex items-center justify-center bg-emerald-600 text-white shadow-md shadow-emerald-200">
-                  <Building2 className="h-4 w-4" />
-                </div>
-                <span className="font-bold text-slate-800 text-sm">HFP</span>
-              </div>
+            <div className="relative hidden sm:block shrink">
+              <Search
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 h-4.5 w-4.5"
+                aria-hidden="true"
+              />
+              <input
+                type="text"
+                aria-label="Search"
+                className="pl-10 pr-4 py-2 lg:py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 ring-emerald-500 outline-none transition-all w-44 md:w-64 lg:w-80 text-sm text-slate-700 placeholder:text-slate-400"
+                placeholder="Search..."
+              />
+            </div>
 
-              {/* Search — full on desktop, icon-only on mobile */}
-              <div className="relative hidden sm:block">
-                <Search
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 h-4.5 w-4.5"
-                  aria-hidden="true"
-                />
-                <input
-                  type="text"
-                  aria-label="Search"
-                  className="pl-10 pr-4 py-2 lg:py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 ring-emerald-500 outline-none transition-all w-48 md:w-64 lg:w-72 text-sm text-slate-700 placeholder:text-slate-400"
-                  placeholder="Search..."
-                />
-              </div>
+            <div className="flex flex-1 basis-0 items-center justify-end gap-1 sm:gap-2">
               <button
                 type="button"
                 aria-label="Search"
@@ -86,9 +72,6 @@ export default async function DashboardLayout({
               >
                 <Search className="h-5 w-5" />
               </button>
-            </div>
-
-            <div className="flex items-center gap-2">
               <button
                 type="button"
                 aria-label="Notifications (new)"
@@ -100,6 +83,7 @@ export default async function DashboardLayout({
                   aria-hidden="true"
                 />
               </button>
+              <UserMenu />
             </div>
           </header>
 
