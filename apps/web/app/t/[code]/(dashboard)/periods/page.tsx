@@ -85,6 +85,11 @@ const STATUS_CONFIG: Record<
   }
 > = {
   OPEN: { label: "Open", variant: "success", description: "Journals can be posted" },
+  SOFT_CLOSE: {
+    label: "Soft close",
+    variant: "warning",
+    description: "Period-end runs (revaluation, depreciation, allocation) only"
+  },
   CLOSED: { label: "Closed", variant: "warning", description: "No new postings allowed" },
   LOCKED: { label: "Locked", variant: "destructive", description: "Permanently locked" }
 };

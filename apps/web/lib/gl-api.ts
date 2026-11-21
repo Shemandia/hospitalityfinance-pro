@@ -269,7 +269,7 @@ export async function deleteEntity(context: ApiContext, id: string) {
   return request<null>(context, `/api/v1/entities/${id}`, { method: "DELETE" });
 }
 
-export type PeriodStatus = "OPEN" | "CLOSED" | "LOCKED";
+export type PeriodStatus = "OPEN" | "SOFT_CLOSE" | "CLOSED" | "LOCKED";
 
 export type Period = {
   id: string;
