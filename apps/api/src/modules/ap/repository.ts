@@ -6,10 +6,12 @@ import type {
   APInvoiceUpdateInput,
   PaymentRunProposalInput,
   SupplierCreateInput,
+  SupplierListQuery,
   SupplierUpdateInput
 } from "./types.js";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
+type APInvoiceStatusValue = NonNullable<APInvoiceListQuery["status"]>;
 
 export class APRepository {
   constructor(private readonly db: DbClient) {}
@@ -19,6 +21,35 @@ export class APRepository {
       where: { entityId },
       orderBy: [{ name: "asc" }]
     });
+  }
+
+  private supplierListWhere(entityId: string, query: SupplierListQuery) {
+    return {
+      entityId,
+      ...(query.status === "all" ? {} : { isActive: query.status === "active" }),
+      ...(query.search
+        ? {
+            OR: [
+              { name: { contains: query.search, mode: "insensitive" as const } },
+              { code: { contains: query.search, mode: "insensitive" as const } }
+            ]
+          }
+        : {})
+    };
+  }
+
+  /** One page of the supplier list, and how many match. */
+  async pageSuppliers(entityId: string, query: SupplierListQuery & { limit: number }) {
+    const where = this.supplierListWhere(entityId, query);
+    // One after the other: the RLS middleware binds the entity for one query at a time.
+    const rows = await this.db.supplier.findMany({
+      where,
+      orderBy: [{ name: "asc" }, { id: "asc" }],
+      take: query.limit,
+      skip: query.offset
+    });
+    const total = await this.db.supplier.count({ where });
+    return { rows, total };
   }
 
   getSupplier(entityId: string, supplierId: string) {
@@ -72,16 +103,49 @@ export class APRepository {
     });
   }
 
+  private invoiceListWhere(entityId: string, query: Partial<APInvoiceListQuery>) {
+    return {
+      entityId,
+      status: query.status,
+      supplierId: query.supplierId,
+      dueDate: query.dueBefore ? { lte: query.dueBefore } : undefined
+    };
+  }
+
+  countInvoices(entityId: string, query: APInvoiceListQuery): Promise<number> {
+    return this.db.aPInvoice.count({ where: this.invoiceListWhere(entityId, query) });
+  }
+
+  /**
+   * Figures over every invoice the list's filters match, not one page: the
+   * value in the entity's functional currency, and how many open invoices are
+   * overdue or due within seven days of `today` (the start of the day, UTC).
+   */
+  async summarizeInvoices(entityId: string, query: APInvoiceListQuery, today: Date) {
+    const where = this.invoiceListWhere(entityId, query);
+    const open = { status: { notIn: ["PAID", "CANCELLED"] as APInvoiceStatusValue[] } };
+    const inAWeek = new Date(today.getTime() + 8 * 86_400_000);
+    // One after the other: the RLS middleware binds the entity for one query at a time.
+    const value = await this.db.aPInvoice.aggregate({ where, _sum: { functionalAmount: true } });
+    const overdue = await this.db.aPInvoice.count({
+      where: { AND: [where, open, { dueDate: { lt: today } }] }
+    });
+    const dueThisWeek = await this.db.aPInvoice.count({
+      where: { AND: [where, open, { dueDate: { gte: today, lt: inAWeek } }] }
+    });
+    return {
+      functionalValue: (value._sum.functionalAmount ?? 0).toString(),
+      overdue,
+      dueThisWeek
+    };
+  }
+
   listInvoices(entityId: string, query: APInvoiceListQuery) {
     return this.db.aPInvoice.findMany({
-      where: {
-        entityId,
-        status: query.status,
-        supplierId: query.supplierId,
-        dueDate: query.dueBefore ? { lte: query.dueBefore } : undefined
-      },
+      where: this.invoiceListWhere(entityId, query),
       take: query.limit,
-      orderBy: [{ dueDate: "asc" }, { createdAt: "desc" }],
+      skip: query.offset,
+      orderBy: [{ dueDate: "asc" }, { createdAt: "desc" }, { id: "asc" }],
       include: {
         supplier: true,
         lines: true
@@ -449,11 +513,16 @@ export class APRepository {
     });
   }
 
-  listPaymentRuns(entityId: string, limit: number) {
+  countPaymentRuns(entityId: string): Promise<number> {
+    return this.db.paymentRun.count({ where: { entityId } });
+  }
+
+  listPaymentRuns(entityId: string, limit: number, offset = 0) {
     return this.db.paymentRun.findMany({
       where: { entityId },
       take: limit,
-      orderBy: [{ createdAt: "desc" }],
+      skip: offset,
+      orderBy: [{ createdAt: "desc" }, { id: "asc" }],
       include: {
         items: true,
         payments: true

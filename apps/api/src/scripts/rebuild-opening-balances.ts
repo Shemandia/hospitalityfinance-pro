@@ -131,7 +131,7 @@ async function main() {
           for (const entity of entities) {
             // Carry-forward filters by entity_id explicitly, but RLS policies
             // still need the tenant context for the tables it touches.
-            await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'true', true)`;
+            await tx.$executeRaw`SELECT app_begin_rls_bypass()`;
 
             const before = await snapshot(tx, entity.id);
             await rebuildOpeningBalances(tx, entity.id);

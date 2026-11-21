@@ -132,6 +132,8 @@ export async function grantApplicationRole(
     `REVOKE ALL ON _prisma_migrations FROM ${a}`,
     `REVOKE UPDATE, DELETE ON audit_events FROM ${a}`,
     `GRANT EXECUTE ON FUNCTION refresh_period_balances() TO ${a}`,
+    // The only way the application role may bypass row-level security (SEC-11).
+    `GRANT EXECUTE ON FUNCTION app_begin_rls_bypass() TO ${a}`,
     `ALTER DEFAULT PRIVILEGES FOR ROLE ${o} IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${a}`,
     `ALTER DEFAULT PRIVILEGES FOR ROLE ${o} IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO ${a}`
   ];
@@ -139,9 +141,10 @@ export async function grantApplicationRole(
 }
 
 /**
- * Throws unless the application role has data rights only: it owns nothing,
- * cannot create in the schema, cannot change the audit log or read the
- * migration history, and can read a business table. Checked by provisioning
+ * Throws unless the application role has data rights only: it owns nothing
+ * (not the database either), cannot create in the schema, cannot change the
+ * audit log or read the migration history, cannot reach the bypass grants
+ * in schema app_private, and can read a business table. Checked by provisioning
  * before the first user is written.
  */
 export async function assertApplicationRoleRights(db: Query, appRole: string): Promise<void> {
@@ -151,6 +154,8 @@ export async function assertApplicationRoleRights(db: Query, appRole: string): P
       can_create: boolean;
       audit_update: boolean;
       history: boolean;
+      owns_db: boolean;
+      bypass_grants: boolean;
       can_read: boolean;
     }>
   >(
@@ -160,6 +165,9 @@ export async function assertApplicationRoleRights(db: Query, appRole: string): P
        has_schema_privilege('${appRole}', 'public', 'CREATE') as can_create,
        has_table_privilege('${appRole}', 'audit_events', 'UPDATE') as audit_update,
        has_table_privilege('${appRole}', '_prisma_migrations', 'SELECT') as history,
+       (select pg_get_userbyid(datdba) = '${appRole}' from pg_database
+         where datname = current_database()) as owns_db,
+       has_schema_privilege('${appRole}', 'app_private', 'USAGE') as bypass_grants,
        has_table_privilege('${appRole}', 'journals', 'SELECT') as can_read`
   );
   const problems = [
@@ -167,6 +175,8 @@ export async function assertApplicationRoleRights(db: Query, appRole: string): P
     row?.can_create ? "can create in schema public" : "",
     row?.audit_update ? "can update audit_events" : "",
     row?.history ? "can read _prisma_migrations" : "",
+    row?.owns_db ? "owns the database" : "",
+    row?.bypass_grants ? "can use schema app_private (bypass grants)" : "",
     row?.can_read ? "" : "cannot read journals"
   ].filter(Boolean);
   if (problems.length > 0) {

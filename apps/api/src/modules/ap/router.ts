@@ -9,6 +9,8 @@ import { mapError, requireEntityId } from "../../shared/router-utils.js";
 import {
   apInvoiceCreateSchema,
   apInvoiceListQuerySchema,
+  paymentRunListQuerySchema,
+  supplierListQuerySchema,
   apInvoiceUpdateSchema,
   paymentRunConfirmSchema,
   paymentRunProposalSchema,
@@ -20,7 +22,7 @@ import {
   updatePaymentProfileSchema,
   runCollectionSchema
 } from "./payment-profile-types.js";
-import { pageLimit } from "../../shared/pagination.js";
+import { pageLimit, pageMeta } from "../../shared/pagination.js";
 import { signedInUserId } from "../access/system-user.js";
 
 const apService = new APService(prisma as unknown as PrismaClient);
@@ -44,8 +46,24 @@ export async function registerAPRouter(app: FastifyInstance): Promise<void> {
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
-            const data = await apService.listSuppliers(entityId);
-            return reply.send({ data, errors: [] });
+            const query = supplierListQuerySchema.parse(request.query);
+            // Without a limit: the whole list, as pickers and older clients expect.
+            if (
+              query.limit === undefined &&
+              !query.search &&
+              query.offset === 0 &&
+              query.status === "all"
+            ) {
+              const data = await apService.listSuppliers(entityId);
+              return reply.send({ data, meta: pageMeta(data.length, data.length, 0), errors: [] });
+            }
+            const limit = pageLimit(query.limit);
+            const { rows, total } = await apService.pageSuppliers(entityId, { ...query, limit });
+            return reply.send({
+              data: rows,
+              meta: pageMeta(total, limit, query.offset),
+              errors: []
+            });
           } catch (error) {
             return mapError(reply, error);
           }
@@ -117,8 +135,12 @@ export async function registerAPRouter(app: FastifyInstance): Promise<void> {
           try {
             const entityId = requireEntityId(request.entityId);
             const query = apInvoiceListQuerySchema.parse(request.query);
-            const data = await apService.listInvoices(entityId, query);
-            return reply.send({ data, errors: [] });
+            const { rows, total, summary } = await apService.pageInvoices(entityId, query);
+            return reply.send({
+              data: rows,
+              meta: { ...pageMeta(total, query.limit, query.offset), summary },
+              errors: []
+            });
           } catch (error) {
             return mapError(reply, error);
           }
@@ -254,9 +276,17 @@ export async function registerAPRouter(app: FastifyInstance): Promise<void> {
         async (request, reply) => {
           try {
             const entityId = requireEntityId(request.entityId);
-            const query = request.query as { limit?: string | number };
-            const data = await apService.listPaymentRuns(entityId, pageLimit(query.limit));
-            return reply.send({ data, errors: [] });
+            const query = paymentRunListQuerySchema.parse(request.query);
+            const { rows, total } = await apService.pagePaymentRuns(
+              entityId,
+              query.limit,
+              query.offset
+            );
+            return reply.send({
+              data: rows,
+              meta: pageMeta(total, query.limit, query.offset),
+              errors: []
+            });
           } catch (error) {
             return mapError(reply, error);
           }

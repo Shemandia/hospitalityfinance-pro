@@ -41,6 +41,8 @@ import {
   type PeriodStatus
 } from "../../../../../lib/gl-api";
 import { useApiContext } from "../../../../../components/use-api-context";
+import { QueryError } from "../../../../../components/query-error";
+import { TableSkeleton } from "../../../../../components/page-skeletons";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -83,6 +85,11 @@ const STATUS_CONFIG: Record<
   }
 > = {
   OPEN: { label: "Open", variant: "success", description: "Journals can be posted" },
+  SOFT_CLOSE: {
+    label: "Soft close",
+    variant: "warning",
+    description: "Period-end runs (revaluation, depreciation, allocation) only"
+  },
   CLOSED: { label: "Closed", variant: "warning", description: "No new postings allowed" },
   LOCKED: { label: "Locked", variant: "destructive", description: "Permanently locked" }
 };
@@ -444,7 +451,9 @@ export default function PeriodsPage() {
   const {
     data: periodsRes,
     isLoading,
-    error: loadError
+    isError,
+    error: loadError,
+    refetch
   } = useQuery({
     queryKey: ["periods", ctx?.tenantSlug, ctx?.entityId],
     queryFn: () => getPeriodList(ctx!),

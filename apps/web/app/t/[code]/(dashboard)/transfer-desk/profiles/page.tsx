@@ -53,6 +53,8 @@ import {
   ChevronLeft,
   ChevronRight
 } from "lucide-react";
+import { QueryError } from "../../../../../../components/query-error";
+import { TableSkeleton } from "../../../../../../components/page-skeletons";
 
 // ── Type badge styles ───────────────────────────────────────────────────────
 
@@ -344,14 +346,17 @@ export default function TransferDeskProfileListPage() {
             <TableBody>
               {profilesQ.isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8 text-slate-400">
-                    Loading profiles...
+                  <TableCell colSpan={6} className="p-4">
+                    <TableSkeleton rows={6} cols={6} />
                   </TableCell>
                 </TableRow>
               ) : profilesQ.isError ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8 text-red-500 text-sm">
-                    {(profilesQ.error as Error).message}
+                  <TableCell colSpan={6} className="p-4">
+                    <QueryError
+                      message={(profilesQ.error as Error).message}
+                      onRetry={() => profilesQ.refetch()}
+                    />
                   </TableCell>
                 </TableRow>
               ) : paged.length === 0 ? (

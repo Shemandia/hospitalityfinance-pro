@@ -112,14 +112,15 @@ export async function assertTenantSecurity(
   >(
     `select
        (select count(*)::int from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-         where n.nspname = 'public' and p.proname in ('app_current_entity_id', 'app_rls_bypassed')) as functions,
+         where n.nspname = 'public' and p.proname in ('app_current_entity_id', 'app_rls_bypassed',
+           'app_begin_rls_bypass', 'app_rls_bypass_granted')) as functions,
        (select count(*)::int from pg_policies where schemaname = 'public') as policies,
        (select count(*)::int from pg_trigger where tgname in
          ('trg_prevent_audit_event_update', 'trg_prevent_audit_event_delete')) as triggers`
   );
-  if (!row || row.functions < 2 || row.policies === 0 || row.triggers < 2) {
+  if (!row || row.functions < 4 || row.policies === 0 || row.triggers < 2) {
     throw new Error(
-      `Tenant database security is incomplete (functions ${row?.functions}/2, policies ${row?.policies}, audit triggers ${row?.triggers}/2).`
+      `Tenant database security is incomplete (functions ${row?.functions}/4, policies ${row?.policies}, audit triggers ${row?.triggers}/2).`
     );
   }
 }

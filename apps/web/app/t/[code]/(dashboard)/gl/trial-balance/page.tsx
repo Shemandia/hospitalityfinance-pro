@@ -1,5 +1,7 @@
 "use client";
 
+import { useReportPeriodId } from "../../../../../../components/period-provider";
+import { PeriodNotice } from "../../../../../../components/period-gate";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Download, FileSpreadsheet } from "lucide-react";
@@ -237,7 +239,8 @@ function SectionGroup({
 
 export default function TrialBalancePage() {
   const apiContext = useApiContext();
-  const [periodId, setPeriodId] = useState("");
+  // Starts on the period chosen in the top bar; can be changed here for this report.
+  const { periodId, setPeriodId, followsGlobal } = useReportPeriodId("");
   const [comparativePeriodId, setComparativePeriodId] = useState("");
   const [showZero, setShowZero] = useState(false);
 
@@ -306,6 +309,7 @@ export default function TrialBalancePage() {
 
   return (
     <div className="space-y-4">
+      {followsGlobal && <PeriodNotice />}
       {/* Controls */}
       <Card>
         <CardContent className="flex flex-wrap items-center gap-4 py-3 px-6">

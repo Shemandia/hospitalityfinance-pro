@@ -40,6 +40,7 @@ import {
 } from "../../src/db/tenant-location.js";
 import { dropTenantDatabase } from "../../src/db/tenant-roles.js";
 import { RunnerBusyError, runTenantMigrations } from "../../src/db/tenant-runner.js";
+import { whenRunnerFree } from "./runner-lock.js";
 import {
   createDatabase,
   migrateDatabase,
@@ -140,7 +141,9 @@ if (!env.ready) {
     let firstRunId = "";
 
     it("upgrades A, stops at B's failure, records both, and reports failure", async () => {
-      const result = await runTenantMigrations({ schema: release, only: all });
+      const result = await whenRunnerFree(() =>
+        runTenantMigrations({ schema: release, only: all })
+      );
       firstRunId = result.runId;
       expect(result.ok).toBe(false);
       expect(result.outcomes.map((o) => [o.slug, o.status])).toEqual([
@@ -172,7 +175,9 @@ if (!env.ready) {
       await withDb(ownerConnectionUrl(asLocation(locations.get(slugs.b)!)), (db) =>
         db.$executeRawUnsafe(`DROP TABLE "runner_probe"`)
       );
-      const result = await runTenantMigrations({ schema: release, only: all, resume: true });
+      const result = await whenRunnerFree(() =>
+        runTenantMigrations({ schema: release, only: all, resume: true })
+      );
       expect(result.runId).toBe(firstRunId);
       expect(result.ok).toBe(true);
       expect(result.outcomes.map((o) => [o.slug, o.status])).toEqual([
@@ -185,13 +190,17 @@ if (!env.ready) {
     }, 300_000);
 
     it("finds everything up to date on the next run, and changes nothing in a dry run", async () => {
-      const dry = await runTenantMigrations({
-        schema: release,
-        only: [slugs.a, slugs.b],
-        dryRun: true
-      });
+      const dry = await whenRunnerFree(() =>
+        runTenantMigrations({
+          schema: release,
+          only: [slugs.a, slugs.b],
+          dryRun: true
+        })
+      );
       expect(dry.outcomes.map((o) => o.status)).toEqual(["UP_TO_DATE", "UP_TO_DATE"]);
-      const result = await runTenantMigrations({ schema: release, only: [slugs.a, slugs.b] });
+      const result = await whenRunnerFree(() =>
+        runTenantMigrations({ schema: release, only: [slugs.a, slugs.b] })
+      );
       expect(result.ok).toBe(true);
       expect(await registry.tenantMigrationRun.count({ where: { runId: result.runId } })).toBe(0);
     }, 120_000);

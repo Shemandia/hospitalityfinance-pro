@@ -29,3 +29,6 @@ Desktop.ini
 tmp/
 *.tsbuildinfo
 dump.rdb
+
+# Another coding assistant's working files (plans, settings); not part of the project.
+.kilo/
