@@ -14,6 +14,7 @@ import {
   useElementWidth,
   wrappedTick
 } from "../../../../../components/chart-ticks";
+import { labelInkOn, revenueMixSlices, type RevenueMixSlice } from "../../../../../lib/revenue-mix";
 import { useApiContext } from "../../../../../components/use-api-context";
 import {
   getBalanceSheet,
@@ -109,8 +110,6 @@ type APInvoice = {
 };
 
 type PortfolioEntity = { id: string; name: string };
-
-const COLORS = ["#0e7c7b", "#0369a1", "#7c3aed", "#b45309", "#047857", "#dc2626"];
 
 /** Where chart category labels wrap: names are never cut (see components/chart-ticks). */
 const DEPT_LABEL_CHARS = 14;
@@ -460,14 +459,12 @@ function RevenueBudgetChart({ usaliComparative }: { usaliComparative: any }) {
 
 // ── Revenue Mix ───────────────────────────────────────────────────────────────
 
-type PieSlice = { id: string; label: string; value: number; color: string };
-
 /**
  * Revenue by department as a doughnut with a legend beneath it. The names are
  * in the legend, not on link labels beside the pie, which the card's edge cut
  * off; each slice shows its share, the legend shows name and share.
  */
-function RevenueMixPie({ data, innerRadius }: { data: PieSlice[]; innerRadius: number }) {
+function RevenueMixPie({ data, innerRadius }: { data: RevenueMixSlice[]; innerRadius: number }) {
   const total = data.reduce((sum, d) => sum + d.value, 0);
   const share = (value: number) => (total > 0 ? `${((value / total) * 100).toFixed(0)}%` : "–");
 
@@ -486,10 +483,14 @@ function RevenueMixPie({ data, innerRadius }: { data: PieSlice[]; innerRadius: n
             colors={{ datum: "data.color" }}
             enableArcLinkLabels={false}
             arcLabel={(d) => share(d.value)}
+            arcLabelsTextColor={(d) => labelInkOn(d.color)}
             arcLabelsSkipAngle={12}
             tooltip={({ datum }) => (
-              <div className="bg-white border border-border rounded px-2 py-1 text-xs shadow">
+              <div className="bg-white border border-border rounded px-2 py-1 text-xs shadow max-w-64">
                 {datum.label}: <strong>{fmt(datum.value)}</strong>
+                {datum.data.members ? (
+                  <div className="text-muted-foreground">{datum.data.members.join(", ")}</div>
+                ) : null}
               </div>
             )}
           />
@@ -502,7 +503,12 @@ function RevenueMixPie({ data, innerRadius }: { data: PieSlice[]; innerRadius: n
                 style={{ backgroundColor: d.color }}
                 aria-hidden
               />
-              <span className="flex-1 min-w-0 text-slate-600">{d.label}</span>
+              <span className="flex-1 min-w-0 text-slate-600">
+                {d.label}
+                {d.members ? (
+                  <span className="block text-[11px] text-slate-400">{d.members.join(", ")}</span>
+                ) : null}
+              </span>
               <span className="tabular-nums text-slate-500">{share(d.value)}</span>
             </li>
           ))}
@@ -949,14 +955,7 @@ export default function DashboardPage() {
       ].filter((d) => d.value > 0)
     : [];
 
-  const revenuePieData = (usali?.departments ?? [])
-    .filter((d) => parseFloat(d.revenue) > 0)
-    .map((d, i) => ({
-      id: d.name,
-      label: d.name,
-      value: parseFloat(d.revenue),
-      color: COLORS[i % COLORS.length]
-    }));
+  const revenuePieData = revenueMixSlices(usali?.departments ?? []);
 
   const trendPoints = trendQ.data ?? [];
   const revparLineData =
