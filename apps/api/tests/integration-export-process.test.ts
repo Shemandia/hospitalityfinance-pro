@@ -301,62 +301,10 @@ describe("mapRecordsToTarget", () => {
     }
   });
 
-  it("maps records to GL_JOURNAL with fieldMap applied", () => {
-    const records: FsdRecordValue[] = [
-      { acctCode: "50010", dr: 100, cr: 0, desc: "Line 1" },
-      { acctCode: "20010", dr: 0, cr: 100, desc: "Line 2" }
-    ];
-
-    const params: TargetParams = {
-      fieldMap: {
-        acctCode: "accountId",
-        dr: "debit",
-        cr: "credit",
-        desc: "description"
-      },
-      periodId: "period-001",
-      functionalCurrency: "USD",
-      entityId: "entity-001"
-    };
-
-    const result = mapRecordsToTarget("GL_JOURNAL", records, params);
-
-    expect(result.ok).toBe(true);
-    if (result.ok && result.component === "GL_JOURNAL") {
-      expect(result.journals).toHaveLength(1);
-      expect(result.journals[0]!.input.lines).toHaveLength(2);
-      expect(result.journals[0]!.input.lines[0]!.accountId).toBe("50010");
-      expect(result.journals[0]!.input.lines[0]!.debit).toBe("100");
-      expect(result.journals[0]!.input.lines[0]!.credit).toBe("0");
-      expect(result.journals[0]!.input.source).toBe("IMPORT");
-      expect(result.journals[0]!.input.periodId).toBe("period-001");
-    }
-  });
-
-  it("groups records by groupBy field into separate journals", () => {
-    const records: FsdRecordValue[] = [
-      { batchNo: "B1", accountId: "50010", debit: 100, credit: 0 },
-      { batchNo: "B1", accountId: "20010", debit: 0, credit: 100 },
-      { batchNo: "B2", accountId: "60010", debit: 200, credit: 0 },
-      { batchNo: "B2", accountId: "20010", debit: 0, credit: 200 }
-    ];
-
-    const params: TargetParams = {
-      groupBy: "batchNo",
-      periodId: "period-001",
-      functionalCurrency: "EUR"
-    };
-
-    const result = mapRecordsToTarget("GL_JOURNAL", records, params);
-
-    expect(result.ok).toBe(true);
-    if (result.ok && result.component === "GL_JOURNAL") {
-      expect(result.journals).toHaveLength(2);
-      expect(result.journals[0]!.input.lines).toHaveLength(2);
-      expect(result.journals[1]!.input.lines).toHaveLength(2);
-      expect(result.journals[0]!.sourceIndices).toEqual([0, 1]);
-      expect(result.journals[1]!.sourceIndices).toEqual([2, 3]);
-    }
+  it("does not map ledger imports: they become documents and go through the posting service", () => {
+    const records: FsdRecordValue[] = [{ accountCode: "50010", debit: 100, credit: 0 }];
+    const result = mapRecordsToTarget("GL_JOURNAL", records, {});
+    expect(result).toMatchObject({ ok: false, code: "UNSUPPORTED_COMPONENT" });
   });
 
   it("maps AP_INVOICE records 1:1", () => {

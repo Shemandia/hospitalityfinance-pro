@@ -115,13 +115,20 @@ describe("commitBatch is resumable", () => {
       batchId: "b1",
       status: "HELD",
       validationStatus: "OK",
-      payload: {}
+      payload: {
+        document: { contractVersion: 1, documentType: "GL_JOURNAL", sourceDocumentRef: `D${i}` }
+      },
+      validationMessages: []
     }));
     return {
       integrationBatch: {
-        findFirst: vi
-          .fn()
-          .mockResolvedValue({ id: "b1", entityId: "e1", status: "COMMITTING", rejectedItems: 0 }),
+        findFirst: vi.fn().mockResolvedValue({
+          id: "b1",
+          entityId: "e1",
+          profileId: "p1",
+          status: "COMMITTING",
+          rejectedItems: 0
+        }),
         // Claim fails: the batch is no longer PENDING_REVIEW.
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
         update: vi.fn().mockResolvedValue({})
@@ -130,17 +137,26 @@ describe("commitBatch is resumable", () => {
         findMany: vi.fn().mockResolvedValue(items),
         count: vi.fn().mockResolvedValue(remainingHeld),
         update: vi.fn().mockResolvedValue({})
+      },
+      integrationProfile: {
+        findUnique: vi.fn().mockResolvedValue({ id: "p1", targetParams: null })
       }
     } as any;
   }
 
+  const poster = {
+    post: vi.fn(async () => ({ status: "POSTED", journalId: "j1", entityId: "e1" })),
+    postAll: vi.fn()
+  };
+
   it("picks up items stranded by an interrupted commit", async () => {
     const db = interruptedDb(2);
-    const service = new BatchReviewService(db);
+    const service = new BatchReviewService(db, poster as any);
     const result = await service.commitBatch("e1", "b1", "u1");
 
     // Previously this returned alreadyCommitted and left both items HELD.
     expect(result.alreadyCommitted).toBe(false);
+    expect(poster.post).toHaveBeenCalledTimes(2);
     expect(db.integrationBatchItem.findMany).toHaveBeenCalled();
   });
 

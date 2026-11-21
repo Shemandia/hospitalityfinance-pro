@@ -16,7 +16,9 @@ import { useEffect, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { step3Schema, type Step3FormData } from "../../../../lib/integrations/validation";
-import { HFP_TARGET_FIELDS } from "../../../../lib/integrations/constants";
+import { useQuery } from "@tanstack/react-query";
+import { listTargetFields } from "../../../../lib/integrations/api";
+import { useApiContext } from "../../../use-api-context";
 import type { FsdFieldConfig } from "../../../../lib/integrations/types";
 import { useFieldMapper } from "../../../../lib/integrations/hooks/useFieldMapper";
 import { FieldMapper } from "../shared/FieldMapper";
@@ -48,8 +50,19 @@ export function FieldMappingStep({
     initialMappings: data?.mappings ?? []
   });
 
-  // Target fields from constants (typed read-only array → mutable)
-  const targetFields = useMemo(() => [...HFP_TARGET_FIELDS], []);
+  // Target fields come from the API, which takes them from the posting
+  // contract: the keys a transformation writes for a ledger import.
+  const apiContext = useApiContext();
+  const targetFieldsQuery = useQuery({
+    queryKey: ["integrations", "target-fields"],
+    queryFn: () => listTargetFields(apiContext!),
+    enabled: Boolean(apiContext),
+    staleTime: Infinity
+  });
+  const targetFields = useMemo(
+    () => [...(targetFieldsQuery.data?.data ?? [])],
+    [targetFieldsQuery.data]
+  );
 
   // Sync mapper state → form state
   useEffect(() => {

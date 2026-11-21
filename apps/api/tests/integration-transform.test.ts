@@ -4,15 +4,15 @@ import type { FsdSchema } from "@hfp/fsd-engine";
 // Allow the (insecure) Node vm fallback on dev machines without isolated-vm
 process.env.TML_ALLOW_INSECURE_SANDBOX ??= "true";
 
-// ── Mock GL/AP/AR services before importing the pipeline ───────────────────
+// ── Mock AP/AR services before importing the pipeline ──────────────────────
+// Ledger imports post canonical documents; a fake poster records them.
 
-const createJournalMock = vi.fn().mockResolvedValue({ id: "journal-001" });
-
-vi.mock("../src/modules/gl/service.js", () => ({
-  GLService: class {
-    createJournal = createJournalMock;
-  }
+const postMock = vi.fn(async () => ({
+  status: "POSTED",
+  journalId: "journal-001",
+  entityId: "entity-001"
 }));
+const poster = { post: postMock, postAll: vi.fn() };
 
 vi.mock("../src/modules/ap/service.js", () => ({
   APService: class {
@@ -32,6 +32,10 @@ vi.mock("../src/db/requestContext.js", () => ({
     acting.userId = ctx?.userId ?? null;
     return fn();
   }
+}));
+vi.mock("../src/db/rls-bypass.js", () => ({
+  withBypassRLS: async (_db: unknown, fn: (tx: unknown) => unknown) =>
+    fn({ entity: { findUnique: async () => ({ id: "entity-001", code: "EZZ" }) } })
 }));
 vi.mock("../src/modules/access/system-user.js", () => ({
   systemUserId: async () => "system-user",
@@ -53,15 +57,15 @@ const janaSchema: FsdSchema = {
   record: {
     name: "voucher",
     fields: [
-      { name: "voucherNo", type: "string", required: true, maxLength: 20 },
-      { name: "journalType", type: "string", required: true, maxLength: 10 },
+      { name: "sourceDocumentRef", type: "string", required: true, maxLength: 20 },
+      { name: "journalTypeCode", type: "string", required: true, maxLength: 10 },
       { name: "accountCode", type: "string", required: true, maxLength: 20 },
       { name: "debit", type: "integer", required: true, maxLength: 15 },
       { name: "credit", type: "integer", required: true, maxLength: 15 },
       { name: "description", type: "string", maxLength: 200 },
-      { name: "entryDate", type: "date", required: true, maxLength: 10 },
-      { name: "supplierCode", type: "string", maxLength: 20 },
-      { name: "reference", type: "string", maxLength: 50 }
+      { name: "documentDate", type: "date", required: true, maxLength: 10 },
+      { name: "entityCode", type: "string", maxLength: 20 },
+      { name: "currency", type: "string", maxLength: 3 }
     ]
   }
 };
@@ -71,21 +75,21 @@ const janaFsdJson = JSON.stringify(janaSchema);
 // ── Test data: Jana internal movements (÷1000 implied decimals) ─────────────
 
 const JANA_INTERNAL_MOVEMENT_INPUT =
-  "IM001;INTMV;30010;500000;0;Transfer to Kitchen;2026-04-01;;\n" +
-  "IM002;INTMV;30020;0;500000;Transfer from Store;2026-04-01;;";
+  "EZZ-IM001;INTMV;30010;500000;0;Transfer to Kitchen;2026-04-01;EZZ;TZS\n" +
+  "EZZ-IM001;INTMV;30020;0;500000;Transfer from Store;2026-04-01;EZZ;TZS";
 
 // ── Test data: Jana purchasing vouchers (whole integers, no transform) ──────
 
 const JANA_PURCHASING_INPUT =
-  "PV001;PURCH;50010;385000;0;Rice 50kg;2026-04-01;SUP001;INV-1\n" +
-  "PV002;PURCH;20010;0;385000;Control;2026-04-01;SUP001;INV-1";
+  "EZZ-PV001;PURCH;50010;385000;0;Rice 50kg;2026-04-01;EZZ;TZS\n" +
+  "EZZ-PV001;PURCH;20010;0;385000;Control;2026-04-01;EZZ;TZS";
 
 // ── TML definitions ────────────────────────────────────────────────────────
 
 /** Transformation that applies ÷1000 to debit and credit fields */
 const divideBy1000Rules = [
-  { type: "map" as const, target: "voucherNo", sources: [{ path: "voucherNo" }] },
-  { type: "map" as const, target: "journalType", sources: [{ path: "journalType" }] },
+  { type: "map" as const, target: "sourceDocumentRef", sources: [{ path: "sourceDocumentRef" }] },
+  { type: "map" as const, target: "journalTypeCode", sources: [{ path: "journalTypeCode" }] },
   { type: "map" as const, target: "accountCode", sources: [{ path: "accountCode" }] },
   {
     type: "transform" as const,
@@ -104,22 +108,22 @@ const divideBy1000Rules = [
     }
   },
   { type: "map" as const, target: "description", sources: [{ path: "description" }] },
-  { type: "map" as const, target: "entryDate", sources: [{ path: "entryDate" }] },
-  { type: "map" as const, target: "supplierCode", sources: [{ path: "supplierCode" }] },
-  { type: "map" as const, target: "reference", sources: [{ path: "reference" }] }
+  { type: "map" as const, target: "documentDate", sources: [{ path: "documentDate" }] },
+  { type: "map" as const, target: "entityCode", sources: [{ path: "entityCode" }] },
+  { type: "map" as const, target: "currency", sources: [{ path: "currency" }] }
 ];
 
 /** Transformation that just maps fields through (identity, for PV) */
 const identityRules = [
-  { type: "map" as const, target: "voucherNo", sources: [{ path: "voucherNo" }] },
-  { type: "map" as const, target: "journalType", sources: [{ path: "journalType" }] },
+  { type: "map" as const, target: "sourceDocumentRef", sources: [{ path: "sourceDocumentRef" }] },
+  { type: "map" as const, target: "journalTypeCode", sources: [{ path: "journalTypeCode" }] },
   { type: "map" as const, target: "accountCode", sources: [{ path: "accountCode" }] },
   { type: "map" as const, target: "debit", sources: [{ path: "debit" }] },
   { type: "map" as const, target: "credit", sources: [{ path: "credit" }] },
   { type: "map" as const, target: "description", sources: [{ path: "description" }] },
-  { type: "map" as const, target: "entryDate", sources: [{ path: "entryDate" }] },
-  { type: "map" as const, target: "supplierCode", sources: [{ path: "supplierCode" }] },
-  { type: "map" as const, target: "reference", sources: [{ path: "reference" }] }
+  { type: "map" as const, target: "documentDate", sources: [{ path: "documentDate" }] },
+  { type: "map" as const, target: "entityCode", sources: [{ path: "entityCode" }] },
+  { type: "map" as const, target: "currency", sources: [{ path: "currency" }] }
 ];
 
 /** Transformation with a lookup table substitution for department codes */
@@ -190,6 +194,7 @@ function createCtx(
 ): PipelineContext {
   return {
     db: dbStub.db as any,
+    poster: poster as any,
     storage: storageStub.storage,
     tenantSlug: "test-hotel",
     tenantDbUrl: "postgresql://localhost/test"
@@ -210,12 +215,8 @@ function makeProfile(overrides: Partial<ProfileWithRelations> = {}): ProfileWith
     targetFormatId: null,
     transformationId: null,
     sourceParams: null,
-    targetParams: {
-      fieldMap: {
-        accountCode: "accountId",
-        voucherNo: "reference"
-      }
-    },
+    targetParams: { journalSource: "IMPORT" },
+    sourceSystemCode: "JANA",
     savePayload: "NONE",
     sourceFormat: {
       id: "fmt-001",
@@ -232,7 +233,7 @@ function makeProfile(overrides: Partial<ProfileWithRelations> = {}): ProfileWith
 
 describe("executeImport with TML transformation — Jana ÷1000 rule", () => {
   it("applies ÷1000 to internal movement debit/credit fields", async () => {
-    createJournalMock.mockClear();
+    postMock.mockClear();
 
     const dbStub = createStubDb();
     const storageStub = createStubStorage({
@@ -258,15 +259,16 @@ describe("executeImport with TML transformation — Jana ÷1000 rule", () => {
     expect(result.recordsSucceeded).toBeGreaterThan(0);
     expect(result.recordsFailed).toBe(0);
 
-    // Verify the GL journal was created with transformed (÷1000) amounts
-    expect(createJournalMock).toHaveBeenCalledTimes(1);
-    const journalInput = createJournalMock.mock.calls[0]![2];
+    // Verify the document posted carries the transformed (÷1000) amounts
+    expect(postMock).toHaveBeenCalledTimes(1);
+    const journalInput = (postMock.mock.calls[0] as unknown as [any])[0];
 
     // The transformed records should have debit=500 and credit=500 (not 500000)
     const lines = journalInput.lines ?? journalInput;
     if (Array.isArray(lines)) {
       // Check the debit line (first record: debit=500000 → 500 after ÷1000)
       const debitLine = lines.find((l: any) => Number(l.debit) > 0);
+      expect(debitLine).toBeDefined();
       if (debitLine) {
         expect(Number(debitLine.debit)).toBe(500);
       }
@@ -274,7 +276,7 @@ describe("executeImport with TML transformation — Jana ÷1000 rule", () => {
   });
 
   it("passes purchasing vouchers through without transformation", async () => {
-    createJournalMock.mockClear();
+    postMock.mockClear();
 
     const dbStub = createStubDb();
     const storageStub = createStubStorage({
@@ -295,11 +297,12 @@ describe("executeImport with TML transformation — Jana ÷1000 rule", () => {
     expect(result.recordsFailed).toBe(0);
 
     // Verify the GL journal was created with original amounts (no ÷1000)
-    expect(createJournalMock).toHaveBeenCalledTimes(1);
-    const journalInput = createJournalMock.mock.calls[0]![2];
+    expect(postMock).toHaveBeenCalledTimes(1);
+    const journalInput = (postMock.mock.calls[0] as unknown as [any])[0];
     const lines = journalInput.lines ?? journalInput;
     if (Array.isArray(lines)) {
       const debitLine = lines.find((l: any) => Number(l.debit) > 0);
+      expect(debitLine).toBeDefined();
       if (debitLine) {
         expect(Number(debitLine.debit)).toBe(385000);
       }
@@ -307,7 +310,7 @@ describe("executeImport with TML transformation — Jana ÷1000 rule", () => {
   });
 
   it("purchasing vouchers with identity transformation keep whole integers", async () => {
-    createJournalMock.mockClear();
+    postMock.mockClear();
 
     const dbStub = createStubDb();
     const storageStub = createStubStorage({
@@ -334,11 +337,12 @@ describe("executeImport with TML transformation — Jana ÷1000 rule", () => {
     expect(result.recordsSucceeded).toBeGreaterThan(0);
 
     // Verify amounts are still 385000 (not divided)
-    expect(createJournalMock).toHaveBeenCalledTimes(1);
-    const journalInput = createJournalMock.mock.calls[0]![2];
+    expect(postMock).toHaveBeenCalledTimes(1);
+    const journalInput = (postMock.mock.calls[0] as unknown as [any])[0];
     const lines = journalInput.lines ?? journalInput;
     if (Array.isArray(lines)) {
       const debitLine = lines.find((l: any) => Number(l.debit) > 0);
+      expect(debitLine).toBeDefined();
       if (debitLine) {
         expect(Number(debitLine.debit)).toBe(385000);
       }
@@ -348,7 +352,7 @@ describe("executeImport with TML transformation — Jana ÷1000 rule", () => {
 
 describe("executeImport — transformation error logging", () => {
   it("logs TRANSFORM_ERROR for records that fail transformation", async () => {
-    createJournalMock.mockClear();
+    postMock.mockClear();
 
     const dbStub = createStubDb();
     const storageStub = createStubStorage({
@@ -391,7 +395,7 @@ describe("executeImport — transformation error logging", () => {
   });
 
   it("skips transformation step when profile has no transformationId", async () => {
-    createJournalMock.mockClear();
+    postMock.mockClear();
 
     const dbStub = createStubDb();
     const storageStub = createStubStorage({

@@ -1,10 +1,10 @@
 /**
- * Held-journal batch review service — list/get/reject/restore/discard.
- * Commit lives in commitBatch (a later task).
+ * Held-batch review: list, get, reject, restore, discard, and commit (which
+ * posts the held canonical documents through the posting service).
  */
 
 import type { PrismaClient } from "../../db/client.js";
-import { GLService } from "../gl/service.js";
+import { PostingService, type PostingOptions, type PostingOutcome } from "../posting/service.js";
 
 export class BatchReviewError extends Error {
   constructor(
@@ -18,7 +18,11 @@ export class BatchReviewError extends Error {
 }
 
 export class BatchReviewService {
-  constructor(protected readonly prisma: PrismaClient) {}
+  constructor(
+    protected readonly prisma: PrismaClient,
+    /** Posts the held documents; the posting service unless a test gives one. */
+    private readonly poster?: Pick<PostingService, "post" | "postAll">
+  ) {}
 
   protected get db(): any {
     return this.prisma as any;
@@ -119,9 +123,10 @@ export class BatchReviewService {
   }
 
   /**
-   * Commit a held batch: materialise each HELD, non-ERROR item through
-   * GLService.createJournal (honouring approval rules); DRAFT results are
-   * posted, PENDING_APPROVAL results are left for approvers. Idempotent.
+   * Commit a held batch: post each HELD, non-ERROR item's canonical document
+   * through the posting service (approval rules and authorization apply as
+   * for any journal), or all of them in one transaction when the profile
+   * posts whole files. Idempotent and resumable.
    */
   async commitBatch(entityId: string, batchId: string, userId: string) {
     const batch = await this.db.integrationBatch.findFirst({ where: { id: batchId, entityId } });
@@ -168,40 +173,100 @@ export class BatchReviewService {
       orderBy: { itemIndex: "asc" }
     });
 
-    const gl = new GLService(this.prisma);
+    const profile = await this.db.integrationProfile.findUnique({ where: { id: batch.profileId } });
+    const options: PostingOptions = {
+      actorUserId: userId,
+      journalSource:
+        ((profile?.targetParams as Record<string, unknown> | null)
+          ?.journalSource as PostingOptions["journalSource"]) ?? "IMPORT",
+      ...(profile?.fxRateType && { fxRateType: profile.fxRateType })
+    };
+    const poster = this.poster ?? new PostingService(this.prisma);
+    const documents: unknown[] = items.map(
+      (item: { payload: unknown }) => (item.payload as { document?: unknown } | null)?.document
+    );
+    let outcomes: PostingOutcome[];
+    if (documents.some((d) => d === undefined)) {
+      // Staged before documents (import plan step 5): its payload is not a document.
+      outcomes = documents.map(
+        (d): PostingOutcome =>
+          d === undefined
+            ? {
+                status: "REFUSED",
+                errors: [
+                  {
+                    code: "STAGED_BEFORE_RELEASE",
+                    path: "",
+                    message:
+                      "Staged by an earlier release; discard the batch and import the file again."
+                  }
+                ]
+              }
+            : {
+                status: "REFUSED",
+                errors: [
+                  {
+                    code: "FILE_NOT_POSTED",
+                    path: "",
+                    message: "Not posted: another item of the batch cannot be."
+                  }
+                ]
+              }
+      );
+    } else if (profile?.atomicity === "WHOLE_FILE") {
+      outcomes = await poster.postAll(documents, options);
+    } else {
+      outcomes = [];
+      for (const document of documents) outcomes.push(await poster.post(document, options));
+    }
+
     let committed = 0;
     let pendingApproval = 0;
     let errors = 0;
-
-    for (const item of items) {
-      try {
-        const created: any = await gl.createJournal(batch.entityId, userId, item.payload as any);
-        if (created?.status === "PENDING_APPROVAL") {
-          pendingApproval++;
-        } else {
-          await gl.postJournal(batch.entityId, created.id, userId);
-          committed++;
-        }
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]!;
+      const outcome = outcomes[i]!;
+      if (
+        outcome.status === "POSTED" ||
+        outcome.status === "PENDING_APPROVAL" ||
+        outcome.status === "AWAITING_AUTHORIZATION"
+      ) {
+        if (outcome.status === "POSTED") committed++;
+        else pendingApproval++;
         await this.db.integrationBatchItem.update({
           where: { id: item.id },
-          data: { status: "COMMITTED", resultJournalId: created?.id ?? null }
+          data: { status: "COMMITTED", resultJournalId: outcome.journalId }
         });
-      } catch (err) {
-        errors++;
-        const message = err instanceof Error ? err.message : "Commit failed";
-        const existing = Array.isArray(item.validationMessages) ? item.validationMessages : [];
-        await this.db.integrationBatchItem.update({
-          where: { id: item.id },
-          data: {
-            status: "ERROR",
-            validationStatus: "ERROR",
-            validationMessages: [
-              ...existing,
-              { code: "COMMIT_FAILED", severity: "ERROR", message }
-            ] as any
-          }
-        });
+        continue;
       }
+      errors++;
+      const messages =
+        outcome.status === "REFUSED"
+          ? outcome.errors.map((e) => ({ code: e.code, severity: "ERROR", message: e.message }))
+          : outcome.status === "DUPLICATE"
+            ? [
+                {
+                  code: "DUPLICATE",
+                  severity: "ERROR",
+                  message: `Already posted (journal ${outcome.journalId}).`
+                }
+              ]
+            : [
+                {
+                  code: "COMMIT_FAILED",
+                  severity: "ERROR",
+                  message: `Unexpected outcome ${outcome.status}.`
+                }
+              ];
+      const existing = Array.isArray(item.validationMessages) ? item.validationMessages : [];
+      await this.db.integrationBatchItem.update({
+        where: { id: item.id },
+        data: {
+          status: "ERROR",
+          validationStatus: "ERROR",
+          validationMessages: [...existing, ...messages] as any
+        }
+      });
     }
 
     await this.db.integrationBatch.update({

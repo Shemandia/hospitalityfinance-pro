@@ -1,17 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 import type { FsdSchema } from "@hfp/fsd-engine";
 
-// ── Mock GL/AP/AR services before importing the pipeline ───────────────────
+// ── Mock AP/AR services before importing the pipeline ──────────────────────
+// Ledger imports post canonical documents through the posting service; the
+// tests give the pipeline a fake poster that records what it receives.
 
-const createJournalMock = vi.fn().mockResolvedValue({ id: "journal-001" });
+const postMock = vi.fn(async () => ({
+  status: "POSTED",
+  journalId: "journal-001",
+  entityId: "entity-001"
+}));
+const poster = { post: postMock, postAll: vi.fn() };
 const createApInvoiceMock = vi.fn().mockResolvedValue({ id: "ap-inv-001" });
 const createArInvoiceMock = vi.fn().mockResolvedValue({ id: "ar-inv-001" });
-
-vi.mock("../src/modules/gl/service.js", () => ({
-  GLService: class {
-    createJournal = createJournalMock;
-  }
-}));
 
 vi.mock("../src/modules/ap/service.js", () => ({
   APService: class {
@@ -34,6 +35,10 @@ vi.mock("../src/db/requestContext.js", () => ({
     return fn();
   }
 }));
+vi.mock("../src/db/rls-bypass.js", () => ({
+  withBypassRLS: async (_db: unknown, fn: (tx: unknown) => unknown) =>
+    fn({ entity: { findUnique: async () => ({ id: "entity-001", code: "EZZ" }) } })
+}));
 vi.mock("../src/modules/access/system-user.js", () => ({
   systemUserId: async () => "system-user",
   actingUserId: async () => acting.userId ?? "system-user"
@@ -45,7 +50,9 @@ import {
   type ProfileWithRelations
 } from "../src/jobs/integration-pipeline.js";
 
-// ── Jana voucher FSD schema (semicolon-delimited, 9 fields) ────────────────
+// ── Jana voucher FSD schema (semicolon-delimited) ──────────────────────────
+// The fields carry the contract's names, so no transformation is needed:
+// records with the same entity and sourceDocumentRef form one document.
 
 const janaVoucherSchema: FsdSchema = {
   classification: "DELIMITED",
@@ -54,15 +61,15 @@ const janaVoucherSchema: FsdSchema = {
   record: {
     name: "voucher",
     fields: [
-      { name: "voucherNo", type: "string", required: true, maxLength: 20 },
-      { name: "journalType", type: "string", required: true, maxLength: 10 },
+      { name: "sourceDocumentRef", type: "string", required: true, maxLength: 20 },
+      { name: "journalTypeCode", type: "string", required: true, maxLength: 10 },
       { name: "accountCode", type: "string", required: true, maxLength: 20 },
       { name: "debit", type: "integer", required: true, maxLength: 15 },
       { name: "credit", type: "integer", required: true, maxLength: 15 },
       { name: "description", type: "string", maxLength: 200 },
-      { name: "entryDate", type: "date", required: true, maxLength: 10 },
-      { name: "supplierCode", type: "string", maxLength: 20 },
-      { name: "reference", type: "string", maxLength: 50 }
+      { name: "documentDate", type: "date", required: true, maxLength: 10 },
+      { name: "entityCode", type: "string", maxLength: 20 },
+      { name: "currency", type: "string", maxLength: 3 }
     ]
   }
 };
@@ -72,8 +79,8 @@ const janaFsdJson = JSON.stringify(janaVoucherSchema);
 // ── Test data ──────────────────────────────────────────────────────────────
 
 const VALID_JANA_INPUT =
-  "PV001;PURCH;50010;385000;0;Rice 50kg;2026-04-01;SUP001;INV-1\n" +
-  "PV002;PURCH;20010;0;385000;Control;2026-04-01;SUP001;INV-1";
+  "EZZ-PV001;PURCH;50010;385000;0;Rice 50kg;2026-04-01;EZZ;TZS\n" +
+  "EZZ-PV001;PURCH;20010;0;385000;Control;2026-04-01;EZZ;TZS";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -131,6 +138,7 @@ function createCtx(
 ): PipelineContext {
   return {
     db: dbStub.db as any,
+    poster: poster as any,
     storage: storageStub.storage,
     tenantSlug: "test-hotel",
     tenantDbUrl: "postgresql://localhost/test"
@@ -151,12 +159,8 @@ function makeImportProfile(overrides: Partial<ProfileWithRelations> = {}): Profi
     targetFormatId: null,
     transformationId: null,
     sourceParams: null,
-    targetParams: {
-      fieldMap: {
-        accountCode: "accountId",
-        voucherNo: "reference"
-      }
-    },
+    targetParams: { journalSource: "IMPORT" },
+    sourceSystemCode: "JANA",
     savePayload: "NONE",
     sourceFormat: {
       id: "fmt-001",
@@ -172,8 +176,8 @@ function makeImportProfile(overrides: Partial<ProfileWithRelations> = {}): Profi
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 describe("executeImport — happy path (Jana voucher → GL_JOURNAL)", () => {
-  it("parses 2-line Jana file and creates one GL journal with 2 lines", async () => {
-    createJournalMock.mockClear();
+  it("parses a 2-line Jana file into one document of 2 lines and posts it", async () => {
+    postMock.mockClear();
 
     const dbStub = createStubDb();
     const storageStub = createStubStorage({
@@ -185,8 +189,7 @@ describe("executeImport — happy path (Jana voucher → GL_JOURNAL)", () => {
     const runtimeParams = {
       filePath: "test-hotel/vouchers.csv",
       entityId: "entity-001",
-      periodId: "period-001",
-      triggeredBy: "user-001"
+      triggeredBy: "00000000-0000-4000-8000-000000000001"
     };
 
     const result = await executeImport(ctx, "exec-001", profile, runtimeParams);
@@ -197,10 +200,28 @@ describe("executeImport — happy path (Jana voucher → GL_JOURNAL)", () => {
     expect(result.recordsFailed).toBe(0);
     expect(result.errorMessage).toBeUndefined();
 
-    // GLService.createJournal should have been called once (all records → one journal)
-    expect(createJournalMock).toHaveBeenCalledTimes(1);
+    // One document: both records share entity and reference.
+    expect(postMock).toHaveBeenCalledTimes(1);
+    const [document, options] = postMock.mock.calls[0] as unknown as [any, any];
+    expect(document).toMatchObject({
+      contractVersion: 1,
+      documentType: "GL_JOURNAL",
+      sourceSystem: "JANA",
+      sourceDocumentRef: "EZZ-PV001",
+      entityCode: "EZZ",
+      documentDate: "2026-04-01",
+      journalTypeCode: "PURCH",
+      currency: "TZS",
+      lines: [
+        { accountCode: "50010", debit: "385000", credit: "0", description: "Rice 50kg" },
+        { accountCode: "20010", debit: "0", credit: "385000", description: "Control" }
+      ]
+    });
     // Recorded as the user who ran the import, never the entity id (IMP-01).
-    expect(createJournalMock.mock.calls[0]?.[1]).toBe("user-001");
+    expect(options).toMatchObject({
+      actorUserId: "00000000-0000-4000-8000-000000000001",
+      journalSource: "IMPORT"
+    });
 
     // Should have logged 2 SUCCESS records
     const successLogs = dbStub.logs.filter((l) => l.status === "SUCCESS");
@@ -208,7 +229,7 @@ describe("executeImport — happy path (Jana voucher → GL_JOURNAL)", () => {
   });
 
   it("saves input payload when savePayload is INPUT", async () => {
-    createJournalMock.mockClear();
+    postMock.mockClear();
 
     const dbStub = createStubDb();
     const storageStub = createStubStorage({
@@ -234,7 +255,7 @@ describe("executeImport — happy path (Jana voucher → GL_JOURNAL)", () => {
   });
 
   it("saves both payloads when savePayload is BOTH", async () => {
-    createJournalMock.mockClear();
+    postMock.mockClear();
 
     const dbStub = createStubDb();
     const storageStub = createStubStorage({
@@ -338,7 +359,7 @@ describe("executeImport — error cases", () => {
   });
 
   it("resolves file path from profile sourceParams when no runtimeParams.filePath", async () => {
-    createJournalMock.mockClear();
+    postMock.mockClear();
 
     const dbStub = createStubDb();
     const storageStub = createStubStorage({

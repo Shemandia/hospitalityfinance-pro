@@ -24,19 +24,19 @@ import {
   type TmlRecord,
   type Sandbox
 } from "@hfp/tml-engine";
-import { GLService } from "../modules/gl/service.js";
+import { GLService } from "../modules/gl/service.js"; // exports read journals
 import { APService } from "../modules/ap/service.js";
 import { ARService } from "../modules/ar/service.js";
 import { AllocationService } from "../modules/allocation/service.js";
 import { FixedAssetService } from "../modules/fixed-asset/service.js";
 import { runWithContext } from "../db/requestContext.js";
 import { mapRecordsToTarget, type TargetParams } from "./integration-record-mapper.js";
+import { type DocumentPoster, importDocuments } from "./integration-import-documents.js";
+import { PostingService } from "../modules/posting/service.js";
+import { withBypassRLS } from "../db/rls-bypass.js";
+import type { PrismaClient } from "../db/client.js";
 import type { StorageBackend } from "./integration-storage.js";
-import {
-  stageJournalItems,
-  resolveReviewMode,
-  type StageContext
-} from "./integration-batch-stager.js";
+import { resolveReviewMode } from "./integration-batch-stager.js";
 import { moduleLogger } from "../shared/logger.js";
 import { insecureTmlSandboxAllowed } from "../shared/tml-sandbox.js";
 import { actingUserId, systemUserId } from "../modules/access/system-user.js";
@@ -48,6 +48,8 @@ const log = moduleLogger("integration-pipeline");
 export type PipelineContext = {
   /** Prisma client for the tenant DB (already tenant-scoped) */
   db: PipelineDb;
+  /** Posts canonical documents; the posting service over `db` unless a test gives one. */
+  poster?: DocumentPoster;
   /** File storage backend (local or S3) */
   storage: StorageBackend;
   /** Tenant slug for context */
@@ -113,6 +115,12 @@ export type ProfileWithRelations = {
   targetParams: Record<string, unknown> | null;
   savePayload: "NONE" | "INPUT" | "OUTPUT" | "BOTH";
   reviewMode?: "HOLD" | "AUTO_COMMIT" | null;
+  /** The tenant's source system this profile imports from (ledger imports). */
+  sourceSystemCode?: string | null;
+  atomicity?: "PER_DOCUMENT" | "WHOLE_FILE";
+  unmappedPolicy?: "REJECT" | "HOLD" | "SUSPENSE";
+  suspenseAccountCode?: string | null;
+  fxRateType?: "SPOT" | "AVERAGE" | "BUDGET" | "CLOSING" | null;
   sourceFormat: { id: string; fsdXml: string; classification: string } | null;
   targetFormat: { id: string; fsdXml: string; classification: string } | null;
   transformation: {
@@ -259,7 +267,59 @@ export async function executeImport(
     recordsForMapping = tmlResult.records as FsdRecordValue[];
   }
 
-  // 5. Map parsed records to target service inputs
+  // 5. Ledger imports: build canonical documents and post them through the
+  // posting service (import plan section 4). Nothing else writes journals.
+  if (profile.targetComponent === "GL_JOURNAL") {
+    const execMeta = await ctx.db.integrationExecution.findUnique({
+      where: { id: executionId },
+      select: { automationId: true, triggeredBy: true }
+    });
+    const scheduled = Boolean(execMeta?.automationId) || execMeta?.triggeredBy === "scheduler";
+    const mode = resolveReviewMode(profile.reviewMode ?? null, {
+      automationId: execMeta?.automationId ?? null,
+      triggeredBy: execMeta?.triggeredBy ?? null
+    });
+    const triggeredBy = String(runtimeParams.triggeredBy ?? execMeta?.triggeredBy ?? "");
+    const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const result = await runWithContext(
+      { tenantSlug: ctx.tenantSlug, tenantDbUrl: ctx.tenantDbUrl, entityId: null },
+      async () => {
+        const actorUserId = UUID.test(triggeredBy) ? triggeredBy : await systemUserId();
+        const runEntityId = scheduled
+          ? null
+          : (runtimeParams.entityId as string | undefined) || null;
+        const runEntity = runEntityId
+          ? ((await withBypassRLS(ctx.db, (tx: any) =>
+              tx.entity.findUnique({ where: { id: runEntityId }, select: { id: true, code: true } })
+            )) as { id: string; code: string } | null)
+          : null;
+        return runWithContext(
+          {
+            tenantSlug: ctx.tenantSlug,
+            tenantDbUrl: ctx.tenantDbUrl,
+            entityId: null,
+            userId: actorUserId
+          },
+          () =>
+            importDocuments({
+              ctx,
+              poster: ctx.poster ?? new PostingService(ctx.db as unknown as PrismaClient),
+              executionId,
+              profile,
+              sourceRecords: parseResult.records,
+              records: recordsForMapping as Record<string, unknown>[],
+              mode,
+              actorUserId,
+              runEntity
+            })
+        );
+      }
+    );
+    await savePayloads(ctx, executionId, profile, fileContent, parseResult.records);
+    return result;
+  }
+
+  // 6. AP and AR targets map records to their services' inputs (WP-U replaces them).
   const targetParams: TargetParams = {
     ...(profile.targetParams as TargetParams | null),
     entityId: String(runtimeParams.entityId ?? ""),
@@ -270,32 +330,6 @@ export async function executeImport(
 
   if (!mapResult.ok) {
     return failExecution(ctx, executionId, mapResult.code, mapResult.message);
-  }
-
-  // 5b. Resolve review mode — scheduled/automation runs always AUTO_COMMIT.
-  const execMeta = await ctx.db.integrationExecution.findUnique({
-    where: { id: executionId },
-    select: { automationId: true, triggeredBy: true }
-  });
-  const effectiveMode = resolveReviewMode(profile.reviewMode ?? null, {
-    automationId: execMeta?.automationId ?? null,
-    triggeredBy: execMeta?.triggeredBy ?? null
-  });
-
-  // HOLD only applies to GL_JOURNAL in v1; other targets keep direct behaviour.
-  if (effectiveMode === "HOLD" && mapResult.component === "GL_JOURNAL") {
-    const createdById = String(
-      runtimeParams.triggeredBy ?? execMeta?.triggeredBy ?? (await systemUserId())
-    );
-    return stageHeldBatch(
-      ctx,
-      executionId,
-      profile,
-      mapResult,
-      parseResult.records,
-      targetParams,
-      createdById
-    );
   }
 
   // 6. Write to target component
@@ -311,6 +345,19 @@ export async function executeImport(
     () => writeToTarget(ctx, executionId, profile, mapResult, parseResult.records, targetParams)
   );
 
+  await savePayloads(ctx, executionId, profile, fileContent, parseResult.records);
+
+  return result;
+}
+
+/** Keeps the input file and/or the parsed records, when the profile asks for it. */
+async function savePayloads(
+  ctx: PipelineContext,
+  executionId: string,
+  profile: ProfileWithRelations,
+  fileContent: string,
+  records: FsdRecordValue[]
+): Promise<void> {
   // 7. Save payloads if configured
   if (profile.savePayload === "INPUT" || profile.savePayload === "BOTH") {
     const inputKey = `${ctx.tenantSlug}/${executionId}/input.txt`;
@@ -322,14 +369,12 @@ export async function executeImport(
   }
   if (profile.savePayload === "OUTPUT" || profile.savePayload === "BOTH") {
     const outputKey = `${ctx.tenantSlug}/${executionId}/output.json`;
-    await ctx.storage.write(outputKey, JSON.stringify(parseResult.records)).catch(() => {});
+    await ctx.storage.write(outputKey, JSON.stringify(records)).catch(() => {});
     await ctx.db.integrationExecution.update({
       where: { id: executionId },
       data: { outputPayloadKey: outputKey }
     });
   }
-
-  return result;
 }
 
 // ── Write to target (inside runWithContext) ───────────────────────────────────
@@ -346,63 +391,7 @@ async function writeToTarget(
   let failed = 0;
   const totalRecords = sourceRecords.length;
 
-  // Check if auto-post is enabled via profile targetParams or sourceParams
-  const autoPost =
-    (profile.targetParams as any)?.autoPost === true ||
-    (profile.sourceParams as any)?.__postingOptions?.autoPost === true;
-
-  if (mapResult.component === "GL_JOURNAL") {
-    const glService = new GLService(ctx.db as any);
-    // Not the entity id (IMP-01): it is no user, and broke journals_created_by_fkey.
-    const postUserId = await actingUserId();
-
-    for (const journal of mapResult.journals) {
-      try {
-        const created = await glService.createJournal(journal.entityId, postUserId, journal.input);
-
-        // Auto-post if enabled and journal is in DRAFT (no approval required)
-        if (autoPost && (created as any)?.status === "DRAFT" && (created as any)?.id) {
-          try {
-            await glService.postJournal(journal.entityId, (created as any).id, postUserId);
-          } catch (postErr) {
-            // Auto-post failure is non-fatal — journal stays as DRAFT
-            log.warn(
-              `Auto-post failed for journal ${(created as any).id}: ${(postErr as Error).message}`
-            );
-          }
-        }
-
-        // Log success for all source records in this journal
-        for (const idx of journal.sourceIndices) {
-          await ctx.db.integrationExecutionLog.create({
-            data: {
-              executionId,
-              recordIndex: idx,
-              status: "SUCCESS",
-              sourceData: sourceRecords[idx] as any,
-              transformedData: journal.input as any
-            }
-          });
-          succeeded++;
-        }
-      } catch (err) {
-        // Log failure for all source records in this journal
-        for (const idx of journal.sourceIndices) {
-          await ctx.db.integrationExecutionLog.create({
-            data: {
-              executionId,
-              recordIndex: idx,
-              status: "FAILED",
-              sourceData: sourceRecords[idx] as any,
-              errorCode: "GL_WRITE_ERROR",
-              errorMessage: (err as Error).message
-            }
-          });
-          failed++;
-        }
-      }
-    }
-  } else if (mapResult.component === "AP_INVOICE") {
+  if (mapResult.component === "AP_INVOICE") {
     const apService = new APService(ctx.db as any);
 
     for (const rec of mapResult.records) {
@@ -472,140 +461,6 @@ async function writeToTarget(
     recordsTotal: totalRecords,
     recordsSucceeded: succeeded,
     recordsFailed: failed
-  };
-}
-
-async function stageHeldBatch(
-  ctx: PipelineContext,
-  executionId: string,
-  profile: ProfileWithRelations,
-  mapResult: Extract<ReturnType<typeof mapRecordsToTarget>, { ok: true; component: "GL_JOURNAL" }>,
-  sourceRecords: FsdRecordValue[],
-  targetParams: TargetParams,
-  createdById: string
-): Promise<PipelineResult> {
-  const entityId = targetParams.entityId ?? "";
-
-  // Pre-fetch validation context (active accounts + period statuses).
-  const accounts = await ctx.db.account.findMany({
-    where: { entityId, isActive: true },
-    select: { id: true, code: true }
-  });
-  const validAccountKeys = new Set<string>();
-  for (const a of accounts) {
-    validAccountKeys.add(a.id);
-    validAccountKeys.add(a.code);
-  }
-  const periodIds = [...new Set(mapResult.journals.map((j) => j.input.periodId).filter(Boolean))];
-  const periods = periodIds.length
-    ? await ctx.db.period.findMany({
-        where: { entityId, id: { in: periodIds } },
-        select: { id: true, status: true }
-      })
-    : [];
-  const periodStatusById = new Map(periods.map((p) => [p.id, p.status]));
-
-  const stageCtx: StageContext = { validAccountKeys, periodStatusById };
-  const items = stageJournalItems(mapResult.journals, stageCtx);
-
-  const heldItems = items.filter((i) => i.status === "HELD").length;
-  const errorItems = items.filter((i) => i.status === "ERROR").length;
-
-  // ── Import idempotency ───────────────────────────────────────────────────
-  // Re-uploading the same source file — after a timeout, a retry, or simple
-  // operator error — used to stage a second batch, which committed a second
-  // set of GL journals and posted the night's revenue twice. Fingerprint the
-  // mapped records and refuse to stage the same content twice for the same
-  // entity and profile.
-  const sourceHash = hashSourceRecords(sourceRecords);
-
-  const duplicate = await ctx.db.integrationBatch.findFirst({
-    where: { entityId, profileId: profile.id, sourceHash }
-  });
-  if (duplicate) {
-    return {
-      recordsTotal: sourceRecords.length,
-      recordsSucceeded: 0,
-      recordsFailed: 0,
-      status: "DUPLICATE",
-      errorMessage:
-        `This file has already been imported for this profile (batch ${duplicate.id}, ` +
-        `status ${duplicate.status}). No new batch was staged and nothing was posted.`
-    };
-  }
-
-  let batch;
-  try {
-    batch = await ctx.db.integrationBatch.create({
-      data: {
-        entityId,
-        profileId: profile.id,
-        executionId,
-        targetComponent: "GL_JOURNAL",
-        status: "PENDING_REVIEW",
-        totalItems: items.length,
-        heldItems,
-        errorItems,
-        sourceHash,
-        createdById
-      } as any
-    });
-  } catch (err: any) {
-    // Unique violation: a concurrent upload of the same file won the race.
-    // Return its batch rather than failing the import.
-    if (err?.code === "P2002") {
-      const existing = await ctx.db.integrationBatch.findFirst({
-        where: { entityId, profileId: profile.id, sourceHash }
-      });
-      if (existing) {
-        return {
-          recordsTotal: sourceRecords.length,
-          recordsSucceeded: 0,
-          recordsFailed: 0,
-          status: "DUPLICATE",
-          errorMessage: `This file is already being imported for this profile (batch ${existing.id}).`
-        };
-      }
-    }
-    throw err;
-  }
-
-  await ctx.db.integrationBatchItem.createMany({
-    data: items.map((item) => ({
-      batchId: batch.id,
-      itemIndex: item.itemIndex,
-      status: item.status,
-      targetComponent: item.targetComponent,
-      payload: item.payload as any,
-      sourceRecordIndices: item.sourceRecordIndices,
-      validationStatus: item.validationStatus,
-      validationMessages: item.validationMessages as any
-    }))
-  });
-
-  await ctx.db.integrationExecutionLog
-    .createMany({
-      data: items.flatMap((item) =>
-        item.sourceRecordIndices.map((idx) => ({
-          executionId,
-          recordIndex: idx,
-          status: item.status === "ERROR" ? "FAILED" : "SUCCESS",
-          sourceData: (sourceRecords[idx] ?? null) as any,
-          transformedData: item.payload as any,
-          errorCode: item.status === "ERROR" ? "STAGE_VALIDATION_ERROR" : null,
-          errorMessage:
-            item.status === "ERROR"
-              ? item.validationMessages.map((m) => m.message).join("; ")
-              : null
-        }))
-      )
-    })
-    .catch(() => {});
-
-  return {
-    recordsTotal: sourceRecords.length,
-    recordsSucceeded: heldItems,
-    recordsFailed: errorItems
   };
 }
 

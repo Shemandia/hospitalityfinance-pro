@@ -40,7 +40,9 @@ export const PostingErrorCode = {
   /** Reverse-and-replace: the reversal would need approval, so the swap cannot happen in one step. */
   REVERSAL_NEEDS_APPROVAL: "REVERSAL_NEEDS_APPROVAL",
   /** Reverse-and-replace: a reason is required. */
-  REASON_REQUIRED: "REASON_REQUIRED"
+  REASON_REQUIRED: "REASON_REQUIRED",
+  /** Whole-file posting: this document was fine, but another of the file was not, so none posted. */
+  FILE_NOT_POSTED: "FILE_NOT_POSTED"
 } as const;
 
 export type PostingErrorCode = (typeof PostingErrorCode)[keyof typeof PostingErrorCode];

@@ -13,11 +13,11 @@ import {
   ALL_CONNECTOR_TYPES,
   ALL_SOURCE_TYPES,
   ALL_TRANSFORMS,
-  GL_JOURNAL_TARGET_FIELDS,
   AP_INVOICE_TARGET_FIELDS,
   SUPPLIER_SYNC_TARGET_FIELDS
 } from "../transform-engine.js";
 import { mapError } from "./_shared.js";
+import { DOCUMENT_FIELDS } from "@hfp/posting-contract";
 import { pageLimit, pageMeta, pageOffset } from "../../../shared/pagination.js";
 import { signedInUserId } from "../../access/system-user.js";
 
@@ -98,7 +98,8 @@ export function registerIntegrationRoutes(router: FastifyInstance) {
           transforms: ALL_TRANSFORMS,
           targetTypes: ["GL_JOURNAL", "AP_INVOICE", "SUPPLIER_SYNC"],
           targetFields: {
-            GL_JOURNAL: GL_JOURNAL_TARGET_FIELDS,
+            // From the posting contract: the keys a transformation writes.
+            GL_JOURNAL: DOCUMENT_FIELDS.GL_JOURNAL.map((f) => f.key),
             AP_INVOICE: AP_INVOICE_TARGET_FIELDS,
             SUPPLIER_SYNC: SUPPLIER_SYNC_TARGET_FIELDS
           },

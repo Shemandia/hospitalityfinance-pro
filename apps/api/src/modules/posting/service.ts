@@ -54,10 +54,21 @@ export type PostingOptions = {
 };
 
 export type PostingOutcome =
-  | { status: "POSTED" | "PENDING_APPROVAL" | "AWAITING_AUTHORIZATION"; journalId: string }
-  | { status: "VALID" }
-  | { status: "DUPLICATE"; journalId: string }
+  | {
+      status: "POSTED" | "PENDING_APPROVAL" | "AWAITING_AUTHORIZATION";
+      journalId: string;
+      entityId: string;
+    }
+  | { status: "VALID"; entityId: string }
+  | { status: "DUPLICATE"; journalId: string; entityId: string }
   | { status: "REFUSED"; errors: PostingError[] };
+
+type PreparedDocument = {
+  kind: "ready";
+  entityId: string;
+  doc: NormalizedGlJournal;
+  input: JournalWriteInput;
+};
 
 export type ReplaceOutcome =
   | {
@@ -84,6 +95,24 @@ class Refused extends Error {
 const refused = (code: string, message: string, path = ""): Refused =>
   new Refused([{ code, path, message }]);
 
+/** The outcome for an error the service reports as a refusal; null for anything else. */
+function refusal(error: unknown): PostingOutcome | null {
+  if (error instanceof Refused) return { status: "REFUSED", errors: error.errors };
+  if (error instanceof GLServiceError) {
+    return {
+      status: "REFUSED",
+      errors: [
+        {
+          code: PostingErrorCode.LEDGER_REFUSED,
+          path: "",
+          message: `${error.code}: ${error.message}`
+        }
+      ]
+    };
+  }
+  return null;
+}
+
 /**
  * A unique violation while writing. Prisma does not always name the
  * constraint (inside an interactive transaction it may say "not available"),
@@ -103,46 +132,147 @@ export class PostingService {
 
   /** Posts a GL journal document (any input: it is checked against the contract first). */
   async post(input: unknown, options: PostingOptions): Promise<PostingOutcome> {
+    const ready = await this.prepareDocument(input, options);
+    if (ready.kind === "outcome") return ready.outcome;
+    if (options.dryRun) return { status: "VALID", entityId: ready.entityId };
+    try {
+      return await this.asEntity(ready.entityId, async () => {
+        let result: WriteAndPostResult;
+        try {
+          result = await this.inTransaction(ready.entityId, (tx) =>
+            this.gl.writeAndPostInTransaction(tx, ready.entityId, options.actorUserId, ready.input)
+          );
+        } catch (error) {
+          if (isUniqueViolation(error)) {
+            const raced = await this.latestPosting(ready.entityId, ready.doc);
+            if (raced)
+              return { status: "DUPLICATE", journalId: raced.id, entityId: ready.entityId };
+          }
+          throw error;
+        }
+        await this.gl.afterWrite(ready.entityId, result);
+        return { status: result.status, journalId: result.journalId, entityId: ready.entityId };
+      });
+    } catch (error) {
+      const outcome = refusal(error);
+      if (outcome) return outcome;
+      throw error;
+    }
+  }
+
+  /**
+   * Posts every document or none (a profile's WHOLE_FILE atomicity): all are
+   * checked first, and only if every one would post are they written, in one
+   * transaction. Outcomes are in the order of `inputs`; when the file is not
+   * posted, the documents that were fine are refused with FILE_NOT_POSTED.
+   */
+  async postAll(
+    inputs: ReadonlyArray<unknown>,
+    options: PostingOptions
+  ): Promise<PostingOutcome[]> {
+    const prepared: PreparedDocument[] = [];
+    const outcomes: Array<PostingOutcome | null> = [];
+    for (const input of inputs) {
+      const ready = await this.prepareDocument(input, options);
+      if (ready.kind === "outcome") outcomes.push(ready.outcome);
+      else {
+        outcomes.push(null);
+        prepared.push(ready);
+      }
+    }
+    const notPosted = (because: string): PostingOutcome[] =>
+      outcomes.map(
+        (o) =>
+          o ?? {
+            status: "REFUSED",
+            errors: [{ code: PostingErrorCode.FILE_NOT_POSTED, path: "", message: because }]
+          }
+      );
+    if (outcomes.some((o) => o !== null)) {
+      return notPosted(
+        "Not posted: another document of the file was refused or is a duplicate, and the profile posts whole files only."
+      );
+    }
+    if (options.dryRun) return prepared.map((p) => ({ status: "VALID", entityId: p.entityId }));
+
+    let results: WriteAndPostResult[];
+    try {
+      results = await this.prisma.$transaction(
+        async (tx) => {
+          const written: WriteAndPostResult[] = [];
+          for (const doc of prepared) {
+            written.push(
+              await this.asEntity(doc.entityId, async () => {
+                await setEntityDbContext(tx, doc.entityId);
+                return this.gl.writeAndPostInTransaction(
+                  tx,
+                  doc.entityId,
+                  options.actorUserId,
+                  doc.input
+                );
+              })
+            );
+          }
+          return written;
+        },
+        { timeout: 120_000 }
+      );
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        return notPosted(
+          "Not posted: a document of the file was posted by another import at the same time."
+        );
+      }
+      const outcome = refusal(error);
+      if (outcome) {
+        const reason =
+          outcome.status === "REFUSED" ? outcome.errors.map((e) => e.message).join("; ") : "";
+        return notPosted(`Not posted: the ledger refused a document of the file (${reason}).`);
+      }
+      throw error;
+    } finally {
+      clearEntityDbContext();
+    }
+    for (let i = 0; i < prepared.length; i++) {
+      await this.asEntity(prepared[i]!.entityId, () =>
+        this.gl.afterWrite(prepared[i]!.entityId, results[i]!)
+      );
+    }
+    return results.map((r, i) => ({
+      status: r.status,
+      journalId: r.journalId,
+      entityId: prepared[i]!.entityId
+    }));
+  }
+
+  /**
+   * Everything before the write: contract, codes, period, rate, duplicate,
+   * ledger rules. Writes nothing.
+   */
+  private async prepareDocument(
+    input: unknown,
+    options: PostingOptions
+  ): Promise<PreparedDocument | { kind: "outcome"; outcome: PostingOutcome }> {
     const contract = validateGlJournal(input);
-    if (!contract.ok) return { status: "REFUSED", errors: contract.errors };
+    if (!contract.ok)
+      return { kind: "outcome", outcome: { status: "REFUSED", errors: contract.errors } };
     const doc = contract.document;
     try {
       const entity = await this.entity(doc.entityCode);
       return await this.asEntity(entity.id, async () => {
         const resolved = await this.resolve(doc, entity, options);
         const existing = await this.latestPosting(entity.id, doc);
-        if (existing) return { status: "DUPLICATE", journalId: existing.id };
-        const prepared = await this.prepare(resolved);
-        if (options.dryRun) return { status: "VALID" };
-        let result: WriteAndPostResult;
-        try {
-          result = await this.inTransaction(entity.id, (tx) =>
-            this.gl.writeAndPostInTransaction(tx, entity.id, options.actorUserId, prepared)
-          );
-        } catch (error) {
-          if (isUniqueViolation(error)) {
-            const raced = await this.latestPosting(entity.id, doc);
-            if (raced) return { status: "DUPLICATE", journalId: raced.id };
-          }
-          throw error;
+        if (existing) {
+          return {
+            kind: "outcome",
+            outcome: { status: "DUPLICATE", journalId: existing.id, entityId: entity.id }
+          };
         }
-        await this.gl.afterWrite(entity.id, result);
-        return { status: result.status, journalId: result.journalId };
+        return { kind: "ready", entityId: entity.id, doc, input: await this.prepare(resolved) };
       });
     } catch (error) {
-      if (error instanceof Refused) return { status: "REFUSED", errors: error.errors };
-      if (error instanceof GLServiceError) {
-        return {
-          status: "REFUSED",
-          errors: [
-            {
-              code: PostingErrorCode.LEDGER_REFUSED,
-              path: "",
-              message: `${error.code}: ${error.message}`
-            }
-          ]
-        };
-      }
+      const outcome = refusal(error);
+      if (outcome) return { kind: "outcome", outcome };
       throw error;
     }
   }

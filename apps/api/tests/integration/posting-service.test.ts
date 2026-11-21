@@ -24,6 +24,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PrismaClient } from "../../src/db/client.js";
+import { dropTestRole, underGrantLock } from "./grants.js";
 import { runWithContext } from "../../src/db/requestContext.js";
 import { disconnectAllTenants, getTenantClient } from "../../src/db/tenantPool.js";
 import { PostingService } from "../../src/modules/posting/service.js";
@@ -95,18 +96,14 @@ if (!base) {
 
     beforeAll(async () => {
       const db = new URL(base).pathname.slice(1).split("?")[0]!;
-      await owner.$executeRawUnsafe(
-        `CREATE ROLE ${role} LOGIN PASSWORD '${password}' NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE`
-      );
-      for (const sql of [
+      await underGrantLock(owner, [
+        `CREATE ROLE ${role} LOGIN PASSWORD '${password}' NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE`,
         `GRANT CONNECT ON DATABASE "${db}" TO ${role}`,
         `GRANT USAGE ON SCHEMA public TO ${role}`,
         `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${role}`,
         `GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${role}`,
         `GRANT EXECUTE ON FUNCTION app_begin_rls_bypass() TO ${role}`
-      ]) {
-        await owner.$executeRawUnsafe(sql);
-      }
+      ]);
       const appUrl = new URL(base);
       appUrl.username = role;
       appUrl.password = password;
@@ -145,16 +142,14 @@ if (!base) {
 
     afterAll(async () => {
       await disconnectAllTenants();
-      for (const sql of [
+      await dropTestRole(owner, role, [
         `REVOKE ALL ON ALL TABLES IN SCHEMA public FROM ${role}`,
         `REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM ${role}`,
         `REVOKE ALL ON FUNCTION app_begin_rls_bypass() FROM ${role}`,
         `REVOKE ALL ON SCHEMA public FROM ${role}`,
         `REVOKE ALL ON DATABASE "${new URL(base).pathname.slice(1).split("?")[0]}" FROM ${role}`,
         `DROP ROLE IF EXISTS ${role}`
-      ]) {
-        await owner.$executeRawUnsafe(sql).catch(() => {});
-      }
+      ]);
       await owner.$disconnect();
     }, 60_000);
 
@@ -353,7 +348,7 @@ if (!base) {
       const document = doc();
       const first = await asImport(() => service.post(document, options));
       expect(first.status).toBe("POSTED");
-      expect(await asImport(() => service.post(document, options))).toEqual({
+      expect(await asImport(() => service.post(document, options))).toMatchObject({
         status: "DUPLICATE",
         journalId: (first as { journalId: string }).journalId
       });
@@ -373,12 +368,35 @@ if (!base) {
 
     it("checks without writing on a dry run", async () => {
       const document = doc();
-      expect(await asImport(() => service.post(document, { ...options, dryRun: true }))).toEqual({
-        status: "VALID"
+      expect(
+        await asImport(() => service.post(document, { ...options, dryRun: true }))
+      ).toMatchObject({
+        status: "VALID",
+        entityId: ids.entity
       });
       expect(
         await ownerRows(
           `SELECT id FROM journals WHERE source_document_ref = '${document.sourceDocumentRef}'`
+        )
+      ).toEqual([]);
+    });
+
+    it("posts a whole file in one transaction, or nothing when one document cannot post", async () => {
+      const a = doc();
+      const b = doc({ documentDate: "2026-03-20" });
+      const outcomes = await asImport(() => service.postAll([a, b], options));
+      expect(outcomes.map((o) => o.status)).toEqual(["POSTED", "POSTED"]);
+
+      const c = doc();
+      const bad = doc({ documentDate: "2026-02-10" }); // a closed period
+      const refused = await asImport(() => service.postAll([c, bad], options));
+      expect(refused.map((o) => (o.status === "REFUSED" ? o.errors[0]!.code : o.status))).toEqual([
+        "FILE_NOT_POSTED",
+        "PERIOD_NOT_OPEN"
+      ]);
+      expect(
+        await ownerRows(
+          `SELECT id FROM journals WHERE source_document_ref = '${c.sourceDocumentRef}'`
         )
       ).toEqual([]);
     });
@@ -446,7 +464,7 @@ if (!base) {
       });
 
       // A plain post of the same document is still a duplicate (of the latest revision).
-      expect(await asImport(() => service.post(original, options))).toEqual({
+      expect(await asImport(() => service.post(original, options))).toMatchObject({
         status: "DUPLICATE",
         journalId: r.journalId
       });

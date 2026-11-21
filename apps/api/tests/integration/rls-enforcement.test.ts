@@ -16,6 +16,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { Prisma } from "../../src/db/client.js";
+import { underGrantLock } from "./grants.js";
 import { getTestPrisma, disconnectTestPrisma } from "./helpers.js";
 
 const APP_ROLE = "hfp_rls_test_app";
@@ -66,15 +67,12 @@ if (!process.env.TEST_DATABASE_URL) {
           `CREATE ROLE ${APP_ROLE} NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE`
         );
       }
-      await prisma.$executeRawUnsafe(`GRANT ${APP_ROLE} TO CURRENT_USER`);
-      await prisma.$executeRawUnsafe(`GRANT USAGE ON SCHEMA public TO ${APP_ROLE}`);
-      await prisma.$executeRawUnsafe(
-        `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${APP_ROLE}`
-      );
-      // As provisioning does: the bypass only through the owner's function (SEC-11).
-      await prisma.$executeRawUnsafe(
+      await underGrantLock(prisma, [
+        `GRANT ${APP_ROLE} TO CURRENT_USER`,
+        `GRANT USAGE ON SCHEMA public TO ${APP_ROLE}`,
+        `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${APP_ROLE}`,
         `GRANT EXECUTE ON FUNCTION app_begin_rls_bypass() TO ${APP_ROLE}`
-      );
+      ]);
 
       await asOwner(async (tx) => {
         const a = await tx.entity.create({

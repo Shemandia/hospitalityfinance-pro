@@ -7,6 +7,8 @@
 
 // ── HFP Target Journal Fields (§18) ──────────────────────────────────────────
 
+import { DOCUMENT_FIELDS } from "@hfp/posting-contract";
+
 export type HfpTargetField = {
   path: string;
   label: string;
@@ -15,222 +17,21 @@ export type HfpTargetField = {
   required: boolean;
 };
 
-export const HFP_TARGET_FIELDS: ReadonlyArray<HfpTargetField> = [
-  // Journal Header
-  {
-    path: "journal.date",
-    label: "Transaction Date",
-    group: "Journal Header",
-    type: "date",
-    required: true
-  },
-  {
-    path: "journal.period",
-    label: "Accounting Period",
-    group: "Journal Header",
-    type: "string",
-    required: false
-  },
-  {
-    path: "journal.source",
-    label: "Journal Source Code",
-    group: "Journal Header",
-    type: "string",
-    required: true
-  },
-  {
-    path: "journal.reference",
-    label: "External Reference",
-    group: "Journal Header",
-    type: "string",
-    required: false
-  },
-  {
-    path: "journal.description",
-    label: "Journal Description",
-    group: "Journal Header",
-    type: "string",
-    required: false
-  },
-  {
-    path: "journal.currency",
-    label: "ISO Currency Code",
-    group: "Journal Header",
-    type: "string",
-    required: true
-  },
-  {
-    path: "journal.exchangeRate",
-    label: "Exchange Rate",
-    group: "Journal Header",
-    type: "decimal",
-    required: false
-  },
-  {
-    path: "journal.entity",
-    label: "Entity Code",
-    group: "Journal Header",
-    type: "string",
-    required: false
-  },
-  // Journal Line
-  {
-    path: "line.sequence",
-    label: "Line Sequence",
-    group: "Journal Line",
-    type: "integer",
-    required: false
-  },
-  {
-    path: "line.account",
-    label: "GL Account Code",
-    group: "Journal Line",
-    type: "account",
-    required: true
-  },
-  {
-    path: "line.debit",
-    label: "Debit (Base Currency)",
-    group: "Journal Line",
-    type: "decimal",
-    required: false
-  },
-  {
-    path: "line.credit",
-    label: "Credit (Base Currency)",
-    group: "Journal Line",
-    type: "decimal",
-    required: false
-  },
-  {
-    path: "line.transactionDebit",
-    label: "Debit (Transaction Currency)",
-    group: "Journal Line",
-    type: "decimal",
-    required: false
-  },
-  {
-    path: "line.transactionCredit",
-    label: "Credit (Transaction Currency)",
-    group: "Journal Line",
-    type: "decimal",
-    required: false
-  },
-  {
-    path: "line.description",
-    label: "Line Description",
-    group: "Journal Line",
-    type: "string",
-    required: false
-  },
-  {
-    path: "line.reference",
-    label: "Line Reference",
-    group: "Journal Line",
-    type: "string",
-    required: false
-  },
-  { path: "line.dueDate", label: "Due Date", group: "Journal Line", type: "date", required: false },
-  {
-    path: "line.quantity",
-    label: "Quantity",
-    group: "Journal Line",
-    type: "decimal",
-    required: false
-  },
-  {
-    path: "line.unitPrice",
-    label: "Unit Price",
-    group: "Journal Line",
-    type: "decimal",
-    required: false
-  },
-  {
-    path: "line.taxCode",
-    label: "Tax Code",
-    group: "Journal Line",
-    type: "string",
-    required: false
-  },
-  {
-    path: "line.taxAmount",
-    label: "Tax Amount",
-    group: "Journal Line",
-    type: "decimal",
-    required: false
-  },
-  // Analysis Dimensions
-  {
-    path: "line.analysisCode1",
-    label: "Department (Dim 1)",
-    group: "Analysis Dimensions",
-    type: "string",
-    required: false
-  },
-  {
-    path: "line.analysisCode2",
-    label: "Cost Centre (Dim 2)",
-    group: "Analysis Dimensions",
-    type: "string",
-    required: false
-  },
-  {
-    path: "line.analysisCode3",
-    label: "Project (Dim 3)",
-    group: "Analysis Dimensions",
-    type: "string",
-    required: false
-  },
-  {
-    path: "line.analysisCode4",
-    label: "Dimension 4",
-    group: "Analysis Dimensions",
-    type: "string",
-    required: false
-  },
-  {
-    path: "line.analysisCode5",
-    label: "Dimension 5",
-    group: "Analysis Dimensions",
-    type: "string",
-    required: false
-  },
-  {
-    path: "line.analysisCode6",
-    label: "Dimension 6",
-    group: "Analysis Dimensions",
-    type: "string",
-    required: false
-  },
-  {
-    path: "line.analysisCode7",
-    label: "Dimension 7",
-    group: "Analysis Dimensions",
-    type: "string",
-    required: false
-  },
-  {
-    path: "line.analysisCode8",
-    label: "Dimension 8",
-    group: "Analysis Dimensions",
-    type: "string",
-    required: false
-  },
-  {
-    path: "line.analysisCode9",
-    label: "Dimension 9",
-    group: "Analysis Dimensions",
-    type: "string",
-    required: false
-  },
-  {
-    path: "line.analysisCode10",
-    label: "Dimension 10",
-    group: "Analysis Dimensions",
-    type: "string",
-    required: false
-  }
-];
+/**
+ * The fields a transformation can fill for a ledger import: the contract's
+ * GL journal fields (@hfp/posting-contract), never a list kept here. `path`
+ * is the key the transformation writes; dimensions are
+ * "dimensions.<dimension name>".
+ */
+export const HFP_TARGET_FIELDS: ReadonlyArray<HfpTargetField> = DOCUMENT_FIELDS.GL_JOURNAL.map(
+  (f) => ({
+    path: f.key,
+    label: f.description,
+    group: f.level === "document" ? "Journal" : "Line",
+    type: f.kind,
+    required: f.required
+  })
+);
 
 // ── Pre-built Function Library (§7) ──────────────────────────────────────────
 

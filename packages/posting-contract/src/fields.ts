@@ -12,6 +12,12 @@ export type FieldKind = "code" | "text" | "date" | "decimal" | "currency" | "dim
 
 export type ContractField = {
   name: string;
+  /**
+   * The key a transformation writes in its output record for this field.
+   * Usually the name; the journal's description is "journalDescription" (the
+   * line has one too), and dimensions are "dimensions.<dimension name>".
+   */
+  key: string;
   /** Once per document, or once per line. */
   level: "document" | "line";
   kind: FieldKind;
@@ -23,6 +29,7 @@ export const DOCUMENT_FIELDS: Readonly<Record<DocumentType, ReadonlyArray<Contra
   GL_JOURNAL: [
     {
       name: "sourceDocumentRef",
+      key: "sourceDocumentRef",
       level: "document",
       kind: "code",
       required: true,
@@ -31,6 +38,7 @@ export const DOCUMENT_FIELDS: Readonly<Record<DocumentType, ReadonlyArray<Contra
     },
     {
       name: "documentDate",
+      key: "documentDate",
       level: "document",
       kind: "date",
       required: true,
@@ -38,6 +46,7 @@ export const DOCUMENT_FIELDS: Readonly<Record<DocumentType, ReadonlyArray<Contra
     },
     {
       name: "entityCode",
+      key: "entityCode",
       level: "document",
       kind: "code",
       required: true,
@@ -45,6 +54,7 @@ export const DOCUMENT_FIELDS: Readonly<Record<DocumentType, ReadonlyArray<Contra
     },
     {
       name: "journalTypeCode",
+      key: "journalTypeCode",
       level: "document",
       kind: "code",
       required: false,
@@ -52,6 +62,7 @@ export const DOCUMENT_FIELDS: Readonly<Record<DocumentType, ReadonlyArray<Contra
     },
     {
       name: "description",
+      key: "journalDescription",
       level: "document",
       kind: "text",
       required: false,
@@ -59,6 +70,7 @@ export const DOCUMENT_FIELDS: Readonly<Record<DocumentType, ReadonlyArray<Contra
     },
     {
       name: "currency",
+      key: "currency",
       level: "document",
       kind: "currency",
       required: true,
@@ -66,6 +78,7 @@ export const DOCUMENT_FIELDS: Readonly<Record<DocumentType, ReadonlyArray<Contra
     },
     {
       name: "fxRate",
+      key: "fxRate",
       level: "document",
       kind: "decimal",
       required: false,
@@ -73,6 +86,7 @@ export const DOCUMENT_FIELDS: Readonly<Record<DocumentType, ReadonlyArray<Contra
     },
     {
       name: "accountCode",
+      key: "accountCode",
       level: "line",
       kind: "code",
       required: true,
@@ -80,6 +94,7 @@ export const DOCUMENT_FIELDS: Readonly<Record<DocumentType, ReadonlyArray<Contra
     },
     {
       name: "debit",
+      key: "debit",
       level: "line",
       kind: "decimal",
       required: false,
@@ -87,6 +102,7 @@ export const DOCUMENT_FIELDS: Readonly<Record<DocumentType, ReadonlyArray<Contra
     },
     {
       name: "credit",
+      key: "credit",
       level: "line",
       kind: "decimal",
       required: false,
@@ -94,6 +110,7 @@ export const DOCUMENT_FIELDS: Readonly<Record<DocumentType, ReadonlyArray<Contra
     },
     {
       name: "amount",
+      key: "amount",
       level: "line",
       kind: "decimal",
       required: false,
@@ -101,6 +118,7 @@ export const DOCUMENT_FIELDS: Readonly<Record<DocumentType, ReadonlyArray<Contra
     },
     {
       name: "statValue",
+      key: "statValue",
       level: "line",
       kind: "decimal",
       required: false,
@@ -108,14 +126,23 @@ export const DOCUMENT_FIELDS: Readonly<Record<DocumentType, ReadonlyArray<Contra
     },
     {
       name: "dimensions",
+      key: "dimensions.*",
       level: "line",
       kind: "dimensions",
       required: false,
       description: `Up to ${MAX_DIMENSIONS} dimension codes, keyed by the entity's dimension names`
     },
-    { name: "taxCode", level: "line", kind: "code", required: false, description: "Tax code" },
+    {
+      name: "taxCode",
+      key: "taxCode",
+      level: "line",
+      kind: "code",
+      required: false,
+      description: "Tax code"
+    },
     {
       name: "description",
+      key: "description",
       level: "line",
       kind: "text",
       required: false,
@@ -123,6 +150,7 @@ export const DOCUMENT_FIELDS: Readonly<Record<DocumentType, ReadonlyArray<Contra
     },
     {
       name: "lineRef",
+      key: "lineRef",
       level: "line",
       kind: "code",
       required: false,
@@ -132,6 +160,7 @@ export const DOCUMENT_FIELDS: Readonly<Record<DocumentType, ReadonlyArray<Contra
   BANK_STATEMENT: [
     {
       name: "sourceDocumentRef",
+      key: "sourceDocumentRef",
       level: "document",
       kind: "code",
       required: true,
@@ -139,6 +168,7 @@ export const DOCUMENT_FIELDS: Readonly<Record<DocumentType, ReadonlyArray<Contra
     },
     {
       name: "entityCode",
+      key: "entityCode",
       level: "document",
       kind: "code",
       required: true,
@@ -146,6 +176,7 @@ export const DOCUMENT_FIELDS: Readonly<Record<DocumentType, ReadonlyArray<Contra
     },
     {
       name: "bankAccountNumber",
+      key: "bankAccountNumber",
       level: "document",
       kind: "code",
       required: true,
@@ -153,6 +184,7 @@ export const DOCUMENT_FIELDS: Readonly<Record<DocumentType, ReadonlyArray<Contra
     },
     {
       name: "statementDate",
+      key: "statementDate",
       level: "document",
       kind: "date",
       required: true,
@@ -160,6 +192,7 @@ export const DOCUMENT_FIELDS: Readonly<Record<DocumentType, ReadonlyArray<Contra
     },
     {
       name: "currency",
+      key: "currency",
       level: "document",
       kind: "currency",
       required: true,
@@ -167,6 +200,7 @@ export const DOCUMENT_FIELDS: Readonly<Record<DocumentType, ReadonlyArray<Contra
     },
     {
       name: "openingBalance",
+      key: "openingBalance",
       level: "document",
       kind: "decimal",
       required: true,
@@ -174,6 +208,7 @@ export const DOCUMENT_FIELDS: Readonly<Record<DocumentType, ReadonlyArray<Contra
     },
     {
       name: "closingBalance",
+      key: "closingBalance",
       level: "document",
       kind: "decimal",
       required: true,
@@ -181,6 +216,7 @@ export const DOCUMENT_FIELDS: Readonly<Record<DocumentType, ReadonlyArray<Contra
     },
     {
       name: "valueDate",
+      key: "valueDate",
       level: "line",
       kind: "date",
       required: true,
@@ -188,6 +224,7 @@ export const DOCUMENT_FIELDS: Readonly<Record<DocumentType, ReadonlyArray<Contra
     },
     {
       name: "bookingDate",
+      key: "bookingDate",
       level: "line",
       kind: "date",
       required: false,
@@ -195,14 +232,23 @@ export const DOCUMENT_FIELDS: Readonly<Record<DocumentType, ReadonlyArray<Contra
     },
     {
       name: "amount",
+      key: "amount",
       level: "line",
       kind: "decimal",
       required: true,
       description: "Signed amount: in positive, out negative"
     },
-    { name: "description", level: "line", kind: "text", required: true, description: "Narrative" },
+    {
+      name: "description",
+      key: "description",
+      level: "line",
+      kind: "text",
+      required: true,
+      description: "Narrative"
+    },
     {
       name: "reference",
+      key: "reference",
       level: "line",
       kind: "code",
       required: false,
@@ -210,6 +256,7 @@ export const DOCUMENT_FIELDS: Readonly<Record<DocumentType, ReadonlyArray<Contra
     },
     {
       name: "counterparty",
+      key: "counterparty",
       level: "line",
       kind: "text",
       required: false,
@@ -217,6 +264,7 @@ export const DOCUMENT_FIELDS: Readonly<Record<DocumentType, ReadonlyArray<Contra
     },
     {
       name: "lineRef",
+      key: "lineRef",
       level: "line",
       kind: "code",
       required: false,
@@ -224,3 +272,6 @@ export const DOCUMENT_FIELDS: Readonly<Record<DocumentType, ReadonlyArray<Contra
     }
   ]
 };
+
+/** The prefix of dimension keys in a transformation's output: "dimensions.Department". */
+export const DIMENSION_KEY_PREFIX = "dimensions.";
