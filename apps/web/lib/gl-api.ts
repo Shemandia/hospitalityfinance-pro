@@ -3355,11 +3355,12 @@ export type IntegrationProfileSummary = {
   createdById: string | null;
   createdAt: string;
   updatedAt: string;
-  sourceFormat?: { id: string; name: string; classification: string } | null;
-  targetFormat?: { id: string; name: string; classification: string } | null;
-  transformation?: { id: string; name: string } | null;
-  _count?: { executions: number; versions: number };
-};
+} & Partial<IntegrationImportSettings> & {
+    sourceFormat?: { id: string; name: string; classification: string } | null;
+    targetFormat?: { id: string; name: string; classification: string } | null;
+    transformation?: { id: string; name: string } | null;
+    _count?: { executions: number; versions: number };
+  };
 
 export type IntegrationProfileDetail = IntegrationProfileSummary & {
   sourceParams: Record<string, unknown> | null;
@@ -3373,7 +3374,46 @@ export type IntegrationProfileDetail = IntegrationProfileSummary & {
   }>;
 };
 
-export type IntegrationProfileInput = {
+/** How a ledger import posts (import plan sections 4 and 5). */
+export type IntegrationImportSettings = {
+  reviewMode: "HOLD" | "AUTO_COMMIT";
+  sourceSystemCode: string | null;
+  atomicity: "PER_DOCUMENT" | "WHOLE_FILE";
+  unmappedPolicy: "REJECT" | "HOLD" | "SUSPENSE";
+  suspenseAccountCode: string | null;
+  fxRateType: "SPOT" | "AVERAGE" | "BUDGET" | "CLOSING" | null;
+};
+
+/** A system that sends documents to the ledger; the codes are the tenant's. */
+export type SourceSystem = { id: string; code: string; name: string; isActive: boolean };
+
+export function listSourceSystems(context: ApiContext) {
+  return request<SourceSystem[]>(context, "/api/v1/integrations/source-systems");
+}
+
+export function createSourceSystem(context: ApiContext, payload: { code: string; name: string }) {
+  return request<SourceSystem>(context, "/api/v1/integrations/source-systems", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateSourceSystem(
+  context: ApiContext,
+  code: string,
+  payload: { name?: string; isActive?: boolean }
+) {
+  return request<SourceSystem>(
+    context,
+    `/api/v1/integrations/source-systems/${encodeURIComponent(code)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(payload)
+    }
+  );
+}
+
+export type IntegrationProfileInput = Partial<IntegrationImportSettings> & {
   name: string;
   description?: string;
   profileType: IntegrationProfileType;

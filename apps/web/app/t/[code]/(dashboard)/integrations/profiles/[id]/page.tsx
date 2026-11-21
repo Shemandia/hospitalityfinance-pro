@@ -27,6 +27,7 @@ import {
   type IntegrationProfileType
 } from "../../../../../../../lib/gl-api";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../../../../../components/ui/card";
+import { ImportSettingsCard } from "../../../../../../../components/integrations/import-settings-card";
 import { Badge } from "../../../../../../../components/ui/badge";
 import { Button } from "../../../../../../../components/ui/button";
 import {
@@ -266,6 +267,15 @@ export default function IntegrationProfileDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* How a ledger import posts */}
+      {profile.profileType === "IMPORT" && profile.targetComponent === "GL_JOURNAL" && (
+        <ImportSettingsCard
+          profile={profile}
+          canEdit={role.canIntegrationAdmin}
+          onSaved={() => qc.invalidateQueries({ queryKey: ["integrations-profile"] })}
+        />
+      )}
 
       {/* Runtime parameters snapshot */}
       {(profile.sourceParams || profile.targetParams) && (

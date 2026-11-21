@@ -23,6 +23,7 @@ import { Badge } from "../../../../../components/ui/badge";
 import { Button } from "../../../../../components/ui/button";
 import {
   LayoutDashboard,
+  Plug,
   ListChecks,
   PlayCircle,
   CalendarClock,
@@ -59,6 +60,14 @@ const NAV_SECTIONS: NavSection[] = [
     label: "Dashboard",
     description: "Recent executions, system profiles, quick actions",
     icon: LayoutDashboard,
+    minRole: "user",
+    status: "ready"
+  },
+  {
+    href: "/integrations/sources",
+    label: "Sources",
+    description: "The systems that send documents to the ledger",
+    icon: Plug,
     minRole: "user",
     status: "ready"
   },

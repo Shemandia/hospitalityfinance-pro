@@ -115,6 +115,7 @@ const navGroups: NavGroup[] = [
     label: "Integrations",
     items: [
       { href: "/integrations", label: "Integrations", icon: Plug },
+      { href: "/integrations/sources", label: "Sources", icon: Plug },
       // The older connector screens, until their sources move to templates (import plan steps 8-9).
       { href: "/integrations/connectors", label: "Connectors", icon: Plug },
       { href: "/integrations/saf-import", label: "SAF Import", icon: FileUp },
