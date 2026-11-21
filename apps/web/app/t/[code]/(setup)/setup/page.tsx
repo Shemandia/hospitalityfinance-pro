@@ -6,13 +6,9 @@ import { useRouter, useParams } from "next/navigation";
 import { WizardLayout, WizardStepContent } from "../../../../../components/wizard-layout";
 import { COUNTRIES } from "../../../../../lib/countries";
 import { useQuery } from "@tanstack/react-query";
-import { useApiContext } from "../../../../../components/use-api-context";
-import {
-  getSetupRoles,
-  getSetupDepartments,
-  getSetupCurrencies
-} from "../../../../../lib/setup-api";
+import { getSetupRoles, getSetupTemplates } from "../../../../../lib/setup-api";
 import { getSupportedTimezones } from "../../../../../lib/timezones";
+import { QueryError } from "../../../../../components/query-error";
 
 const STEPS = [
   { id: 1, name: "Organization Structure" },
@@ -37,8 +33,6 @@ const MONTH_NAMES = [
   "November",
   "December"
 ];
-
-const FALLBACK_CURRENCIES = ["USD", "EUR", "GBP", "TZS", "KES", "ZAR", "AED", "SAR"];
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -134,41 +128,36 @@ export default function SetupPage() {
 
   // Step 6
   const [invitedUsers, setInvitedUsers] = useState<InviteUser[]>([
-    { email: "", firstName: "", lastName: "", role: "ACCOUNTANT", propertyAccess: [] }
+    { email: "", firstName: "", lastName: "", role: "", propertyAccess: [] }
   ]);
 
   const accessToken = session?.accessToken;
-  const apiContext = useApiContext();
+  // The session and the tenant; a tenant in setup has no entity yet.
+  const setupContext = accessToken
+    ? { accessToken, tenantSlug: session?.user?.tenantSlug ?? undefined }
+    : null;
   const timezones = getSupportedTimezones();
+  // Roles, departments and currencies come from the API: the tenant's own
+  // roles, and the USALI departments and currencies offered as templates.
   const rolesQuery = useQuery({
     queryKey: ["setup-roles", tenantSlug],
-    queryFn: () => getSetupRoles(apiContext!),
-    enabled: !!apiContext && !loading
+    queryFn: () => getSetupRoles(setupContext!),
+    enabled: !!setupContext && !loading
   });
-  const departmentsQuery = useQuery({
-    queryKey: ["setup-departments", tenantSlug],
-    queryFn: () => getSetupDepartments(apiContext!),
-    enabled: !!apiContext && !loading
+  const templatesQuery = useQuery({
+    queryKey: ["setup-templates", tenantSlug],
+    queryFn: () => getSetupTemplates(setupContext!),
+    enabled: !!setupContext && !loading
   });
-  const currenciesQuery = useQuery({
-    queryKey: ["setup-currencies", tenantSlug],
-    queryFn: () => getSetupCurrencies(apiContext!),
-    enabled: !!apiContext && !loading
-  });
-  const roleOptions = (rolesQuery.data ?? [])
-    .map((r) => String(r.code ?? r.name ?? "").toUpperCase())
-    .filter(Boolean);
-  const currencyOptions = (currenciesQuery.data ?? [])
-    .map((c) => String(c.code).toUpperCase())
-    .filter(Boolean);
-  const availableCurrencies = currencyOptions.length ? currencyOptions : FALLBACK_CURRENCIES;
-  const departmentOptions = (departmentsQuery.data ?? [])
-    .map((d) => ({
-      name: String(d.name ?? d.code ?? ""),
-      code: String(d.code ?? d.name ?? "").toUpperCase(),
-      enabled: d.isActive !== false
-    }))
-    .filter((d) => d.code);
+  const roleOptions = rolesQuery.data ?? [];
+  // Invitations default to the first role that is not the tenant administrator's.
+  const defaultRole = (roleOptions.find((r) => !r.isSystem) ?? roleOptions[0])?.code ?? "";
+  const availableCurrencies = (templatesQuery.data?.currencies ?? []).map((c) => c.code);
+  const departmentOptions: Department[] = (templatesQuery.data?.departments ?? []).map((d) => ({
+    name: d.name,
+    code: d.code,
+    enabled: true
+  }));
 
   const apiHeaders = useCallback((): HeadersInit => {
     const headers: HeadersInit = {
@@ -272,7 +261,7 @@ export default function SetupPage() {
 
   useEffect(() => {
     if (departmentsInitialized) return;
-    if (departmentsQuery.isLoading) return;
+    if (!templatesQuery.isSuccess) return;
     if (departments.length > 0) {
       setDepartmentsInitialized(true);
       return;
@@ -283,7 +272,7 @@ export default function SetupPage() {
     setDepartmentsInitialized(true);
   }, [
     departmentsInitialized,
-    departmentsQuery.isLoading,
+    templatesQuery.isSuccess,
     departments.length,
     departmentOptions.length
   ]);
@@ -332,7 +321,7 @@ export default function SetupPage() {
             .map((u) => ({
               email: u.email,
               name: `${u.firstName} ${u.lastName}`.trim(),
-              role: u.role === "ACCOUNTANT" ? "CONTROLLER" : u.role,
+              role: u.role || defaultRole,
               entityIds: []
             }))
         };
@@ -446,7 +435,7 @@ export default function SetupPage() {
   const addUser = () =>
     setInvitedUsers((prev) => [
       ...prev,
-      { email: "", firstName: "", lastName: "", role: "ACCOUNTANT", propertyAccess: [] }
+      { email: "", firstName: "", lastName: "", role: "", propertyAccess: [] }
     ]);
 
   const removeUser = (idx: number) => setInvitedUsers((prev) => prev.filter((_, i) => i !== idx));
@@ -516,6 +505,17 @@ export default function SetupPage() {
       {error && (
         <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           {error}
+        </div>
+      )}
+      {(templatesQuery.isError || rolesQuery.isError) && (
+        <div className="mb-4">
+          <QueryError
+            message="The departments, currencies or roles to choose from could not be loaded."
+            onRetry={() => {
+              void templatesQuery.refetch();
+              void rolesQuery.refetch();
+            }}
+          />
         </div>
       )}
 
@@ -757,10 +757,10 @@ export default function SetupPage() {
           isNextDisabled={departments.filter((d) => d.enabled).length === 0}
         >
           <div className="space-y-4">
-            {departmentsQuery.isLoading && (
+            {templatesQuery.isLoading && (
               <p className="text-sm text-slate-500">Loading departments…</p>
             )}
-            {!departmentsQuery.isLoading && departments.length === 0 && (
+            {templatesQuery.isSuccess && departments.length === 0 && (
               <p className="text-sm text-slate-500">
                 No departments available. Add a custom department below.
               </p>
@@ -1071,13 +1071,13 @@ export default function SetupPage() {
                 <div>
                   <label className="block text-xs font-medium text-slate-600">Role *</label>
                   <select
-                    value={user.role}
+                    value={user.role || defaultRole}
                     onChange={(e) => updateUser(idx, "role", e.target.value)}
                     className="mt-1 w-full rounded-md border px-3 py-1.5 text-sm"
                   >
-                    {(roleOptions.length ? roleOptions : ["ACCOUNTANT"]).map((r) => (
-                      <option key={r} value={r}>
-                        {r.replace(/_/g, " ")}
+                    {roleOptions.map((r) => (
+                      <option key={r.code} value={r.code}>
+                        {r.name}
                       </option>
                     ))}
                   </select>

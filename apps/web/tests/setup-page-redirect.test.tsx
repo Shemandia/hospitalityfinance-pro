@@ -22,10 +22,6 @@ vi.mock("../components/auth-provider", () => ({
   useSession: () => ({ data: { accessToken: "cookie", user: {} }, status: "authenticated" })
 }));
 
-vi.mock("../components/use-api-context", () => ({
-  useApiContext: () => null
-}));
-
 import SetupPage from "../app/t/[code]/(setup)/setup/page";
 
 afterEach(() => {

@@ -87,7 +87,9 @@ describe("route access table", () => {
     app = await createApp();
     await app.ready();
     table = [...app.routeAccess.entries()].sort(([a], [b]) => a.localeCompare(b));
-  });
+    // Building the whole app takes several seconds while every unit test file
+    // runs at once; the default 10s hook limit made this suite flaky.
+  }, 30_000);
 
   afterAll(async () => {
     await app?.close();
@@ -212,7 +214,9 @@ describe("route access table", () => {
       "GET /api/v1/admin/login-audit",
       "GET /api/v1/admin/permissions",
       "GET /api/v1/admin/roles",
-      "GET /api/v1/admin/roles/:id"
+      "GET /api/v1/admin/roles/:id",
+      // The setup wizard's template data: for the tenant administrator only.
+      "GET /api/v1/setup/templates"
     ];
     const PAYMENT_FILES = [
       "GET /api/v1/ap/payment-runs/:id/download",

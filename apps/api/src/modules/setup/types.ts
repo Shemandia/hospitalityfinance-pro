@@ -50,7 +50,8 @@ export const stepSchemas: Record<number, z.ZodType> = {
       z.object({
         email: z.string().email(),
         name: z.string().min(1),
-        role: z.enum(["VIEWER", "CONTROLLER", "ADMIN"]),
+        // A role code of this tenant; checked against its roles when saved.
+        role: z.string().min(1).max(50),
         entityIds: z.array(z.string().uuid())
       })
     )

@@ -1,4 +1,8 @@
-import type { ApiContext } from "./gl-api";
+/**
+ * Requests the setup wizard makes. A tenant in setup has no entity yet, so
+ * these carry the session and the tenant only, never an entity.
+ */
+export type SetupContext = { accessToken: string; tenantSlug?: string };
 
 type Envelope<T> = {
   data: T;
@@ -6,7 +10,7 @@ type Envelope<T> = {
 };
 
 async function request<T>(
-  context: ApiContext,
+  context: SetupContext,
   path: string,
   init?: RequestInit
 ): Promise<Envelope<T>> {
@@ -18,7 +22,6 @@ async function request<T>(
       ...(context.accessToken && context.accessToken !== "cookie"
         ? { Authorization: `Bearer ${context.accessToken}` }
         : {}),
-      ...(context.entityId ? { "X-Entity-ID": context.entityId } : {}),
       ...(context.tenantSlug ? { "X-Tenant-Slug": context.tenantSlug } : {}),
       ...(init?.headers ?? {})
     }
@@ -32,36 +35,23 @@ async function request<T>(
   return payload;
 }
 
-export type SetupRole = { id?: string; code?: string; name?: string; isActive?: boolean };
-export type SetupDepartment = { id?: string; code?: string; name?: string; isActive?: boolean };
-export type SetupCurrency = {
-  code: string;
-  name?: string;
-  decimalPlaces?: number | null;
-  isActive?: boolean;
+/** A role of this tenant (GET /api/v1/admin/roles). */
+export type SetupRole = { id: string; code: string; name: string; isSystem: boolean };
+
+/** Starting data the API offers a new tenant (GET /api/v1/setup/templates). */
+export type SetupTemplates = {
+  departments: Array<{ code: string; name: string }>;
+  currencies: Array<{ code: string; name: string }>;
 };
 
-function normalizeArray<T>(value: unknown): T[] {
-  if (Array.isArray(value)) return value as T[];
-  if (value && typeof value === "object") {
-    const v = value as Record<string, unknown>;
-    if (Array.isArray(v.items)) return v.items as T[];
-    if (Array.isArray(v.data)) return v.data as T[];
-  }
-  return [];
+/** The tenant's roles, for inviting users in the setup wizard. */
+export async function getSetupRoles(context: SetupContext): Promise<SetupRole[]> {
+  const res = await request<SetupRole[]>(context, "/api/v1/admin/roles");
+  return res.data ?? [];
 }
 
-export async function getSetupRoles(context: ApiContext): Promise<SetupRole[]> {
-  const res = await request<unknown>(context, "/api/v1/roles");
-  return normalizeArray<SetupRole>(res.data).filter((r) => r && (r.code || r.name));
-}
-
-export async function getSetupDepartments(context: ApiContext): Promise<SetupDepartment[]> {
-  const res = await request<unknown>(context, "/api/v1/departments");
-  return normalizeArray<SetupDepartment>(res.data).filter((d) => d && (d.code || d.name));
-}
-
-export async function getSetupCurrencies(context: ApiContext): Promise<SetupCurrency[]> {
-  const res = await request<unknown>(context, "/api/v1/fx/currencies");
-  return normalizeArray<SetupCurrency>(res.data).filter((c) => c && c.code);
+/** USALI departments and currencies to start from; the tenant chooses among them. */
+export async function getSetupTemplates(context: SetupContext): Promise<SetupTemplates> {
+  const res = await request<SetupTemplates>(context, "/api/v1/setup/templates");
+  return res.data;
 }
