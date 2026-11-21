@@ -458,6 +458,60 @@ function RevenueBudgetChart({ usaliComparative }: { usaliComparative: any }) {
   );
 }
 
+// ── Revenue Mix ───────────────────────────────────────────────────────────────
+
+type PieSlice = { id: string; label: string; value: number; color: string };
+
+/**
+ * Revenue by department as a doughnut with a legend beneath it. The names are
+ * in the legend, not on link labels beside the pie, which the card's edge cut
+ * off; each slice shows its share, the legend shows name and share.
+ */
+function RevenueMixPie({ data, innerRadius }: { data: PieSlice[]; innerRadius: number }) {
+  const total = data.reduce((sum, d) => sum + d.value, 0);
+  const share = (value: number) => (total > 0 ? `${((value / total) * 100).toFixed(0)}%` : "–");
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">Revenue Mix</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="h-48">
+          <ResponsivePie
+            data={data}
+            margin={{ top: 8, right: 8, bottom: 8, left: 8 }}
+            innerRadius={innerRadius}
+            padAngle={1.5}
+            colors={{ datum: "data.color" }}
+            enableArcLinkLabels={false}
+            arcLabel={(d) => share(d.value)}
+            arcLabelsSkipAngle={12}
+            tooltip={({ datum }) => (
+              <div className="bg-white border border-border rounded px-2 py-1 text-xs shadow">
+                {datum.label}: <strong>{fmt(datum.value)}</strong>
+              </div>
+            )}
+          />
+        </div>
+        <ul className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs">
+          {data.map((d) => (
+            <li key={d.id} className="flex items-center gap-2 min-w-0">
+              <span
+                className="h-2.5 w-2.5 rounded-sm shrink-0"
+                style={{ backgroundColor: d.color }}
+                aria-hidden
+              />
+              <span className="flex-1 min-w-0 text-slate-600">{d.label}</span>
+              <span className="tabular-nums text-slate-500">{share(d.value)}</span>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ── Portfolio Table ────────────────────────────────────────────────────────────
 
 function PortfolioTable({ summaries }: { summaries: Array<EntitySummary | null> }) {
@@ -1123,31 +1177,7 @@ export default function DashboardPage() {
           {usali ? (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {revenuePieData.length > 0 ? (
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base">Revenue Mix</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="h-60">
-                      <ResponsivePie
-                        data={revenuePieData}
-                        margin={{ top: 16, right: 80, bottom: 16, left: 80 }}
-                        innerRadius={0.45}
-                        padAngle={1.5}
-                        colors={{ datum: "data.color" }}
-                        arcLabel={(d) =>
-                          `${((d.value / parseFloat(usali.totalRevenue)) * 100).toFixed(0)}%`
-                        }
-                        arcLabelsSkipAngle={12}
-                        tooltip={({ datum }) => (
-                          <div className="bg-white border border-border rounded px-2 py-1 text-xs shadow">
-                            {datum.label}: <strong>{fmt(datum.value)}</strong>
-                          </div>
-                        )}
-                      />
-                    </div>
-                  </CardContent>
-                </Card>
+                <RevenueMixPie data={revenuePieData} innerRadius={0.45} />
               ) : null}
               <Card>
                 <CardHeader className="pb-2">
@@ -1260,48 +1290,7 @@ export default function DashboardPage() {
 
           {usali ? (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Revenue Mix</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="h-48">
-                    <ResponsivePie
-                      data={revenuePieData}
-                      margin={{ top: 8, right: 8, bottom: 8, left: 8 }}
-                      innerRadius={0.4}
-                      padAngle={1.5}
-                      colors={{ datum: "data.color" }}
-                      enableArcLinkLabels={false}
-                      arcLabel={(d) =>
-                        `${((d.value / parseFloat(usali.totalRevenue)) * 100).toFixed(0)}%`
-                      }
-                      arcLabelsSkipAngle={12}
-                      tooltip={({ datum }) => (
-                        <div className="bg-white border border-border rounded px-2 py-1 text-xs shadow">
-                          {datum.label}: <strong>{fmt(datum.value)}</strong>
-                        </div>
-                      )}
-                    />
-                  </div>
-                  {/* The names go in a legend, not on link labels that the card's edge cuts off. */}
-                  <ul className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                    {revenuePieData.map((d) => (
-                      <li key={d.id} className="flex items-center gap-2 min-w-0">
-                        <span
-                          className="h-2.5 w-2.5 rounded-sm shrink-0"
-                          style={{ backgroundColor: d.color }}
-                          aria-hidden
-                        />
-                        <span className="flex-1 min-w-0 text-slate-600">{d.label}</span>
-                        <span className="tabular-nums text-slate-500">
-                          {((d.value / parseFloat(usali.totalRevenue)) * 100).toFixed(0)}%
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </CardContent>
-              </Card>
+              <RevenueMixPie data={revenuePieData} innerRadius={0.4} />
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base">Department Income %</CardTitle>
