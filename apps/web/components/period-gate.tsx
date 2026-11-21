@@ -6,6 +6,7 @@ import { useEntity } from "./entity-provider";
 import { useSelectedPeriod } from "./period-provider";
 import { QueryError } from "./query-error";
 import { monthLabel, type EntityPeriod } from "../lib/period";
+import { PeriodStatusBadge } from "./period-selector";
 
 /** The message for a month the selected entity has no period for. */
 export function PeriodMissing({ month, entityName }: { month: string; entityName: string }) {
@@ -70,4 +71,16 @@ export function PeriodGate({
   if (selected.state === "loading") return <>{loading}</>;
   if (selected.state !== "ready") return <PeriodNotice />;
   return <>{children(selected.period, selected.periods)}</>;
+}
+
+/** The period a page shows, as a label: chosen in the top bar, not on the page. */
+export function PeriodInUse() {
+  const selected = useSelectedPeriod();
+  if (selected.state !== "ready") return null;
+  return (
+    <span className="inline-flex items-center gap-2 text-sm text-slate-700">
+      {monthLabel(selected.month)}
+      <PeriodStatusBadge status={selected.period.status} />
+    </span>
+  );
 }

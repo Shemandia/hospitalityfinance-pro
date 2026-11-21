@@ -3,6 +3,9 @@
 import { useQuery, useQueries } from "@tanstack/react-query";
 import { useState, useMemo } from "react";
 import { QueryError } from "../../../../../components/query-error";
+import { useSelectedPeriod } from "../../../../../components/period-provider";
+import { PeriodNotice } from "../../../../../components/period-gate";
+import { PERIOD_STATUS_LABEL } from "../../../../../lib/period";
 import { DashboardSkeleton } from "../../../../../components/page-skeletons";
 import { ResponsiveBar } from "@nivo/bar";
 import { ResponsiveLine } from "@nivo/line";
@@ -19,7 +22,6 @@ import { useApiContext } from "../../../../../components/use-api-context";
 import {
   getBalanceSheet,
   getCashFlow,
-  getPeriods,
   getRevPAR,
   getRevPARTrend,
   getUSALI,
@@ -34,19 +36,11 @@ import type { CurrencyExposureRow, EntitySummary } from "../../../../../lib/gl-a
 import { Button } from "../../../../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../../../components/ui/card";
 import { Badge } from "../../../../../components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "../../../../../components/ui/select";
 import { Separator } from "../../../../../components/ui/separator";
 import { fmt, fmtPct } from "../../../../../lib/format";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type Period = { id: string; name: string; status: string; year: number; month: number };
 type RevPARData = {
   occupancyPct: number;
   adr: string;
@@ -771,19 +765,11 @@ function CovenantRatios({
 export default function DashboardPage() {
   const apiContext = useApiContext();
   const [roleView, setRoleView] = useState<"GM" | "CONTROLLER" | "CFO">("GM");
-  const [periodId, setPeriodId] = useState("");
 
-  const periodsQ = useQuery({
-    queryKey: ["periods", apiContext?.tenantSlug, apiContext?.entityId],
-    queryFn: () => (apiContext ? getPeriods(apiContext) : Promise.resolve({ data: [] })),
-    enabled: Boolean(apiContext),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    select: (r: any) => (r.data as unknown as Period[]) ?? []
-  });
-  const periods = periodsQ.data ?? [];
-  const activePeriodId =
-    periodId || periods.find((p) => p.status === "OPEN")?.id || periods[0]?.id || "";
-  const activePeriod = periods.find((p) => p.id === activePeriodId);
+  // The period chosen in the top bar, resolved to this entity's own period.
+  const selectedPeriod = useSelectedPeriod();
+  const activePeriod = selectedPeriod.state === "ready" ? selectedPeriod.period : undefined;
+  const activePeriodId = activePeriod?.id ?? "";
 
   // Common queries
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -987,18 +973,22 @@ export default function DashboardPage() {
   const portfolioSummaries = portfolioQueries.map((q) => q.data ?? null);
 
   // Show skeleton while core data loads
-  if (periodsQ.isLoading || (revparQ.isLoading && !revpar)) {
+  if (selectedPeriod.state === "loading" || (revparQ.isLoading && !revpar)) {
     return <DashboardSkeleton />;
   }
 
+  // No period for the chosen month (or none at all): say so, show nothing else.
+  if (selectedPeriod.state !== "ready") {
+    return <PeriodNotice />;
+  }
+
   // Show error state if core queries failed
-  const coreError = periodsQ.error || revparQ.error || usaliQ.error;
-  if (coreError && !periodsQ.data?.length) {
+  const coreError = revparQ.error || usaliQ.error;
+  if (coreError && !revpar) {
     return (
       <QueryError
         message={(coreError as Error).message}
         onRetry={() => {
-          periodsQ.refetch();
           revparQ.refetch();
           usaliQ.refetch();
         }}
@@ -1026,24 +1016,9 @@ export default function DashboardPage() {
               </Button>
             ))}
           </div>
-          <div className="ml-auto flex items-center gap-2.5">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70">
-              Period
-            </span>
-            <Select value={activePeriodId} onValueChange={setPeriodId}>
-              <SelectTrigger className="h-8 w-52">
-                <SelectValue placeholder="Select period" />
-              </SelectTrigger>
-              <SelectContent>
-                {periods.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.name}
-                    {p.status === "OPEN" ? " (Open)" : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <p className="ml-auto text-xs text-muted-foreground">
+            {selectedPeriod.period.name} · {PERIOD_STATUS_LABEL[selectedPeriod.period.status]}
+          </p>
         </CardContent>
       </Card>
 

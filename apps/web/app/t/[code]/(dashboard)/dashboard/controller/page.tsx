@@ -1,5 +1,7 @@
 "use client";
 
+import { useSelectedPeriod } from "../../../../../../components/period-provider";
+import { PeriodNotice } from "../../../../../../components/period-gate";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useTenantRouter } from "../../../../../../hooks/use-tenant-router";
@@ -120,24 +122,11 @@ export default function ControllerDashboard() {
   const router = useTenantRouter();
   const apiContext = useApiContext();
 
-  // Periods
-  const periodsQ = useQuery({
-    queryKey: ["periods"],
-    queryFn: () => getPeriods(apiContext!),
-    enabled: !!apiContext
-  });
-
-  const periods = (periodsQ.data?.data ?? []) as Period[];
-  const currentPeriod = useMemo(
-    () =>
-      periods.find((p) => p.status === "OPEN") ??
-      periods.sort((a, b) => {
-        if (a.year !== b.year) return b.year - a.year;
-        return b.month - a.month;
-      })[0],
-    [periods]
-  );
-
+  // The period chosen in the top bar, resolved to this entity's own period.
+  const selectedPeriod = useSelectedPeriod();
+  const periods = selectedPeriod.periods as unknown as Period[];
+  const currentPeriod =
+    selectedPeriod.state === "ready" ? (selectedPeriod.period as unknown as Period) : undefined;
   const periodId = currentPeriod?.id ?? "";
 
   // RevPAR / KPIs
@@ -225,7 +214,8 @@ export default function ControllerDashboard() {
     return { assets, liabEquity, balanced: diff < 0.01 };
   }, [bs]);
 
-  const isLoading = periodsQ.isLoading || revparQ.isLoading || usaliQ.isLoading || bsQ.isLoading;
+  const isLoading =
+    selectedPeriod.state === "loading" || revparQ.isLoading || usaliQ.isLoading || bsQ.isLoading;
 
   if (!apiContext) {
     return (
@@ -233,6 +223,10 @@ export default function ControllerDashboard() {
         Please sign in to view the Controller dashboard.
       </div>
     );
+  }
+
+  if (selectedPeriod.state !== "ready" && selectedPeriod.state !== "loading") {
+    return <PeriodNotice />;
   }
 
   return (
@@ -683,7 +677,7 @@ export default function ControllerDashboard() {
               <CardTitle className="text-base">Period Status</CardTitle>
             </CardHeader>
             <CardContent>
-              {periodsQ.isLoading ? (
+              {selectedPeriod.state === "loading" ? (
                 <div className="space-y-2 py-2">
                   <Skeleton className="h-4 w-full" />
                   <Skeleton className="h-4 w-3/4" />
@@ -693,7 +687,7 @@ export default function ControllerDashboard() {
                 <p className="text-sm text-muted-foreground">No periods found.</p>
               ) : (
                 <div className="space-y-2">
-                  {periods
+                  {[...periods]
                     .sort((a, b) => {
                       if (a.year !== b.year) return b.year - a.year;
                       return b.month - a.month;

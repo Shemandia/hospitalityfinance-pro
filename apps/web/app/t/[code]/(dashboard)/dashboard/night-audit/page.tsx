@@ -1,5 +1,7 @@
 "use client";
 
+import { useSelectedPeriod } from "../../../../../../components/period-provider";
+import { PeriodNotice } from "../../../../../../components/period-gate";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useMemo } from "react";
 import { useTenantRouter } from "../../../../../../hooks/use-tenant-router";
@@ -137,24 +139,11 @@ export default function NightAuditDashboard() {
   const queryClient = useQueryClient();
   const [postingId, setPostingId] = useState<string | null>(null);
 
-  // Periods
-  const periodsQ = useQuery({
-    queryKey: ["periods"],
-    queryFn: () => getPeriods(apiContext!),
-    enabled: !!apiContext
-  });
-
-  const periods = (periodsQ.data?.data ?? []) as Period[];
-  const currentPeriod = useMemo(
-    () =>
-      periods.find((p) => p.status === "OPEN") ??
-      periods.sort((a, b) => {
-        if (a.year !== b.year) return b.year - a.year;
-        return b.month - a.month;
-      })[0],
-    [periods]
-  );
-
+  // The period chosen in the top bar, resolved to this entity's own period.
+  const selectedPeriod = useSelectedPeriod();
+  const periods = selectedPeriod.periods as unknown as Period[];
+  const currentPeriod =
+    selectedPeriod.state === "ready" ? (selectedPeriod.period as unknown as Period) : undefined;
   const periodId = currentPeriod?.id ?? "";
 
   // RevPAR
@@ -239,7 +228,7 @@ export default function NightAuditDashboard() {
   const totalExpenses = revenueSummary.reduce((s, r) => s + r.expenses, 0);
   const totalNet = revenueSummary.reduce((s, r) => s + r.net, 0);
 
-  const isLoading = periodsQ.isLoading || revparQ.isLoading || usaliQ.isLoading;
+  const isLoading = selectedPeriod.state === "loading" || revparQ.isLoading || usaliQ.isLoading;
 
   if (!apiContext) {
     return (
@@ -247,6 +236,10 @@ export default function NightAuditDashboard() {
         Please sign in to view the Night Audit dashboard.
       </div>
     );
+  }
+
+  if (selectedPeriod.state !== "ready" && selectedPeriod.state !== "loading") {
+    return <PeriodNotice />;
   }
 
   return (
