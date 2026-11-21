@@ -278,5 +278,50 @@ if (!base) {
         { period_id: ids.apr, status: "POSTED" }
       ]);
     });
+
+    it("maps source codes through the tenant's lookup table, and SUSPENSE posts the unmapped one to suspense", async () => {
+      const table = `Revenue codes ${run}`;
+      const [t, c, r1, r2] = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+      await ownerSql(
+        `INSERT INTO accounts (id, entity_id, code, name, type, normal_balance, updated_at)
+           VALUES ('${randomUUID()}', '${ids.entity}', '1999', 'Suspense', 'LIABILITY', 'CREDIT', now())`,
+        `INSERT INTO integration_lookup_tables (id, name, updated_at) VALUES ('${t}', '${table}', now())`,
+        `INSERT INTO integration_lookup_columns (id, table_id, name, column_order) VALUES ('${c}', '${t}', 'Account', 1)`,
+        `INSERT INTO integration_lookup_rows (id, table_id, range_from, range_to, row_order) VALUES
+           ('${r1}', '${t}', 'GL', 'GL', 1), ('${r2}', '${t}', 'RM', 'RM', 2)`,
+        `INSERT INTO integration_lookup_values (id, row_id, column_id, value_type, value_param) VALUES
+           ('${randomUUID()}', '${r1}', '${c}', 'MAP_TO', '1200'), ('${randomUUID()}', '${r2}', '${c}', 'MAP_TO', '4000')`
+      );
+      const rules = RULES.map((rule) =>
+        rule.target === "accountCode"
+          ? { type: "lookup", table, source: "acct", target: "accountCode" }
+          : rule
+      );
+      const base = await profileRow("Mapped", {
+        unmappedPolicy: "SUSPENSE",
+        suspenseAccountCode: "1999"
+      });
+      const profile = {
+        ...base,
+        transformation: { id: "t", rulesJson: rules, functionsJson: null }
+      };
+      const content = file([
+        "{E};2026-04-04;GL;30;0;ROOMS",
+        "{E};2026-04-04;RM;0;20;ROOMS",
+        "{E};2026-04-04;SPA;0;10;ROOMS"
+      ]);
+      const { result } = await runImport(profile, content);
+      expect(result).toMatchObject({ recordsSucceeded: 3, recordsFailed: 0 });
+      const [journal] = await journalsOf(`${E}-2026-04-04`);
+      const lines = await ownerRows<{ code: string; credit: string; description: string | null }>(
+        `SELECT a.code, l.credit::text, l.description FROM journal_lines l JOIN accounts a ON a.id = l.account_id
+          WHERE l.journal_id = '${journal!.id}' ORDER BY l.line_number`
+      );
+      expect(lines.map((l) => [l.code, l.description])).toEqual([
+        ["1200", null],
+        ["4000", null],
+        ["1999", "Unmapped " + table + " SPA"]
+      ]);
+    });
   });
 }

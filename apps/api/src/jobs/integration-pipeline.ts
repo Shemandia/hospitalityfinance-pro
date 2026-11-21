@@ -32,6 +32,8 @@ import { FixedAssetService } from "../modules/fixed-asset/service.js";
 import { runWithContext } from "../db/requestContext.js";
 import { mapRecordsToTarget, type TargetParams } from "./integration-record-mapper.js";
 import { type DocumentPoster, importDocuments } from "./integration-import-documents.js";
+import { applyUnmappedPolicy, type RecordFailure } from "./integration-unmapped.js";
+import { loadLookupResolver, lookupTablesOf } from "../modules/integrations/lookup-resolver.js";
 import { PostingService } from "../modules/posting/service.js";
 import { withBypassRLS } from "../db/rls-bypass.js";
 import type { PrismaClient } from "../db/client.js";
@@ -233,38 +235,60 @@ export async function executeImport(
     };
   }
 
-  // 4. Apply TML transformation (if profile has a transformation)
+  // 4. Apply TML transformation (if profile has a transformation), with the
+  // tenant's lookup tables.
   let recordsForMapping: FsdRecordValue[] = parseResult.records;
+  let recordFailures = new Map<number, RecordFailure>();
+  let unmappedValues = 0;
 
   if (profile.transformation?.rulesJson) {
-    const tmlResult = applyTransformation(profile.transformation, parseResult.records);
-
-    // Log transformation errors
-    if (tmlResult.errors.length > 0) {
-      const logData = tmlResult.errors.map((e) => ({
+    let tmlResult: Awaited<ReturnType<typeof applyTransformation>>;
+    try {
+      tmlResult = await applyTransformation(ctx, profile.transformation, parseResult.records);
+    } catch (err) {
+      return failExecution(
+        ctx,
         executionId,
-        recordIndex: e.recordIndex,
-        status: "FAILED" as const,
-        sourceData: parseResult.records[e.recordIndex] as any,
-        transformedData: null,
-        errorCode: "TRANSFORM_ERROR",
-        errorMessage: `[${e.ruleType}] ${e.message}`
-      }));
-      await ctx.db.integrationExecutionLog.createMany({ data: logData });
+        "TRANSFORMATION_SETUP_ERROR",
+        `The transformation could not start: ${(err as Error).message}`
+      );
     }
 
-    // If ALL records failed transformation, fail the execution
-    if (tmlResult.succeeded === 0 && tmlResult.failed > 0) {
-      return {
-        recordsTotal: parseResult.records.length,
-        recordsSucceeded: 0,
-        recordsFailed: tmlResult.failed,
-        errorMessage: `All ${tmlResult.failed} records failed transformation: ${tmlResult.errors[0]?.message ?? "unknown error"}`
-      };
+    if (profile.targetComponent === "GL_JOURNAL") {
+      // Ledger imports: the profile's unmapped policy decides, and a record
+      // that failed takes its whole document with it (logged per record by
+      // the document stage).
+      const applied = applyUnmappedPolicy(tmlResult, profile);
+      recordsForMapping = applied.records as FsdRecordValue[];
+      recordFailures = applied.failures;
+      unmappedValues = applied.unmapped;
+    } else {
+      // AP and AR targets (WP-U replaces them): failed records are logged and left out.
+      if (tmlResult.errors.length > 0) {
+        await ctx.db.integrationExecutionLog.createMany({
+          data: tmlResult.errors.map((e) => ({
+            executionId,
+            recordIndex: e.recordIndex,
+            status: "FAILED" as const,
+            sourceData: parseResult.records[e.recordIndex] as any,
+            transformedData: null,
+            errorCode: "TRANSFORM_ERROR",
+            errorMessage: `[${e.ruleType}] ${e.message}`
+          }))
+        });
+      }
+      if (tmlResult.succeeded === 0 && tmlResult.failed > 0) {
+        return {
+          recordsTotal: parseResult.records.length,
+          recordsSucceeded: 0,
+          recordsFailed: tmlResult.failed,
+          errorMessage: `All ${tmlResult.failed} records failed transformation: ${tmlResult.errors[0]?.message ?? "unknown error"}`
+        };
+      }
+      // Unchanged from before: every record goes on, failed ones as far as
+      // they got (the writer logs by index). WP-U replaces these targets.
+      recordsForMapping = tmlResult.records as FsdRecordValue[];
     }
-
-    // Use transformed records for mapping (cast back to FsdRecordValue)
-    recordsForMapping = tmlResult.records as FsdRecordValue[];
   }
 
   // 5. Ledger imports: build canonical documents and post them through the
@@ -275,10 +299,12 @@ export async function executeImport(
       select: { automationId: true, triggeredBy: true }
     });
     const scheduled = Boolean(execMeta?.automationId) || execMeta?.triggeredBy === "scheduler";
-    const mode = resolveReviewMode(profile.reviewMode ?? null, {
+    const reviewMode = resolveReviewMode(profile.reviewMode ?? null, {
       automationId: execMeta?.automationId ?? null,
       triggeredBy: execMeta?.triggeredBy ?? null
     });
+    // HOLD policy: a run with unmapped values waits for review.
+    const mode = profile.unmappedPolicy === "HOLD" && unmappedValues > 0 ? "HOLD" : reviewMode;
     const triggeredBy = String(runtimeParams.triggeredBy ?? execMeta?.triggeredBy ?? "");
     const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     const result = await runWithContext(
@@ -310,7 +336,8 @@ export async function executeImport(
               records: recordsForMapping as Record<string, unknown>[],
               mode,
               actorUserId,
-              runEntity
+              runEntity,
+              recordFailures
             })
         );
       }
@@ -843,10 +870,11 @@ async function executeDepreciationProcess(
 
 // ── TML transformation ──────────────────────────────────────────────────────
 
-function applyTransformation(
+async function applyTransformation(
+  ctx: PipelineContext,
   transformation: { rulesJson: unknown; functionsJson: unknown },
   records: FsdRecordValue[]
-): ReturnType<typeof executeTransformation> {
+): Promise<ReturnType<typeof executeTransformation>> {
   // Parse TML definition from DB JSONB columns
   const definition: TmlDefinition = {
     rules: Array.isArray(transformation.rulesJson)
@@ -868,8 +896,11 @@ function applyTransformation(
     });
   }
 
+  // The tenant's lookup tables the rules name (source codes to ledger codes).
+  const lookup = await loadLookupResolver(ctx.db, lookupTablesOf(definition.rules));
+
   try {
-    return executeTransformation(definition, records as TmlRecord[], sandbox);
+    return executeTransformation(definition, records as TmlRecord[], sandbox, { lookup });
   } finally {
     sandbox?.dispose();
   }

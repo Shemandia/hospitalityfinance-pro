@@ -149,6 +149,8 @@ function createStubDb() {
       integrationProfile: {
         findUnique: vi.fn().mockResolvedValue(null)
       },
+      // The tenant's lookup tables (none here).
+      integrationLookupTable: { findMany: vi.fn().mockResolvedValue([]) },
       integrationExecution: {
         update: vi.fn(async (args: any) => {
           execUpdates.push(args.data);
@@ -383,15 +385,18 @@ describe("executeImport — transformation error logging", () => {
       periodId: "period-001"
     });
 
-    // All records should fail transformation
+    // Both records fail the transformation, so their document is refused
+    // whole and nothing posts.
     expect(result.recordsFailed).toBe(2);
     expect(result.recordsSucceeded).toBe(0);
-    expect(result.errorMessage).toContain("failed transformation");
+    expect(postMock).not.toHaveBeenCalled();
 
-    // Check that TRANSFORM_ERROR logs were created
+    // Each record is logged with the transformation's error.
     const transformLogs = dbStub.logs.filter((l) => l.errorCode === "TRANSFORM_ERROR");
     expect(transformLogs.length).toBe(2);
-    expect(String(transformLogs[0]!.errorMessage)).toContain("lookup");
+    expect(String(transformLogs[0]!.errorMessage)).toContain(
+      'lookup table "nonExistentTable" not found'
+    );
   });
 
   it("skips transformation step when profile has no transformationId", async () => {

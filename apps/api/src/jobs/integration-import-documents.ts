@@ -21,6 +21,7 @@ import {
   type ProfileWithRelations
 } from "./integration-pipeline.js";
 import type { FsdRecordValue } from "@hfp/fsd-engine";
+import type { RecordFailure } from "./integration-unmapped.js";
 
 /** The part of the posting service the pipeline uses (a fake in unit tests). */
 export type DocumentPoster = {
@@ -45,6 +46,11 @@ export type DocumentImportInput = {
    * the file names (the profile is tenant configuration).
    */
   runEntity: { id: string; code: string } | null;
+  /**
+   * Records the transformation could not complete (unmapped codes, other
+   * errors), by index: their documents are refused whole.
+   */
+  recordFailures?: ReadonlyMap<number, RecordFailure>;
 };
 
 const SUCCESS = new Set(["POSTED", "PENDING_APPROVAL", "AWAITING_AUTHORIZATION"]);
@@ -78,7 +84,15 @@ export async function importDocuments(input: DocumentImportInput): Promise<Pipel
     };
   }
 
-  const { documents, errors: buildErrors } = buildGlDocuments(input.records, { sourceSystem });
+  const failures = input.recordFailures ?? new Map<number, RecordFailure>();
+  const built = buildGlDocuments(input.records, { sourceSystem });
+  const documents = built.documents;
+  // A record that failed the transformation and so has no document is
+  // reported with that failure rather than the missing key it caused.
+  const buildErrors = built.errors.map((e) => {
+    const failure = failures.get(e.recordIndex);
+    return failure ? { recordIndex: e.recordIndex, ...failure } : e;
+  });
   const options: PostingOptions = {
     actorUserId: input.actorUserId,
     journalSource:
@@ -86,8 +100,23 @@ export async function importDocuments(input: DocumentImportInput): Promise<Pipel
     ...(profile.fxRateType && { fxRateType: profile.fxRateType })
   };
 
+  // A document with a record the transformation could not complete is
+  // refused whole, naming each such record.
+  const incomplete = (doc: BuiltDocument): PostingOutcome | null => {
+    const failed = doc.recordIndices.filter((i) => failures.has(i));
+    if (failed.length === 0) return null;
+    return {
+      status: "REFUSED",
+      errors: failed.map((i) => ({
+        code: failures.get(i)!.code,
+        path: `record ${i + 1}`,
+        message: failures.get(i)!.message
+      }))
+    };
+  };
+
   // An interactive run posts only to the entity it was started at.
-  const outside = (built: BuiltDocument): PostingOutcome | null =>
+  const outsideRun = (built: BuiltDocument): PostingOutcome | null =>
     input.runEntity && built.document.entityCode !== input.runEntity.code
       ? {
           status: "REFUSED",
@@ -100,6 +129,8 @@ export async function importDocuments(input: DocumentImportInput): Promise<Pipel
           ]
         }
       : null;
+
+  const outside = (doc: BuiltDocument): PostingOutcome | null => outsideRun(doc) ?? incomplete(doc);
 
   let results: DocResult[];
   if (input.mode === "HOLD") {

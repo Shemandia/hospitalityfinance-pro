@@ -59,7 +59,8 @@ export function executeTransformation(
           recordIndex: ri,
           ruleIndex: ruleIdx,
           ruleType: rule.type,
-          message: err instanceof Error ? err.message : String(err)
+          message: err instanceof Error ? err.message : String(err),
+          ...(err instanceof UnmappedValueError && { unmapped: err.unmapped })
         });
       }
     }
@@ -180,28 +181,45 @@ function applyTransform(
 
 // ── LOOKUP ─────────────────────────────────────────────────────────────────
 
+/** A lookup table had no entry for the value. */
+export class UnmappedValueError extends Error {
+  constructor(readonly unmapped: { table: string; key: string; target: string }) {
+    super(`lookup table "${unmapped.table}" has no entry for "${unmapped.key}"`);
+    this.name = "UnmappedValueError";
+  }
+}
+
 function applyLookup(
   rule: TmlLookupRule,
   source: TmlRecord,
   output: TmlRecord,
   options?: TmlExecutionOptions
 ): TmlRecord {
-  if (!options?.lookupTables) {
-    throw new Error(
-      `lookup rule references table "${rule.table}" but no lookup tables were provided`
-    );
-  }
-
-  const table = options.lookupTables.get(rule.table);
-  if (!table) {
-    throw new Error(`lookup table "${rule.table}" not found`);
-  }
-
   // Determine the value to look up
   const sourceField = rule.source ?? rule.target;
   const sourceValue = String(source[sourceField] ?? output[sourceField] ?? "");
 
-  const mapped = table.get(sourceValue);
+  let mapped: string | null | undefined;
+  if (options?.lookup) {
+    mapped = options.lookup({
+      table: rule.table,
+      ...(rule.column !== undefined && { column: rule.column }),
+      key: sourceValue,
+      record: { ...source, ...output }
+    });
+  } else {
+    if (!options?.lookupTables) {
+      throw new Error(
+        `lookup rule references table "${rule.table}" but no lookup tables were provided`
+      );
+    }
+    const table = options.lookupTables.get(rule.table);
+    if (!table) {
+      throw new Error(`lookup table "${rule.table}" not found`);
+    }
+    mapped = table.get(sourceValue);
+  }
+
   if (mapped !== undefined) {
     output[rule.target] = mapped;
   } else {
@@ -209,7 +227,7 @@ function applyLookup(
     if (unknown === "copy") {
       output[rule.target] = sourceValue;
     } else {
-      throw new Error(`lookup table "${rule.table}" has no entry for "${sourceValue}"`);
+      throw new UnmappedValueError({ table: rule.table, key: sourceValue, target: rule.target });
     }
   }
 

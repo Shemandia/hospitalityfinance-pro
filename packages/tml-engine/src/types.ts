@@ -68,6 +68,8 @@ export interface TmlLookupRule {
   target: string;
   /** Source field to look up. If omitted, uses the target field's current value. */
   source?: string;
+  /** The table's output column to write; the table's first column when omitted. */
+  column?: string;
   /** Behaviour when the source value is not found: "fail" (default) or "copy". */
   unknown?: "fail" | "copy";
 }
@@ -124,11 +126,25 @@ export interface TmlExecutionOptions {
    * Required if any rule uses the "lookup" type.
    */
   lookupTables?: Map<string, Map<string, string>>;
+  /**
+   * Resolves a lookup against richer tables (ranges, business units, typed
+   * values): the value, null to leave the target empty, or undefined when
+   * the table has no entry. Used instead of lookupTables when given.
+   */
+  lookup?: TmlLookupResolver;
   /** Sandbox timeout in milliseconds (default: 2000). */
   sandboxTimeoutMs?: number;
   /** Sandbox memory limit in MB (default: 64). */
   sandboxMemoryMb?: number;
 }
+
+export type TmlLookupResolver = (request: {
+  table: string;
+  column?: string;
+  key: string;
+  /** The record so far (source fields, then what the rules wrote). */
+  record: TmlRecord;
+}) => string | null | undefined;
 
 // ── Result types ───────────────────────────────────────────────────────────
 
@@ -152,4 +168,6 @@ export interface TmlRecordError {
   ruleType: TmlRule["type"];
   /** Human-readable error message. */
   message: string;
+  /** Set when a lookup table had no entry for the value: the value was not mapped. */
+  unmapped?: { table: string; key: string; target: string };
 }

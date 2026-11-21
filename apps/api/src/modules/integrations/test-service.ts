@@ -6,6 +6,7 @@
  * results in IntegrationExecution + IntegrationExecutionLog.
  */
 
+import { loadLookupResolver, lookupTablesOf } from "./lookup-resolver.js";
 import type { PrismaClient } from "../../db/client.js";
 import { FsdEngine } from "@hfp/fsd-engine";
 import type { ProfileFsdSchema } from "@hfp/fsd-engine";
@@ -203,16 +204,10 @@ export class TestRunnerService {
             });
           }
 
-          // Load lookup tables if any rules reference them
-          let lookupTables: Map<string, Map<string, string>> | undefined;
-          const lookupRules = tmlDef.rules.filter((r) => r.type === "lookup");
-          if (lookupRules.length > 0) {
-            lookupTables = await this.loadLookupTables(
-              lookupRules.map((r) => (r as { table: string }).table)
-            );
-          }
+          // The tenant's lookup tables the rules name, resolved as the import does.
+          const lookup = await loadLookupResolver(this.prisma, lookupTablesOf(tmlDef.rules));
 
-          const tmlResult = executeTransformation(tmlDef, flatRecords, sandbox, { lookupTables });
+          const tmlResult = executeTransformation(tmlDef, flatRecords, sandbox, { lookup });
           transformedRecords = tmlResult.records;
           tmlErrors = tmlResult.errors.map((e) => ({
             rowIndex: e.recordIndex,
@@ -370,33 +365,6 @@ export class TestRunnerService {
    * Load lookup tables from DB for TML lookup rules.
    * Returns Map<tableId, Map<sourceValue, targetValue>>.
    */
-  private async loadLookupTables(tableIds: string[]): Promise<Map<string, Map<string, string>>> {
-    const db = this.prisma as any;
-    const result = new Map<string, Map<string, string>>();
-
-    const uniqueIds = [...new Set(tableIds.filter(Boolean))];
-    if (uniqueIds.length === 0) return result;
-
-    for (const tableId of uniqueIds) {
-      const rows = await db.integrationLookupRow
-        ?.findMany?.({
-          where: { tableId },
-          select: { sourceValue: true, targetValue: true }
-        })
-        .catch(() => []);
-
-      if (rows && rows.length > 0) {
-        const map = new Map<string, string>();
-        for (const row of rows) {
-          map.set(String(row.sourceValue), String(row.targetValue));
-        }
-        result.set(tableId, map);
-      }
-    }
-
-    return result;
-  }
-
   // ── Get cached results ──────────────────────────────────────────────────
 
   async getResults(profileId: string, testId: string) {
