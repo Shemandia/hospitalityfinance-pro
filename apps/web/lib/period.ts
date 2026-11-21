@@ -63,7 +63,7 @@ export function withPeriodParam(search: string, month: MonthKey): string {
 /** "October 2026" (or "Oct 2026" short). */
 export function monthLabel(month: MonthKey, style: "long" | "short" = "long"): string {
   const [year, m] = month.split("-").map(Number) as [number, number];
-  const name = new Date(Date.UTC(year, m - 1, 1)).toLocaleString("en-GB", {
+  const name = new Date(Date.UTC(year, m - 1, 1)).toLocaleString("en-US", {
     month: style,
     timeZone: "UTC"
   });

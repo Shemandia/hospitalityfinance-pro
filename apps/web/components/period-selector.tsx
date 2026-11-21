@@ -12,6 +12,11 @@ import {
   type PeriodStatus
 } from "../lib/period";
 
+/** "Jul 26", for the narrowest screens. */
+function shortMonth(month: string): string {
+  return `${monthLabel(month as Parameters<typeof monthLabel>[0], "short").slice(0, 3)} ${month.slice(2, 4)}`;
+}
+
 const STATUS_STYLE: Record<PeriodStatus, string> = {
   OPEN: "bg-emerald-50 text-emerald-700 border-emerald-200",
   SOFT_CLOSE: "bg-amber-50 text-amber-800 border-amber-200",
@@ -92,8 +97,11 @@ export function PeriodSelector() {
           open ? "bg-emerald-50 border-emerald-200" : "bg-white border-slate-200 hover:bg-slate-50"
         }`}
       >
-        <CalendarDays className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden />
-        <span className="text-sm font-semibold text-slate-800 whitespace-nowrap">{label}</span>
+        <CalendarDays className="hidden sm:block h-4 w-4 shrink-0 text-emerald-600" aria-hidden />
+        <span className="text-sm font-semibold text-slate-800 whitespace-nowrap">
+          <span className="sm:hidden">{month ? shortMonth(month) : label}</span>
+          <span className="hidden sm:inline">{label}</span>
+        </span>
         {status && (
           <span className="hidden sm:inline-flex">
             <PeriodStatusBadge status={status} />

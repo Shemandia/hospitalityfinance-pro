@@ -79,7 +79,7 @@ export function PropertySwitcher() {
   const Icon = currentEntity.type === "PROPERTY" ? Building2 : Layers;
 
   return (
-    <div ref={rootRef} className="relative min-w-0">
+    <div ref={rootRef} className="relative min-w-0 shrink-0 sm:shrink">
       <button
         type="button"
         onClick={() => (open ? close() : canSwitch && setOpen(true))}
