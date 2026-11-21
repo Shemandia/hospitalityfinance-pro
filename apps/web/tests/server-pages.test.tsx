@@ -49,6 +49,18 @@ describe("paging helpers", () => {
     ]);
   });
 
+  it("read on past a page the server capped below the limit", async () => {
+    const all = Array.from({ length: 250 }, (_, i) => i);
+    const calls: number[] = [];
+    const rows = await fetchAllRows(async (offset, limit) => {
+      calls.push(offset);
+      const capped = Math.min(limit, 100); // PAGE_SIZE_MAX of 100
+      return { rows: all.slice(offset, offset + capped), total: all.length };
+    }, 200);
+    expect(rows).toEqual(all);
+    expect(calls).toEqual([0, 100, 200]);
+  });
+
   it("know the last page", () => {
     expect(lastPage(0, 20)).toBe(0);
     expect(lastPage(20, 20)).toBe(0);

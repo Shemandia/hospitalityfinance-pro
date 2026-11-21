@@ -27,8 +27,10 @@ export function pageFrom<T>(envelope: {
 
 /**
  * Every row of a list, page after page (for an export). Stops on the total,
- * on a short page, or after `maxPages` as a guard against a list that grows
- * while it is read.
+ * on an empty page, or after `maxPages` as a guard against a list that grows
+ * while it is read. A short page is not the end: the server may cap the page
+ * size below `limit` (PAGE_SIZE_MAX), so the next offset follows the rows
+ * actually received.
  */
 export async function fetchAllRows<T>(
   fetchPage: (offset: number, limit: number) => Promise<Page<T>>,
@@ -39,7 +41,7 @@ export async function fetchAllRows<T>(
   for (let i = 0; i < maxPages; i++) {
     const page = await fetchPage(rows.length, limit);
     rows.push(...page.rows);
-    if (page.rows.length === 0 || page.rows.length < limit || rows.length >= page.total) break;
+    if (page.rows.length === 0 || rows.length >= page.total) break;
   }
   return rows;
 }

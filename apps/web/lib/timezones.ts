@@ -6,7 +6,10 @@ export function getSupportedTimezones(): string[] {
   if (typeof intl.supportedValuesOf === "function") {
     try {
       const zones = intl.supportedValuesOf("timeZone");
-      if (Array.isArray(zones) && zones.length > 0) return zones;
+      // V8 leaves UTC out of the list, but forms start on it.
+      if (Array.isArray(zones) && zones.length > 0) {
+        return zones.includes("UTC") ? zones : ["UTC", ...zones];
+      }
     } catch {
       // fall through to fallback
     }
