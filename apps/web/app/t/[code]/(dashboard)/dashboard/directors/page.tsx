@@ -1,5 +1,7 @@
 "use client";
 
+import { useSelectedPeriod } from "../../../../../../components/period-provider";
+import { PeriodInUse, PeriodNotice } from "../../../../../../components/period-gate";
 import { useQuery, useQueries } from "@tanstack/react-query";
 import { useState, useMemo } from "react";
 import { useApiContext } from "../../../../../../components/use-api-context";
@@ -129,20 +131,11 @@ function LoadingState() {
 
 export default function DirectorsDashboardPage() {
   const apiContext = useApiContext();
-  const [periodId, setPeriodId] = useState("");
-
-  // ── Periods ──
-  const periodsQ = useQuery({
-    queryKey: ["periods", apiContext?.tenantSlug, apiContext?.entityId],
-    queryFn: () => (apiContext ? getPeriods(apiContext) : Promise.resolve({ data: [] })),
-    enabled: Boolean(apiContext),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    select: (r: any) => (r.data as unknown as Period[]) ?? []
-  });
-  const periods = periodsQ.data ?? [];
-  const activePeriodId =
-    periodId || periods.find((p) => p.status === "OPEN")?.id || periods[0]?.id || "";
-  const activePeriod = periods.find((p) => p.id === activePeriodId);
+  // The period chosen in the top bar, resolved to this entity's own period.
+  const selectedPeriod = useSelectedPeriod();
+  const activePeriod = selectedPeriod.state === "ready" ? selectedPeriod.period : undefined;
+  const activePeriodId = activePeriod?.id ?? "";
+  const periods = selectedPeriod.periods;
 
   // ── KPI Queries ──
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -340,7 +333,11 @@ export default function DirectorsDashboardPage() {
   const ytdEBITDA = usaliComp ? parseFloat(usaliComp.ytdEBITDA) : 0;
 
   const isLoading =
-    periodsQ.isLoading || revparQ.isLoading || usaliQ.isLoading || bsQ.isLoading || cfQ.isLoading;
+    selectedPeriod.state === "loading" ||
+    revparQ.isLoading ||
+    usaliQ.isLoading ||
+    bsQ.isLoading ||
+    cfQ.isLoading;
 
   if (!apiContext) {
     return (
@@ -348,6 +345,10 @@ export default function DirectorsDashboardPage() {
         Please log in to view the Directors Dashboard.
       </div>
     );
+  }
+
+  if (selectedPeriod.state !== "ready" && selectedPeriod.state !== "loading") {
+    return <PeriodNotice />;
   }
 
   return (
@@ -363,19 +364,7 @@ export default function DirectorsDashboardPage() {
           </div>
           <div className="ml-auto flex items-center gap-2">
             <span className="text-sm text-muted-foreground">Period:</span>
-            <Select value={activePeriodId} onValueChange={setPeriodId}>
-              <SelectTrigger className="h-8 w-52">
-                <SelectValue placeholder="Select period" />
-              </SelectTrigger>
-              <SelectContent>
-                {periods.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.name}
-                    {p.status === "OPEN" ? " (Open)" : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <PeriodInUse />
           </div>
         </CardContent>
       </Card>

@@ -4,6 +4,7 @@ import { prisma, registryPrisma } from "../../db/prisma.js";
 import { resolveTenant } from "../../db/tenantRegistry.js";
 import { stepSchemas } from "./types.js";
 import { USALI_ACCOUNTS, SYSTEM_ACCOUNT_TYPES } from "./usali-template.js";
+import { ZodError } from "zod";
 
 const MONTH_NAMES = [
   "January",
@@ -21,6 +22,32 @@ const MONTH_NAMES = [
 ];
 
 // No longer need RLS_TABLES — bypass is now via session variable, not ALTER TABLE
+
+/** Invitations name roles by code; each must be one of the tenant's roles. */
+async function assertRolesExist(step6: { invitations: Array<{ role: string }> }): Promise<void> {
+  const codes = [...new Set(step6.invitations.map((i) => i.role))];
+  if (codes.length === 0) return;
+  const known = new Set(
+    (
+      await (prisma as any).role.findMany({
+        where: { code: { in: codes } },
+        select: { code: true }
+      })
+    ).map((r: { code: string }) => r.code)
+  );
+  const issues = step6.invitations.flatMap((invitation, index) =>
+    known.has(invitation.role)
+      ? []
+      : [
+          {
+            code: "custom" as const,
+            path: ["invitations", index, "role"],
+            message: `Unknown role: ${invitation.role}`
+          }
+        ]
+  );
+  if (issues.length > 0) throw new ZodError(issues);
+}
 
 export class SetupService {
   async getProgress(tenantId: string) {
@@ -62,6 +89,7 @@ export class SetupService {
     const schema = stepSchemas[step];
     if (!schema) throw new Error(`Invalid step: ${step}`);
     const validated = schema.parse(data);
+    if (step === 6) await assertRolesExist(validated as { invitations: Array<{ role: string }> });
 
     const progress = await this.getProgress(tenantId);
     const stepData = (progress.stepData as Record<string, unknown>) ?? {};

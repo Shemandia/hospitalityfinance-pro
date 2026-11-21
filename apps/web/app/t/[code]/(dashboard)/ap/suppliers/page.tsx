@@ -2,7 +2,9 @@
 
 import { useRef, useState } from "react";
 import { useTenantRouter } from "../../../../../../hooks/use-tenant-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { TablePager } from "../../../../../../components/table-pager";
+import { pageFrom, useDebouncedValue, usePaging, type Page } from "../../../../../../lib/paging";
 import { useApiContext } from "../../../../../../components/use-api-context";
 import {
   getSuppliers,
@@ -542,12 +544,55 @@ export default function SuppliersPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [showInactive, setShowInactive] = useState(false);
+  const searchTerm = useDebouncedValue(search.trim());
+  const status = showInactive ? "all" : "active";
+  const { page, pageSize, offset, setPage, setPageSize } = usePaging([
+    searchTerm,
+    status,
+    apiContext?.entityId
+  ]);
 
   // ── Queries ──────────────────────────────────────────────────────────────
 
+  // The page shown: search and the inactive filter run on the server.
   const suppliersQ = useQuery({
-    queryKey: ["ap-suppliers", apiContext?.tenantSlug, apiContext?.entityId],
-    queryFn: () => (apiContext ? getSuppliers(apiContext) : Promise.resolve(null)),
+    queryKey: [
+      "ap-suppliers",
+      apiContext?.tenantSlug,
+      apiContext?.entityId,
+      "page",
+      searchTerm,
+      status,
+      offset,
+      pageSize
+    ],
+    queryFn: async (): Promise<Page<Supplier>> =>
+      apiContext
+        ? pageFrom(
+            (await getSuppliers(apiContext, {
+              search: searchTerm || undefined,
+              status,
+              limit: pageSize,
+              offset
+            })) as unknown as { data: Supplier[]; meta?: Record<string, unknown> }
+          )
+        : { rows: [], total: 0 },
+    placeholderData: keepPreviousData,
+    enabled: Boolean(apiContext)
+  });
+
+  // How many suppliers the property has at all, for the header and the empty state.
+  const registeredQ = useQuery({
+    queryKey: ["ap-suppliers", apiContext?.tenantSlug, apiContext?.entityId, "registered"],
+    queryFn: async () =>
+      apiContext
+        ? pageFrom(
+            (await getSuppliers(apiContext, { limit: 1 })) as unknown as {
+              data: Supplier[];
+              meta?: Record<string, unknown>;
+            }
+          ).total
+        : 0,
     enabled: Boolean(apiContext)
   });
 
@@ -578,16 +623,9 @@ export default function SuppliersPage() {
 
   // ── Data ─────────────────────────────────────────────────────────────────
 
-  const allSuppliers: Supplier[] = (suppliersQ.data?.data as unknown as Supplier[]) ?? [];
-
-  const suppliers = allSuppliers
-    .filter((s) => showInactive || s.isActive)
-    .filter(
-      (s) =>
-        !search ||
-        s.name.toLowerCase().includes(search.toLowerCase()) ||
-        s.code.toLowerCase().includes(search.toLowerCase())
-    );
+  const suppliers: Supplier[] = suppliersQ.data?.rows ?? [];
+  const matching = suppliersQ.data?.total ?? 0;
+  const registered = registeredQ.data ?? 0;
 
   function openCreate() {
     setEditingSupplier(null);
@@ -621,7 +659,7 @@ export default function SuppliersPage() {
               <Users className="h-5 w-5" /> Suppliers
             </h1>
             <p className="text-sm text-muted-foreground mt-0.5">
-              {allSuppliers.length} supplier{allSuppliers.length !== 1 ? "s" : ""} registered
+              {registered} supplier{registered !== 1 ? "s" : ""} registered
             </p>
           </div>
           <Button size="sm" className="gap-1" onClick={openCreate}>
@@ -681,7 +719,7 @@ export default function SuppliersPage() {
                 ) : suppliers.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={7} className="text-center py-10 text-muted-foreground">
-                      {allSuppliers.length === 0 ? (
+                      {registered === 0 ? (
                         <>
                           No suppliers yet. Click <strong>New Supplier</strong> to add one.
                         </>
@@ -732,6 +770,16 @@ export default function SuppliersPage() {
                 )}
               </TableBody>
             </Table>
+            {!suppliersQ.isLoading && !suppliersQ.isError && matching > 0 && (
+              <TablePager
+                page={page}
+                pageSize={pageSize}
+                total={matching}
+                onPage={setPage}
+                onPageSize={setPageSize}
+                busy={suppliersQ.isFetching && suppliersQ.isPlaceholderData}
+              />
+            )}
           </CardContent>
         </Card>
       </div>

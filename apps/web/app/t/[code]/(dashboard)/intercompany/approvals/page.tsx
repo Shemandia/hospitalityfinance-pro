@@ -29,6 +29,8 @@ import {
   DialogTitle
 } from "../../../../../../components/ui/dialog";
 import { CheckCircle, XCircle } from "lucide-react";
+import { QueryError } from "../../../../../../components/query-error";
+import { ListPageSkeleton, TableSkeleton } from "../../../../../../components/page-skeletons";
 
 function fmt(v: string | number | null | undefined): string {
   const n = Number(v ?? 0);
@@ -41,7 +43,13 @@ export default function ICApprovalsPage() {
   const [rejectTarget, setRejectTarget] = useState<ICTransactionSummary2 | null>(null);
   const [rejectReason, setRejectReason] = useState("");
 
-  const { data: pendingTxns = [], isLoading } = useQuery({
+  const {
+    data: pendingTxns = [],
+    isLoading,
+    isError,
+    error,
+    refetch
+  } = useQuery({
     queryKey: ["ic-transactions", "PENDING_APPROVAL"],
     queryFn: () => getICTransactions(ctx, { status: "PENDING_APPROVAL" }),
     select: (r) => r.data ?? []
@@ -76,7 +84,9 @@ export default function ICApprovalsPage() {
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <p className="text-muted-foreground py-8 text-center">Loading...</p>
+            <TableSkeleton rows={6} cols={6} />
+          ) : isError ? (
+            <QueryError message={(error as Error)?.message} onRetry={() => refetch()} />
           ) : pendingTxns.length === 0 ? (
             <p className="text-muted-foreground py-8 text-center">
               No transactions pending approval.

@@ -42,3 +42,10 @@ export const pageFields = {
     .optional()
     .transform((v) => pageOffset(v))
 };
+
+/** What a paged list returns beside its rows, so a client can draw "21–40 of 312". */
+export type PageMeta = { total: number; limit: number; offset: number };
+
+export function pageMeta(total: number, limit: number, offset: number): PageMeta {
+  return { total, limit, offset };
+}

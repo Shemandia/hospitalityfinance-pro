@@ -1,8 +1,10 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useTenantRouter } from "../../../../../../hooks/use-tenant-router";
+import { TablePager } from "../../../../../../components/table-pager";
+import { pageFrom, usePaging, type Page } from "../../../../../../lib/paging";
 import { useApiContext } from "../../../../../../components/use-api-context";
 import { usePermissions } from "../../../../../../components/use-permissions";
 import {
@@ -17,6 +19,8 @@ import {
   getPaymentVoucherUrl,
   getSuppliers
 } from "../../../../../../lib/gl-api";
+import { QueryError } from "../../../../../../components/query-error";
+import { TableSkeleton } from "../../../../../../components/page-skeletons";
 
 type PaymentRunSummary = {
   id: string;
@@ -107,6 +111,7 @@ export default function APPaymentRunsPage() {
   const canPropose = can("PAYMENT_RUN_CREATE");
   const router = useTenantRouter();
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const { page, pageSize, offset, setPage, setPageSize } = usePaging([apiContext?.entityId]);
   const [startDate, setStartDate] = useState(() => {
     const d = new Date();
     d.setDate(1);
@@ -133,16 +138,21 @@ export default function APPaymentRunsPage() {
   const [feedback, setFeedback] = useState<string>("");
 
   const runsQuery = useQuery({
-    queryKey: ["ap-payment-runs", apiContext?.tenantSlug, apiContext?.entityId],
-    queryFn: async () => {
+    queryKey: ["ap-payment-runs", apiContext?.tenantSlug, apiContext?.entityId, offset, pageSize],
+    queryFn: async (): Promise<Page<PaymentRunSummary>> => {
       if (!apiContext) {
-        return [];
+        return { rows: [], total: 0 };
       }
-      const response = await getAPPaymentRuns(apiContext, { limit: 100 });
-      return (response.data as unknown as PaymentRunSummary[]) ?? [];
+      const response = await getAPPaymentRuns(apiContext, { limit: pageSize, offset });
+      return pageFrom(
+        response as unknown as { data: PaymentRunSummary[]; meta?: Record<string, unknown> }
+      );
     },
+    placeholderData: keepPreviousData,
     enabled: Boolean(apiContext)
   });
+  const runs = runsQuery.data?.rows ?? [];
+  const totalRuns = runsQuery.data?.total ?? 0;
 
   const detailQuery = useQuery({
     queryKey: ["ap-payment-run", apiContext?.tenantSlug, apiContext?.entityId, selectedRunId],
@@ -606,7 +616,7 @@ export default function APPaymentRunsPage() {
               </tr>
             </thead>
             <tbody>
-              {(runsQuery.data ?? []).map((run) => (
+              {runs.map((run) => (
                 <tr
                   key={run.id}
                   onClick={() => router.push(`/ap/payment-runs/${run.id}`)}
@@ -676,10 +686,29 @@ export default function APPaymentRunsPage() {
               ))}
             </tbody>
           </table>
-          {runsQuery.isLoading ? <p>Loading payment runs...</p> : null}
-          {runsQuery.isError ? (
-            <p style={{ color: "#b91c1c" }}>{(runsQuery.error as Error).message}</p>
+          {runsQuery.isLoading ? (
+            <div style={{ padding: "1rem" }}>
+              <TableSkeleton rows={6} cols={5} />
+            </div>
           ) : null}
+          {runsQuery.isError ? (
+            <div style={{ padding: "1rem" }}>
+              <QueryError
+                message={(runsQuery.error as Error).message}
+                onRetry={() => runsQuery.refetch()}
+              />
+            </div>
+          ) : null}
+          {!runsQuery.isLoading && !runsQuery.isError && totalRuns > 0 && (
+            <TablePager
+              page={page}
+              pageSize={pageSize}
+              total={totalRuns}
+              onPage={setPage}
+              onPageSize={setPageSize}
+              busy={runsQuery.isFetching && runsQuery.isPlaceholderData}
+            />
+          )}
         </div>
       </div>
 

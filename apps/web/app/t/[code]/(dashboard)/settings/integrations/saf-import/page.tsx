@@ -1,5 +1,6 @@
 "use client";
 
+import { DEFAULT_LOCALE } from "../../../../../../../lib/format";
 import { useCallback, useMemo, useState } from "react";
 import { useTenantRouter } from "../../../../../../../hooks/use-tenant-router";
 import { useMutation } from "@tanstack/react-query";
@@ -89,7 +90,7 @@ function StepIndicator({ current }: { current: number }) {
 // ── Formatters ────────────────────────────────────────────────────────────────
 
 function fmtNum(n: number) {
-  return n.toLocaleString("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+  return n.toLocaleString(DEFAULT_LOCALE, { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 }
 
 function fmtDate(d: string | null | undefined) {

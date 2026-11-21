@@ -11,6 +11,8 @@ import {
   type LoginAuditEntry
 } from "../../../../../../lib/gl-api";
 import { Button } from "../../../../../../components/ui/button";
+import { QueryError } from "../../../../../../components/query-error";
+import { ListPageSkeleton, TableSkeleton } from "../../../../../../components/page-skeletons";
 import { Badge } from "../../../../../../components/ui/badge";
 import { Input } from "../../../../../../components/ui/input";
 import { Label } from "../../../../../../components/ui/label";
@@ -110,17 +112,18 @@ export default function ProfilePage() {
   }
 
   if (profileQ.isLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-[300px]">
-        <p className="text-muted-foreground">Loading profile...</p>
-      </div>
-    );
+    return <ListPageSkeleton />;
   }
 
-  if (!profile) {
+  if (profileQ.isError || !profile) {
     return (
-      <div className="flex items-center justify-center min-h-[300px]">
-        <p className="text-destructive">Could not load profile.</p>
+      <div className="max-w-3xl mx-auto py-8">
+        <QueryError
+          message={
+            profileQ.error instanceof Error ? profileQ.error.message : "Could not load profile."
+          }
+          onRetry={() => profileQ.refetch()}
+        />
       </div>
     );
   }

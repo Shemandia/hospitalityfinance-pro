@@ -1,5 +1,8 @@
 "use client";
 
+import { useReportPeriodId } from "../../../../../../components/period-provider";
+import { PeriodNotice } from "../../../../../../components/period-gate";
+import { DEFAULT_LOCALE } from "../../../../../../lib/format";
 import { useQuery } from "@tanstack/react-query";
 import { useState, useMemo } from "react";
 import { useApiContext } from "../../../../../../components/use-api-context";
@@ -32,7 +35,7 @@ import {
 // ── Formatters ────────────────────────────────────────────────────────────────
 
 const fmt = (v: string | number) =>
-  Number(v).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  Number(v).toLocaleString(DEFAULT_LOCALE, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
 const fmtPct = (v: string | number) => `${Number(v).toFixed(1)}%`;
 
@@ -649,7 +652,8 @@ function exportCSV(report: USALIComparativeReport) {
 
 export default function USALIPLPage() {
   const apiContext = useApiContext();
-  const [periodId, setPeriodId] = useState("NONE");
+  // Starts on the period chosen in the top bar; can be changed here for this report.
+  const { periodId, setPeriodId, followsGlobal } = useReportPeriodId("NONE");
   const [viewMode, setViewMode] = useState<"detail" | "comparative">("detail");
   const [exportError, setExportError] = useState("");
 
@@ -692,6 +696,7 @@ export default function USALIPLPage() {
 
   return (
     <div className="space-y-6">
+      {followsGlobal && <PeriodNotice />}
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>

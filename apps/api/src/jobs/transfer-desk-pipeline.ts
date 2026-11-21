@@ -772,7 +772,8 @@ async function readFromSource(
     const result = await glService.listJournals(entityId, {
       periodId: runtimeParams.periodId ? String(runtimeParams.periodId) : undefined,
       status: "POSTED",
-      limit: 100
+      limit: 100,
+      offset: 0
     });
     // Flatten journal lines into FSD records
     const records: FsdRecordValue[] = [];

@@ -1,7 +1,9 @@
 "use client";
 
 import { useMemo, useRef, useState, useEffect } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { TablePager } from "../../../../../components/table-pager";
+import { fetchAllRows, pageFrom, usePaging } from "../../../../../lib/paging";
 import { useApiContext } from "../../../../../components/use-api-context";
 import { QueryError } from "../../../../../components/query-error";
 import { ListPageSkeleton } from "../../../../../components/page-skeletons";
@@ -16,6 +18,7 @@ import {
   getGLAccountTree,
   type APInvoice,
   type APInvoiceStatus,
+  type APInvoiceSummary,
   type Supplier,
   type AccountNode
 } from "../../../../../lib/gl-api";
@@ -707,21 +710,38 @@ export default function APInvoicesPage() {
   const apiContext = useApiContext();
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
+  const { page, pageSize, offset, setPage, setPageSize } = usePaging([
+    statusFilter,
+    apiContext?.entityId
+  ]);
+  const [exporting, setExporting] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
   // ── Queries ──────────────────────────────────────────────────────────────
 
+  const statusParam = statusFilter === "ALL" ? undefined : (statusFilter as APInvoiceStatus);
+
+  // One page of invoices; the summary cards cover every invoice the filter matches.
   const invoicesQ = useQuery({
-    queryKey: ["ap-invoices", apiContext?.tenantSlug, apiContext?.entityId, statusFilter],
-    queryFn: () =>
-      apiContext
-        ? getAPInvoices(apiContext, {
-            status: statusFilter === "ALL" ? undefined : (statusFilter as APInvoiceStatus),
-            limit: 200
-          })
-        : Promise.resolve(null),
+    queryKey: [
+      "ap-invoices",
+      apiContext?.tenantSlug,
+      apiContext?.entityId,
+      statusFilter,
+      offset,
+      pageSize
+    ],
+    queryFn: async () => {
+      if (!apiContext) return { rows: [] as APInvoice[], total: 0, summary: null };
+      const res = await getAPInvoices(apiContext, { status: statusParam, limit: pageSize, offset });
+      const page = pageFrom(
+        res as unknown as { data: APInvoice[]; meta?: Record<string, unknown> }
+      );
+      return { ...page, summary: (res.meta?.summary as APInvoiceSummary | undefined) ?? null };
+    },
+    placeholderData: keepPreviousData,
     enabled: Boolean(apiContext)
   });
 
@@ -773,7 +793,8 @@ export default function APInvoicesPage() {
 
   // ── Data ─────────────────────────────────────────────────────────────────
 
-  const invoices: APInvoice[] = (invoicesQ.data?.data as unknown as APInvoice[]) ?? [];
+  const invoices: APInvoice[] = invoicesQ.data?.rows ?? [];
+  const totalInvoices = invoicesQ.data?.total ?? 0;
   const suppliers: Supplier[] = (suppliersQ.data?.data as unknown as Supplier[]) ?? [];
   const periods =
     (periodsQ.data?.data as unknown as Array<{ id: string; name: string; status: string }>) ?? [];
@@ -782,21 +803,32 @@ export default function APInvoicesPage() {
     [accountTreeQ.data]
   );
 
-  const summary = useMemo(() => {
-    const total = invoices.reduce((s, i) => s + Number(i.netAmount || 0), 0);
-    const overdue = invoices.filter(
-      (i) => !["PAID", "CANCELLED"].includes(i.status) && daysUntil(i.dueDate) < 0
-    ).length;
-    const dueWeek = invoices.filter(
-      (i) =>
-        !["PAID", "CANCELLED"].includes(i.status) &&
-        daysUntil(i.dueDate) >= 0 &&
-        daysUntil(i.dueDate) <= 7
-    ).length;
-    return { total, overdue, dueWeek, count: invoices.length };
-  }, [invoices]);
+  const apiSummary = invoicesQ.data?.summary;
+  const summary = {
+    count: totalInvoices,
+    total: Number(apiSummary?.functionalValue ?? 0),
+    overdue: apiSummary?.overdue ?? 0,
+    dueWeek: apiSummary?.dueThisWeek ?? 0
+  };
 
-  function exportCsv() {
+  /** Every invoice the filter matches, not only the page shown. */
+  async function exportCsv() {
+    if (!apiContext) return;
+    setExporting(true);
+    let all: APInvoice[];
+    try {
+      all = await fetchAllRows(async (from, limit) =>
+        pageFrom(
+          (await getAPInvoices(apiContext, {
+            status: statusParam,
+            limit,
+            offset: from
+          })) as unknown as { data: APInvoice[]; meta?: Record<string, unknown> }
+        )
+      );
+    } finally {
+      setExporting(false);
+    }
     const headers = [
       "Invoice #",
       "Supplier",
@@ -808,7 +840,7 @@ export default function APInvoicesPage() {
       "Net",
       "Status"
     ];
-    const rows = invoices.map((i) =>
+    const rows = all.map((i) =>
       [
         i.invoiceNumber,
         i.supplier?.name ?? "",
@@ -854,8 +886,13 @@ export default function APInvoicesPage() {
         {/* Summary cards */}
         <div className="grid grid-cols-4 gap-3">
           {[
-            { label: "Total Invoices", value: summary.count, sub: "in view" },
-            { label: "Total Value", value: `${fmt(summary.total)}`, sub: "net amount", mono: true },
+            { label: "Total Invoices", value: summary.count, sub: "matching the filter" },
+            {
+              label: "Total Value",
+              value: `${fmt(summary.total)}`,
+              sub: "net, functional currency",
+              mono: true
+            },
             {
               label: "Overdue",
               value: summary.overdue,
@@ -888,7 +925,7 @@ export default function APInvoicesPage() {
               <FileText className="h-5 w-5" /> Accounts Payable Invoices
             </CardTitle>
             <div className="flex items-center gap-2">
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v)}>
                 <SelectTrigger className="w-44">
                   <SelectValue />
                 </SelectTrigger>
@@ -904,10 +941,10 @@ export default function APInvoicesPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={exportCsv}
-                disabled={invoices.length === 0}
+                onClick={() => void exportCsv()}
+                disabled={totalInvoices === 0 || exporting}
               >
-                <Download className="h-3.5 w-3.5 mr-1" /> Export
+                <Download className="h-3.5 w-3.5 mr-1" /> {exporting ? "Exporting…" : "Export"}
               </Button>
               <Button
                 size="sm"
@@ -994,6 +1031,16 @@ export default function APInvoicesPage() {
                 )}
               </TableBody>
             </Table>
+            {!invoicesQ.isLoading && !invoicesQ.isError && totalInvoices > 0 && (
+              <TablePager
+                page={page}
+                pageSize={pageSize}
+                total={totalInvoices}
+                onPage={setPage}
+                onPageSize={setPageSize}
+                busy={invoicesQ.isFetching && invoicesQ.isPlaceholderData}
+              />
+            )}
           </CardContent>
         </Card>
       </div>

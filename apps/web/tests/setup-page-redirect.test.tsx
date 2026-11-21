@@ -7,6 +7,7 @@
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const calls: string[] = [];
 const replace = vi.fn((url: string) => void calls.push(`replace ${url}`));
@@ -44,7 +45,12 @@ describe("setup wizard, setup already finished", () => {
         })
       )
     );
-    render(<SetupPage />);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <SetupPage />
+      </QueryClientProvider>
+    );
     await waitFor(() => expect(replace).toHaveBeenCalledWith("/t/ab12cd34/dashboard"));
     expect(calls).toEqual(["reloadContext", "replace /t/ab12cd34/dashboard"]);
   });
