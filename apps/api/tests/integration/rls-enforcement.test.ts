@@ -71,6 +71,10 @@ if (!process.env.TEST_DATABASE_URL) {
       await prisma.$executeRawUnsafe(
         `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${APP_ROLE}`
       );
+      // As provisioning does: the bypass only through the owner's function (SEC-11).
+      await prisma.$executeRawUnsafe(
+        `GRANT EXECUTE ON FUNCTION app_begin_rls_bypass() TO ${APP_ROLE}`
+      );
 
       await asOwner(async (tx) => {
         const a = await tx.entity.create({
@@ -219,13 +223,62 @@ if (!process.env.TEST_DATABASE_URL) {
       expect(stillThere?.name).toBe("Cash - Entity B");
     });
 
-    it("the explicit bypass setting sees both entities", async () => {
-      const results = await prisma.$transaction(async (tx) => {
-        await tx.$executeRawUnsafe(`SET LOCAL ROLE ${APP_ROLE}`);
+    // SEC-11 (P0): the application role must not turn row-level security off
+    // by setting app.bypass_rls itself, in any of the ways a setting is set.
+    it("the application role setting app.bypass_rls still sees only its property (SEC-11)", async () => {
+      const ids = [accountA, accountB];
+      const local = await asApp(entityA, async (tx) => {
         await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'true', true)`;
+        return tx.account.findMany({ where: { id: { in: ids } } });
+      });
+      const viaSet = await asApp(entityA, async (tx) => {
+        await tx.$executeRawUnsafe(`SET LOCAL app.bypass_rls = 'true'`);
+        return tx.account.findMany({ where: { id: { in: ids } } });
+      });
+      const noEntity = await asApp(null, async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'true', true)`;
+        return tx.account.findMany({ where: { id: { in: ids } } });
+      });
+      expect(local.map((r) => r.entityId)).toEqual([entityA]);
+      expect(viaSet.map((r) => r.entityId)).toEqual([entityA]);
+      expect(noEntity).toEqual([]);
+    });
+
+    it("the application role setting app.bypass_rls cannot write to another property (SEC-11)", async () => {
+      const updated = await asApp(entityA, async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'true', true)`;
+        return tx.account.updateMany({ where: { id: accountB }, data: { name: "Hijacked" } });
+      });
+      expect(updated.count).toBe(0);
+      const stillThere = await asOwner((tx) => tx.account.findUnique({ where: { id: accountB } }));
+      expect(stillThere?.name).toBe("Cash - Entity B");
+    });
+
+    it("the application role cannot grant itself the bypass through the grants table (SEC-11)", async () => {
+      await expect(
+        asApp(entityA, (tx) =>
+          tx.$executeRawUnsafe(
+            `INSERT INTO app_private.rls_bypass_grants (xact) VALUES (pg_current_xact_id())`
+          )
+        )
+      ).rejects.toThrow(/permission denied/);
+    });
+
+    it("app_begin_rls_bypass() lets the application role see both properties", async () => {
+      const results = await asApp(entityA, async (tx) => {
+        await tx.$executeRaw`SELECT app_begin_rls_bypass()`;
         return tx.account.findMany({ where: { id: { in: [accountA, accountB] } } });
       });
       expect(results.map((r) => r.entityId).sort()).toEqual([entityA, entityB].sort());
+    });
+
+    it("the bypass ends with the transaction that was granted it", async () => {
+      await asApp(entityA, (tx) => tx.$executeRaw`SELECT app_begin_rls_bypass()`);
+      const next = await asApp(entityA, async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'true', true)`;
+        return tx.account.findMany({ where: { id: { in: [accountA, accountB] } } });
+      });
+      expect(next.map((r) => r.entityId)).toEqual([entityA]);
     });
   });
 }

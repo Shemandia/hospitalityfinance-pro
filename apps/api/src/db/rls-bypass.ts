@@ -1,10 +1,12 @@
 /**
  * RLS bypass — the one way to read or write across entities (AUT-14).
  *
- * `fn` runs inside a single transaction in which `app.bypass_rls` is set, so
- * the row-level security policies let every row of the tenant through. The
- * setting is transaction-local: it ends with the transaction and is never
- * visible to another connection.
+ * `fn` runs inside a single transaction granted the bypass by the database
+ * function app_begin_rls_bypass() (SECURITY DEFINER, owned by the owner
+ * role), so the row-level security policies let every row of the tenant
+ * through. The grant belongs to that transaction alone and ends with it.
+ * Setting app.bypass_rls directly does nothing for the application role
+ * (SEC-11).
  *
  * Every query made through `tx` stays on that transaction. Without the
  * `rlsBypass` flag the tenant clients would undo the bypass: the RLS
@@ -27,7 +29,7 @@ export async function withBypassRLS<T>(prisma: any, fn: (tx: any) => Promise<T>)
   // and it must start while the flag is visible.
   return runWithContext({ ...getRequestContext(), rlsBypass: true }, async () => {
     return await prisma.$transaction(async (tx: any) => {
-      await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'true', true)`;
+      await tx.$executeRaw`SELECT app_begin_rls_bypass()`;
       return fn(tx);
     });
   });

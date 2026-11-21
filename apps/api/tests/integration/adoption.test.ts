@@ -179,15 +179,21 @@ if (!env.ready) {
 
       const app = new PrismaClient({ datasourceUrl: appConnectionUrl(row) });
       try {
-        await app.$executeRawUnsafe(`SELECT set_config('app.bypass_rls', 'true', false)`);
-        const users = await app.$queryRawUnsafe<Array<{ email: string; is_system: boolean }>>(
-          "select email, is_system from users order by email"
-        );
+        // The application role bypasses only through the owner's function (SEC-11).
+        const [users, entities] = await app
+          .$transaction([
+            app.$executeRawUnsafe(`SELECT app_begin_rls_bypass()`),
+            app.$queryRawUnsafe<Array<{ email: string; is_system: boolean }>>(
+              "select email, is_system from users order by email"
+            ),
+            app.$queryRawUnsafe(`select id from entities`)
+          ])
+          .then(([, u, e]) => [u, e] as const);
         expect(users).toEqual([
           { email: "ada@it.test", is_system: false },
           { email: "system@hfp.invalid", is_system: true }
         ]);
-        expect(await app.$queryRawUnsafe(`select id from entities`)).toEqual([{ id: "e1" }]);
+        expect(entities).toEqual([{ id: "e1" }]);
       } finally {
         await app.$disconnect();
       }
