@@ -7,7 +7,7 @@ const storageMock = vi.hoisted(() => ({
   write: vi.fn()
 }));
 
-vi.mock("../src/jobs/transfer-desk-storage.js", () => ({
+vi.mock("../src/jobs/integration-storage.js", () => ({
   getStorageBackend: () => storageMock
 }));
 

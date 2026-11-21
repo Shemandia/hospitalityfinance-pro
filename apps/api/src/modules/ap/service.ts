@@ -1,7 +1,7 @@
 import { Prisma, PrismaClient } from "../../db/client.js";
 import { setEntityDbContext, clearEntityDbContext } from "../../db/tenantContext.js";
 import { getRequestContext } from "../../db/requestContext.js";
-import { getStorageBackend } from "../../jobs/transfer-desk-storage.js";
+import { getStorageBackend } from "../../jobs/integration-storage.js";
 import { ServiceError } from "../../shared/service-error.js";
 import {
   resolveCurrencyDecimals,

@@ -95,7 +95,7 @@ export default function BankReconciliationPage() {
     queryFn: async () => {
       if (!apiContext || !activeStatementId) return [];
       const res = await apiFetch(
-        `/api/v1/integration/bank/statements/${activeStatementId}/transactions`,
+        `/api/v1/integrations/bank/statements/${activeStatementId}/transactions`,
         apiContext
       );
       const json = await res.json();
@@ -465,7 +465,7 @@ export default function BankReconciliationPage() {
             <li>
               Import bank statements via{" "}
               <a
-                href={tenantHref("/settings/integrations")}
+                href={tenantHref("/integrations/connectors")}
                 className="underline text-(--color-primary)"
               >
                 Integrations

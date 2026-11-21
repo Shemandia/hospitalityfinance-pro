@@ -269,10 +269,10 @@ if (!base) {
       await expect(
         asOwner(
           db,
-          `INSERT INTO transfer_profiles (id, name, profile_type, unmapped_policy, updated_at)
+          `INSERT INTO integration_profiles (id, name, profile_type, unmapped_policy, updated_at)
              VALUES ('${randomUUID()}', 'Suspense ${run}', 'IMPORT', 'SUSPENSE', now())`
         )
-      ).rejects.toThrow(/transfer_profiles_suspense_needs_account/);
+      ).rejects.toThrow(/integration_profiles_suspense_needs_account/);
     });
   });
 }

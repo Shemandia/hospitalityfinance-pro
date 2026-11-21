@@ -1,7 +1,7 @@
 # STATISTICS IMPORT — Claude Code Implementation Guide
 
 > **Sprint:** 4 (Statistics Import)
-> **Depends on:** Sprint 3 (Transfer Desk foundation tables, BullMQ worker skeleton)
+> **Depends on:** Sprint 3 (Integrations foundation tables, BullMQ worker skeleton)
 > **Spec:** HFP_Opera_Statistics_Import_v1.1.md
 
 ---
@@ -186,9 +186,9 @@ function createStatisticsJournalLine(parsed: SAFLine) {
 
 ---
 
-## TASK 5: Transfer Desk Import Profiles
+## TASK 5: Integrations Import Profiles
 
-Create two import profile records (seed data or via the admin UI). These configure the Transfer Desk to recognise and process statistics files.
+Create two import profile records (seed data or via the admin UI). These configure the Integrations to recognise and process statistics files.
 
 ### Profile: OPERA-DS
 
@@ -510,7 +510,7 @@ Z134      |2025008|20250830|||L|000000000000028000|D||FIDMS||RAC  |Rack Rate    
 2. **Task 2** — Create migration for `stat_value` column
 3. **Task 3** — Modify journal balance check logic
 4. **Task 4** — Implement/extend SAF parser for statistics files
-5. **Task 5** — Seed Transfer Desk import profiles (OPERA-DS, OPERA-MS)
+5. **Task 5** — Seed Integrations import profiles (OPERA-DS, OPERA-MS)
 6. **Task 7** — Write Vitest tests using sample data
 7. **Task 6** — Cross-validation (can be deferred to next sprint if needed)
 
@@ -537,4 +537,4 @@ After implementation:
 3. Statistics lines post with `debit_amount=0`, `credit_amount=0`, `stat_value=<parsed>`
 4. Journal balance check passes for statistics-only journals
 5. All Vitest tests pass
-6. Transfer Desk profiles OPERA-DS and OPERA-MS exist in seed data
+6. Integrations profiles OPERA-DS and OPERA-MS exist in seed data

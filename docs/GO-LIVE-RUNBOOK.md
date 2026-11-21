@@ -85,7 +85,7 @@ TRUST_PROXY=loopback
 APP_BASE_URL=https://app.hospitalityfinancepro.com
 STORAGE_BACKEND=s3
 AWS_REGION=<region>
-TD_S3_BUCKET=<secure-transfer-desk-bucket>
+INTEGRATION_S3_BUCKET=<secure-integration-bucket>
 AWS_S3_BUCKET=<secure-report-bucket>
 ```
 

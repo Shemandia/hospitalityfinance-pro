@@ -16,7 +16,7 @@ Two Opera file types are covered for automated import:
 
 These files use the standard SunSystems SAF (Standard Accounting Format) pipe-delimited structure but carry **no financial impact**. They record operational KPIs such as occupancy, guest counts, arrivals, departures, cancellations, and market segment breakdowns.
 
-In SunSystems, this data posts to **Memo accounts** — a dedicated account type for non-financial information that is excluded from the trial balance and ignores debit/credit balancing rules. HFP implements this as the `STATISTICS` account type in the Chart of Accounts. Statistics files are processed through the same Transfer Desk SAF import pipeline as financial files (EZZRV, EZZCL), but post to statistics accounts with zero GL impact.
+In SunSystems, this data posts to **Memo accounts** — a dedicated account type for non-financial information that is excluded from the trial balance and ignores debit/credit balancing rules. HFP implements this as the `STATISTICS` account type in the Chart of Accounts. Statistics files are processed through the same Integrations SAF import pipeline as financial files (EZZRV, EZZCL), but post to statistics accounts with zero GL impact.
 
 ---
 
@@ -186,7 +186,7 @@ These are **not** populated by Opera PMS files. They are entered manually or imp
 
 ## 5. SAF File Format — Statistics Files
 
-Both EZZDS and EZZMS files follow the standard Opera PMS SAF export format: pipe-delimited, CRLF line endings, fixed-width padded fields. They share the same column layout as financial SAF files (EZZRV, EZZCL) and are processed by the same Transfer Desk import profile parser.
+Both EZZDS and EZZMS files follow the standard Opera PMS SAF export format: pipe-delimited, CRLF line endings, fixed-width padded fields. They share the same column layout as financial SAF files (EZZRV, EZZCL) and are processed by the same Integrations import profile parser.
 
 ### 5.1 Common SAF Column Layout
 
@@ -241,9 +241,9 @@ HFP calculates these KPIs from imported EZZDS data at query time or during a nig
 
 ---
 
-## 7. Transfer Desk Import Profile Configuration
+## 7. Integrations Import Profile Configuration
 
-Statistics files share the same SAF format as financial files and are handled by the existing Transfer Desk SAF import pipeline.
+Statistics files share the same SAF format as financial files and are handled by the existing Integrations SAF import pipeline.
 
 ### 7.1 Profile Definitions
 

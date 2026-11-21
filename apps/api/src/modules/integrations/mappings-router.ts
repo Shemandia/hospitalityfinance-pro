@@ -1,0 +1,43 @@
+/**
+ * TML Mapping API routes — target fields and pre-built functions.
+ *
+ * These are read-only endpoints that return the HFP target journal
+ * field definitions and the pre-built transform function library.
+ * Both are static constants (not DB-driven).
+ */
+
+import type { FastifyInstance } from "fastify";
+import { requireAuth } from "../../middleware/requireAuth.js";
+import { requirePermission } from "../../middleware/requirePermission.js";
+import { HFP_TARGET_FIELDS, PREBUILT_FUNCTIONS } from "./constants.js";
+
+// ── Router registration ──────────────────────────────────────────────────────
+
+export async function registerMappingsRouter(app: FastifyInstance): Promise<void> {
+  app.register(
+    async (router) => {
+      router.addHook("preHandler", requireAuth);
+
+      // ── GET /integrations/mappings/target-fields ─────────────────────
+
+      router.get(
+        "/integrations/builder/mappings/target-fields",
+        { preHandler: [requirePermission("INTEGRATIONS_READ")] },
+        async (_request, reply) => {
+          return reply.send({ data: HFP_TARGET_FIELDS, errors: [] });
+        }
+      );
+
+      // ── GET /integrations/mappings/functions ─────────────────────────
+
+      router.get(
+        "/integrations/builder/mappings/functions",
+        { preHandler: [requirePermission("INTEGRATIONS_READ")] },
+        async (_request, reply) => {
+          return reply.send({ data: PREBUILT_FUNCTIONS, errors: [] });
+        }
+      );
+    },
+    { prefix: "/api/v1" }
+  );
+}

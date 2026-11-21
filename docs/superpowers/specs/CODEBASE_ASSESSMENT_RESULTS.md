@@ -13,9 +13,9 @@ HFP has a **solid, working core ledger** (GL, AP, AR, FX, Period, Consolidation,
 
 1. **Financials Admin spec** — Core ledger is well-implemented against the spec. **Recently completed** (Sprints 15–17): Process Locks, Payment Profiles, Revaluation Profiles, Ledger Revaluation engine, Year-End P&L Cleardown, Intercompany Journals with dual-approval workflow. **Still missing**: Fixed Assets, Corporate Allocations, multi-stage Authorization workflow, Financial Calendars, 3-Writer Reporting (FAL/FSL/FTL). Several ENUMs and tables need **expanding** rather than rebuilding (`JournalSource`, `JournalLine` analysis dimensions, missing `ledger_setup` table).
 
-2. **Transfer Desk Technical spec** — The current `integration/` module is a functional layer of ad-hoc connectors (Opera Cloud, Sky Jana, Simphony, Mews, SAF, Bank, Payroll, Inbound) glued together by a custom `transform-engine.ts`. The spec's Transfer Desk model (18 tables, 73 endpoints, 2 custom libraries: `@hfp/fsd-engine` and `@hfp/tml-engine`) **does not exist as such**. `InterfaceDefinition` conflates what the spec separates into `transfer_formats` and `transfer_transformations`. The parsing rules are correct (Jana whole-integer vs ÷1000, Opera ÷1000); they just need to be ported into FSD/TML when those engines are built.
+2. **Integrations Technical spec** — The current `integration/` module is a functional layer of ad-hoc connectors (Opera Cloud, Sky Jana, Simphony, Mews, SAF, Bank, Payroll, Inbound) glued together by a custom `transform-engine.ts`. The spec's Integrations model (18 tables, 73 endpoints, 2 custom libraries: `@hfp/fsd-engine` and `@hfp/tml-engine`) **does not exist as such**. `InterfaceDefinition` conflates what the spec separates into `integration_formats` and `integration_transformations`. The parsing rules are correct (Jana whole-integer vs ÷1000, Opera ÷1000); they just need to be ported into FSD/TML when those engines are built.
 
-3. **Transfer Desk Self-Service Designer (UI) spec** — The UI is **~6% complete**. Only one embedded page exists (`settings/integrations/transfer-desk/page.tsx`), which is effectively Step 5 (Mapping) of the spec's 8-step profile wizard. None of the other 16 routes, 9 wizards, visual mapper, Format Designer, Lookup Editor, Automation Builder, File Repository, or Execution History exist. The RBAC divergence is significant — spec requires `transfer:user/power-user/designer/admin` namespace; codebase uses generic `VIEWER/CONTROLLER/ADMIN/SUPERADMIN`.
+3. **Integrations Self-Service Designer (UI) spec** — The UI is **~6% complete**. Only one embedded page exists (`settings/integrations/integrations/page.tsx`), which is effectively Step 5 (Mapping) of the spec's 8-step profile wizard. None of the other 16 routes, 9 wizards, visual mapper, Format Designer, Lookup Editor, Automation Builder, File Repository, or Execution History exist. The RBAC divergence is significant — spec requires `transfer:user/power-user/designer/admin` namespace; codebase uses generic `VIEWER/CONTROLLER/ADMIN/SUPERADMIN`.
 
 **What's working today (protect at all costs):**
 
@@ -46,7 +46,7 @@ HFP has a **solid, working core ledger** (GL, AP, AR, FX, Period, Consolidation,
 
 | Spec                     | Tables                              | Endpoints           | ENUMs | Business rules | Coverage today                                                                                                                                                                   |
 | ------------------------ | ----------------------------------- | ------------------- | ----- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Transfer Desk Technical  | 18                                  | 73                  | 12    | 28+            | 0 TD-native tables; 4 overlapping (`InterfaceDefinition`, `ConnectorMapping`, `ImportLog`, `PMSStatistic`). ~30 connector endpoints exist vs 73 spec endpoints. No FSD/TML libs. |
+| Integrations Technical   | 18                                  | 73                  | 12    | 28+            | 0 TD-native tables; 4 overlapping (`InterfaceDefinition`, `ConnectorMapping`, `ImportLog`, `PMSStatistic`). ~30 connector endpoints exist vs 73 spec endpoints. No FSD/TML libs. |
 | Financials Admin         | 43                                  | 25+                 | 7     | 15+            | 23 implemented / 8 partial / 12 missing. Core GL/AP/AR/FX/Period solid; Fixed Assets + Allocations + multi-stage auth entirely absent.                                           |
 | Self-Service Designer UI | 17 routes, 9 wizards, 15 components | 13 UI-specific APIs | —     | —              | 1 partial route; 0 wizards; 0 visual designers; 0 RBAC matrix. ~6% complete.                                                                                                     |
 
@@ -65,9 +65,9 @@ This is the ordered fix list if the goal is "ship a product that customers can u
 3. **Journal source list fix** — when the new enum values land, update the gl router to expose them in the journal create/post endpoints. Don't let this drift.
 4. **Expand `JournalLine` analysis dimensions from 6 to 10** (T7–T10). Spec requires 10; hospitality reporting benefits from the extra dimensions. Schema migration + service updates. (`schema-tenant.prisma` JournalLine)
 
-**From Transfer Desk Technical (blocks new profile-driven work, not existing connectors):**
+**From Integrations Technical (blocks new profile-driven work, not existing connectors):**
 
-5. **Add `transfer_profiles`, `transfer_profile_versions`, `transfer_filters`, `transfer_executions`, `transfer_execution_logs` tables.** These are the foundation; nothing in modules 2/3/4/5 can be built without them. (`schema-tenant.prisma`)
+5. **Add `integration_profiles`, `integration_profile_versions`, `integration_filters`, `integration_executions`, `integration_execution_logs` tables.** These are the foundation; nothing in modules 2/3/4/5 can be built without them. (`schema-tenant.prisma`)
 6. **Implement `TD-API-001..008`** (execution queue/list/detail/logs/payload/cancel/progress/purge) **and `TD-API-009..020`** (profile + filter CRUD). First batch of endpoints needed for any UI.
 7. **RLS policies on `transfer_*` tables** — do this as each table is added, not retroactively.
 8. **BullMQ `transfer:{tenant-slug}` worker** wired with per-tenant concurrency limits. Pattern already exists elsewhere; just needs a new worker class.
@@ -75,9 +75,9 @@ This is the ordered fix list if the goal is "ship a product that customers can u
 
 **From Self-Service Designer UI (the only P0/P1 UI items):**
 
-10. **Transfer Desk RBAC** — add `canTransferDeskUser`, `canTransferDeskPowerUser`, `canTransferDeskDesigner`, `canTransferDeskAdmin` helpers to `useUserRole.ts`. Don't create new Keycloak roles yet; map from the existing 4-level hierarchy for MVP. This unblocks all UI gating work. (1–2 hours.)
-11. **Landing page** (`/{tenant}/transfer-desk`) with sidebar nav + quick actions + recent executions + system profiles grid. Without this there's no entry point.
-12. **Profile list + detail + execution dialog** (3 pages). The existing `settings/integrations/transfer-desk/page.tsx` can be refactored into the detail view.
+10. **Integrations RBAC** — add `canIntegrationUser`, `canIntegrationPowerUser`, `canIntegrationDesigner`, `canIntegrationAdmin` helpers to `useUserRole.ts`. Don't create new Keycloak roles yet; map from the existing 4-level hierarchy for MVP. This unblocks all UI gating work. (1–2 hours.)
+11. **Landing page** (`/{tenant}/integrations`) with sidebar nav + quick actions + recent executions + system profiles grid. Without this there's no entry point.
+12. **Profile list + detail + execution dialog** (3 pages). The existing `settings/integrations/integrations/page.tsx` can be refactored into the detail view.
 13. **Execution history + execution detail pages** — paginated list + record-level log table. Required for users to investigate failures.
 
 ### P1 — required for MVP (the full feature set a customer expects)
@@ -95,14 +95,14 @@ This is the ordered fix list if the goal is "ship a product that customers can u
 - **Financial calendars** abstraction — currently periods are hardcoded to year/month on Entity.
 - **Period lifecycle: add `SOFT_CLOSE`** intermediate state between OPEN and LOCKED, and add flags (`revaluation_run`, `depreciation_run`, `allocations_run`, `year_end_processed`) on Period.
 
-**Transfer Desk Technical (the hard engineering work):**
+**Integrations Technical (the hard engineering work):**
 
 - **`@hfp/fsd-engine`** custom library — FSD XML parser/writer supporting 6 format classifications (delimited, single_fixed, multiple_fixed, other_flat, user_xml, simple_xml). Handles sequence/choice/record/field elements with all attributes (field-sep, record-sep, validValue, defaultValue, leading/trailingChars, outputIfEmpty, maxLength, truncate, quoted). Include the CSV triple-quote edge case normalization. **Prototype first** — this is the most technically complex item on the whole list.
 - **`@hfp/tml-engine`** custom library — TML XML parser + JS sandbox. Four commands: `map`, `set`, `transform`, `lookup`. Slash-separated data paths (spec) converted to dot notation (internal JSON model). `isolated-vm` with 64MB memory cap, 5s timeout, no filesystem/network, ES2020 only. This is the second-hardest item.
-- **Automation Engine** — `transfer_automations`, `transfer_automation_steps`, `transfer_automation_schedules` tables + `TD-API-021..030` endpoints + BullMQ flow orchestration (fail-on-error, parameter overrides that don't mutate the underlying profile). Cron scheduling with tenant timezone.
-- **Lookup Tables** — `transfer_lookup_tables`, `_columns`, `_rows`, `_values`. Critical detail: lookup ranges use **alphabetical collation**, not numeric. Value types: `constant`, `copy`, `map_to`, `omit`, `reverse_sign`. BU scope resolution with fallback to global.
-- **Journal Range Control** — `transfer_journal_ranges` table tracking `journal_number_from/to` per BU × ledger, auto-incrementing on subsequent runs.
-- **Port existing connector parsing rules into FSD + TML definitions** — once the engines exist, convert the hardcoded Opera/Jana/Simphony mappers into database-stored `transfer_formats` + `transfer_transformations` rows. The parsing rules (Jana whole-integer vs ÷1000, Opera ÷1000) are already correct in the connectors; it's a migration, not a rewrite.
+- **Automation Engine** — `integration_automations`, `integration_automation_steps`, `integration_automation_schedules` tables + `TD-API-021..030` endpoints + BullMQ flow orchestration (fail-on-error, parameter overrides that don't mutate the underlying profile). Cron scheduling with tenant timezone.
+- **Lookup Tables** — `integration_lookup_tables`, `_columns`, `_rows`, `_values`. Critical detail: lookup ranges use **alphabetical collation**, not numeric. Value types: `constant`, `copy`, `map_to`, `omit`, `reverse_sign`. BU scope resolution with fallback to global.
+- **Journal Range Control** — `integration_journal_ranges` table tracking `journal_number_from/to` per BU × ledger, auto-incrementing on subsequent runs.
+- **Port existing connector parsing rules into FSD + TML definitions** — once the engines exist, convert the hardcoded Opera/Jana/Simphony mappers into database-stored `integration_formats` + `integration_transformations` rows. The parsing rules (Jana whole-integer vs ÷1000, Opera ÷1000) are already correct in the connectors; it's a migration, not a rewrite.
 
 **Self-Service Designer UI:**
 
@@ -124,12 +124,12 @@ This is the ordered fix list if the goal is "ship a product that customers can u
 - ~~**Intercompany journals**~~ ✅ Done (Sprint 17) — cross-entity posting with mirrored entries, IC account pairs, dual-approval workflow, INTERCOMPANY dimension for consolidation elimination.
 - **Multi-currency reporting** with reporting currency columns on JournalLine.
 
-**Transfer Desk Technical:**
+**Integrations Technical:**
 
-- **Server Folder Management** — `transfer_folders`, `transfer_folder_access`, `transfer_files` tables + `TD-API-063..070`. S3 pre-signed URLs, folder hierarchy, per-folder access control.
+- **Server Folder Management** — `integration_folders`, `integration_folder_access`, `integration_files` tables + `TD-API-063..070`. S3 pre-signed URLs, folder hierarchy, per-folder access control.
 - **Configuration Export/Import/Cleardown** — `TD-API-031..033`. Serialize all TD config to a single JSON file in S3; double-confirm token-based cleardown.
 - **Pre-built hospitality profiles in DB** — once FSD/TML engines exist, ship Opera EZZRV/EZZCL/EZZMS/EZZDS, Jana purchasing voucher / internal movement / inventory differences, Simphony POS as system profiles that tenants can clone.
-- **License entitlement gating** — feature tier matrix (Starter/Pro/Enterprise) for Transfer Desk features.
+- **License entitlement gating** — feature tier matrix (Starter/Pro/Enterprise) for Integrations features.
 
 **Self-Service Designer UI:**
 
@@ -156,14 +156,14 @@ This is the ordered fix list if the goal is "ship a product that customers can u
 These are low-risk items that close a visible gap fast:
 
 1. **Expand `JournalSource` enum** with the 7 missing values. Migration + enum update. ~1 hour.
-2. **Add `canTransferDesk*` helpers** to `useUserRole.ts`. ~1 hour.
+2. **Add `canIntegration*` helpers** to `useUserRole.ts`. ~1 hour.
 3. **Rename-or-delete `withRLSBypassed`** (dead code, flagged in the tenant-isolation audit) and the manual `setEntityDbContext` exports. ~30 mins.
-4. **Stub the 9 missing Transfer Desk API-client functions** in `gl-api.ts` (detectFormat, getComponentSchemas, autoMap, getFunctionLibrary, testFunction, validateProfile, dryRun, getExecutionStats, getLicenseEntitlements) so the frontend pages don't break on import. ~2 hours.
-5. **Add `GET /api/v1/integration/transfer-desk/components`** returning HFP component schemas (Ledger, AP, AR, COA, Supplier, Customer, AddressBook, PO, Budget). ~3 hours.
-6. **Transfer Desk Landing page** (static dashboard with nav + cards). ~3 hours.
-7. **Transfer Desk Settings page** stub (Export / Import / Cleardown tabs with no-op mutations). ~3 hours.
+4. **Stub the 9 missing Integrations API-client functions** in `gl-api.ts` (detectFormat, getComponentSchemas, autoMap, getFunctionLibrary, testFunction, validateProfile, dryRun, getExecutionStats, getLicenseEntitlements) so the frontend pages don't break on import. ~2 hours.
+5. **Add `GET /api/v1/integrations/components`** returning HFP component schemas (Ledger, AP, AR, COA, Supplier, Customer, AddressBook, PO, Budget). ~3 hours.
+6. **Integrations Landing page** (static dashboard with nav + cards). ~3 hours.
+7. **Integrations Settings page** stub (Export / Import / Cleardown tabs with no-op mutations). ~3 hours.
 8. **File Repository stub page** (folder tree + file list + disabled upload). ~2 hours.
-9. **Extract `FieldMappingEditor`** component from the current transfer-desk page so it can be reused in the wizard Step 5. ~3 hours.
+9. **Extract `FieldMappingEditor`** component from the current integrations page so it can be reused in the wizard Step 5. ~3 hours.
 10. **Add `tenantSlug` to every TanStack Query key** as a defensive prefix (from the tenant-isolation audit MED-7). ~2 hours.
 
 ---
@@ -175,12 +175,12 @@ These are low-risk items that close a visible gap fast:
 - P0 items 1–4 from the P0 list (JournalSource enum, ledger_setup table, source list fix, 10 analysis dimensions)
 - Plus Quick wins 1, 2, 3, 10
 
-**Sprint 2 — Transfer Desk foundation (2 weeks):**
+**Sprint 2 — Integrations foundation (2 weeks):**
 
 - P0 items 5–9 (TD tables, first 20 endpoints, RLS, BullMQ worker, is_valid enforcement)
 - Plus Quick wins 4, 5
 
-**Sprint 3 — Transfer Desk entry UI (2 weeks):**
+**Sprint 3 — Integrations entry UI (2 weeks):**
 
 - P0 items 10–13 (RBAC helpers, Landing, Profile list/detail/execution dialog, Execution history)
 - Plus Quick wins 6, 7, 8, 9
@@ -240,22 +240,22 @@ These are low-risk items that close a visible gap fast:
 
 **Well-implemented (protect):** Period lifecycle, AP/AR, Payment Run 3-step process, FX rates + revaluation, Consolidation with CTA, Audit log, SAF import.
 
-### B. Transfer Desk Technical — top 15 gaps (see TD Technical agent report for the full 73-endpoint matrix)
+### B. Integrations Technical — top 15 gaps (see TD Technical agent report for the full 73-endpoint matrix)
 
 | Spec ID         | Item                                                                       | Status       | File(s)                 | Priority |
 | --------------- | -------------------------------------------------------------------------- | ------------ | ----------------------- | -------- |
-| TD-DB-003       | `transfer_profiles` table                                                  | ❌ Missing   | `schema-tenant.prisma`  | P0       |
-| TD-DB-001/002   | `transfer_executions` + `transfer_execution_logs`                          | ❌ Missing   | `schema-tenant.prisma`  | P0       |
+| TD-DB-003       | `integration_profiles` table                                               | ❌ Missing   | `schema-tenant.prisma`  | P0       |
+| TD-DB-001/002   | `integration_executions` + `integration_execution_logs`                    | ❌ Missing   | `schema-tenant.prisma`  | P0       |
 | TD-API-001..008 | Execution endpoints (queue/list/detail/logs/payload/cancel/progress/purge) | ❌ Missing   | `integration/router.ts` | P0       |
 | TD-API-009..020 | Profile + Filter CRUD endpoints                                            | ❌ Missing   | `integration/router.ts` | P0       |
 | TD-BL-026       | RLS policies on `transfer_*` tables                                        | ❌ Missing   | `db/sql/entity-rls.sql` | P0       |
 | TD-BL-027       | BullMQ `transfer:{tenant-slug}` worker                                     | ❌ Missing   | `jobs/`                 | P0       |
-| TD-DB-010       | `transfer_formats` table (separate from InterfaceDefinition)               | 🔄 Divergent | `schema-tenant.prisma`  | P0       |
+| TD-DB-010       | `integration_formats` table (separate from InterfaceDefinition)            | 🔄 Divergent | `schema-tenant.prisma`  | P0       |
 | TD-FSD-001..010 | `@hfp/fsd-engine` library (6 format classifications)                       | ❌ Missing   | —                       | P1       |
 | TD-TML-001..008 | `@hfp/tml-engine` library + `isolated-vm` sandbox                          | ❌ Missing   | —                       | P1       |
 | TD-DB-007..009  | Automation engine tables                                                   | ❌ Missing   | `schema-tenant.prisma`  | P1       |
 | TD-DB-012..015  | Lookup tables (4 tables, alpha collation)                                  | ❌ Missing   | `schema-tenant.prisma`  | P1       |
-| TD-DB-006       | `transfer_journal_ranges` (Journal Range Control)                          | ❌ Missing   | `schema-tenant.prisma`  | P1       |
+| TD-DB-006       | `integration_journal_ranges` (Journal Range Control)                       | ❌ Missing   | `schema-tenant.prisma`  | P1       |
 | TD-DB-016..018  | Server folder management (3 tables)                                        | ❌ Missing   | `schema-tenant.prisma`  | P2       |
 | TD-API-031..033 | Config export/import/cleardown                                             | ❌ Missing   | `integration/router.ts` | P2       |
 | TD-HOS-001..010 | Pre-built hospitality profiles as DB rows                                  | ⚠️ Partial   | `connectors/`           | P2       |
@@ -269,23 +269,23 @@ These are low-risk items that close a visible gap fast:
 
 ### C. Self-Service Designer UI — top 15 gaps (see SSD agent report for the full 17-route matrix)
 
-| Spec ID          | Item                                                  | Status     | File(s)                                        | Priority |
-| ---------------- | ----------------------------------------------------- | ---------- | ---------------------------------------------- | -------- |
-| UI-RBAC-001..004 | `transfer:user/power-user/designer/admin` RBAC matrix | ❌ Missing | `use-user-role.ts`                             | P0       |
-| UI-URL-001       | `/{tenant}/transfer-desk` landing page                | ❌ Missing | —                                              | P1       |
-| UI-URL-002       | `/{tenant}/transfer-desk/profiles` list               | ❌ Missing | —                                              | P1       |
-| UI-URL-003       | Profile creation wizard (5 types × 8 steps)           | ❌ Missing | —                                              | P1       |
-| UI-URL-004       | Profile detail / editor                               | ⚠️ Partial | `settings/integrations/transfer-desk/page.tsx` | P1       |
-| UI-URL-005       | Profile execution dialog with SSE                     | ⚠️ Partial | same page                                      | P1       |
-| UI-URL-019       | `/{tenant}/transfer-desk/history` execution history   | ❌ Missing | —                                              | P1       |
-| UI-URL-020       | Execution detail with record-level logs               | ❌ Missing | —                                              | P1       |
-| UI-RT-001        | SSE progress streaming                                | ❌ Missing | —                                              | P1       |
-| UI-VM-001..011   | Visual Transformation Mapper (three-column canvas)    | ❌ Missing | —                                              | P2       |
-| UI-URL-011       | Format Designer (GUI + Code tabs)                     | ❌ Missing | —                                              | P2       |
-| UI-URL-017       | Lookup Table Editor (spreadsheet)                     | ❌ Missing | —                                              | P2       |
-| UI-URL-008       | Automation Builder (visual pipeline canvas)           | ❌ Missing | —                                              | P2       |
-| UI-URL-018       | File Repository browser                               | ❌ Missing | —                                              | P2       |
-| UI-URL-021       | Config Export/Import/Cleardown admin page             | ❌ Missing | —                                              | P3       |
+| Spec ID          | Item                                                  | Status     | File(s)                                       | Priority |
+| ---------------- | ----------------------------------------------------- | ---------- | --------------------------------------------- | -------- |
+| UI-RBAC-001..004 | `transfer:user/power-user/designer/admin` RBAC matrix | ❌ Missing | `use-user-role.ts`                            | P0       |
+| UI-URL-001       | `/{tenant}/integrations` landing page                 | ❌ Missing | —                                             | P1       |
+| UI-URL-002       | `/{tenant}/integrations/profiles` list                | ❌ Missing | —                                             | P1       |
+| UI-URL-003       | Profile creation wizard (5 types × 8 steps)           | ❌ Missing | —                                             | P1       |
+| UI-URL-004       | Profile detail / editor                               | ⚠️ Partial | `settings/integrations/integrations/page.tsx` | P1       |
+| UI-URL-005       | Profile execution dialog with SSE                     | ⚠️ Partial | same page                                     | P1       |
+| UI-URL-019       | `/{tenant}/integrations/history` execution history    | ❌ Missing | —                                             | P1       |
+| UI-URL-020       | Execution detail with record-level logs               | ❌ Missing | —                                             | P1       |
+| UI-RT-001        | SSE progress streaming                                | ❌ Missing | —                                             | P1       |
+| UI-VM-001..011   | Visual Transformation Mapper (three-column canvas)    | ❌ Missing | —                                             | P2       |
+| UI-URL-011       | Format Designer (GUI + Code tabs)                     | ❌ Missing | —                                             | P2       |
+| UI-URL-017       | Lookup Table Editor (spreadsheet)                     | ❌ Missing | —                                             | P2       |
+| UI-URL-008       | Automation Builder (visual pipeline canvas)           | ❌ Missing | —                                             | P2       |
+| UI-URL-018       | File Repository browser                               | ❌ Missing | —                                             | P2       |
+| UI-URL-021       | Config Export/Import/Cleardown admin page             | ❌ Missing | —                                             | P3       |
 
 **Well-implemented (protect):** InterfaceDefinition CRUD + PreviewPanel + execution dialog (these will become the Profile detail view). Field mapping table as the foundation for Step 5 of the wizard.
 
@@ -319,14 +319,14 @@ Per the user's explicit exclusions, the following domains were **not assessed** 
 - Budgets, Allocations (planned), Consolidation
 - Financial Reporting (trial balance, balance sheet, cash flow, USALI P&L)
 - Fixed Assets (planned, spec present)
-- Transfer Desk for journal-only imports from PMS (Opera), POS (Simphony), Inventory System (Jana), Bank statements
+- Integrations for journal-only imports from PMS (Opera), POS (Simphony), Inventory System (Jana), Bank statements
 
 ---
 
 ## Cross-references
 
 - **Tenant isolation audit** — see `finalv1 findings.md` in this directory for 5 critical, 8 high, 11 medium findings on cross-tenant data exposure. That audit is independent of this assessment and should be read alongside.
-- **Spec documents** — `HFP_TransferDesk_TechnicalSpecification_v1_0.md`, `HFP_FinancialsAdmin_TechnicalSpec_v1_0.md`, `HFP_TransferDesk_SelfService_Designer_v1_0.md` in this directory.
+- **Spec documents** — `HFP_Integration_TechnicalSpecification_v1_0.md`, `HFP_FinancialsAdmin_TechnicalSpec_v1_0.md`, `HFP_Integration_SelfService_Designer_v1_0.md` in this directory.
 - **Assessment process** — `CODEBASE_ASSESSMENT_TASKS.md` in this directory.
 
 ---

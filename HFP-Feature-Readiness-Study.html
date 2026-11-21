@@ -148,7 +148,7 @@
 
   <div class="grid g4" style="margin-top:22px">
     <div class="card kpi"><span class="big accent">~50%</span><span class="lbl">Production-ready (financial correctness weighted)</span></div>
-    <div class="card kpi"><span class="big">24</span><span class="lbl">Modules built (GL → consolidation → Transfer Desk)</span></div>
+    <div class="card kpi"><span class="big">24</span><span class="lbl">Modules built (GL → consolidation → Integrations)</span></div>
     <div class="card kpi"><span class="big" style="color:var(--bad)">9</span><span class="lbl">P0 correctness blockers before go-live</span></div>
     <div class="card kpi"><span class="big" style="color:var(--ok)">Strong</span><span class="lbl">Architecture & breadth — a real ERP, not a prototype</span></div>
   </div>
@@ -160,7 +160,7 @@
       <span class="pill bad dot">Not tax-aware (TZ VAT)</span>
       <span class="pill info dot">SunSystems parity is real, not cosmetic</span>
     </div>
-    <p style="margin:0 0 8px">This is a <b>serious, well-architected financial ERP</b> — multi-tenant (database-per-tenant with row-level security), multi-entity (Group → Property), multi-currency, with a real SunSystems-style report writer (FAL/FSL/FTL), a working <b>Transfer Desk</b> import subsystem with its own format engine (<code>fsd-engine</code>) and sandboxed transformation language (<code>tml-engine</code>), plus PMS/POS/bank/payroll connectors and USALI hospitality P&L. The double-entry plumbing — row-locking on posting, atomic balance upserts, <code>Decimal</code> money math — is solid where it counts. Many critical issues from the April inspections have genuinely been fixed.</p>
+    <p style="margin:0 0 8px">This is a <b>serious, well-architected financial ERP</b> — multi-tenant (database-per-tenant with row-level security), multi-entity (Group → Property), multi-currency, with a real SunSystems-style report writer (FAL/FSL/FTL), a working <b>Integrations</b> import subsystem with its own format engine (<code>fsd-engine</code>) and sandboxed transformation language (<code>tml-engine</code>), plus PMS/POS/bank/payroll connectors and USALI hospitality P&L. The double-entry plumbing — row-locking on posting, atomic balance upserts, <code>Decimal</code> money math — is solid where it counts. Many critical issues from the April inspections have genuinely been fixed.</p>
     <p style="margin:0"><b>But it cannot yet be trusted to close a month or a year.</b> A small number of deep, cross-cutting defects break the one thing a finance system exists to do — produce a correct trial balance and balance sheet. The gap is not breadth (breadth is excellent); it's <b>a handful of correctness fixes at the core</b>. Fix the nine P0 items and this crosses from "impressive demo running on live data" to "system of record."</p>
   </div>
 
@@ -202,7 +202,7 @@
       <h3 style="margin-top:2px">SunSystems-class capability</h3>
       <ul class="clean">
         <li><b>Genuine Q&A-style report writer</b> — FAL (account listing), FSL (P&L/BS/CF), FTL (transaction listing) with drill-down and seeded USALI departmental P&L (<code>reporting/report-engine.ts</code>).</li>
-        <li><b>Transfer Desk is end-to-end and governed</b> — upload → detect → parse → transform → <b>held batch → review → commit through GL approval</b>, not a bypass.</li>
+        <li><b>Integrations is end-to-end and governed</b> — upload → detect → parse → transform → <b>held batch → review → commit through GL approval</b>, not a bypass.</li>
         <li><b>Own format engine + transformation DSL</b> (<code>fsd-engine</code>, <code>tml-engine</code>) — the actual SunSystems differentiator, and it's real.</li>
       </ul>
     </div>
@@ -291,12 +291,12 @@
       <h3>Phase 2 · Close the workflow gaps <span class="pill p1" style="margin-left:8px">P1 · ~3–5 weeks</span></h3>
       <p class="tag" style="margin-top:0">Goal: a finance clerk can run the full monthly cycle from the UI without SQL.</p>
       <ul class="clean">
-        <li><b>Import idempotency</b> — content-hash / unique-constraint on the generic Transfer Desk path, bank, and Sky Jana so re-runs can't duplicate journals; wrap commits in transactions and make them resumable.</li>
+        <li><b>Import idempotency</b> — content-hash / unique-constraint on the generic Integrations path, bank, and Sky Jana so re-runs can't duplicate journals; wrap commits in transactions and make them resumable.</li>
         <li><b>Overdue-aging job</b> so dunning actually fires; fix or remove the broken collection-run.</li>
         <li>Kill remaining <b>float on money</b> in <code>fsd-engine</code> coercion, <code>tml-engine</code> money functions, and the bank / Sky Jana parsers.</li>
         <li>Wire the <b>already-built endpoints</b> with no UI: report scheduling, AR receipts register, AP/AR invoice edit/delete/void, user activate-deactivate.</li>
         <li><b>Segregation of duties</b>: enforce creator ≠ approver; consolidate the two overlapping journal-approval systems into one.</li>
-        <li>Entity-scope + RLS on Transfer Desk batch tables; make background jobs (dunning, recurring, reports) tenant-aware.</li>
+        <li>Entity-scope + RLS on Integrations batch tables; make background jobs (dunning, recurring, reports) tenant-aware.</li>
         <li>Client-side numeric validation on money inputs; realized FX gain/loss on settlement; AR credit notes &amp; write-offs.</li>
       </ul>
     </div>
@@ -316,7 +316,7 @@
 </section>
 
 <div class="foot">
-  <p><b>Method.</b> Six parallel domain audits read the live source at file/line granularity — GL core; AP/AR; multi-entity finance (FX, consolidation, intercompany, budget, fixed assets); Transfer Desk &amp; connectors; platform/tenancy/security; web UI &amp; reporting — cross-checked against the two April inspection reports and git history, then reconciled. The two root-cause claims (missing balance carry-forward; materialized-view casing bug) were re-verified by hand in the code. Findings reflect the codebase as of the last commit (12 Jun 2026).</p>
+  <p><b>Method.</b> Six parallel domain audits read the live source at file/line granularity — GL core; AP/AR; multi-entity finance (FX, consolidation, intercompany, budget, fixed assets); Integrations &amp; connectors; platform/tenancy/security; web UI &amp; reporting — cross-checked against the two April inspection reports and git history, then reconciled. The two root-cause claims (missing balance carry-forward; materialized-view casing bug) were re-verified by hand in the code. Findings reflect the codebase as of the last commit (12 Jun 2026).</p>
   <p>Prepared for the HospitalityFinance Pro team · running live for Essque Hotels Group (Essque Zalu Zanzibar, Niamembe Island).</p>
 </div>
 
@@ -336,7 +336,7 @@ const scores=[
  ["Intercompany","dual-entity postings",60,"md"],
  ["Budget","variance",65,"md"],
  ["Fixed assets","depreciation, disposal",50,"md"],
- ["Transfer Desk engine","import pipeline",65,"md"],
+ ["Integrations engine","import pipeline",65,"md"],
  ["Integration connectors","PMS/POS/bank/payroll",55,"md"],
  ["Reporting engine","FAL/FSL/FTL, USALI",70,"hi"],
  ["Dashboards / KPI","role dashboards",40,"lo"],
@@ -371,8 +371,8 @@ const blockers=[
  {n:8,h:"Consolidation eliminations and translation are wrong",mod:"Consolidation",
   d:"IC eliminations are summed in each child's <i>functional</i> currency then subtracted from a <i>reporting</i>-currency figure (<code>consolidation/service.ts:314</code>) — a ~2500× mismatch for a TZS child in USD. And a missing closing/average rate falls back to 1:1 with only a warning (<code>:209</code>), silently overstating foreign balances.",
   s:"Consolidate a TZS property into the USD group → eliminations and translated balances are off by orders of magnitude."},
- {n:9,h:"Imports can duplicate journals on re-run",mod:"Transfer Desk / Bank",
-  d:"The generic Transfer Desk path has no import-level idempotency — re-running creates a second held batch → duplicate GL journals (<code>transfer-desk-record-mapper.ts:122</code>); commit flips batch status <i>before</i> posting and isn't transactional (<code>batch-service.ts:116</code>). Bank and Sky Jana re-imports duplicate the whole statement. Batch operations also aren't entity-scoped (cross-property exposure).",
+ {n:9,h:"Imports can duplicate journals on re-run",mod:"Integrations / Bank",
+  d:"The generic Integrations path has no import-level idempotency — re-running creates a second held batch → duplicate GL journals (<code>integration-record-mapper.ts:122</code>); commit flips batch status <i>before</i> posting and isn't transactional (<code>batch-service.ts:116</code>). Bank and Sky Jana re-imports duplicate the whole statement. Batch operations also aren't entity-scoped (cross-property exposure).",
   s:"Re-upload last night's PMS file after a timeout → revenue posted twice."},
 ];
 
@@ -417,18 +417,18 @@ const findings=[
  {sev:"MED",mod:"Budget",h:"Monthly budget compared to cumulative balance",loc:"budget/service.ts:130",d:"Variance compares a monthly line to the cumulative MV closing balance; over/understates for P&L accounts carrying within-year balances."},
  {sev:"LOW",mod:"FixedAssets",h:"Depreciation ignores in-service timing",loc:"fixed-asset/service.ts:235–304",d:"depreciationStartPeriodId / firstPeriodDays stored but unused; no first-period proration; assets depreciate before in-service; USER_TABLE method returns zero."},
  {sev:"LOW",mod:"Consolidation",h:"MV read without pre-refresh",loc:"jobs/mv-refresh-job.ts:44",d:"Consolidation/budget read the MV with no pre-refresh; a 15-min cron with a singleton jobId can drop a queued refresh → up to 15-min stale financials."},
- // Transfer Desk / integrations
- {sev:"P0",mod:"TransferDesk",h:"Generic imports duplicate journals on re-run",loc:"transfer-desk-record-mapper.ts:122 · batch-service.ts:116",d:"See blocker #9. No import idempotency; non-transactional, non-resumable commit."},
- {sev:"HIGH",mod:"TransferDesk",h:"Batch operations not entity-scoped",loc:"batch-service.ts:40–112",d:"getBatch/commit/discard query by id only; routes never pass entityId; batch tables absent from RLS. A user in hotel A can commit or discard hotel B's staged batch."},
- {sev:"HIGH",mod:"TransferDesk",h:"FSD engine coerces money to float64",loc:"fsd-engine/src/parsers/shared.ts:70",d:"decimal/currency fields parsed to JS float, then String()→Decimal — precision lost whenever a profile types an amount as decimal/currency. Config-dependent and silent."},
+ // Integrations / integrations
+ {sev:"P0",mod:"Integrations",h:"Generic imports duplicate journals on re-run",loc:"integration-record-mapper.ts:122 · batch-service.ts:116",d:"See blocker #9. No import idempotency; non-transactional, non-resumable commit."},
+ {sev:"HIGH",mod:"Integrations",h:"Batch operations not entity-scoped",loc:"batch-service.ts:40–112",d:"getBatch/commit/discard query by id only; routes never pass entityId; batch tables absent from RLS. A user in hotel A can commit or discard hotel B's staged batch."},
+ {sev:"HIGH",mod:"Integrations",h:"FSD engine coerces money to float64",loc:"fsd-engine/src/parsers/shared.ts:70",d:"decimal/currency fields parsed to JS float, then String()→Decimal — precision lost whenever a profile types an amount as decimal/currency. Config-dependent and silent."},
  {sev:"HIGH",mod:"Integration",h:"Bank import: float money + duplicates statements",loc:"bank-statement-importer.ts:112",d:"parseFloat on all amounts; re-importing the same MT940/OFX creates a new statement id so dedup fails and the whole statement duplicates. No file hash, no transaction."},
- {sev:"MED",mod:"TransferDesk",h:"TML money functions use float",loc:"tml-engine/src/functions.ts:98",d:"multiply/divide/round/taxExtract use Number() and round to 2dp — truncates the 3rd decimal of ÷1000 amounts. Any money math in TML loses precision."},
+ {sev:"MED",mod:"Integrations",h:"TML money functions use float",loc:"tml-engine/src/functions.ts:98",d:"multiply/divide/round/taxExtract use Number() and round to 2dp — truncates the 3rd decimal of ÷1000 amounts. Any money math in TML loses precision."},
  {sev:"MED",mod:"Integration",h:"Sky Jana job: no dedup, float, no transaction",loc:"sky-jana-sync-job.ts:196",d:"Creates JANA- journals with no existence check; re-run or archive failure duplicates journals; 2dp rounding on 3-decimal amounts."},
  {sev:"MED",mod:"Integration",h:"No transaction on Opera/SAF/payroll posts",loc:"opera-cloud-import-job.ts:436",d:"Journal + balance upserts + import-log update are separate writes; a mid-run crash leaves partial balances and a stuck RUNNING log."},
  {sev:"MED",mod:"Integration",h:"Simphony posting code is dead but unsafe",loc:"simphony-import-job.ts:60",d:"Hard-disabled by a throw; the dead path would post unbalanced POSTED journals (float, no suspense) if ever re-enabled."},
- {sev:"MED",mod:"TransferDesk",h:"No FSD/TML/sandbox tests",loc:"packages/*/tests",d:"Zero unit tests for the format and transformation engines; the isolated-vm escape surface is entirely unverified."},
- {sev:"LOW",mod:"TransferDesk",h:"Orphan parsers not wired",loc:"fsd-engine/src/parsers/",d:"delimited.ts / fixed-width.ts / xml.ts exist but aren't imported by engine.ts — dead/duplicate code. Serialisation is CSV/TSV only."},
- {sev:"LOW",mod:"TransferDesk",h:"AUTO_COMMIT bypasses human review",loc:"transfer-desk-batch-stager.ts:108",d:"Scheduled/automation runs skip the held-batch review entirely — a controls question worth an explicit decision."},
+ {sev:"MED",mod:"Integrations",h:"No FSD/TML/sandbox tests",loc:"packages/*/tests",d:"Zero unit tests for the format and transformation engines; the isolated-vm escape surface is entirely unverified."},
+ {sev:"LOW",mod:"Integrations",h:"Orphan parsers not wired",loc:"fsd-engine/src/parsers/",d:"delimited.ts / fixed-width.ts / xml.ts exist but aren't imported by engine.ts — dead/duplicate code. Serialisation is CSV/TSV only."},
+ {sev:"LOW",mod:"Integrations",h:"AUTO_COMMIT bypasses human review",loc:"integration-batch-stager.ts:108",d:"Scheduled/automation runs skip the held-batch review entirely — a controls question worth an explicit decision."},
  // Platform
  {sev:"HIGH",mod:"Platform",h:"AsyncLocalStorage uses unsafe enterWith",loc:"app.ts:104 · requestContext.ts:47",d:"Hot path uses enterWith (no clean exit, can bleed context across async continuations) though the safe runWithContext exists and is imported. If context is lost, the proxy routes to the shared default DB."},
  {sev:"HIGH",mod:"Platform",h:"Child line tables have no RLS",loc:"schema-tenant.prisma:750",d:"journal_lines / ap_invoice_lines / ar_invoice_lines / po_lines / recurring_journal_lines have no entity_id and no policy; raw SQL or a bare findMany bypasses isolation on the highest-volume tables."},
@@ -456,7 +456,7 @@ const keep=[
  ["Database-per-tenant + RLS","Strong isolation model; the April criticals are fixed. This is a genuine competitive asset."],
  ["RBAC with privilege ceiling","Real, enforced, entity-scoped. Only needs default-deny and a couple of policy gaps closed."],
  ["FAL/FSL/FTL report engine + USALI","The SunSystems Q&A parity — real and rare. This is a headline selling point."],
- ["Transfer Desk + fsd/tml engines","Your core differentiator vs generic accounting tools. Fix precision + idempotency, then market it hard."],
+ ["Integrations + fsd/tml engines","Your core differentiator vs generic accounting tools. Fix precision + idempotency, then market it hard."],
  ["Mews & Inbound connectors","Reference-quality (transactional, Decimal-clean, suspense-balanced). Use them as the template for the others."],
  ["Advisory-lock process locks","Correctly serialize close/consolidation/depreciation. Keep."],
  ["Role dashboards","All real and API-wired — no mock data to unwind."],
@@ -471,7 +471,7 @@ const remove=[
  ["Duplicate entity store","useAppStore.activeEntityId duplicates entity-provider's store; only one drives API calls. Collapse to one."],
  ["getKPIDashboard dead wrapper","Never called; dashboards compose individual endpoints. Remove."],
  ["RabbitMQ service","Present in docker-compose but unused (runtime is BullMQ/Redis). Extra attack surface — drop it."],
- ["'Coming soon' placeholders","Transfer Desk 'Recent Executions' widget and disabled 'New Profile' button — wire or hide."],
+ ["'Coming soon' placeholders","Integrations 'Recent Executions' widget and disabled 'New Profile' button — wire or hide."],
 ];
 
 const add=[
@@ -494,7 +494,7 @@ const ss=[
  ["Multi-ledger GL + subledgers","At parity","GL, AP, AR present with double-entry and locking. Depth gaps (VAT, carry-forward) are the work.","hi"],
  ["Multi-currency + revaluation","Partial","Rates and two reval engines exist but have sign/idempotency/rate-source bugs. Correct the engine, don't add more.","lo"],
  ["Consolidation","Partial","Aggregation + lineage-checked eliminations exist but currency translation is broken. Report-only (no consolidated journal / NCI).","lo"],
- ["Transfer Desk (import)","At / beyond parity","Own format engine + transformation DSL + governed held-batch review. Precision + idempotency are the gaps.","md"],
+ ["Integrations (import)","At / beyond parity","Own format engine + transformation DSL + governed held-batch review. Precision + idempotency are the gaps.","md"],
  ["Q&A ad-hoc report writer","At parity","FAL/FSL/FTL with drill-down and seeded definitions — genuinely SunSystems-class.","hi"],
  ["Budgeting","At parity","Definitions, lines, variance. Minor basis fix needed.","md"],
  ["Fixed assets","Partial","Register + idempotent depreciation, but acquisition/disposal don't post to the GL correctly.","lo"],

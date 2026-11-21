@@ -1,11 +1,11 @@
 /**
  * @hfp/fsd-engine
  *
- * Flat-file Schema Definition engine for HFP Transfer Desk.
+ * Flat-file Schema Definition engine for HFP Integrations.
  *
  * Parses FSD definitions (TypeScript/JSON model) and performs bidirectional
  * conversion between flat files and JSON record arrays. Supports 3 of the 6
- * FSD classifications from the Transfer Desk Technical Specification Module 4:
+ * FSD classifications from the Integrations Technical Specification Module 4:
  *
  *   - DELIMITED        — CSV, TSV, semicolon, custom delimiters
  *   - SINGLE_FIXED     — fixed-width with one record type

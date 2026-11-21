@@ -103,7 +103,7 @@ API → http://localhost:4000, web → http://localhost:3000 (Next dev default).
 
 ### Background workers (optional)
 
-The async workers (Transfer Desk imports and exports, report generation, dunning, scheduled reports) run on BullMQ over **Redis**, in their own process. The API only queues the work: without this process a Transfer Desk run stays `QUEUED`. Start it when you use those features:
+The async workers (Integrations imports and exports, report generation, dunning, scheduled reports) run on BullMQ over **Redis**, in their own process. The API only queues the work: without this process a Integrations run stays `QUEUED`. Start it when you use those features:
 
 ```powershell
 pnpm --filter @hfp/api run workers

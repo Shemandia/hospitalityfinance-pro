@@ -12,7 +12,7 @@
   - Set `REDIS_URL` in API `.env`
 
 - [ ] S3-compatible storage or private local storage
-  - Set `STORAGE_BACKEND`, `TD_LOCAL_UPLOADS_PATH`, `TD_S3_BUCKET`, `AWS_S3_BUCKET`, and `AWS_REGION`
+  - Set `STORAGE_BACKEND`, `INTEGRATION_UPLOADS_PATH`, `INTEGRATION_S3_BUCKET`, `AWS_S3_BUCKET`, and `AWS_REGION`
   - Local storage must not point inside a public web root
 
 ## Application
@@ -33,7 +33,7 @@
 
 - [ ] Workers
   - `pnpm --filter @hfp/api run workers:prod` or `pm2 start ecosystem.config.cjs --only hfp-workers`
-  - Worker supervisor starts report generation, dunning, scheduled reports, and Transfer Desk workers
+  - Worker supervisor starts report generation, dunning, scheduled reports, and Integrations workers
   - See `docs/NON-DOCKER-SETUP.md` for direct PM2 deployment
 
 ## Security

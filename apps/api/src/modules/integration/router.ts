@@ -10,7 +10,7 @@ import { registerPayrollRoutes } from "./routes/payroll.js";
 import { registerSAFRoutes } from "./routes/saf.js";
 import { registerInboundRoutes } from "./routes/inbound.js";
 import { registerInterfaceRoutes } from "./routes/interfaces.js";
-import { registerTransferDeskRoutes } from "./routes/transfer-desk.js";
+import { registerIntegrationRoutes } from "./routes/pipeline.js";
 import { registerImportOpsRoutes } from "./routes/imports.js";
 
 export async function registerIntegrationRouter(app: FastifyInstance): Promise<void> {
@@ -29,9 +29,9 @@ export async function registerIntegrationRouter(app: FastifyInstance): Promise<v
       registerSAFRoutes(router);
       registerInboundRoutes(router);
       registerInterfaceRoutes(router);
-      registerTransferDeskRoutes(router);
+      registerIntegrationRoutes(router);
       registerImportOpsRoutes(router);
     },
-    { prefix: "/api/v1/integration" }
+    { prefix: "/api/v1/integrations" }
   );
 }

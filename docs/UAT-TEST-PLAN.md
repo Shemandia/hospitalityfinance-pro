@@ -167,7 +167,7 @@
 | 12.1 | Connector mapping     | Settings → Integrations, create mapping: PMS code → GL account | Mapping saved                                     |        |          |
 | 12.2 | Bank statement import | Upload MT940 or OFX file                                       | Statement parsed, transactions listed             |        |          |
 | 12.3 | Bank reconciliation   | Click "Auto-Match" on statement                                | Transactions matched to GL entries by amount/date |        |          |
-| 12.4 | Transfer desk         | Create interface, upload CSV, preview, execute                 | Data transformed to GL journals                   |        |          |
+| 12.4 | Integrations          | Create interface, upload CSV, preview, execute                 | Data transformed to GL journals                   |        |          |
 | 12.5 | SAF import            | Upload SAF .txt file                                           | Journals created from SAF data                    |        |          |
 
 ---

@@ -59,7 +59,7 @@ describe("worker supervisor (OPS-10)", () => {
       "report-generation",
       "dunning",
       "scheduled-reports",
-      "transfer-desk",
+      "integrations",
       "mv-refresh"
     ]);
     for (const e of entries) expect(existsSync(e.script), e.script).toBe(true);

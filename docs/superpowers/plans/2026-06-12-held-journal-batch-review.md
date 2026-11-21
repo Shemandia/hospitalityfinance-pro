@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Interactive Transfer Desk `GL_JOURNAL` imports stage a reviewable batch of held journals; a reviewer rejects/excludes individual journals, then commits the rest through the existing hardened GL posting path.
+**Goal:** Interactive Integrations `GL_JOURNAL` imports stage a reviewable batch of held journals; a reviewer rejects/excludes individual journals, then commits the rest through the existing hardened GL posting path.
 
-**Architecture:** Staging-then-materialize — imports write `TransferBatch` + `TransferBatchItem` rows (the mapped `JournalCreateInput` as JSONB) instead of journals. Nothing reaches the `journals` table until commit, which calls `GLService.createJournal` (→ `PENDING_APPROVAL` per rules, or `DRAFT` then `postJournal`). Scheduled/automation imports bypass review (`AUTO_COMMIT`). Full design: `docs/superpowers/specs/2026-06-12-held-journal-batch-review-design.md`.
+**Architecture:** Staging-then-materialize — imports write `IntegrationBatch` + `IntegrationBatchItem` rows (the mapped `JournalCreateInput` as JSONB) instead of journals. Nothing reaches the `journals` table until commit, which calls `GLService.createJournal` (→ `PENDING_APPROVAL` per rules, or `DRAFT` then `postJournal`). Scheduled/automation imports bypass review (`AUTO_COMMIT`). Full design: `docs/superpowers/specs/2026-06-12-held-journal-batch-review-design.md`.
 
 **Tech Stack:** Fastify 4, Prisma (tenant schema `schema-tenant.prisma`), Prisma.Decimal, vitest (hand-rolled mock-prisma), Next.js (web).
 
@@ -47,26 +47,26 @@ This task has no unit test (schema). Verification is a clean client regen + type
 In `apps/api/src/db/schema-tenant.prisma`, near the other enums (e.g. just after `enum JournalStatus { ... }`), add:
 
 ```prisma
-enum TransferBatchStatus {
+enum IntegrationBatchStatus {
   PENDING_REVIEW
   COMMITTED
   DISCARDED
 }
 
-enum TransferBatchItemStatus {
+enum IntegrationBatchItemStatus {
   HELD
   COMMITTED
   REJECTED
   ERROR
 }
 
-enum TransferValidationStatus {
+enum IntegrationValidationStatus {
   OK
   WARNING
   ERROR
 }
 
-enum TransferReviewMode {
+enum IntegrationReviewMode {
   HOLD
   AUTO_COMMIT
 }
@@ -77,13 +77,13 @@ enum TransferReviewMode {
 Add near the other `transfer_*` models:
 
 ```prisma
-model TransferBatch {
+model IntegrationBatch {
   id              String              @id @default(uuid())
   entityId        String              @map("entity_id")
   profileId       String              @map("profile_id")
   executionId     String              @map("execution_id")
   targetComponent String              @map("target_component")
-  status          TransferBatchStatus @default(PENDING_REVIEW)
+  status          IntegrationBatchStatus @default(PENDING_REVIEW)
   totalItems      Int                 @default(0) @map("total_items")
   heldItems       Int                 @default(0) @map("held_items")
   rejectedItems   Int                 @default(0) @map("rejected_items")
@@ -94,40 +94,40 @@ model TransferBatch {
   reviewedById    String?             @map("reviewed_by")
   committedAt     DateTime?           @map("committed_at")
 
-  items TransferBatchItem[]
+  items IntegrationBatchItem[]
 
   @@index([entityId, status])
   @@index([profileId])
-  @@map("transfer_batches")
+  @@map("integration_batches")
 }
 
-model TransferBatchItem {
+model IntegrationBatchItem {
   id                  String                   @id @default(uuid())
   batchId             String                   @map("batch_id")
   itemIndex           Int                      @map("item_index")
-  status              TransferBatchItemStatus  @default(HELD)
+  status              IntegrationBatchItemStatus  @default(HELD)
   targetComponent     String                   @map("target_component")
   payload             Json
   sourceRecordIndices Int[]                    @map("source_record_indices")
-  validationStatus    TransferValidationStatus @default(OK) @map("validation_status")
+  validationStatus    IntegrationValidationStatus @default(OK) @map("validation_status")
   validationMessages  Json?                    @map("validation_messages")
   resultJournalId     String?                  @map("result_journal_id")
   rejectedReason      String?                  @map("rejected_reason")
   createdAt           DateTime                 @default(now()) @map("created_at")
 
-  batch TransferBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  batch IntegrationBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
 
   @@index([batchId, status])
-  @@map("transfer_batch_items")
+  @@map("integration_batch_items")
 }
 ```
 
-- [ ] **Step 3: Add `reviewMode` to `TransferProfile`**
+- [ ] **Step 3: Add `reviewMode` to `IntegrationProfile`**
 
-In `model TransferProfile`, add this field (anywhere among the scalars, e.g. after `savePayload`):
+In `model IntegrationProfile`, add this field (anywhere among the scalars, e.g. after `savePayload`):
 
 ```prisma
-  reviewMode       TransferReviewMode @default(HOLD) @map("review_mode")
+  reviewMode       IntegrationReviewMode @default(HOLD) @map("review_mode")
 ```
 
 - [ ] **Step 4: Regenerate the tenant client + create the migration**
@@ -137,7 +137,7 @@ Expected: "Generated Prisma Client" with no errors.
 
 Then create the migration (requires a reachable dev DB + shadow DB):
 Run: `cd apps/api && npx prisma migrate dev --schema src/db/schema-tenant.prisma --name held_journal_batches`
-Expected: a new folder under `apps/api/prisma/migrations/` (or the configured migrations dir) with the `CREATE TABLE transfer_batches`/`transfer_batch_items` SQL.
+Expected: a new folder under `apps/api/prisma/migrations/` (or the configured migrations dir) with the `CREATE TABLE integration_batches`/`integration_batch_items` SQL.
 
 > If no dev DB is reachable in this environment: `db:generate:tenant` alone regenerates the client types (all that the mock-based tests need). Note in the commit that the SQL migration must be generated against a real DB before deploy. Do NOT hand-write the migration SQL unless you verify it against the generator output.
 
@@ -152,7 +152,7 @@ Expected: exit 0 (the new models/enums are now on the generated client).
 git add apps/api/src/db/schema-tenant.prisma apps/api/src/db/generated/tenant
 # include the migration dir if one was generated:
 # git add apps/api/prisma/migrations
-git commit -m "feat(transfer-desk): schema for held-journal batches + profile reviewMode"
+git commit -m "feat(integrations): schema for held-journal batches + profile reviewMode"
 ```
 
 ---
@@ -161,14 +161,14 @@ git commit -m "feat(transfer-desk): schema for held-journal batches + profile re
 
 **Files:**
 
-- Create: `apps/api/src/jobs/transfer-desk-batch-stager.ts`
-- Test: `apps/api/tests/transfer-desk-batch-stager.test.ts`
+- Create: `apps/api/src/jobs/integration-batch-stager.ts`
+- Test: `apps/api/tests/integration-batch-stager.test.ts`
 
 Pure functions: given the mapped journals and pre-fetched validation context (valid account keys, period statuses), produce staged items with `validationStatus`. Also a pure `resolveReviewMode`.
 
 - [ ] **Step 1: Write the failing test**
 
-Create `apps/api/tests/transfer-desk-batch-stager.test.ts`:
+Create `apps/api/tests/integration-batch-stager.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -176,8 +176,8 @@ import {
   stageJournalItems,
   resolveReviewMode,
   type StageContext
-} from "../src/jobs/transfer-desk-batch-stager.js";
-import type { MappedJournal } from "../src/jobs/transfer-desk-record-mapper.js";
+} from "../src/jobs/integration-batch-stager.js";
+import type { MappedJournal } from "../src/jobs/integration-record-mapper.js";
 
 function journal(
   lines: Array<{ accountId: string; debit: string; credit: string; fxRate?: string }>
@@ -298,23 +298,23 @@ describe("resolveReviewMode", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd apps/api && npx vitest run tests/transfer-desk-batch-stager.test.ts`
+Run: `cd apps/api && npx vitest run tests/integration-batch-stager.test.ts`
 Expected: FAIL — module not found / exports missing.
 
 - [ ] **Step 3: Implement the stager**
 
-Create `apps/api/src/jobs/transfer-desk-batch-stager.ts`:
+Create `apps/api/src/jobs/integration-batch-stager.ts`:
 
 ```ts
 /**
- * Transfer Desk — held-batch staging.
+ * Integrations — held-batch staging.
  *
  * Pure helpers: turn mapped journals into staged batch items with
  * stage-time validation, and resolve the effective review mode.
  */
 
 import { Prisma } from "../db/client.js";
-import type { MappedJournal } from "./transfer-desk-record-mapper.js";
+import type { MappedJournal } from "./integration-record-mapper.js";
 import type { JournalCreateInput } from "../modules/gl/types.js";
 
 const D = (v: unknown): Prisma.Decimal => new Prisma.Decimal(String(v ?? 0));
@@ -428,14 +428,14 @@ export function resolveReviewMode(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd apps/api && npx vitest run tests/transfer-desk-batch-stager.test.ts && npx tsc --noEmit`
+Run: `cd apps/api && npx vitest run tests/integration-batch-stager.test.ts && npx tsc --noEmit`
 Expected: PASS, typecheck clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/api/src/jobs/transfer-desk-batch-stager.ts apps/api/tests/transfer-desk-batch-stager.test.ts
-git commit -m "feat(transfer-desk): batch stager — stage-time validation + reviewMode resolution"
+git add apps/api/src/jobs/integration-batch-stager.ts apps/api/tests/integration-batch-stager.test.ts
+git commit -m "feat(integrations): batch stager — stage-time validation + reviewMode resolution"
 ```
 
 ---
@@ -444,12 +444,12 @@ git commit -m "feat(transfer-desk): batch stager — stage-time validation + rev
 
 **Files:**
 
-- Modify: `apps/api/src/jobs/transfer-desk-pipeline.ts` (add `reviewMode` to `ProfileWithRelations`; new HOLD branch in `executeImport`; add `PipelineDb` members)
-- Test: `apps/api/tests/transfer-desk-batch-pipeline.test.ts`
+- Modify: `apps/api/src/jobs/integration-pipeline.ts` (add `reviewMode` to `ProfileWithRelations`; new HOLD branch in `executeImport`; add `PipelineDb` members)
+- Test: `apps/api/tests/integration-batch-pipeline.test.ts`
 
 - [ ] **Step 1: Write the failing test**
 
-Create `apps/api/tests/transfer-desk-batch-pipeline.test.ts`:
+Create `apps/api/tests/integration-batch-pipeline.test.ts`:
 
 ```ts
 import { describe, expect, it, vi, beforeEach } from "vitest";
@@ -478,7 +478,7 @@ import {
   executeImport,
   type ProfileWithRelations,
   type PipelineContext
-} from "../src/jobs/transfer-desk-pipeline.js";
+} from "../src/jobs/integration-pipeline.js";
 
 const FSD = JSON.stringify({
   version: "1.0",
@@ -528,12 +528,12 @@ function makeCtx(db: any): PipelineContext {
 
 function makeDb(overrides: Record<string, any> = {}) {
   return {
-    transferProfile: { findUnique: vi.fn() },
-    transferExecution: {
+    integrationProfile: { findUnique: vi.fn() },
+    integrationExecution: {
       update: vi.fn().mockResolvedValue({}),
       findUnique: vi.fn().mockResolvedValue({ automationId: null, triggeredBy: "u1" })
     },
-    transferExecutionLog: {
+    integrationExecutionLog: {
       create: vi.fn().mockResolvedValue({}),
       createMany: vi.fn().mockResolvedValue({})
     },
@@ -544,11 +544,11 @@ function makeDb(overrides: Record<string, any> = {}) {
       ])
     },
     period: { findMany: vi.fn().mockResolvedValue([{ id: "p1", status: "OPEN" }]) },
-    transferBatch: {
+    integrationBatch: {
       create: vi.fn().mockResolvedValue({ id: "b1" }),
       update: vi.fn().mockResolvedValue({})
     },
-    transferBatchItem: { createMany: vi.fn().mockResolvedValue({}) },
+    integrationBatchItem: { createMany: vi.fn().mockResolvedValue({}) },
     ...overrides
   };
 }
@@ -564,8 +564,8 @@ describe("executeImport HOLD vs AUTO_COMMIT", () => {
       entityId: "e1",
       periodId: "p1"
     });
-    expect(db.transferBatch.create).toHaveBeenCalledTimes(1);
-    expect(db.transferBatchItem.createMany).toHaveBeenCalledTimes(1);
+    expect(db.integrationBatch.create).toHaveBeenCalledTimes(1);
+    expect(db.integrationBatchItem.createMany).toHaveBeenCalledTimes(1);
     expect(createJournalMock).not.toHaveBeenCalled();
     expect(result.recordsTotal).toBeGreaterThan(0);
   });
@@ -577,19 +577,19 @@ describe("executeImport HOLD vs AUTO_COMMIT", () => {
       periodId: "p1"
     });
     expect(createJournalMock).toHaveBeenCalled();
-    expect(db.transferBatch.create).not.toHaveBeenCalled();
+    expect(db.integrationBatch.create).not.toHaveBeenCalled();
   });
 });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd apps/api && npx vitest run tests/transfer-desk-batch-pipeline.test.ts`
+Run: `cd apps/api && npx vitest run tests/integration-batch-pipeline.test.ts`
 Expected: FAIL — HOLD path not implemented (batch.create never called).
 
 - [ ] **Step 3: Implement the HOLD branch**
 
-In `apps/api/src/jobs/transfer-desk-pipeline.ts`:
+In `apps/api/src/jobs/integration-pipeline.ts`:
 
 (a) Add the import near the top:
 
@@ -598,7 +598,7 @@ import {
   stageJournalItems,
   resolveReviewMode,
   type StageContext
-} from "./transfer-desk-batch-stager.js";
+} from "./integration-batch-stager.js";
 ```
 
 (b) Add `reviewMode` to `ProfileWithRelations` (after `savePayload`):
@@ -610,7 +610,7 @@ import {
 (c) Extend `PipelineDb` with the members the HOLD path needs:
 
 ```ts
-transferExecution: {
+integrationExecution: {
   update: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<unknown>;
   findUnique: (args: { where: { id: string }; select?: Record<string, unknown> }) =>
     Promise<{ automationId: string | null; triggeredBy: string | null } | null>;
@@ -623,11 +623,11 @@ period: {
   findMany: (args: { where: Record<string, unknown>; select?: Record<string, unknown> }) =>
     Promise<Array<{ id: string; status: string }>>;
 }
-transferBatch: {
+integrationBatch: {
   create: (args: { data: Record<string, unknown> }) => Promise<{ id: string }>;
   update: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<unknown>;
 }
-transferBatchItem: {
+integrationBatchItem: {
   createMany: (args: { data: Record<string, unknown>[] }) => Promise<unknown>;
 }
 ```
@@ -640,7 +640,7 @@ if (!mapResult.ok) {
 }
 
 // 5b. Resolve review mode — scheduled/automation runs always AUTO_COMMIT.
-const execMeta = await ctx.db.transferExecution.findUnique({
+const execMeta = await ctx.db.integrationExecution.findUnique({
   where: { id: executionId },
   select: { automationId: true, triggeredBy: true }
 });
@@ -705,7 +705,7 @@ async function stageHeldBatch(
   const heldItems = items.filter((i) => i.status === "HELD").length;
   const errorItems = items.filter((i) => i.status === "ERROR").length;
 
-  const batch = await ctx.db.transferBatch.create({
+  const batch = await ctx.db.integrationBatch.create({
     data: {
       entityId,
       profileId: profile.id,
@@ -719,7 +719,7 @@ async function stageHeldBatch(
     } as any
   });
 
-  await ctx.db.transferBatchItem.createMany({
+  await ctx.db.integrationBatchItem.createMany({
     data: items.map((item) => ({
       batchId: batch.id,
       itemIndex: item.itemIndex,
@@ -733,7 +733,7 @@ async function stageHeldBatch(
   });
 
   // Per-source-record success log (held — not yet posted).
-  await ctx.db.transferExecutionLog
+  await ctx.db.integrationExecutionLog
     .createMany({
       data: items.flatMap((item) =>
         item.sourceRecordIndices.map((idx) => ({
@@ -764,14 +764,14 @@ async function stageHeldBatch(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd apps/api && npx vitest run tests/transfer-desk-batch-pipeline.test.ts && npx tsc --noEmit`
+Run: `cd apps/api && npx vitest run tests/integration-batch-pipeline.test.ts && npx tsc --noEmit`
 Expected: PASS, typecheck clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/api/src/jobs/transfer-desk-pipeline.ts apps/api/tests/transfer-desk-batch-pipeline.test.ts
-git commit -m "feat(transfer-desk): import stages a held batch in HOLD mode (GL journals)"
+git add apps/api/src/jobs/integration-pipeline.ts apps/api/tests/integration-batch-pipeline.test.ts
+git commit -m "feat(integrations): import stages a held batch in HOLD mode (GL journals)"
 ```
 
 ---
@@ -780,29 +780,26 @@ git commit -m "feat(transfer-desk): import stages a held batch in HOLD mode (GL 
 
 **Files:**
 
-- Create: `apps/api/src/modules/transfer-desk/batch-service.ts`
-- Test: `apps/api/tests/transfer-desk-batch-service.test.ts`
+- Create: `apps/api/src/modules/integrations/batch-service.ts`
+- Test: `apps/api/tests/integration-batch-service.test.ts`
 
 - [ ] **Step 1: Write the failing test**
 
-Create `apps/api/tests/transfer-desk-batch-service.test.ts`:
+Create `apps/api/tests/integration-batch-service.test.ts`:
 
 ```ts
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import {
-  BatchReviewService,
-  BatchReviewError
-} from "../src/modules/transfer-desk/batch-service.js";
+import { BatchReviewService, BatchReviewError } from "../src/modules/integrations/batch-service.js";
 
 function makeDb() {
   return {
-    transferBatch: {
+    integrationBatch: {
       findMany: vi.fn().mockResolvedValue([]),
       findFirst: vi.fn().mockResolvedValue(null),
       update: vi.fn().mockResolvedValue({}),
       updateMany: vi.fn().mockResolvedValue({ count: 1 })
     },
-    transferBatchItem: {
+    integrationBatchItem: {
       findFirst: vi.fn().mockResolvedValue(null),
       update: vi.fn().mockResolvedValue({})
     }
@@ -818,18 +815,22 @@ beforeEach(() => {
 
 describe("rejectItem", () => {
   it("rejects a HELD item and decrements held / increments rejected", async () => {
-    db.transferBatch.findFirst.mockResolvedValue({ id: "b1", status: "PENDING_REVIEW" });
-    db.transferBatchItem.findFirst.mockResolvedValue({ id: "i1", batchId: "b1", status: "HELD" });
+    db.integrationBatch.findFirst.mockResolvedValue({ id: "b1", status: "PENDING_REVIEW" });
+    db.integrationBatchItem.findFirst.mockResolvedValue({
+      id: "i1",
+      batchId: "b1",
+      status: "HELD"
+    });
 
     await service.rejectItem("b1", "i1", "u1", "wrong account");
 
-    expect(db.transferBatchItem.update).toHaveBeenCalledWith(
+    expect(db.integrationBatchItem.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "i1" },
         data: expect.objectContaining({ status: "REJECTED", rejectedReason: "wrong account" })
       })
     );
-    expect(db.transferBatch.update).toHaveBeenCalledWith(
+    expect(db.integrationBatch.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           heldItems: { decrement: 1 },
@@ -840,7 +841,7 @@ describe("rejectItem", () => {
   });
 
   it("refuses to reject when the batch is already COMMITTED", async () => {
-    db.transferBatch.findFirst.mockResolvedValue({ id: "b1", status: "COMMITTED" });
+    db.integrationBatch.findFirst.mockResolvedValue({ id: "b1", status: "COMMITTED" });
     await expect(service.rejectItem("b1", "i1", "u1")).rejects.toMatchObject({
       code: "BATCH_NOT_REVIEWABLE",
       statusCode: 409
@@ -848,8 +849,12 @@ describe("rejectItem", () => {
   });
 
   it("refuses to reject an item that is not HELD", async () => {
-    db.transferBatch.findFirst.mockResolvedValue({ id: "b1", status: "PENDING_REVIEW" });
-    db.transferBatchItem.findFirst.mockResolvedValue({ id: "i1", batchId: "b1", status: "ERROR" });
+    db.integrationBatch.findFirst.mockResolvedValue({ id: "b1", status: "PENDING_REVIEW" });
+    db.integrationBatchItem.findFirst.mockResolvedValue({
+      id: "i1",
+      batchId: "b1",
+      status: "ERROR"
+    });
     await expect(service.rejectItem("b1", "i1", "u1")).rejects.toMatchObject({
       code: "ITEM_NOT_HELD",
       statusCode: 409
@@ -859,19 +864,19 @@ describe("rejectItem", () => {
 
 describe("restoreItem", () => {
   it("moves a REJECTED item back to HELD and adjusts counts", async () => {
-    db.transferBatch.findFirst.mockResolvedValue({ id: "b1", status: "PENDING_REVIEW" });
-    db.transferBatchItem.findFirst.mockResolvedValue({
+    db.integrationBatch.findFirst.mockResolvedValue({ id: "b1", status: "PENDING_REVIEW" });
+    db.integrationBatchItem.findFirst.mockResolvedValue({
       id: "i1",
       batchId: "b1",
       status: "REJECTED"
     });
     await service.restoreItem("b1", "i1");
-    expect(db.transferBatchItem.update).toHaveBeenCalledWith(
+    expect(db.integrationBatchItem.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ status: "HELD", rejectedReason: null })
       })
     );
-    expect(db.transferBatch.update).toHaveBeenCalledWith(
+    expect(db.integrationBatch.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           heldItems: { increment: 1 },
@@ -884,9 +889,9 @@ describe("restoreItem", () => {
 
 describe("discardBatch", () => {
   it("sets a reviewable batch to DISCARDED", async () => {
-    db.transferBatch.findFirst.mockResolvedValue({ id: "b1", status: "PENDING_REVIEW" });
+    db.integrationBatch.findFirst.mockResolvedValue({ id: "b1", status: "PENDING_REVIEW" });
     await service.discardBatch("b1", "u1");
-    expect(db.transferBatch.update).toHaveBeenCalledWith(
+    expect(db.integrationBatch.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "b1" },
         data: expect.objectContaining({ status: "DISCARDED" })
@@ -895,7 +900,7 @@ describe("discardBatch", () => {
   });
 
   it("refuses to discard a committed batch", async () => {
-    db.transferBatch.findFirst.mockResolvedValue({ id: "b1", status: "COMMITTED" });
+    db.integrationBatch.findFirst.mockResolvedValue({ id: "b1", status: "COMMITTED" });
     await expect(service.discardBatch("b1", "u1")).rejects.toMatchObject({
       code: "BATCH_NOT_REVIEWABLE"
     });
@@ -904,7 +909,7 @@ describe("discardBatch", () => {
 
 describe("getBatch", () => {
   it("throws when not found", async () => {
-    db.transferBatch.findFirst.mockResolvedValue(null);
+    db.integrationBatch.findFirst.mockResolvedValue(null);
     await expect(service.getBatch("nope")).rejects.toMatchObject({
       code: "BATCH_NOT_FOUND",
       statusCode: 404
@@ -915,12 +920,12 @@ describe("getBatch", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd apps/api && npx vitest run tests/transfer-desk-batch-service.test.ts`
+Run: `cd apps/api && npx vitest run tests/integration-batch-service.test.ts`
 Expected: FAIL — module not found.
 
 - [ ] **Step 3: Implement list/get/reject/restore/discard**
 
-Create `apps/api/src/modules/transfer-desk/batch-service.ts`:
+Create `apps/api/src/modules/integrations/batch-service.ts`:
 
 ```ts
 /**
@@ -949,7 +954,7 @@ export class BatchReviewService {
   }
 
   async listBatches(filter: { entityId?: string; status?: string; profileId?: string }) {
-    return this.db.transferBatch.findMany({
+    return this.db.integrationBatch.findMany({
       where: {
         ...(filter.entityId ? { entityId: filter.entityId } : {}),
         ...(filter.status ? { status: filter.status } : {}),
@@ -961,7 +966,7 @@ export class BatchReviewService {
   }
 
   async getBatch(batchId: string) {
-    const batch = await this.db.transferBatch.findFirst({
+    const batch = await this.db.integrationBatch.findFirst({
       where: { id: batchId },
       include: { items: { orderBy: { itemIndex: "asc" } } }
     });
@@ -970,7 +975,7 @@ export class BatchReviewService {
   }
 
   private async assertReviewable(batchId: string) {
-    const batch = await this.db.transferBatch.findFirst({ where: { id: batchId } });
+    const batch = await this.db.integrationBatch.findFirst({ where: { id: batchId } });
     if (!batch) throw new BatchReviewError("BATCH_NOT_FOUND", "Batch not found.", 404);
     if (batch.status !== "PENDING_REVIEW") {
       throw new BatchReviewError(
@@ -984,16 +989,16 @@ export class BatchReviewService {
 
   async rejectItem(batchId: string, itemId: string, userId: string, reason?: string) {
     await this.assertReviewable(batchId);
-    const item = await this.db.transferBatchItem.findFirst({ where: { id: itemId, batchId } });
+    const item = await this.db.integrationBatchItem.findFirst({ where: { id: itemId, batchId } });
     if (!item) throw new BatchReviewError("ITEM_NOT_FOUND", "Batch item not found.", 404);
     if (item.status !== "HELD")
       throw new BatchReviewError("ITEM_NOT_HELD", `Item is ${item.status}, not HELD.`, 409);
 
-    await this.db.transferBatchItem.update({
+    await this.db.integrationBatchItem.update({
       where: { id: itemId },
       data: { status: "REJECTED", rejectedReason: reason ?? null }
     });
-    await this.db.transferBatch.update({
+    await this.db.integrationBatch.update({
       where: { id: batchId },
       data: { heldItems: { decrement: 1 }, rejectedItems: { increment: 1 }, reviewedById: userId }
     });
@@ -1002,16 +1007,16 @@ export class BatchReviewService {
 
   async restoreItem(batchId: string, itemId: string) {
     await this.assertReviewable(batchId);
-    const item = await this.db.transferBatchItem.findFirst({ where: { id: itemId, batchId } });
+    const item = await this.db.integrationBatchItem.findFirst({ where: { id: itemId, batchId } });
     if (!item) throw new BatchReviewError("ITEM_NOT_FOUND", "Batch item not found.", 404);
     if (item.status !== "REJECTED")
       throw new BatchReviewError("ITEM_NOT_REJECTED", `Item is ${item.status}, not REJECTED.`, 409);
 
-    await this.db.transferBatchItem.update({
+    await this.db.integrationBatchItem.update({
       where: { id: itemId },
       data: { status: "HELD", rejectedReason: null }
     });
-    await this.db.transferBatch.update({
+    await this.db.integrationBatch.update({
       where: { id: batchId },
       data: { heldItems: { increment: 1 }, rejectedItems: { decrement: 1 } }
     });
@@ -1020,7 +1025,7 @@ export class BatchReviewService {
 
   async discardBatch(batchId: string, userId: string) {
     await this.assertReviewable(batchId);
-    await this.db.transferBatch.update({
+    await this.db.integrationBatch.update({
       where: { id: batchId },
       data: { status: "DISCARDED", reviewedById: userId }
     });
@@ -1031,14 +1036,14 @@ export class BatchReviewService {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd apps/api && npx vitest run tests/transfer-desk-batch-service.test.ts && npx tsc --noEmit`
+Run: `cd apps/api && npx vitest run tests/integration-batch-service.test.ts && npx tsc --noEmit`
 Expected: PASS, typecheck clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/api/src/modules/transfer-desk/batch-service.ts apps/api/tests/transfer-desk-batch-service.test.ts
-git commit -m "feat(transfer-desk): batch review service — list/get/reject/restore/discard"
+git add apps/api/src/modules/integrations/batch-service.ts apps/api/tests/integration-batch-service.test.ts
+git commit -m "feat(integrations): batch review service — list/get/reject/restore/discard"
 ```
 
 ---
@@ -1047,16 +1052,16 @@ git commit -m "feat(transfer-desk): batch review service — list/get/reject/res
 
 **Files:**
 
-- Modify: `apps/api/src/modules/transfer-desk/batch-service.ts` (add `commitBatch`)
-- Test: `apps/api/tests/transfer-desk-batch-commit.test.ts`
+- Modify: `apps/api/src/modules/integrations/batch-service.ts` (add `commitBatch`)
+- Test: `apps/api/tests/integration-batch-commit.test.ts`
 
 - [ ] **Step 1: Write the failing test**
 
-Create `apps/api/tests/transfer-desk-batch-commit.test.ts`:
+Create `apps/api/tests/integration-batch-commit.test.ts`:
 
 ```ts
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { BatchReviewService } from "../src/modules/transfer-desk/batch-service.js";
+import { BatchReviewService } from "../src/modules/integrations/batch-service.js";
 import { GLService } from "../src/modules/gl/service.js";
 
 function item(over: Record<string, any> = {}) {
@@ -1072,12 +1077,12 @@ function item(over: Record<string, any> = {}) {
 
 function makeDb(items: any[]) {
   return {
-    transferBatch: {
+    integrationBatch: {
       findFirst: vi.fn().mockResolvedValue({ id: "b1", entityId: "e1", status: "PENDING_REVIEW" }),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       update: vi.fn().mockResolvedValue({})
     },
-    transferBatchItem: {
+    integrationBatchItem: {
       findMany: vi.fn().mockResolvedValue(items),
       update: vi.fn().mockResolvedValue({})
     }
@@ -1122,14 +1127,14 @@ describe("commitBatch governance", () => {
     ]);
     // findMany should be called with a filter that returns only the HELD/non-ERROR item;
     // emulate that the service filters in the query:
-    db.transferBatchItem.findMany.mockResolvedValue([item({ id: "ok" })]);
+    db.integrationBatchItem.findMany.mockResolvedValue([item({ id: "ok" })]);
     await new BatchReviewService(db).commitBatch("b1", "u1");
     expect(createSpy).toHaveBeenCalledTimes(1);
   });
 
   it("is idempotent — a non-PENDING_REVIEW batch creates no journals", async () => {
     const db = makeDb([item()]);
-    db.transferBatch.updateMany.mockResolvedValue({ count: 0 }); // conditional flip failed → already committed
+    db.integrationBatch.updateMany.mockResolvedValue({ count: 0 }); // conditional flip failed → already committed
     const summary = await new BatchReviewService(db).commitBatch("b1", "u1");
     expect(createSpy).not.toHaveBeenCalled();
     expect(summary.alreadyCommitted).toBe(true);
@@ -1139,7 +1144,7 @@ describe("commitBatch governance", () => {
     createSpy.mockRejectedValueOnce(new Error("account locked"));
     const db = makeDb([item()]);
     const summary = await new BatchReviewService(db).commitBatch("b1", "u1");
-    expect(db.transferBatchItem.update).toHaveBeenCalledWith(
+    expect(db.integrationBatchItem.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "i1" },
         data: expect.objectContaining({ status: "ERROR" })
@@ -1152,12 +1157,12 @@ describe("commitBatch governance", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd apps/api && npx vitest run tests/transfer-desk-batch-commit.test.ts`
+Run: `cd apps/api && npx vitest run tests/integration-batch-commit.test.ts`
 Expected: FAIL — `commitBatch` does not exist.
 
 - [ ] **Step 3: Implement `commitBatch`**
 
-In `apps/api/src/modules/transfer-desk/batch-service.ts`, add the import at the top:
+In `apps/api/src/modules/integrations/batch-service.ts`, add the import at the top:
 
 ```ts
 import { GLService } from "../gl/service.js";
@@ -1172,11 +1177,11 @@ Add the method to `BatchReviewService`:
    * posted, PENDING_APPROVAL results are left for approvers. Idempotent.
    */
   async commitBatch(batchId: string, userId: string) {
-    const batch = await this.db.transferBatch.findFirst({ where: { id: batchId } });
+    const batch = await this.db.integrationBatch.findFirst({ where: { id: batchId } });
     if (!batch) throw new BatchReviewError("BATCH_NOT_FOUND", "Batch not found.", 404);
 
     // Conditional flip — only one caller wins; prevents double-commit.
-    const flipped = await this.db.transferBatch.updateMany({
+    const flipped = await this.db.integrationBatch.updateMany({
       where: { id: batchId, status: "PENDING_REVIEW" },
       data: { status: "COMMITTED", reviewedById: userId, committedAt: new Date() }
     });
@@ -1184,7 +1189,7 @@ Add the method to `BatchReviewService`:
       return { alreadyCommitted: true, committed: 0, pendingApproval: 0, rejected: 0, errors: 0 };
     }
 
-    const items = await this.db.transferBatchItem.findMany({
+    const items = await this.db.integrationBatchItem.findMany({
       where: { batchId, status: "HELD", validationStatus: { not: "ERROR" } },
       orderBy: { itemIndex: "asc" }
     });
@@ -1203,7 +1208,7 @@ Add the method to `BatchReviewService`:
           await gl.postJournal(batch.entityId, created.id, userId);
           committed++;
         }
-        await this.db.transferBatchItem.update({
+        await this.db.integrationBatchItem.update({
           where: { id: item.id },
           data: { status: "COMMITTED", resultJournalId: created?.id ?? null }
         });
@@ -1211,7 +1216,7 @@ Add the method to `BatchReviewService`:
         errors++;
         const message = err instanceof Error ? err.message : "Commit failed";
         const existing = Array.isArray(item.validationMessages) ? item.validationMessages : [];
-        await this.db.transferBatchItem.update({
+        await this.db.integrationBatchItem.update({
           where: { id: item.id },
           data: {
             status: "ERROR",
@@ -1222,7 +1227,7 @@ Add the method to `BatchReviewService`:
       }
     }
 
-    await this.db.transferBatch.update({
+    await this.db.integrationBatch.update({
       where: { id: batchId },
       data: {
         committedItems: { increment: committed + pendingApproval },
@@ -1237,14 +1242,14 @@ Add the method to `BatchReviewService`:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd apps/api && npx vitest run tests/transfer-desk-batch-commit.test.ts && npx tsc --noEmit`
+Run: `cd apps/api && npx vitest run tests/integration-batch-commit.test.ts && npx tsc --noEmit`
 Expected: PASS, typecheck clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/api/src/modules/transfer-desk/batch-service.ts apps/api/tests/transfer-desk-batch-commit.test.ts
-git commit -m "feat(transfer-desk): commit held batch through GL governance (post or route to approval)"
+git add apps/api/src/modules/integrations/batch-service.ts apps/api/tests/integration-batch-commit.test.ts
+git commit -m "feat(integrations): commit held batch through GL governance (post or route to approval)"
 ```
 
 ---
@@ -1253,14 +1258,14 @@ git commit -m "feat(transfer-desk): commit held batch through GL governance (pos
 
 **Files:**
 
-- Create: `apps/api/src/modules/transfer-desk/batch-router.ts`
+- Create: `apps/api/src/modules/integrations/batch-router.ts`
 - Modify: `apps/api/src/app.ts` (import + register)
 
 No new unit test (thin router over the tested service). Verification = typecheck + full suite green.
 
 - [ ] **Step 1: Implement the router**
 
-Create `apps/api/src/modules/transfer-desk/batch-router.ts`:
+Create `apps/api/src/modules/integrations/batch-router.ts`:
 
 ```ts
 import type { FastifyInstance, FastifyReply } from "fastify";
@@ -1291,13 +1296,13 @@ function mapError(reply: FastifyReply, error: unknown) {
 
 const rejectSchema = z.object({ reason: z.string().max(500).optional() });
 
-export async function registerTransferDeskBatchRouter(app: FastifyInstance): Promise<void> {
+export async function registerIntegrationBatchRouter(app: FastifyInstance): Promise<void> {
   app.register(
     async (router) => {
       router.addHook("preHandler", requireAuth);
-      router.addHook("preHandler", requirePermission("TRANSFER_DESK_EXECUTE"));
+      router.addHook("preHandler", requirePermission("INTEGRATIONS_RUN"));
 
-      router.get("/transfer-desk/batches", async (request, reply) => {
+      router.get("/integrations/batches", async (request, reply) => {
         try {
           const q = request.query as { status?: string; profileId?: string };
           const data = await service.listBatches({
@@ -1312,7 +1317,7 @@ export async function registerTransferDeskBatchRouter(app: FastifyInstance): Pro
       });
 
       router.get<{ Params: { id: string } }>(
-        "/transfer-desk/batches/:id",
+        "/integrations/batches/:id",
         async (request, reply) => {
           try {
             const data = await service.getBatch(request.params.id);
@@ -1324,7 +1329,7 @@ export async function registerTransferDeskBatchRouter(app: FastifyInstance): Pro
       );
 
       router.post<{ Params: { id: string; itemId: string } }>(
-        "/transfer-desk/batches/:id/items/:itemId/reject",
+        "/integrations/batches/:id/items/:itemId/reject",
         async (request, reply) => {
           try {
             const { reason } = rejectSchema.parse(request.body ?? {});
@@ -1343,7 +1348,7 @@ export async function registerTransferDeskBatchRouter(app: FastifyInstance): Pro
       );
 
       router.post<{ Params: { id: string; itemId: string } }>(
-        "/transfer-desk/batches/:id/items/:itemId/restore",
+        "/integrations/batches/:id/items/:itemId/restore",
         async (request, reply) => {
           try {
             const data = await service.restoreItem(request.params.id, request.params.itemId);
@@ -1355,7 +1360,7 @@ export async function registerTransferDeskBatchRouter(app: FastifyInstance): Pro
       );
 
       router.post<{ Params: { id: string } }>(
-        "/transfer-desk/batches/:id/commit",
+        "/integrations/batches/:id/commit",
         async (request, reply) => {
           try {
             const userId = String((request.user as any)?.sub ?? "system");
@@ -1368,7 +1373,7 @@ export async function registerTransferDeskBatchRouter(app: FastifyInstance): Pro
       );
 
       router.post<{ Params: { id: string } }>(
-        "/transfer-desk/batches/:id/discard",
+        "/integrations/batches/:id/discard",
         async (request, reply) => {
           try {
             const userId = String((request.user as any)?.sub ?? "system");
@@ -1387,16 +1392,16 @@ export async function registerTransferDeskBatchRouter(app: FastifyInstance): Pro
 
 - [ ] **Step 2: Register in `app.ts`**
 
-In `apps/api/src/app.ts`, add the import alongside the other transfer-desk imports (near line 28-33):
+In `apps/api/src/app.ts`, add the import alongside the other integrations imports (near line 28-33):
 
 ```ts
-import { registerTransferDeskBatchRouter } from "./modules/transfer-desk/batch-router.js";
+import { registerIntegrationBatchRouter } from "./modules/integrations/batch-router.js";
 ```
 
-And register it next to `registerTransferDeskProfileRouter(app)` (near line 202):
+And register it next to `registerIntegrationProfileRouter(app)` (near line 202):
 
 ```ts
-await registerTransferDeskBatchRouter(app);
+await registerIntegrationBatchRouter(app);
 ```
 
 - [ ] **Step 3: Verify typecheck + full API suite**
@@ -1407,8 +1412,8 @@ Expected: typecheck clean; all tests pass (612 baseline + the new batch tests).
 - [ ] **Step 4: Commit**
 
 ```bash
-git add apps/api/src/modules/transfer-desk/batch-router.ts apps/api/src/app.ts
-git commit -m "feat(transfer-desk): held-batch review API (list/get/reject/restore/commit/discard)"
+git add apps/api/src/modules/integrations/batch-router.ts apps/api/src/app.ts
+git commit -m "feat(integrations): held-batch review API (list/get/reject/restore/commit/discard)"
 ```
 
 ---
@@ -1417,14 +1422,14 @@ git commit -m "feat(transfer-desk): held-batch review API (list/get/reject/resto
 
 **Files:**
 
-- Modify: `apps/web/lib/transfer-desk/api.ts` (append batch functions)
-- Modify: `apps/web/lib/transfer-desk/types.ts` (append batch types)
+- Modify: `apps/web/lib/integrations/api.ts` (append batch functions)
+- Modify: `apps/web/lib/integrations/types.ts` (append batch types)
 
-`lib/transfer-desk/` exists on disk; this task is safe regardless of the dashboard page-tree drift.
+`lib/integrations/` exists on disk; this task is safe regardless of the dashboard page-tree drift.
 
 - [ ] **Step 1: Add types**
 
-Append to `apps/web/lib/transfer-desk/types.ts`:
+Append to `apps/web/lib/integrations/types.ts`:
 
 ```ts
 export type BatchItemValidationMessage = {
@@ -1488,7 +1493,7 @@ export type CommitSummary = {
 
 - [ ] **Step 2: Add client functions**
 
-Append to `apps/web/lib/transfer-desk/api.ts` (it already has the `request` helper and imports `ApiContext`):
+Append to `apps/web/lib/integrations/api.ts` (it already has the `request` helper and imports `ApiContext`):
 
 ```ts
 import type { HeldBatchSummary, HeldBatchDetail, CommitSummary } from "./types";
@@ -1501,12 +1506,18 @@ export async function listHeldBatches(
   if (filters?.status) qs.set("status", filters.status);
   if (filters?.profileId) qs.set("profileId", filters.profileId);
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
-  const res = await request<HeldBatchSummary[]>(ctx, `/api/v1/transfer-desk/batches${suffix}`);
+  const res = await request<HeldBatchSummary[]>(
+    ctx,
+    `/api/v1/integrations/builder/batches${suffix}`
+  );
   return res.data;
 }
 
 export async function getHeldBatch(ctx: ApiContext, batchId: string): Promise<HeldBatchDetail> {
-  const res = await request<HeldBatchDetail>(ctx, `/api/v1/transfer-desk/batches/${batchId}`);
+  const res = await request<HeldBatchDetail>(
+    ctx,
+    `/api/v1/integrations/builder/batches/${batchId}`
+  );
   return res.data;
 }
 
@@ -1516,7 +1527,7 @@ export async function rejectBatchItem(
   itemId: string,
   reason?: string
 ): Promise<void> {
-  await request(ctx, `/api/v1/transfer-desk/batches/${batchId}/items/${itemId}/reject`, {
+  await request(ctx, `/api/v1/integrations/builder/batches/${batchId}/items/${itemId}/reject`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ reason })
@@ -1528,20 +1539,24 @@ export async function restoreBatchItem(
   batchId: string,
   itemId: string
 ): Promise<void> {
-  await request(ctx, `/api/v1/transfer-desk/batches/${batchId}/items/${itemId}/restore`, {
+  await request(ctx, `/api/v1/integrations/builder/batches/${batchId}/items/${itemId}/restore`, {
     method: "POST"
   });
 }
 
 export async function commitHeldBatch(ctx: ApiContext, batchId: string): Promise<CommitSummary> {
-  const res = await request<CommitSummary>(ctx, `/api/v1/transfer-desk/batches/${batchId}/commit`, {
-    method: "POST"
-  });
+  const res = await request<CommitSummary>(
+    ctx,
+    `/api/v1/integrations/builder/batches/${batchId}/commit`,
+    {
+      method: "POST"
+    }
+  );
   return res.data;
 }
 
 export async function discardHeldBatch(ctx: ApiContext, batchId: string): Promise<void> {
-  await request(ctx, `/api/v1/transfer-desk/batches/${batchId}/discard`, { method: "POST" });
+  await request(ctx, `/api/v1/integrations/builder/batches/${batchId}/discard`, { method: "POST" });
 }
 ```
 
@@ -1550,33 +1565,33 @@ export async function discardHeldBatch(ctx: ApiContext, batchId: string): Promis
 - [ ] **Step 3: Verify web typecheck**
 
 Run: `cd apps/web && npx tsc --noEmit`
-Expected: exit 0. (If the web app has unrelated pre-existing drift errors, confirm none are in `lib/transfer-desk/`.)
+Expected: exit 0. (If the web app has unrelated pre-existing drift errors, confirm none are in `lib/integrations/`.)
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add apps/web/lib/transfer-desk/api.ts apps/web/lib/transfer-desk/types.ts
-git commit -m "feat(web): transfer-desk held-batch API client"
+git add apps/web/lib/integrations/api.ts apps/web/lib/integrations/types.ts
+git commit -m "feat(web): integrations held-batch API client"
 ```
 
 ---
 
 ### Task 8: Web pages — Held Batches list + batch review
 
-**PRECONDITION:** The dashboard route tree `apps/web/app/[tenant]/(dashboard)/transfer-desk/` is currently **absent on disk** (working-tree drift). Restore it first (`git checkout origin/main -- "apps/web/app/[tenant]/(dashboard)/transfer-desk"` or however the team restores the drifted web tree) and confirm a sibling page (e.g. `.../transfer-desk/history/page.tsx`) renders, **before** adding these pages. If the web tree cannot be restored in this environment, STOP after Task 7 and report — the backend (Tasks 1–6) is independently shippable and testable.
+**PRECONDITION:** The dashboard route tree `apps/web/app/[tenant]/(dashboard)/integrations/` is currently **absent on disk** (working-tree drift). Restore it first (`git checkout origin/main -- "apps/web/app/[tenant]/(dashboard)/integrations"` or however the team restores the drifted web tree) and confirm a sibling page (e.g. `.../integrations/history/page.tsx`) renders, **before** adding these pages. If the web tree cannot be restored in this environment, STOP after Task 7 and report — the backend (Tasks 1–6) is independently shippable and testable.
 
 **Files:**
 
-- Create: `apps/web/app/[tenant]/(dashboard)/transfer-desk/batches/page.tsx`
-- Create: `apps/web/app/[tenant]/(dashboard)/transfer-desk/batches/[id]/page.tsx`
+- Create: `apps/web/app/[tenant]/(dashboard)/integrations/batches/page.tsx`
+- Create: `apps/web/app/[tenant]/(dashboard)/integrations/batches/[id]/page.tsx`
 
 - [ ] **Step 1: Read a sibling page for conventions**
 
-Read `apps/web/app/[tenant]/(dashboard)/transfer-desk/history/page.tsx` (or the nearest existing transfer-desk page) to copy: how it obtains `ApiContext` (token/entity/tenant), the table/card components and styling, loading/error states, and `use-tenant-router`/`use-api-context` hooks. Match those exactly — do not introduce a new data-fetching pattern.
+Read `apps/web/app/[tenant]/(dashboard)/integrations/history/page.tsx` (or the nearest existing integrations page) to copy: how it obtains `ApiContext` (token/entity/tenant), the table/card components and styling, loading/error states, and `use-tenant-router`/`use-api-context` hooks. Match those exactly — do not introduce a new data-fetching pattern.
 
 - [ ] **Step 2: Held Batches list page**
 
-Create `apps/web/app/[tenant]/(dashboard)/transfer-desk/batches/page.tsx` following the sibling page's structure. Requirements (implement with the existing design-system components found in step 1):
+Create `apps/web/app/[tenant]/(dashboard)/integrations/batches/page.tsx` following the sibling page's structure. Requirements (implement with the existing design-system components found in step 1):
 
 - On mount, call `listHeldBatches(ctx, { status: "PENDING_REVIEW" })` plus recent committed/discarded.
 - Table columns: profile (resolve name if available, else `profileId`), created at, status badge, and counts `held / rejected / error / committed`.
@@ -1585,7 +1600,7 @@ Create `apps/web/app/[tenant]/(dashboard)/transfer-desk/batches/page.tsx` follow
 
 - [ ] **Step 3: Batch review page**
 
-Create `apps/web/app/[tenant]/(dashboard)/transfer-desk/batches/[id]/page.tsx`:
+Create `apps/web/app/[tenant]/(dashboard)/integrations/batches/[id]/page.tsx`:
 
 - On mount, `getHeldBatch(ctx, id)`.
 - Header: profile, status, counts, and an overall "balanced" indicator (every item `validationStatus !== "ERROR"`).
@@ -1602,7 +1617,7 @@ Expected: exit 0 for the new files. Optionally `npx next build` if the team buil
 - [ ] **Step 5: Commit**
 
 ```bash
-git add "apps/web/app/[tenant]/(dashboard)/transfer-desk/batches"
+git add "apps/web/app/[tenant]/(dashboard)/integrations/batches"
 git commit -m "feat(web): held-journal batch review pages"
 ```
 
@@ -1612,7 +1627,7 @@ git commit -m "feat(web): held-journal batch review pages"
 
 - **Spec coverage:** §3.2 data model → Task 1. §3.3 reviewMode + scheduled-forces-AUTO_COMMIT → Tasks 1, 2 (`resolveReviewMode`), 3. §4.1 import→stage → Task 3. §4.2 stage validation (functional balance / account / period) → Task 2. §4.3 review (reject/restore/discard/list/get) → Task 4. §4.4 commit (idempotent, governance, skip rejected/error, item-throw→ERROR) → Task 5. §5 API → Task 6. §6 UI → Tasks 7–8. §7 testing → Tasks 2,3,4,5. All covered.
 - **Deliberate judgment calls:**
-  - Account validation checks line keys against a set containing **both** account ids and codes, because `transfer-desk-record-mapper.ts` sets `accountId = accountId ?? accountCode` (can't distinguish). Documented in Task 2/3.
+  - Account validation checks line keys against a set containing **both** account ids and codes, because `integration-record-mapper.ts` sets `accountId = accountId ?? accountCode` (can't distinguish). Documented in Task 2/3.
   - `createdById` on the batch is threaded from the call site as `String(runtimeParams.triggeredBy ?? execMeta?.triggeredBy ?? "system")`.
   - Commit counts `committedItems` as posted + pending-approval (both materialized into journals); `committed` vs `pendingApproval` in the summary distinguishes them for the UI.
   - Task 8 is gated on restoring the drifted web route tree; backend (1–6) ships independently.

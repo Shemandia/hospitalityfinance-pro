@@ -19,20 +19,23 @@ DELETE /api/v1/gl/accounts/:id  ->  entity  COA_EDIT
 DELETE /api/v1/gl/approval-rules/:id  ->  entity  GL_APPROVE | ADMIN_SETTINGS
 DELETE /api/v1/gl/journal-types/:id  ->  entity  GL_WRITE | ADMIN_SETTINGS
 DELETE /api/v1/gl/recurring-journals/:id  ->  entity  GL_WRITE | ADMIN_SETTINGS
-DELETE /api/v1/integration/interfaces/:id  ->  entity  INTEGRATION_CONFIG
-DELETE /api/v1/integration/mappings/:id  ->  entity  INTEGRATION_CONFIG
-DELETE /api/v1/integration/transfer-desk/automations/:id  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
-DELETE /api/v1/integration/transfer-desk/filters/:id  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
-DELETE /api/v1/integration/transfer-desk/lookups/:id  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
-DELETE /api/v1/integration/transfer-desk/profiles/:id  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
+DELETE /api/v1/integration/*  ->  public
+DELETE /api/v1/integration/transfer-desk/*  ->  public
+DELETE /api/v1/integrations/automations/:id  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
+DELETE /api/v1/integrations/builder/profiles/:profileId  ->  entity  INTEGRATIONS_CONFIG
+DELETE /api/v1/integrations/builder/profiles/:profileId/schedule  ->  entity  INTEGRATIONS_CONFIG
+DELETE /api/v1/integrations/filters/:id  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
+DELETE /api/v1/integrations/interfaces/:id  ->  entity  INTEGRATION_CONFIG
+DELETE /api/v1/integrations/lookups/:id  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
+DELETE /api/v1/integrations/mappings/:id  ->  entity  INTEGRATION_CONFIG
+DELETE /api/v1/integrations/profiles/:id  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
 DELETE /api/v1/intercompany/account-pairs/:id  ->  entity  IC_CONFIG
 DELETE /api/v1/intercompany/v2/mappings/:id  ->  entity  IC_CONFIG
 DELETE /api/v1/intercompany/v2/pairs/:id  ->  entity  IC_CONFIG
 DELETE /api/v1/platform/tenants/:slug  ->  platform
 DELETE /api/v1/reports/definitions/:id  ->  entity  REPORT_WRITE
 DELETE /api/v1/reports/definitions/:id/schedule  ->  entity  REPORT_WRITE
-DELETE /api/v1/transfer-desk/profiles/:profileId  ->  entity  TRANSFER_DESK_CONFIG
-DELETE /api/v1/transfer-desk/profiles/:profileId/schedule  ->  entity  TRANSFER_DESK_CONFIG
+DELETE /api/v1/transfer-desk/*  ->  public
 DELETE /auth/sessions/:sessionId  ->  session
 GET    /api/v1/account-types  ->  entity  COA_READ | GL_READ
 GET    /api/v1/account-types/all  ->  entity  ADMIN_SETTINGS
@@ -104,40 +107,54 @@ GET    /api/v1/gl/recurring-journals  ->  entity  GL_READ
 GET    /api/v1/gl/recurring-journals/:id  ->  entity  GL_READ
 GET    /api/v1/gl/trial-balance  ->  entity  GL_READ
 GET    /api/v1/gl/users  ->  entity  GL_READ
-GET    /api/v1/integration/bank/statements  ->  entity  INTEGRATION_READ
-GET    /api/v1/integration/bank/statements/:statementId/reconciliation  ->  entity  INTEGRATION_READ
-GET    /api/v1/integration/bank/statements/:statementId/transactions  ->  entity  INTEGRATION_READ
-GET    /api/v1/integration/bank/statements/:statementId/unreconciled  ->  entity  INTEGRATION_READ
-GET    /api/v1/integration/bank/transactions/:transactionId/candidates  ->  entity  INTEGRATION_READ
-GET    /api/v1/integration/imports/coverage  ->  entity  INTEGRATION_READ
-GET    /api/v1/integration/imports/ledger-reconciliation  ->  entity  INTEGRATION_READ
-GET    /api/v1/integration/interfaces  ->  entity  INTEGRATION_READ
-GET    /api/v1/integration/interfaces/:id  ->  entity  INTEGRATION_READ
-GET    /api/v1/integration/mappings  ->  entity  INTEGRATION_READ
-GET    /api/v1/integration/mews/logs  ->  entity  INTEGRATION_READ
-GET    /api/v1/integration/opera-cloud/cashier-report  ->  entity  INTEGRATION_READ
-GET    /api/v1/integration/opera-cloud/city-ledger  ->  entity  INTEGRATION_READ
-GET    /api/v1/integration/opera-cloud/logs  ->  entity  INTEGRATION_READ
-GET    /api/v1/integration/opera-cloud/statistics  ->  entity  STATS_READ | INTEGRATION_READ
-GET    /api/v1/integration/payroll/logs  ->  entity  INTEGRATION_READ
-GET    /api/v1/integration/simphony/logs  ->  entity  INTEGRATION_READ
-GET    /api/v1/integration/transfer-desk/automations  ->  entity  TRANSFER_DESK_READ
-GET    /api/v1/integration/transfer-desk/automations/:id  ->  entity  TRANSFER_DESK_READ
-GET    /api/v1/integration/transfer-desk/components  ->  entity  TRANSFER_DESK_READ
-GET    /api/v1/integration/transfer-desk/executions  ->  entity  TRANSFER_DESK_READ
-GET    /api/v1/integration/transfer-desk/executions/:id  ->  entity  TRANSFER_DESK_READ
-GET    /api/v1/integration/transfer-desk/executions/:id/logs  ->  entity  TRANSFER_DESK_READ
-GET    /api/v1/integration/transfer-desk/filters  ->  entity  TRANSFER_DESK_READ
-GET    /api/v1/integration/transfer-desk/formats  ->  entity  TRANSFER_DESK_READ
-GET    /api/v1/integration/transfer-desk/formats/:id  ->  entity  TRANSFER_DESK_READ
-GET    /api/v1/integration/transfer-desk/lookups  ->  entity  TRANSFER_DESK_READ
-GET    /api/v1/integration/transfer-desk/lookups/:id  ->  entity  TRANSFER_DESK_READ
-GET    /api/v1/integration/transfer-desk/metadata  ->  entity  TRANSFER_DESK_READ
-GET    /api/v1/integration/transfer-desk/profiles  ->  entity  TRANSFER_DESK_READ
-GET    /api/v1/integration/transfer-desk/profiles/:id  ->  entity  TRANSFER_DESK_READ
-GET    /api/v1/integration/transfer-desk/profiles/:id/versions  ->  entity  TRANSFER_DESK_READ
-GET    /api/v1/integration/transfer-desk/transformations  ->  entity  TRANSFER_DESK_READ
-GET    /api/v1/integration/transfer-desk/transformations/:id  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/integration/*  ->  public
+GET    /api/v1/integration/transfer-desk/*  ->  public
+GET    /api/v1/integrations/automations  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/automations/:id  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/bank/statements  ->  entity  INTEGRATION_READ
+GET    /api/v1/integrations/bank/statements/:statementId/reconciliation  ->  entity  INTEGRATION_READ
+GET    /api/v1/integrations/bank/statements/:statementId/transactions  ->  entity  INTEGRATION_READ
+GET    /api/v1/integrations/bank/statements/:statementId/unreconciled  ->  entity  INTEGRATION_READ
+GET    /api/v1/integrations/bank/transactions/:transactionId/candidates  ->  entity  INTEGRATION_READ
+GET    /api/v1/integrations/builder/batches  ->  entity  INTEGRATIONS_RUN
+GET    /api/v1/integrations/builder/batches/:id  ->  entity  INTEGRATIONS_RUN
+GET    /api/v1/integrations/builder/lookup-tables  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/builder/lookup-tables/:tableId  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/builder/mappings/functions  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/builder/mappings/target-fields  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/builder/profiles  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/builder/profiles/:profileId  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/builder/profiles/:profileId/schedule  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/builder/profiles/:profileId/test/:testId/results  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/builder/profiles/:profileId/versions  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/builder/profiles/:profileId/versions/:versionId  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/components  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/executions  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/executions/:id  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/executions/:id/logs  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/filters  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/formats  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/formats/:id  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/imports/coverage  ->  entity  INTEGRATION_READ
+GET    /api/v1/integrations/imports/ledger-reconciliation  ->  entity  INTEGRATION_READ
+GET    /api/v1/integrations/interfaces  ->  entity  INTEGRATION_READ
+GET    /api/v1/integrations/interfaces/:id  ->  entity  INTEGRATION_READ
+GET    /api/v1/integrations/lookups  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/lookups/:id  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/mappings  ->  entity  INTEGRATION_READ
+GET    /api/v1/integrations/metadata  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/mews/logs  ->  entity  INTEGRATION_READ
+GET    /api/v1/integrations/opera-cloud/cashier-report  ->  entity  INTEGRATION_READ
+GET    /api/v1/integrations/opera-cloud/city-ledger  ->  entity  INTEGRATION_READ
+GET    /api/v1/integrations/opera-cloud/logs  ->  entity  INTEGRATION_READ
+GET    /api/v1/integrations/opera-cloud/statistics  ->  entity  STATS_READ | INTEGRATION_READ
+GET    /api/v1/integrations/payroll/logs  ->  entity  INTEGRATION_READ
+GET    /api/v1/integrations/profiles  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/profiles/:id  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/profiles/:id/versions  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/simphony/logs  ->  entity  INTEGRATION_READ
+GET    /api/v1/integrations/transformations  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/transformations/:id  ->  entity  INTEGRATIONS_READ
 GET    /api/v1/intercompany/account-pairs  ->  entity  IC_READ
 GET    /api/v1/intercompany/journals  ->  entity  IC_READ
 GET    /api/v1/intercompany/v2/pairs  ->  entity  IC_READ | IC_CONFIG
@@ -175,25 +192,17 @@ GET    /api/v1/reports/runs/:id/download  ->  entity  REPORT_EXPORT
 GET    /api/v1/reports/types  ->  entity  REPORT_READ
 GET    /api/v1/setup/progress  ->  session
 GET    /api/v1/setup/templates  ->  tenant  ADMIN_SETTINGS
-GET    /api/v1/transfer-desk/batches  ->  entity  TRANSFER_DESK_EXECUTE
-GET    /api/v1/transfer-desk/batches/:id  ->  entity  TRANSFER_DESK_EXECUTE
-GET    /api/v1/transfer-desk/lookup-tables  ->  entity  TRANSFER_DESK_READ
-GET    /api/v1/transfer-desk/lookup-tables/:tableId  ->  entity  TRANSFER_DESK_READ
-GET    /api/v1/transfer-desk/mappings/functions  ->  entity  TRANSFER_DESK_READ
-GET    /api/v1/transfer-desk/mappings/target-fields  ->  entity  TRANSFER_DESK_READ
-GET    /api/v1/transfer-desk/profiles  ->  entity  TRANSFER_DESK_READ
-GET    /api/v1/transfer-desk/profiles/:profileId  ->  entity  TRANSFER_DESK_READ
-GET    /api/v1/transfer-desk/profiles/:profileId/schedule  ->  entity  TRANSFER_DESK_READ
-GET    /api/v1/transfer-desk/profiles/:profileId/test/:testId/results  ->  entity  TRANSFER_DESK_READ
-GET    /api/v1/transfer-desk/profiles/:profileId/versions  ->  entity  TRANSFER_DESK_READ
-GET    /api/v1/transfer-desk/profiles/:profileId/versions/:versionId  ->  entity  TRANSFER_DESK_READ
+GET    /api/v1/transfer-desk/*  ->  public
 GET    /api/v1/version  ->  public
 GET    /auth/me  ->  session
 GET    /auth/sessions  ->  session
 GET    /auth/tenant/:tenantCode  ->  public
 GET    /health  ->  public
 GET    /ready  ->  public
-PATCH  /api/v1/transfer-desk/profiles/:profileId/status  ->  entity  TRANSFER_DESK_CONFIG
+PATCH  /api/v1/integration/*  ->  public
+PATCH  /api/v1/integration/transfer-desk/*  ->  public
+PATCH  /api/v1/integrations/builder/profiles/:profileId/status  ->  entity  INTEGRATIONS_CONFIG
+PATCH  /api/v1/transfer-desk/*  ->  public
 POST   /api/v1/account-types  ->  entity  ADMIN_SETTINGS
 POST   /api/v1/admin/login-audit  ->  any-entity  ADMIN_USERS
 POST   /api/v1/admin/permissions  ->  tenant  ADMIN_ROLES_MANAGE
@@ -270,44 +279,57 @@ POST   /api/v1/gl/journals/:id/reject  ->  entity  GL_APPROVE
 POST   /api/v1/gl/journals/:id/reverse  ->  entity  GL_REVERSE
 POST   /api/v1/gl/recurring-journals  ->  entity  GL_WRITE
 POST   /api/v1/gl/recurring-journals/:id/generate  ->  entity  GL_WRITE | ADMIN_SETTINGS
-POST   /api/v1/integration/bank/import  ->  entity  INTEGRATION_IMPORT
-POST   /api/v1/integration/bank/statements/:statementId/auto-match  ->  entity  INTEGRATION_IMPORT
-POST   /api/v1/integration/bank/transactions/:transactionId/match  ->  entity  INTEGRATION_IMPORT
-POST   /api/v1/integration/bank/transactions/:transactionId/unmatch  ->  entity  INTEGRATION_IMPORT
-POST   /api/v1/integration/import/saf/account-mapping  ->  entity  INTEGRATION_READ
-POST   /api/v1/integration/import/saf/execute  ->  entity  INTEGRATION_IMPORT
-POST   /api/v1/integration/import/saf/preview  ->  entity  INTEGRATION_READ
-POST   /api/v1/integration/imports/:id/reverse  ->  entity  INTEGRATION_IMPORT
-POST   /api/v1/integration/inbound/file-import  ->  entity  INTEGRATION_IMPORT
-POST   /api/v1/integration/inbound/invoices  ->  entity  INTEGRATION_IMPORT
-POST   /api/v1/integration/inbound/journals  ->  entity  INTEGRATION_IMPORT
-POST   /api/v1/integration/inbound/suppliers  ->  entity  INTEGRATION_IMPORT
-POST   /api/v1/integration/interfaces  ->  entity  INTEGRATION_CONFIG
-POST   /api/v1/integration/interfaces/:id/execute  ->  entity  INTEGRATION_IMPORT
-POST   /api/v1/integration/interfaces/:id/preview  ->  entity  INTEGRATION_READ
-POST   /api/v1/integration/interfaces/preview-draft  ->  entity  INTEGRATION_READ
-POST   /api/v1/integration/mappings  ->  entity  INTEGRATION_CONFIG
-POST   /api/v1/integration/mews/import  ->  entity  INTEGRATION_IMPORT
-POST   /api/v1/integration/opera-cloud/import  ->  entity  INTEGRATION_IMPORT
-POST   /api/v1/integration/opera-sun/import  ->  entity  INTEGRATION_IMPORT
-POST   /api/v1/integration/payroll/import  ->  entity  INTEGRATION_IMPORT
-POST   /api/v1/integration/payroll/import-file  ->  entity  INTEGRATION_IMPORT
-POST   /api/v1/integration/simphony/import  ->  entity  INTEGRATION_IMPORT
-POST   /api/v1/integration/sky-jana/sync  ->  entity  INTEGRATION_IMPORT
-POST   /api/v1/integration/transfer-desk/automations  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
-POST   /api/v1/integration/transfer-desk/automations/:id/run  ->  entity  TRANSFER_DESK_EXECUTE | INTEGRATION_IMPORT
-POST   /api/v1/integration/transfer-desk/executions/:id/cancel  ->  entity  TRANSFER_DESK_EXECUTE | INTEGRATION_IMPORT
-POST   /api/v1/integration/transfer-desk/filters  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
-POST   /api/v1/integration/transfer-desk/formats  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
-POST   /api/v1/integration/transfer-desk/formats/detect  ->  entity  TRANSFER_DESK_READ | INTEGRATION_READ
-POST   /api/v1/integration/transfer-desk/lookups  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
-POST   /api/v1/integration/transfer-desk/lookups/:id/import-csv  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
-POST   /api/v1/integration/transfer-desk/lookups/:id/rows  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
-POST   /api/v1/integration/transfer-desk/profiles  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
-POST   /api/v1/integration/transfer-desk/profiles/:id/clone  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
-POST   /api/v1/integration/transfer-desk/profiles/:id/execute  ->  entity  TRANSFER_DESK_EXECUTE | INTEGRATION_IMPORT
-POST   /api/v1/integration/transfer-desk/profiles/:id/validate  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
-POST   /api/v1/integration/transfer-desk/transformations  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
+POST   /api/v1/integration/*  ->  public
+POST   /api/v1/integration/transfer-desk/*  ->  public
+POST   /api/v1/integrations/automations  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
+POST   /api/v1/integrations/automations/:id/run  ->  entity  INTEGRATIONS_RUN | INTEGRATION_IMPORT
+POST   /api/v1/integrations/bank/import  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integrations/bank/statements/:statementId/auto-match  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integrations/bank/transactions/:transactionId/match  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integrations/bank/transactions/:transactionId/unmatch  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integrations/builder/batches/:id/commit  ->  entity  INTEGRATIONS_RUN
+POST   /api/v1/integrations/builder/batches/:id/discard  ->  entity  INTEGRATIONS_RUN
+POST   /api/v1/integrations/builder/batches/:id/items/:itemId/reject  ->  entity  INTEGRATIONS_RUN
+POST   /api/v1/integrations/builder/batches/:id/items/:itemId/restore  ->  entity  INTEGRATIONS_RUN
+POST   /api/v1/integrations/builder/fsd/auto-detect  ->  entity  INTEGRATIONS_READ
+POST   /api/v1/integrations/builder/fsd/parse-preview  ->  entity  INTEGRATIONS_READ
+POST   /api/v1/integrations/builder/fsd/validate-schema  ->  entity  INTEGRATIONS_READ
+POST   /api/v1/integrations/builder/lookup-tables  ->  entity  INTEGRATIONS_CONFIG
+POST   /api/v1/integrations/builder/profiles  ->  entity  INTEGRATIONS_CONFIG
+POST   /api/v1/integrations/builder/profiles/:profileId/schedule  ->  entity  INTEGRATIONS_CONFIG
+POST   /api/v1/integrations/builder/profiles/:profileId/test  ->  entity  INTEGRATIONS_RUN | INTEGRATIONS_CONFIG
+POST   /api/v1/integrations/executions/:id/cancel  ->  entity  INTEGRATIONS_RUN | INTEGRATION_IMPORT
+POST   /api/v1/integrations/filters  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
+POST   /api/v1/integrations/formats  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
+POST   /api/v1/integrations/formats/detect  ->  entity  INTEGRATIONS_READ | INTEGRATION_READ
+POST   /api/v1/integrations/import/saf/account-mapping  ->  entity  INTEGRATION_READ
+POST   /api/v1/integrations/import/saf/execute  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integrations/import/saf/preview  ->  entity  INTEGRATION_READ
+POST   /api/v1/integrations/imports/:id/reverse  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integrations/inbound/file-import  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integrations/inbound/invoices  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integrations/inbound/journals  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integrations/inbound/suppliers  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integrations/interfaces  ->  entity  INTEGRATION_CONFIG
+POST   /api/v1/integrations/interfaces/:id/execute  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integrations/interfaces/:id/preview  ->  entity  INTEGRATION_READ
+POST   /api/v1/integrations/interfaces/preview-draft  ->  entity  INTEGRATION_READ
+POST   /api/v1/integrations/lookups  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
+POST   /api/v1/integrations/lookups/:id/import-csv  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
+POST   /api/v1/integrations/lookups/:id/rows  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
+POST   /api/v1/integrations/mappings  ->  entity  INTEGRATION_CONFIG
+POST   /api/v1/integrations/mews/import  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integrations/opera-cloud/import  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integrations/opera-sun/import  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integrations/payroll/import  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integrations/payroll/import-file  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integrations/profiles  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
+POST   /api/v1/integrations/profiles/:id/clone  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
+POST   /api/v1/integrations/profiles/:id/execute  ->  entity  INTEGRATIONS_RUN | INTEGRATION_IMPORT
+POST   /api/v1/integrations/profiles/:id/validate  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
+POST   /api/v1/integrations/simphony/import  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integrations/sky-jana/sync  ->  entity  INTEGRATION_IMPORT
+POST   /api/v1/integrations/transformations  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
 POST   /api/v1/intercompany/account-pairs  ->  entity  IC_CONFIG
 POST   /api/v1/intercompany/journals  ->  entity  IC_CREATE
 POST   /api/v1/intercompany/journals/:id/approve  ->  entity  IC_APPROVE
@@ -339,17 +361,7 @@ POST   /api/v1/reports/execute  ->  entity  REPORT_WRITE
 POST   /api/v1/reports/runs  ->  entity  REPORT_WRITE
 POST   /api/v1/reports/seed-system  ->  entity  REPORT_WRITE
 POST   /api/v1/setup/complete  ->  tenant  ADMIN_SETTINGS
-POST   /api/v1/transfer-desk/batches/:id/commit  ->  entity  TRANSFER_DESK_EXECUTE
-POST   /api/v1/transfer-desk/batches/:id/discard  ->  entity  TRANSFER_DESK_EXECUTE
-POST   /api/v1/transfer-desk/batches/:id/items/:itemId/reject  ->  entity  TRANSFER_DESK_EXECUTE
-POST   /api/v1/transfer-desk/batches/:id/items/:itemId/restore  ->  entity  TRANSFER_DESK_EXECUTE
-POST   /api/v1/transfer-desk/fsd/auto-detect  ->  entity  TRANSFER_DESK_READ
-POST   /api/v1/transfer-desk/fsd/parse-preview  ->  entity  TRANSFER_DESK_READ
-POST   /api/v1/transfer-desk/fsd/validate-schema  ->  entity  TRANSFER_DESK_READ
-POST   /api/v1/transfer-desk/lookup-tables  ->  entity  TRANSFER_DESK_CONFIG
-POST   /api/v1/transfer-desk/profiles  ->  entity  TRANSFER_DESK_CONFIG
-POST   /api/v1/transfer-desk/profiles/:profileId/schedule  ->  entity  TRANSFER_DESK_CONFIG
-POST   /api/v1/transfer-desk/profiles/:profileId/test  ->  entity  TRANSFER_DESK_EXECUTE | TRANSFER_DESK_CONFIG
+POST   /api/v1/transfer-desk/*  ->  public
 POST   /auth/change-password  ->  session
 POST   /auth/forgot-password  ->  public
 POST   /auth/login  ->  public
@@ -377,18 +389,21 @@ PUT    /api/v1/gl/accounts/:id  ->  entity  COA_EDIT
 PUT    /api/v1/gl/approval-rules/:id  ->  entity  GL_APPROVE | ADMIN_SETTINGS
 PUT    /api/v1/gl/journal-types/:id  ->  entity  GL_WRITE | ADMIN_SETTINGS
 PUT    /api/v1/gl/recurring-journals/:id  ->  entity  GL_WRITE
-PUT    /api/v1/integration/interfaces/:id  ->  entity  INTEGRATION_CONFIG
-PUT    /api/v1/integration/transfer-desk/automations/:id  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
-PUT    /api/v1/integration/transfer-desk/filters/:id  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
-PUT    /api/v1/integration/transfer-desk/formats/:id  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
-PUT    /api/v1/integration/transfer-desk/lookups/:id  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
-PUT    /api/v1/integration/transfer-desk/profiles/:id  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
-PUT    /api/v1/integration/transfer-desk/transformations/:id  ->  entity  TRANSFER_DESK_CONFIG | INTEGRATION_CONFIG
+PUT    /api/v1/integration/*  ->  public
+PUT    /api/v1/integration/transfer-desk/*  ->  public
+PUT    /api/v1/integrations/automations/:id  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
+PUT    /api/v1/integrations/builder/lookup-tables/:tableId  ->  entity  INTEGRATIONS_CONFIG
+PUT    /api/v1/integrations/builder/profiles/:profileId  ->  entity  INTEGRATIONS_CONFIG
+PUT    /api/v1/integrations/filters/:id  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
+PUT    /api/v1/integrations/formats/:id  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
+PUT    /api/v1/integrations/interfaces/:id  ->  entity  INTEGRATION_CONFIG
+PUT    /api/v1/integrations/lookups/:id  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
+PUT    /api/v1/integrations/profiles/:id  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
+PUT    /api/v1/integrations/transformations/:id  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
 PUT    /api/v1/intercompany/account-pairs/:id  ->  entity  IC_CONFIG
 PUT    /api/v1/intercompany/v2/mappings/:id  ->  entity  IC_CONFIG
 PUT    /api/v1/intercompany/v2/pairs/:id  ->  entity  IC_CONFIG
 PUT    /api/v1/platform/tenants/:slug  ->  platform
 PUT    /api/v1/reports/definitions/:id  ->  entity  REPORT_WRITE
 PUT    /api/v1/setup/steps/:step  ->  tenant  ADMIN_SETTINGS
-PUT    /api/v1/transfer-desk/lookup-tables/:tableId  ->  entity  TRANSFER_DESK_CONFIG
-PUT    /api/v1/transfer-desk/profiles/:profileId  ->  entity  TRANSFER_DESK_CONFIG
+PUT    /api/v1/transfer-desk/*  ->  public

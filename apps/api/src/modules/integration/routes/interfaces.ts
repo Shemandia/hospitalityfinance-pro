@@ -675,7 +675,7 @@ export function registerInterfaceRoutes(router: FastifyInstance) {
             lineNumber: lineNum++
           });
         }
-        assertBalanced(journalLines, `Transfer Desk journal ${def.name}`);
+        assertBalanced(journalLines, `Integrations journal ${def.name}`);
 
         const refPrefix =
           payload.reference ?? `TD-${def.name.replace(/[^A-Za-z0-9]/g, "").slice(0, 15)}`;
@@ -715,7 +715,7 @@ export function registerInterfaceRoutes(router: FastifyInstance) {
             entityId,
             periodId: period.id,
             reference: journalRef,
-            description: `Transfer Desk import: ${def.name}`,
+            description: `Integrations import: ${def.name}`,
             functionalCurrency: journalLines[0]?.currency ?? "USD",
             source: (def.connectorType === "PMS"
               ? "PMS"

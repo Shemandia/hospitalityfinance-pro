@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { Prisma, PrismaClient } from "./client.js";
 import { PrismaClient as RegistryPrismaClient } from "./registry-client.js";
 import { USALI_ACCOUNTS, SYSTEM_ACCOUNT_TYPES } from "../modules/setup/usali-template.js";
-import { seedTransferDeskSystemData } from "./seed-transfer-desk.js";
+import { seedIntegrationSystemData } from "./seed-integrations.js";
 import { hashPassword, passwordPolicyErrors } from "../services/password-policy.js";
 import { SYSTEM_PERMISSIONS, SYSTEM_ROLES } from "../modules/access/system-catalog.js";
 import {
@@ -517,8 +517,8 @@ async function main(): Promise<void> {
   await grantRoleAtEntity(prisma, viewer.id, "VIEWER", propertyB.id);
   console.log("Seeded role grants for the demo users.");
 
-  // ── Transfer Desk System Profiles ──────────────────────────────────────────
-  await seedTransferDeskSystemData(prisma);
+  // ── Integrations System Profiles ──────────────────────────────────────────
+  await seedIntegrationSystemData(prisma);
 
   // ── Setup wizard ─────────────────────────────────────────────────────────
   // The seed has created what the wizard would: properties, a chart of

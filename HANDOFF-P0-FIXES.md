@@ -26,17 +26,17 @@ git checkout -b fix/p0-kpi-materialized-view
 
 ## The nine P0 blockers (fix in this order)
 
-| #     | Blocker                                                           | Core location                                                                           |
-| ----- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| **1** | **Materialized view never created → all KPI/BS/CF endpoints 500** | `db/sql/performance.sql`, `db/sqlRunner.ts`                                             |
-| 2     | Opening balances never carry forward between periods              | `modules/period/service.ts`, `modules/gl/repository.ts`                                 |
-| 3     | Year-end cleardown sums final period only                         | `modules/period/year-end-cleardown.ts:149-172`                                          |
-| 4     | AP/AR post and pay net of tax — no VAT                            | `modules/ap/service.ts:584-625,702`, `modules/ar/service.ts:170`                        |
-| 5     | Two balance writers with opposite sign conventions                | `modules/fx/repository.ts:218`, `modules/fixed-asset/service.ts:498`                    |
-| 6     | FX revaluation double-posts on re-run                             | `modules/fx/service.ts:297-310`                                                         |
-| 7     | TZS zero-decimal unhandled (display + payment files)              | `apps/web/lib/format.ts:74`, `modules/ap/service.ts:187,216,269`                        |
-| 8     | Consolidation eliminations mix functional/reporting currency      | `modules/consolidation/service.ts:314,209`                                              |
-| 9     | Generic imports duplicate journals on re-run                      | `jobs/transfer-desk-record-mapper.ts:122`, `modules/transfer-desk/batch-service.ts:116` |
+| #     | Blocker                                                           | Core location                                                                        |
+| ----- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| **1** | **Materialized view never created → all KPI/BS/CF endpoints 500** | `db/sql/performance.sql`, `db/sqlRunner.ts`                                          |
+| 2     | Opening balances never carry forward between periods              | `modules/period/service.ts`, `modules/gl/repository.ts`                              |
+| 3     | Year-end cleardown sums final period only                         | `modules/period/year-end-cleardown.ts:149-172`                                       |
+| 4     | AP/AR post and pay net of tax — no VAT                            | `modules/ap/service.ts:584-625,702`, `modules/ar/service.ts:170`                     |
+| 5     | Two balance writers with opposite sign conventions                | `modules/fx/repository.ts:218`, `modules/fixed-asset/service.ts:498`                 |
+| 6     | FX revaluation double-posts on re-run                             | `modules/fx/service.ts:297-310`                                                      |
+| 7     | TZS zero-decimal unhandled (display + payment files)              | `apps/web/lib/format.ts:74`, `modules/ap/service.ts:187,216,269`                     |
+| 8     | Consolidation eliminations mix functional/reporting currency      | `modules/consolidation/service.ts:314,209`                                           |
+| 9     | Generic imports duplicate journals on re-run                      | `jobs/integration-record-mapper.ts:122`, `modules/integrations/batch-service.ts:116` |
 
 **Start with #1.** It is small, contained, carries no schema risk, and fixes the 500-error flood the user
 actually sees in the browser console. It also unblocks meaningful verification of #2, because the balance

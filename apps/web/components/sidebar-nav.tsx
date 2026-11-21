@@ -112,8 +112,14 @@ const navGroups: NavGroup[] = [
     items: [{ href: "/consolidation", label: "Consolidation", icon: Layers }]
   },
   {
-    label: "Transfer Desk",
-    items: [{ href: "/transfer-desk", label: "Transfer Desk", icon: Plug }]
+    label: "Integrations",
+    items: [
+      { href: "/integrations", label: "Integrations", icon: Plug },
+      // The older connector screens, until their sources move to templates (import plan steps 8-9).
+      { href: "/integrations/connectors", label: "Connectors", icon: Plug },
+      { href: "/integrations/saf-import", label: "SAF Import", icon: FileUp },
+      { href: "/integrations/interfaces", label: "Interfaces", icon: GitBranch }
+    ]
   },
   {
     label: "Admin",
@@ -130,10 +136,7 @@ const navGroups: NavGroup[] = [
       { href: "/settings/authorization", label: "Authorization Setup", icon: Layers },
       { href: "/settings/payment-profiles", label: "Payment Profiles", icon: Banknote },
       { href: "/settings/revaluation-profiles", label: "Revaluation Profiles", icon: RefreshCcw },
-      { href: "/settings/intercompany", label: "Intercompany", icon: ArrowLeftRight },
-      { href: "/settings/integrations", label: "Integrations", icon: Plug },
-      { href: "/settings/integrations/saf-import", label: "SAF Import", icon: FileUp },
-      { href: "/settings/integrations/transfer-desk", label: "Transfer Desk", icon: GitBranch }
+      { href: "/settings/intercompany", label: "Intercompany", icon: ArrowLeftRight }
     ]
   }
 ];

@@ -113,37 +113,37 @@ export const SYSTEM_PERMISSIONS: ReadonlyArray<SystemPermission> = [
     category: "Period Management"
   },
   { code: "PERIOD_REOPEN", description: "Reopen locked periods", category: "Period Management" },
-  // Transfer Desk
-  {
-    code: "TRANSFER_DESK_READ",
-    description: "View import profiles and execution history",
-    category: "Transfer Desk"
-  },
-  {
-    code: "TRANSFER_DESK_EXECUTE",
-    description: "Execute import profiles",
-    category: "Transfer Desk"
-  },
-  {
-    code: "TRANSFER_DESK_CONFIG",
-    description: "Configure profiles, formats, transformations",
-    category: "Transfer Desk"
-  },
   // Integrations
+  {
+    code: "INTEGRATIONS_READ",
+    description: "View import profiles and execution history",
+    category: "Integrations"
+  },
+  {
+    code: "INTEGRATIONS_RUN",
+    description: "Run integration profiles",
+    category: "Integrations"
+  },
+  {
+    code: "INTEGRATIONS_CONFIG",
+    description: "Configure profiles, formats, transformations",
+    category: "Integrations"
+  },
+  // Integrations (connectors): the older connector routes, removed with them (import plan step 9)
   {
     code: "INTEGRATION_READ",
     description: "View import logs and connector mappings",
-    category: "Integrations"
+    category: "Integrations (connectors)"
   },
   {
     code: "INTEGRATION_IMPORT",
     description: "Run PMS/POS/payroll imports",
-    category: "Integrations"
+    category: "Integrations (connectors)"
   },
   {
     code: "INTEGRATION_CONFIG",
     description: "Configure connectors and mappings",
-    category: "Integrations"
+    category: "Integrations (connectors)"
   },
   // Intercompany
   {
@@ -238,7 +238,7 @@ export const SYSTEM_ROLES: ReadonlyArray<SystemRole> = [
       "PERIOD_READ",
       "AUDIT_READ",
       "INTEGRATION_READ",
-      "TRANSFER_DESK_READ",
+      "INTEGRATIONS_READ",
       "STATS_READ",
       "PAYMENT_RUN_READ",
       "ADMIN_USERS_READ"
@@ -276,8 +276,8 @@ export const SYSTEM_ROLES: ReadonlyArray<SystemRole> = [
       "PERIOD_MANAGE",
       "AUDIT_READ",
       "INTEGRATION_READ",
-      "TRANSFER_DESK_READ",
-      "TRANSFER_DESK_EXECUTE",
+      "INTEGRATIONS_READ",
+      "INTEGRATIONS_RUN",
       "STATS_READ",
       "STATS_IMPORT",
       "ADMIN_USERS_READ"

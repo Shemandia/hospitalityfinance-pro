@@ -64,7 +64,7 @@ model TenantEntitlement {
   licenseType           LicenseType @map("license_type")
   maxProperties         Int         @default(10) @map("max_properties")
   maxUsers              Int         @default(50) @map("max_users")
-  enabledModules        String[]    @map("enabled_modules") // GL, AP, AR, TRANSFER_DESK, REPORTING, FIXED_ASSETS
+  enabledModules        String[]    @map("enabled_modules") // GL, AP, AR, INTEGRATIONS, REPORTING, FIXED_ASSETS
   maxConcurrentSessions Int         @default(10) @map("max_concurrent_sessions")
   subscriptionStartDate DateTime    @map("subscription_start_date") @db.Date
   subscriptionEndDate   DateTime?   @map("subscription_end_date") @db.Date
@@ -955,7 +955,7 @@ const STEPS = [
   { id: 4, name: "Review & Provision" }
 ];
 
-const MODULES = ["GL", "AP", "AR", "TRANSFER_DESK", "REPORTING", "FIXED_ASSETS"];
+const MODULES = ["GL", "AP", "AR", "INTEGRATIONS", "REPORTING", "FIXED_ASSETS"];
 
 type TenantData = {
   name: string;

@@ -222,11 +222,11 @@ Fix before production users interact with the system.
 
 ### Security (P1)
 
-#### S6. Path Traversal in Transfer-Desk Storage
+#### S6. Path Traversal in Integrations Storage
 
 **Source:** Security Analyst  
 **Severity:** HIGH  
-**Location:** `apps/api/src/jobs/transfer-desk-storage.ts`, line 29  
+**Location:** `apps/api/src/jobs/integration-storage.ts`, line 29  
 **Impact:** File path constructed from user-controlled input without sanitization. An attacker could read/write files outside the intended directory.  
 **Fix:** Validate that resolved path stays within the storage root using `path.resolve()` and prefix checking.
 
@@ -437,7 +437,7 @@ Fix before production users interact with the system.
 
 **Source:** Deployment Readiness Agent  
 **Severity:** HIGH  
-**Locations:** `rabbitmq.ts` (5), `email.ts` (3), `worker-supervisor.ts` (5), `transfer-desk-worker.ts` (2), various others  
+**Locations:** `rabbitmq.ts` (5), `email.ts` (3), `worker-supervisor.ts` (5), `integration-worker.ts` (2), various others  
 **Impact:** Bypasses Fastify's structured pino logger, preventing log aggregation and alerting.  
 **Fix:** Replace with `request.log` or `app.log` (Fastify logger).
 
@@ -666,11 +666,11 @@ Should fix within first sprint post-launch.
 **Impact:** `if (!res.ok) return` discards errors without user notification. Network or auth errors silently return empty data.  
 **Fix:** Show toast or error message on failed requests.
 
-#### A9. ~20 Orphaned Routes in Standalone Transfer-Desk Module
+#### A9. ~20 Orphaned Routes in Standalone Integrations Module
 
 **Source:** API Endpoint Coverage Agent  
 **Severity:** MEDIUM  
-**Impact:** All routes under `/api/v1/transfer-desk/*` are dead code. Frontend uses `/api/v1/integration/transfer-desk/*` exclusively. Adds unnecessary attack surface.  
+**Impact:** All routes under `/api/v1/integrations/builder/*` are dead code. Frontend uses `/api/v1/integrations/*` exclusively. Adds unnecessary attack surface.  
 **Fix:** Deregister from `app.ts` or document as migration path.
 
 #### A10. Session Management Endpoints With No UI
@@ -755,15 +755,15 @@ Technical debt and polish items.
 
 ### Financial Logic (P3)
 
-| ID  | Issue                                                                   | Location                                        |
-| --- | ----------------------------------------------------------------------- | ----------------------------------------------- |
-| F13 | Transfer desk test service uses `Number()` for debit/credit             | `transfer-desk/test-service.ts` (lines 467-468) |
-| F14 | AP posting does not create separate tax journal line                    | `ap/service.ts` (lines 501-522)                 |
-| F15 | AR invoice single-amount model limits departmental revenue split        | `ar/service.ts`                                 |
-| F16 | Consolidation materialized view has no refresh trigger                  | `consolidation/service.ts` (lines 172-187)      |
-| F17 | FX conversion does not round to target currency precision               | `fx/service.ts` (lines 82-88)                   |
-| F18 | Audit trail omits before-state on batch financial mutations             | `audit/service.ts`                              |
-| F19 | Period SOFT_CLOSE allows system processes but blocks manual corrections | `gl/service.ts` line 296                        |
+| ID  | Issue                                                                   | Location                                       |
+| --- | ----------------------------------------------------------------------- | ---------------------------------------------- |
+| F13 | Integrations test service uses `Number()` for debit/credit              | `integrations/test-service.ts` (lines 467-468) |
+| F14 | AP posting does not create separate tax journal line                    | `ap/service.ts` (lines 501-522)                |
+| F15 | AR invoice single-amount model limits departmental revenue split        | `ar/service.ts`                                |
+| F16 | Consolidation materialized view has no refresh trigger                  | `consolidation/service.ts` (lines 172-187)     |
+| F17 | FX conversion does not round to target currency precision               | `fx/service.ts` (lines 82-88)                  |
+| F18 | Audit trail omits before-state on batch financial mutations             | `audit/service.ts`                             |
+| F19 | Period SOFT_CLOSE allows system processes but blocks manual corrections | `gl/service.ts` line 296                       |
 
 ### API Coverage (P3)
 

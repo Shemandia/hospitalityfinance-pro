@@ -1,14 +1,14 @@
 /**
- * Transfer Desk — Automation scheduler.
+ * Integrations — Automation scheduler.
  *
- * Syncs active TransferAutomationSchedule rows to BullMQ repeatable jobs.
- * Each schedule becomes a repeatable job on the tenant's transfer-desk queue
+ * Syncs active IntegrationAutomationSchedule rows to BullMQ repeatable jobs.
+ * Each schedule becomes a repeatable job on the tenant's integrations queue
  * with pattern `automation:{automationId}`.
  *
  * Call `syncAutomationSchedules()` on API startup and after schedule CRUD.
  */
 
-import { getTransferDeskQueue } from "./transfer-desk-queue.js";
+import { getIntegrationQueue } from "./integration-queue.js";
 import { moduleLogger } from "../shared/logger.js";
 
 const log = moduleLogger("automation-scheduler");
@@ -45,12 +45,12 @@ export async function syncAutomationSchedules(
   db: any,
   tenantSlug: string
 ): Promise<{ synced: number; removed: number }> {
-  const queue = getTransferDeskQueue(tenantSlug);
+  const queue = getIntegrationQueue(tenantSlug);
   let removed = 0;
   let synced = 0;
 
   // Load all schedules with their automation
-  const schedules: ScheduleRow[] = await db.transferAutomationSchedule.findMany({
+  const schedules: ScheduleRow[] = await db.integrationAutomationSchedule.findMany({
     include: {
       automation: {
         select: {
@@ -75,7 +75,7 @@ export async function syncAutomationSchedules(
       } catch {
         // Key may already be gone
       }
-      await db.transferAutomationSchedule.update({
+      await db.integrationAutomationSchedule.update({
         where: { id: schedule.id },
         data: { bullmqRepeatKey: null, nextRunAt: null }
       });
@@ -108,7 +108,7 @@ export async function syncAutomationSchedules(
       // Store the repeat key for later removal
       const repeatKey = job.repeatJobKey;
       if (repeatKey) {
-        await db.transferAutomationSchedule.update({
+        await db.integrationAutomationSchedule.update({
           where: { id: schedule.id },
           data: {
             bullmqRepeatKey: repeatKey,

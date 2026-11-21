@@ -101,7 +101,7 @@ export type TmlRule =
 
 /**
  * A complete TML definition — stored as JSON in
- * transfer_transformations.definition column.
+ * integration_transformations.definition column.
  */
 export interface TmlDefinition {
   /** Ordered list of transformation rules. */

@@ -159,7 +159,12 @@ The rename is complete; no "transfer desk" is left anywhere:
 ## 7. Delivery steps (each one committed and pushed, gated on its tests and CI, with a report after each)
 
 1. ~~Migration for section 3~~: done (95ee625).
-2. **Rename to Integrations** (section 6b), before any new pipeline code, so that nothing new is written under the old name.
+2. ~~**Rename to Integrations**~~: done. Tenant migration `4_rename_transfer_to_integration`, the code, the API (`/api/v1/integrations/...`), the screens (`/integrations/...`) and the docs. Old API paths answer 308 and old screen addresses redirect, for one release. Notes from this step:
+   - The permission codes became `INTEGRATIONS_READ`, `INTEGRATIONS_RUN` and `INTEGRATIONS_CONFIG`, renamed in place so that roles keep exactly what they had. The older connector permissions (`INTEGRATION_READ`, `INTEGRATION_IMPORT`, `INTEGRATION_CONFIG`) stay separate until step 9; merging the two families would widen some roles' access, so that is left to the owner.
+   - Two profile APIs exist side by side: the profile builder (now `/api/v1/integrations/builder/...`) and the profile screens (`/api/v1/integrations/profiles...`). They are merged in step 10.
+   - The web calls three routes that do not exist (`profiles/:id/validate-full`, `profiles/:id/dry-run`, `functions`); these are fixed or removed in step 10.
+   - The settings `TD_LOCAL_UPLOADS_PATH`, `TD_S3_BUCKET` and `TRANSFER_DESK_TENANT_POLL_MS` became `INTEGRATION_UPLOADS_PATH`, `INTEGRATION_S3_BUCKET` and `INTEGRATION_TENANT_POLL_MS`. The old names still work for one release, with a warning in the log.
+   - The per-tenant job queues are now named `integration-{slug}`. Jobs waiting in an old `transfer-{slug}` queue at deploy time are not picked up, so drain them first.
 3. The `@hfp/posting-contract` package: the GL journal and bank statement documents, with unit tests.
 4. The posting service and the audited reverse-and-replace action. Integration tests as the application role: an unbalanced document is refused; a duplicate is reported as a duplicate; a document with no period for its month, or whose period is not open, is refused; a document dated in a prior open period lands in that period.
 5. The pipeline stages from section 4. Targets come from the contract, and the direct-write branch and the mapper's built-in targets are removed.

@@ -49,7 +49,7 @@ export const RLS_MODELS = new Set([
   "PMSStatistic",
   "BudgetDefinition",
   "ConsolidationRunEntity",
-  "TransferJournalRange",
+  "IntegrationJournalRange",
   "LedgerSetup",
   "ProcessLock",
   "PeriodCloseStatus",

@@ -952,7 +952,7 @@ Chapter 13 (31,000 chars) covers Ledger Conversion (LCN). Key observations:
 
 - **Use cases**: Company reorganizations (split BU into two), currency conversion (change base currency), migration to a new COA structure, consolidation of multiple BUs into one.
 
-- **HFP relevance**: Less critical for initial launch but important for onboarding properties that have existing SunSystems data. The Transfer Desk import profiles handle most migration scenarios.
+- **HFP relevance**: Less critical for initial launch but important for onboarding properties that have existing SunSystems data. The Integrations import profiles handle most migration scenarios.
 
 **Appendix: Complete Table Summary**
 

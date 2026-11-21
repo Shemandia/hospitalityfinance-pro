@@ -48,14 +48,30 @@ const SESSION_ROUTES = [
 
 // Routes that need no session at all.
 const PUBLIC_ROUTES = [
+  // Old Integrations paths, redirected for one release (modules/integrations/old-paths.ts).
+  "DELETE /api/v1/integration/*",
+  "DELETE /api/v1/integration/transfer-desk/*",
+  "DELETE /api/v1/transfer-desk/*",
+  "GET /api/v1/integration/*",
+  "GET /api/v1/integration/transfer-desk/*",
+  "GET /api/v1/transfer-desk/*",
   "GET /api/v1/version",
   "GET /auth/tenant/:tenantCode",
   "GET /health",
   "GET /ready",
+  "PATCH /api/v1/integration/*",
+  "PATCH /api/v1/integration/transfer-desk/*",
+  "PATCH /api/v1/transfer-desk/*",
+  "POST /api/v1/integration/*",
+  "POST /api/v1/integration/transfer-desk/*",
+  "POST /api/v1/transfer-desk/*",
   "POST /auth/forgot-password",
   "POST /auth/login",
   "POST /auth/refresh",
-  "POST /auth/reset-password"
+  "POST /auth/reset-password",
+  "PUT /api/v1/integration/*",
+  "PUT /api/v1/integration/transfer-desk/*",
+  "PUT /api/v1/transfer-desk/*"
 ];
 
 // POST routes that compute a preview or a query result and store nothing, so a
@@ -64,15 +80,15 @@ const READ_ONLY_POSTS = [
   "POST /api/v1/budget/definitions/:id/import-excel/preview",
   "POST /api/v1/gl/accounts/import/preview",
   "POST /api/v1/gl/accounts/import/sheets",
-  "POST /api/v1/integration/import/saf/account-mapping",
-  "POST /api/v1/integration/import/saf/preview",
-  "POST /api/v1/integration/interfaces/:id/preview",
-  "POST /api/v1/integration/interfaces/preview-draft",
-  "POST /api/v1/integration/transfer-desk/formats/detect",
-  "POST /api/v1/reports/drill-down",
-  "POST /api/v1/transfer-desk/fsd/auto-detect",
-  "POST /api/v1/transfer-desk/fsd/parse-preview",
-  "POST /api/v1/transfer-desk/fsd/validate-schema"
+  "POST /api/v1/integrations/builder/fsd/auto-detect",
+  "POST /api/v1/integrations/builder/fsd/parse-preview",
+  "POST /api/v1/integrations/builder/fsd/validate-schema",
+  "POST /api/v1/integrations/formats/detect",
+  "POST /api/v1/integrations/import/saf/account-mapping",
+  "POST /api/v1/integrations/import/saf/preview",
+  "POST /api/v1/integrations/interfaces/:id/preview",
+  "POST /api/v1/integrations/interfaces/preview-draft",
+  "POST /api/v1/reports/drill-down"
 ];
 
 // Prefixes whose routes take no X-Entity-ID header (plugins/auth.ts).
@@ -247,8 +263,8 @@ describe("route access table", () => {
           ...INTERCOMPANY_READS,
           ...EXPORTS,
           "GET /api/v1/process-locks/status",
-          "GET /api/v1/transfer-desk/batches",
-          "GET /api/v1/transfer-desk/batches/:id"
+          "GET /api/v1/integrations/builder/batches",
+          "GET /api/v1/integrations/builder/batches/:id"
         ].sort()
       );
     });

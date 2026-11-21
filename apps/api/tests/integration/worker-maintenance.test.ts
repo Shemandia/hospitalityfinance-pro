@@ -1,6 +1,6 @@
 /**
  * A job whose tenant is under maintenance is postponed, not failed
- * (WP-2 item 3). Transfer Desk jobs have one attempt, so failing them would
+ * (WP-2 item 3). Integrations jobs have one attempt, so failing them would
  * lose the import; createWorker puts the job back, delayed, instead.
  *
  * Needs REDIS_URL.

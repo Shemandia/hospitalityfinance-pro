@@ -4,8 +4,8 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const enqueueMock = vi.fn().mockResolvedValue("job-id");
 
-vi.mock("../src/jobs/transfer-desk-queue.js", () => ({
-  enqueueTransferDeskExecution: (...args: unknown[]) => enqueueMock(...args)
+vi.mock("../src/jobs/integration-queue.js", () => ({
+  enqueueIntegrationExecution: (...args: unknown[]) => enqueueMock(...args)
 }));
 
 import {
@@ -25,7 +25,7 @@ function makeMockDb() {
   executionStatusMap.clear();
 
   return {
-    transferExecution: {
+    integrationExecution: {
       create: vi.fn().mockImplementation(({ data }) => {
         executionCounter++;
         const id = `exec-${executionCounter}`;
@@ -89,8 +89,8 @@ describe("automation-engine", () => {
     expect(enqueueMock).toHaveBeenCalledTimes(3);
 
     // Verify execution rows were created in order
-    expect(db.transferExecution.create).toHaveBeenCalledTimes(3);
-    const firstCall = (db.transferExecution.create as any).mock.calls[0][0];
+    expect(db.integrationExecution.create).toHaveBeenCalledTimes(3);
+    const firstCall = (db.integrationExecution.create as any).mock.calls[0][0];
     expect(firstCall.data.profileId).toBe("p1");
     expect(firstCall.data.automationStepOrder).toBe(1);
   });
@@ -105,8 +105,8 @@ describe("automation-engine", () => {
     ];
 
     // Make step 2 fail: override findUnique to return FAILED for exec-2
-    const origCreate = db.transferExecution.create;
-    db.transferExecution.create = vi.fn().mockImplementation(({ data }) => {
+    const origCreate = db.integrationExecution.create;
+    db.integrationExecution.create = vi.fn().mockImplementation(({ data }) => {
       executionCounter++;
       const id = `exec-${executionCounter}`;
       if (executionCounter === 2) {
@@ -137,7 +137,7 @@ describe("automation-engine", () => {
     ];
 
     // Make step 2 fail
-    db.transferExecution.create = vi.fn().mockImplementation(({ data }) => {
+    db.integrationExecution.create = vi.fn().mockImplementation(({ data }) => {
       executionCounter++;
       const id = `exec-${executionCounter}`;
       if (executionCounter === 2) {
@@ -188,7 +188,7 @@ describe("automation-engine", () => {
       entityId: "ent-default"
     });
 
-    const createCall = (db.transferExecution.create as any).mock.calls[0][0];
+    const createCall = (db.integrationExecution.create as any).mock.calls[0][0];
     // Step overrides should merge on top of runtime params
     expect(createCall.data.runtimeParams).toEqual({
       periodId: "period-2026-01",

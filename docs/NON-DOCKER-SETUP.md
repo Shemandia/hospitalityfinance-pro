@@ -186,14 +186,14 @@ Forward these headers from the proxy:
 
 ## Storage
 
-For local storage, keep `TD_LOCAL_UPLOADS_PATH` outside any web public directory. The API rejects paths under known public roots such as `apps/web/public`.
+For local storage, keep `INTEGRATION_UPLOADS_PATH` outside any web public directory. The API rejects paths under known public roots such as `apps/web/public`.
 
 For production, prefer S3-compatible storage:
 
 ```bash
 STORAGE_BACKEND=s3
 AWS_REGION=eu-west-1
-TD_S3_BUCKET=hfp-transfer-desk
+INTEGRATION_S3_BUCKET=hfp-integrations
 AWS_S3_BUCKET=hfp-reports
 ```
 
