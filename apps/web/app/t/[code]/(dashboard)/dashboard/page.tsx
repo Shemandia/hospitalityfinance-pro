@@ -7,6 +7,13 @@ import { DashboardSkeleton } from "../../../../../components/page-skeletons";
 import { ResponsiveBar } from "@nivo/bar";
 import { ResponsiveLine } from "@nivo/line";
 import { ResponsivePie } from "@nivo/pie";
+import {
+  categoryAxisHeight,
+  categoryAxisWidth,
+  needsHorizontalBars,
+  useElementWidth,
+  wrappedTick
+} from "../../../../../components/chart-ticks";
 import { useApiContext } from "../../../../../components/use-api-context";
 import {
   getBalanceSheet,
@@ -105,6 +112,12 @@ type PortfolioEntity = { id: string; name: string };
 
 const COLORS = ["#0e7c7b", "#0369a1", "#7c3aed", "#b45309", "#047857", "#dc2626"];
 
+/** Where chart category labels wrap: names are never cut (see components/chart-ticks). */
+const DEPT_LABEL_CHARS = 14;
+const AR_LABEL_CHARS = 18;
+/** At most this many ticks on a value axis, so the numbers never run together. */
+const VALUE_TICKS = 5;
+
 function pctColor(n: number) {
   if (n >= 35) return "text-emerald-600";
   if (n >= 20) return "text-amber-600";
@@ -154,7 +167,7 @@ function SectionHeader({ title }: { title: string }) {
 
 function ARAgeingChart({ rows }: { rows: AgeingRow[] }) {
   const barData = rows.map((r) => ({
-    customer: r.customerName.slice(0, 16),
+    customer: r.customerName,
     "0–30": parseFloat(r.bucket0to30),
     "31–60": parseFloat(r.bucket31to60),
     "61–90": parseFloat(r.bucket61to90),
@@ -196,16 +209,28 @@ function ARAgeingChart({ rows }: { rows: AgeingRow[] }) {
             No outstanding AR invoices.
           </p>
         ) : (
-          <div className="h-52">
+          <div className="h-60">
             <ResponsiveBar
               data={barData}
               keys={["0–30", "31–60", "61–90", "91+"]}
               indexBy="customer"
               layout="horizontal"
-              margin={{ top: 4, right: 16, bottom: 24, left: 110 }}
+              margin={{
+                top: 4,
+                right: 16,
+                bottom: 48,
+                left: categoryAxisWidth(
+                  barData.map((d) => d.customer),
+                  AR_LABEL_CHARS
+                )
+              }}
               padding={0.3}
               colors={["#059669", "#d97706", "#ea580c", "#dc2626"]}
-              axisBottom={{ format: (v) => `${(Number(v) / 1000).toFixed(0)}k` }}
+              axisLeft={{ renderTick: wrappedTick(AR_LABEL_CHARS) }}
+              axisBottom={{
+                format: (v) => `${(Number(v) / 1000).toFixed(0)}k`,
+                tickValues: VALUE_TICKS
+              }}
               tooltip={({ id, value, indexValue }) => (
                 <div className="bg-white border border-border rounded px-2 py-1 text-xs shadow">
                   {indexValue} · {id}: <strong>{fmt(value)}</strong>
@@ -219,7 +244,7 @@ function ARAgeingChart({ rows }: { rows: AgeingRow[] }) {
                   itemHeight: 14,
                   dataFrom: "keys",
                   symbolSize: 10,
-                  translateY: 24
+                  translateY: 46
                 }
               ]}
             />
@@ -338,17 +363,21 @@ function BankBalanceSummary({ bs }: { bs: BalanceSheetData | null | undefined })
 // ── Revenue vs Budget Sparklines ──────────────────────────────────────────────
 
 function RevenueBudgetChart({ usaliComparative }: { usaliComparative: any }) {
-  if (!usaliComparative) return null;
-  const depts = usaliComparative.departments ?? [];
-  if (depts.length === 0) return null;
+  const [boxRef, boxWidth] = useElementWidth<HTMLDivElement>();
+  const depts = usaliComparative?.departments ?? [];
 
   const barData = depts.map((d: any) => ({
-    dept: d.name.slice(0, 12),
+    dept: d.name as string,
     Actual: parseFloat(d.revenue),
     Budget: parseFloat(d.budgetRevenue)
   }));
+  const names: string[] = barData.map((d: { dept: string }) => d.dept);
+  const hasBudget = usaliComparative?.hasBudget;
+  // On a narrow card the departments no longer fit side by side: lay the bars down.
+  const horizontal = needsHorizontalBars(boxWidth, names.length, DEPT_LABEL_CHARS);
+  const thousands = (v: string | number) => `${(Number(v) / 1000).toFixed(0)}k`;
 
-  const hasBudget = usaliComparative.hasBudget;
+  if (!usaliComparative || depts.length === 0) return null;
 
   return (
     <Card>
@@ -363,17 +392,45 @@ function RevenueBudgetChart({ usaliComparative }: { usaliComparative: any }) {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="h-52">
+        <div
+          ref={boxRef}
+          style={{
+            height: horizontal ? Math.max(256, names.length * (hasBudget ? 44 : 30) + 56) : 256
+          }}
+        >
           <ResponsiveBar
             data={barData}
             keys={hasBudget ? ["Actual", "Budget"] : ["Actual"]}
             indexBy="dept"
-            margin={{ top: 8, right: 16, bottom: 40, left: 60 }}
+            layout={horizontal ? "horizontal" : "vertical"}
+            margin={
+              horizontal
+                ? {
+                    top: hasBudget ? 28 : 8,
+                    right: 16,
+                    bottom: 28,
+                    left: categoryAxisWidth(names, DEPT_LABEL_CHARS)
+                  }
+                : {
+                    top: hasBudget ? 28 : 8,
+                    right: 16,
+                    bottom: categoryAxisHeight(names, DEPT_LABEL_CHARS),
+                    left: 60
+                  }
+            }
             padding={0.25}
             groupMode="grouped"
             colors={["#0e7c7b", "#d1d5db"]}
-            axisLeft={{ format: (v) => `${(Number(v) / 1000).toFixed(0)}k` }}
-            axisBottom={{ tickRotation: -20 }}
+            axisLeft={
+              horizontal
+                ? { renderTick: wrappedTick(DEPT_LABEL_CHARS) }
+                : { format: thousands, tickValues: VALUE_TICKS }
+            }
+            axisBottom={
+              horizontal
+                ? { format: thousands, tickValues: VALUE_TICKS }
+                : { renderTick: wrappedTick(DEPT_LABEL_CHARS) }
+            }
             tooltip={({ id, value, indexValue }) => (
               <div className="bg-white border border-border rounded px-2 py-1 text-xs shadow">
                 {indexValue} · {id}: <strong>{fmt(value)}</strong>
@@ -388,7 +445,8 @@ function RevenueBudgetChart({ usaliComparative }: { usaliComparative: any }) {
                       itemWidth: 70,
                       itemHeight: 14,
                       dataFrom: "keys",
-                      symbolSize: 10
+                      symbolSize: 10,
+                      translateY: -24
                     }
                   ]
                 : []
@@ -1201,19 +1259,20 @@ export default function DashboardPage() {
           <SectionHeader title="Departmental Analysis" />
 
           {usali ? (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base">Revenue Mix</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="h-60">
+                  <div className="h-48">
                     <ResponsivePie
                       data={revenuePieData}
-                      margin={{ top: 16, right: 80, bottom: 16, left: 80 }}
+                      margin={{ top: 8, right: 8, bottom: 8, left: 8 }}
                       innerRadius={0.4}
                       padAngle={1.5}
                       colors={{ datum: "data.color" }}
+                      enableArcLinkLabels={false}
                       arcLabel={(d) =>
                         `${((d.value / parseFloat(usali.totalRevenue)) * 100).toFixed(0)}%`
                       }
@@ -1225,6 +1284,22 @@ export default function DashboardPage() {
                       )}
                     />
                   </div>
+                  {/* The names go in a legend, not on link labels that the card's edge cuts off. */}
+                  <ul className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                    {revenuePieData.map((d) => (
+                      <li key={d.id} className="flex items-center gap-2 min-w-0">
+                        <span
+                          className="h-2.5 w-2.5 rounded-sm shrink-0"
+                          style={{ backgroundColor: d.color }}
+                          aria-hidden
+                        />
+                        <span className="flex-1 min-w-0 text-slate-600">{d.label}</span>
+                        <span className="tabular-nums text-slate-500">
+                          {((d.value / parseFloat(usali.totalRevenue)) * 100).toFixed(0)}%
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
                 </CardContent>
               </Card>
               <Card>
@@ -1232,18 +1307,27 @@ export default function DashboardPage() {
                   <CardTitle className="text-base">Department Income %</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="h-60">
+                  <div style={{ height: Math.max(240, usali.departments.length * 32) }}>
                     <ResponsiveBar
                       data={usali.departments.map((d) => ({
-                        dept: d.name.slice(0, 12),
+                        dept: d.name,
                         pct: parseFloat(d.incomePct)
                       }))}
                       keys={["pct"]}
                       indexBy="dept"
                       layout="horizontal"
-                      margin={{ top: 8, right: 16, bottom: 8, left: 100 }}
+                      margin={{
+                        top: 8,
+                        right: 16,
+                        bottom: 28,
+                        left: categoryAxisWidth(
+                          usali.departments.map((d) => d.name),
+                          DEPT_LABEL_CHARS
+                        )
+                      }}
                       colors={["#0e7c7b"]}
-                      axisBottom={{ format: (v) => `${v}%` }}
+                      axisLeft={{ renderTick: wrappedTick(DEPT_LABEL_CHARS) }}
+                      axisBottom={{ format: (v) => `${v}%`, tickValues: VALUE_TICKS }}
                       tooltip={({ value }) => (
                         <div className="bg-white border border-border rounded px-2 py-1 text-xs shadow">
                           {fmt(value, 1)}%
