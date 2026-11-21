@@ -13,12 +13,35 @@ import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { API_ROOT, schemaPath, type SchemaKind } from "../db/migrate.js";
 import { requireConfig } from "../config.js";
+import { PrismaClient } from "../db/client.js";
 
 const { SHADOW_DATABASE_URL } = requireConfig(["SHADOW_DATABASE_URL"], "db:check:migrations");
 const prisma = resolve(API_ROOT, "node_modules/prisma/build/index.js");
 
+/**
+ * Empties the shadow database. Prisma resets only the public schema of the
+ * shadow before applying the migrations, so a schema a migration creates
+ * elsewhere (app_private, SEC-11) would survive one check and make the next
+ * one fail. The shadow is scratch by definition.
+ */
+async function emptyShadow(): Promise<void> {
+  const db = new PrismaClient({ datasourceUrl: SHADOW_DATABASE_URL });
+  try {
+    const schemas = await db.$queryRawUnsafe<Array<{ nspname: string }>>(
+      `select nspname from pg_namespace
+        where nspname not in ('public', 'information_schema') and nspname not like 'pg\\_%'`
+    );
+    for (const { nspname } of schemas) {
+      await db.$executeRawUnsafe(`DROP SCHEMA "${nspname.replace(/"/g, '""')}" CASCADE`);
+    }
+  } finally {
+    await db.$disconnect();
+  }
+}
+
 let failed = false;
 for (const kind of ["registry", "tenant"] as SchemaKind[]) {
+  await emptyShadow();
   try {
     execFileSync(
       process.execPath,
