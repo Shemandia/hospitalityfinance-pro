@@ -115,7 +115,7 @@ command has succeeded; other tenants are not affected by one that fails.
 
 Tenants are created by provisioning, which applies the migrations itself. A
 tenant database built before WP-2 has no migration history: the runner skips
-it, and it must be adopted (`db:adopt-tenant`) before it can be migrated.
+it, and it must be adopted (`db:adopt registry`, then `db:adopt tenant <slug>`) before it can be migrated.
 
 Do not run `db:seed` in production: it creates demo users and refuses
 `NODE_ENV=production`. Tenants get their roles, permissions and first

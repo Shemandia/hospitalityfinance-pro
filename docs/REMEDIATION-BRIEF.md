@@ -344,11 +344,13 @@ Nine work packages, in dependency order. Each closes named findings and is done 
 - [ ] Provisioning uses `migrate deploy`, creates owner and application roles, creates the tenant system user, and records the schema version in the registry.
 - [ ] Migration runner command: all tenants, resumable, per-tenant result recorded, non-zero exit on any failure. The API returns a maintenance response for a tenant behind the required version.
 - [ ] Adopt existing tenant databases: a one-time script that baselines each one against the new migration history after a schema diff shows no differences.
-- [ ] Encrypt tenant database credentials and integration credentials; rotate existing passwords.
-- [ ] Replace `enterWith` with `runWithContext` in the request hook and every worker; data access throws without a bound tenant.
-- [ ] Connection pooler in front of PostgreSQL; small per-tenant connection limit; safe idle eviction.
-- [ ] Row-level security on every entity-scoped table and its children, forced; test that enumerates tables and fails on a gap.
-- [ ] Scheduled per-tenant backups and a documented, tested restore.
+- [ ] Encrypt tenant database credentials and integration credentials; rotate existing passwords. _Deferred until before the first customer (21 November 2026)._
+- [ ] Replace `enterWith` with `runWithContext` in the request hook and every worker; data access throws without a bound tenant. _Deferred until before the first customer (21 November 2026)._
+- [ ] Connection pooler in front of PostgreSQL; small per-tenant connection limit; safe idle eviction. _Deferred until before the first customer (21 November 2026)._
+- [ ] Row-level security on every entity-scoped table and its children, forced; test that enumerates tables and fails on a gap. _Deferred until before the first customer (21 November 2026)._
+- [ ] Scheduled per-tenant backups and a documented, tested restore. _Deferred until before the first customer (21 November 2026)._
+
+Items 5 to 9 above (credentials, request context, pooler, forced RLS everywhere, backups) are deferred until before the first customer; WP-2 closes for now with items 1 to 4, and the acceptance below is checked in full when the deferred items are done.
 
 **Accepted when:** an empty PostgreSQL instance can be taken to a working tenant by provisioning alone; a second release with a new migration upgrades two tenants through the runner; a test connecting as the application role for entity A cannot read or write any row of entity B in any table; no secret is readable in the registry.
 
@@ -428,6 +430,8 @@ Nine work packages, in dependency order. Each closes named findings and is done 
 **Decided 14 November 2026.** The platform encryption key lives in an environment variable on the server, with a documented rotation procedure. WP-0 and WP-A are merged into `main`. WP-1 runs before WP-2, as the dependency table says. Within WP-1, HC-38 (a system user per tenant) and HC-40 (a plans table in the registry) move to WP-2, which creates the system user at provisioning and owns the new registry migrations. The connector half of HC-34 moves to WP-5.
 
 **Decided 15 November 2026.** HC-35 (upload limit) and HC-37 (import concurrency) become platform settings in WP-1, `UPLOAD_MAX_MB` and `IMPORT_CONCURRENCY`. Their per-tenant values move to WP-2 with the plans table (HC-40), so WP-1 makes no registry schema change.
+
+**Decided 21 November 2026.** The schedule is behind. WP-2 items 5 to 9 (encrypted integration credentials and password rotation, `runWithContext` everywhere, the connection pooler, forced RLS on every table with its gap test, scheduled backups with a tested restore) are deferred until before the first customer. WP-2 finishes items 3 (migration runner) and 4 (adoption of the existing databases, after tested `pg_dump` backups and the owner's go-ahead). The import feature (the canonical posting contract and the single Transfer Desk pipeline, from WP-3, WP-4 and WP-5) starts next, after a plan the owner approves.
 
 ## 9. Verification evidence and limits
 
