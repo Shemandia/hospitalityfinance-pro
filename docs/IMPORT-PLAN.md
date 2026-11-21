@@ -68,7 +68,7 @@ Rules enforced by the posting service, each with a stable error code:
 
 The WP-2 runner applies this migration to every tenant. On the owner's `hfp_db` it can only run after the adoption in WP-2 item 4.
 
-## 4. The pipeline (Transfer Desk only)
+## 4. The pipeline (Integrations only)
 
 `executeImport` becomes these stages. Each is a separate function with its own tests.
 
@@ -115,29 +115,71 @@ The templates are installed per tenant as system templates (`isSystem`). They ar
 Each template ships with:
 
 - a source-property-to-entity lookup (the property code in the file to the tenant's entity code), so files keep their own property codes;
-
 - empty lookup tables (source code to account code, property to entity, store to dimension), which the tenant fills in;
 - a sample file;
 - a parity test: real files (EZZ exports for Opera) run through the old connector and through the template must give the same journals (accounts, amounts, period and dimensions).
 
 The old SAF and Jana file-import routes and services are deleted only after their parity tests pass on real EZZ and Jana files. Simphony's and Opera Cloud's API clients keep only acquisition, which is WP-5.
 
-## 7. Delivery steps (each one committed and pushed, gated on its tests)
+## 6a. No hard-coded source logic (owner, 21 November 2026)
 
-1. Migration for section 3, with integration tests of what the database enforces:
-   - upgrading refuses while an entity has no code or a duplicate code, and names them; existing journals get document dates inside their periods;
-   - a duplicate is refused by the database even when two posts run concurrently, while the same reference may post for another entity or source system;
-   - the source system and reference come together, and the source system must exist;
-   - a missing document date is filled inside the period, and a date outside it is refused;
-   - entity codes are required and unique (also through the entity API: 400 and 409);
-   - a `SUSPENSE` policy needs a suspense account.
-2. The `@hfp/posting-contract` package: schema, types, and unit tests on valid and invalid documents.
-3. The posting service (validate, resolve, post in one transaction) and the audited reverse-and-replace action, with integration tests on real Postgres with row security, as the application role: an unbalanced document is refused; a duplicate is reported as a duplicate; a document with no period for its month, or whose period is not open, is refused; a document dated in a prior open period lands in that period.
-4. The pipeline stages from section 4; the direct-write branch is removed; the old tests are migrated.
-5. Unmapped policies and the profile fields, with tests for each policy.
-6. Templates, the install command and provisioning hook, sample files and parity tests: Opera, then Jana, then Simphony.
-7. Deletion of the SAF and Jana file-import paths, after their parity tests pass.
-8. Screens: a minimal pass. The profile screen gets source system, unmapped policy, suspense account and rate type. The run history shows each document with its error or journal link. The full designer and mapping editor stay in WP-4.
+Everything specific to a source system becomes tenant data: formats, transformations, lookup tables and profiles. What stays in code is only what is not specific to any source: the format and transformation engines, the pipeline, the posting contract and posting service, and **fetch adapters**. A fetch adapter only fetches a file or records: an SFTP folder, the Opera Cloud, Simphony or Mews API, or the inbound push endpoint. It uses credentials from the source system's settings, which are sealed with the platform key. It maps nothing and posts nothing.
+
+Each source's code is deleted as soon as its template produces the same journals from **real files** (accounts, amounts, period, dimensions).
+
+| Hard-coded today                                                                                     | Replaced by                                                                                                                                                       | Deleted                                  |
+| ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `connectors/saf` (parser, import service), `routes/saf.ts`                                           | Opera night-audit and Jana templates                                                                                                                              | after Opera and Jana parity              |
+| `connectors/sky-jana` (parser, sync job)                                                             | Jana template; the SFTP client becomes a fetch adapter                                                                                                            | after Jana parity                        |
+| `connectors/opera-cloud` (mapper, SUN parser, import job), `routes/opera.ts`                         | Opera template; the client and auth become a fetch adapter                                                                                                        | after Opera parity                       |
+| `connectors/simphony` (mapper, import job), `routes/simphony.ts`                                     | Simphony template; the client becomes a fetch adapter                                                                                                             | after Simphony parity                    |
+| `connectors/mews` (mapper, import job), `routes/mews.ts`                                             | Mews template; the client becomes a fetch adapter                                                                                                                 | after Mews parity                        |
+| `connectors/payroll`, `routes/payroll.ts`                                                            | Payroll template                                                                                                                                                  | after payroll parity                     |
+| `connectors/bank/bank-statement-importer.ts`                                                         | MT940 template and a canonical bank-statement target (moved into this phase from section 9). Bank reconciliation is not an import and stays.                      | after MT940 parity                       |
+| `connectors/inbound`                                                                                 | The inbound push endpoint becomes a fetch adapter that hands its payload to the pipeline, plus a template                                                         | after inbound parity                     |
+| `connectors/shared/suspense.ts`                                                                      | The profile's unmapped policy (section 5)                                                                                                                         | with the last connector that uses it     |
+| `transform-engine.ts`, `routes/interfaces.ts`, `InterfaceDefinition`                                 | Saved definitions migrated to formats, transformations and profiles                                                                                               | after the migration of saved definitions |
+| `ConnectorMapping`                                                                                   | Lookup tables                                                                                                                                                     | after its data is migrated               |
+| `ImportLog`                                                                                          | The integration run record                                                                                                                                        | with the last import path that writes it |
+| `seed-transfer-desk.ts` (Opera, Jana, Simphony, MT940 formats in TypeScript)                         | Template data files installed per tenant (section 6)                                                                                                              | when the templates ship                  |
+| The mapper's built-in targets and hand-written field lists (`GL_JOURNAL_TARGET_FIELDS` and the rest) | Targets and fields read from the posting contract package, the one place the ledger's own document types are defined. The AP and AR invoice targets go with WP-U. | in the pipeline step                     |
+
+**Consequence for decision 4.** Deleting the Simphony, Opera Cloud and Mews import jobs would also remove their scheduled API pulls. So their fetch adapters are wired into the pipeline in this phase, and no scheduled import stops working.
+
+## 6b. Transfer Desk becomes Integrations (owner, 21 November 2026)
+
+The rename is complete; no "transfer desk" is left anywhere:
+
+- **Screens and URLs:** a top-level **Integrations** area (`/integrations`) with Sources, Formats, Transformations, Lookups, Profiles, Schedules, Runs and Files. The separate Settings → Integrations page (connector credentials) moves into Sources.
+- **API:** `/api/v1/integrations/...`. The old `/api/v1/transfer-desk/...` paths and old screen URLs redirect for one release, then they are removed.
+- **Code:** `transfer-desk-*` jobs, queue names and modules are renamed. A queue rename drains the old queue first.
+- **Database:** one tenant migration renames the 20 `transfer_*` tables, their indexes, constraints, sequences and row-security policies. Grants and policies are checked by the existing security tests. Permission codes keep working: they are renamed in the same migration, and role assignments follow.
+- **Docs:** the brief, runbooks and help text.
+
+## 7. Delivery steps (each one committed and pushed, gated on its tests and CI, with a report after each)
+
+1. ~~Migration for section 3~~: done (95ee625).
+2. **Rename to Integrations** (section 6b), before any new pipeline code, so that nothing new is written under the old name.
+3. The `@hfp/posting-contract` package: the GL journal and bank statement documents, with unit tests.
+4. The posting service and the audited reverse-and-replace action. Integration tests as the application role: an unbalanced document is refused; a duplicate is reported as a duplicate; a document with no period for its month, or whose period is not open, is refused; a document dated in a prior open period lands in that period.
+5. The pipeline stages from section 4. Targets come from the contract, and the direct-write branch and the mapper's built-in targets are removed.
+6. Unmapped policies and the profile fields.
+7. Source systems with sealed credentials, and fetch adapters (SFTP, Opera Cloud, Simphony, Mews, inbound push) feeding the pipeline on schedules.
+8. Templates with real-file parity, deleting each source's hard-coded code as it passes: Opera, Jana, Simphony, Mews, payroll, MT940, inbound.
+9. Migrating saved interface definitions and connector mappings, then deleting `transform-engine.ts`, the interfaces routes, `ConnectorMapping`, `ImportLog` writes and `seed-transfer-desk.ts`.
+10. Screens: the Integrations area. Sources with their settings, profile policies, and the run history per document with errors and journal links.
+
+**Needed from the owner for step 8:** real sample files for each source:
+
+- Opera EZZ exports (revenue, city ledger, statistics);
+- Jana internal movements;
+- a Simphony sales export;
+- a Mews export;
+- a payroll file;
+- an MT940 statement;
+- an inbound payload.
+
+They are kept out of the repository unless anonymised.
 
 The accepted test for the phase: a sample Opera night-audit file imports through the Opera template into two periods by document date, with ten dimensions on the lines. Importing it a second time posts nothing and reports every document as a duplicate.
 
@@ -150,12 +192,16 @@ The accepted test for the phase: a sample Opera night-audit file imports through
 5. **References:** every template's `sourceDocumentRef` includes the property. Duplicates are refused by default. An explicit reverse-and-replace action, which is audited, replaces a posted document.
 6. **Entities:** both. `entities.code` becomes required and unique per tenant, and each template has a source-property-to-entity lookup.
 7. **Journal numbering and multi-ledger:** left for WP-U.
+8. **Name:** Transfer Desk becomes **Integrations**, and Settings → Integrations folds into it.
+9. **Rename depth:** everything, the database tables included. Old URLs and API paths redirect for one release.
+10. **Hard-coded source logic** is removed per source, after parity on real files. Network clients stay only as fetch adapters.
+11. **CI:** a draft PR from `feat/import-pipeline` into `wp-2/tenant-platform` checks every step.
 
 **Before step 1:** the RLS bypass (finding SEC-11, P0) is fixed first; see `REMEDIATION-BRIEF.md`.
 
 ## 9. Not in this phase
 
-- Bank statements, statistics as a separate target, suppliers, customers, budgets and rates.
+- Statistics as a separate target, suppliers, customers, budgets and rates (bank statements moved into this phase, section 6a).
 - Streaming of 200 MB files.
 - JSON and nested XML formats.
 - The full format designer.
