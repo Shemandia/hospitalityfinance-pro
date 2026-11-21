@@ -128,7 +128,8 @@ if (!base) {
     it("renames the permissions in place, so roles keep what they had", async () => {
       const permissions = await rowsAsOwner<{ id: string; code: string; category: string }>(
         tenant,
-        `SELECT id, code, category FROM permissions ORDER BY id`
+        // Only the rows this test wrote: later migrations add permissions of their own.
+        `SELECT id, code, category FROM permissions WHERE id IN ('p-read', 'p-run', 'p-config', 'p-old') ORDER BY id`
       );
       expect(permissions).toEqual([
         { id: "p-config", code: "INTEGRATIONS_CONFIG", category: "Integrations" },

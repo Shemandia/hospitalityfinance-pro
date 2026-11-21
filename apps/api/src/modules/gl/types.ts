@@ -146,6 +146,31 @@ export type ApprovalRuleUpdateInput = z.infer<typeof approvalRuleUpdateSchema>;
 export type AccountCreateInput = z.infer<typeof accountCreateSchema>;
 export type AccountUpdateInput = z.infer<typeof accountUpdateSchema>;
 export type JournalCreateInput = z.infer<typeof journalCreateSchema>;
+
+type JournalExtraDimensions = {
+  dimension7?: string;
+  dimension8?: string;
+  dimension9?: string;
+  dimension10?: string;
+};
+
+/**
+ * What the import posting service writes (modules/posting): the journal
+ * screen's input plus the source document fields, statistical values and
+ * dimensions 7 to 10. Not accepted by the journal API: a manual journal
+ * cannot claim another system's source reference.
+ */
+export type JournalWriteInput = Omit<JournalCreateInput, "lines"> & {
+  documentDate?: string;
+  sourceSystem?: string;
+  sourceDocumentRef?: string;
+  sourceRevision?: number;
+  replacesJournalId?: string;
+  reversalOfId?: string;
+  lines: Array<
+    JournalCreateInput["lines"][number] & JournalExtraDimensions & { statValue?: string }
+  >;
+};
 export type JournalListQuery = z.infer<typeof journalListQuerySchema>;
 export type TrialBalanceQuery = z.infer<typeof trialBalanceQuerySchema>;
 export type JournalTypeCreateInput = z.infer<typeof journalTypeCreateSchema>;

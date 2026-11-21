@@ -709,55 +709,61 @@ model RecurringJournalLine {
 }
 
 model Journal {
-  id                        String                 @id @default(uuid())
-  entityId                  String                 @map("entity_id")
-  periodId                  String                 @map("period_id")
-  journalTypeId             String?                @map("journal_type_id")
+  id                        String                    @id @default(uuid())
+  entityId                  String                    @map("entity_id")
+  periodId                  String                    @map("period_id")
+  journalTypeId             String?                   @map("journal_type_id")
   reference                 String?
   description               String?
   source                    JournalSource
-  status                    JournalStatus          @default(DRAFT)
-  postedAt                  DateTime?              @map("posted_at")
-  functionalCurrency        String                 @map("functional_currency")
-  createdById               String                 @map("created_by")
-  approvedById              String?                @map("approved_by")
+  status                    JournalStatus             @default(DRAFT)
+  postedAt                  DateTime?                 @map("posted_at")
+  functionalCurrency        String                    @map("functional_currency")
+  createdById               String                    @map("created_by")
+  approvedById              String?                   @map("approved_by")
   /// Current authorization stage sequence order (null = not in authorization workflow)
-  currentAuthStageOrder     Int?                   @map("current_auth_stage_order")
+  currentAuthStageOrder     Int?                      @map("current_auth_stage_order")
   /// Authorization set this journal belongs to (for batch approval)
-  authorizationSetId        String?                @map("authorization_set_id")
+  authorizationSetId        String?                   @map("authorization_set_id")
   /// Auto-reversal flag: if true, a mirrored reversal journal is created in the next period
-  isAutoReversible          Boolean                @default(false) @map("is_auto_reversible")
+  isAutoReversible          Boolean                   @default(false) @map("is_auto_reversible")
   /// Self-reference to the original journal this entry reverses (for auto-reversal tracking)
-  reversalOfId              String?                @map("reversal_of_id")
+  reversalOfId              String?                   @map("reversal_of_id")
   /// Business date of the transaction; always inside the period (database trigger).
   /// Optional here only so that code which does not know it yet can leave it out:
   /// the database fills it (trg_journal_document_date) and requires it.
-  documentDate              DateTime?              @map("document_date") @db.Date
+  documentDate              DateTime?                 @map("document_date") @db.Date
   /// Tenant-defined source system code (source_systems.code), with sourceDocumentRef.
-  sourceSystem              String?                @map("source_system") @db.VarChar(20)
+  sourceSystem              String?                   @map("source_system") @db.VarChar(20)
   /// The source's own document reference: posts once per entity and source system.
-  sourceDocumentRef         String?                @map("source_document_ref") @db.VarChar(100)
-  createdAt                 DateTime               @default(now()) @map("created_at")
-  updatedAt                 DateTime               @updatedAt @map("updated_at")
-  entity                    Entity                 @relation(fields: [entityId], references: [id])
-  period                    Period                 @relation(fields: [periodId], references: [id])
-  journalType               JournalType?           @relation(fields: [journalTypeId], references: [id])
-  createdBy                 User                   @relation("JournalCreatedBy", fields: [createdById], references: [id])
-  approvedBy                User?                  @relation("JournalApprovedBy", fields: [approvedById], references: [id])
-  authorizationSet          AuthorizationSet?      @relation(fields: [authorizationSetId], references: [id])
-  reversalOf                Journal?               @relation("JournalReversal", fields: [reversalOfId], references: [id])
-  reversals                 Journal[]              @relation("JournalReversal")
-  sourceSystemRef           SourceSystem?          @relation(fields: [sourceSystem], references: [code], onDelete: Restrict)
+  sourceDocumentRef         String?                   @map("source_document_ref") @db.VarChar(100)
+  /// 0 for the first posting of a source document; each reverse-and-replace adds one.
+  sourceRevision            Int                       @default(0) @map("source_revision")
+  /// The journal this one replaced (reverse-and-replace); that one was reversed.
+  replacesJournalId         String?                   @unique @map("replaces_journal_id")
+  createdAt                 DateTime                  @default(now()) @map("created_at")
+  updatedAt                 DateTime                  @updatedAt @map("updated_at")
+  entity                    Entity                    @relation(fields: [entityId], references: [id])
+  period                    Period                    @relation(fields: [periodId], references: [id])
+  journalType               JournalType?              @relation(fields: [journalTypeId], references: [id])
+  createdBy                 User                      @relation("JournalCreatedBy", fields: [createdById], references: [id])
+  approvedBy                User?                     @relation("JournalApprovedBy", fields: [approvedById], references: [id])
+  authorizationSet          AuthorizationSet?         @relation(fields: [authorizationSetId], references: [id])
+  reversalOf                Journal?                  @relation("JournalReversal", fields: [reversalOfId], references: [id])
+  reversals                 Journal[]                 @relation("JournalReversal")
+  replaces                  Journal?                  @relation("JournalReplacement", fields: [replacesJournalId], references: [id])
+  replacedBy                Journal?                  @relation("JournalReplacement")
+  sourceSystemRef           SourceSystem?             @relation(fields: [sourceSystem], references: [code], onDelete: Restrict)
   transferLogs              IntegrationExecutionLog[]
   lines                     JournalLine[]
   approvals                 JournalApproval[]
   authorizations            JournalAuthorization[]
-  icSourceJournals          IntercompanyJournal[]  @relation("ICSourceJournal")
-  icMirrorJournals          IntercompanyJournal[]  @relation("ICMirrorJournal")
-  icTxnInitiatorJournals    ICTransaction[]        @relation("ICTxnInitiatorJournal")
-  icTxnCounterpartyJournals ICTransaction[]        @relation("ICTxnCounterpartyJournal")
+  icSourceJournals          IntercompanyJournal[]     @relation("ICSourceJournal")
+  icMirrorJournals          IntercompanyJournal[]     @relation("ICMirrorJournal")
+  icTxnInitiatorJournals    ICTransaction[]           @relation("ICTxnInitiatorJournal")
+  icTxnCounterpartyJournals ICTransaction[]           @relation("ICTxnCounterpartyJournal")
 
-  @@unique([entityId, sourceSystem, sourceDocumentRef])
+  @@unique([entityId, sourceSystem, sourceDocumentRef, sourceRevision])
   @@index([entityId, periodId, status])
   @@index([entityId, createdAt])
   @@index([entityId, journalTypeId])
@@ -1542,44 +1548,44 @@ enum SavePayloadOption {
 // ── TD-DB-003: integration_profiles ─────────────────────────────────────────────
 
 model IntegrationProfile {
-  id                  String             @id @default(uuid())
-  name                String             @unique
+  id                  String                @id @default(uuid())
+  name                String                @unique
   description         String?
-  profileType         ProfileType        @map("profile_type")
+  profileType         ProfileType           @map("profile_type")
   /// External component (e.g. "OPERA_CLOUD"); free-text to allow custom systems
-  sourceComponent     String?            @map("source_component")
+  sourceComponent     String?               @map("source_component")
   /// HFP target component (GL_JOURNAL, AP_INVOICE, AR_INVOICE, etc.)
-  targetComponent     String?            @map("target_component")
-  sourceFormatId      String?            @map("source_format_id")
-  targetFormatId      String?            @map("target_format_id")
-  transformationId    String?            @map("transformation_id")
-  filterId            String?            @map("filter_id")
+  targetComponent     String?               @map("target_component")
+  sourceFormatId      String?               @map("source_format_id")
+  targetFormatId      String?               @map("target_format_id")
+  transformationId    String?               @map("transformation_id")
+  filterId            String?               @map("filter_id")
   /// Runtime parameters (JSONB) — e.g. ledger, posting_options, file_handling
-  sourceParams        Json?              @map("source_params")
-  targetParams        Json?              @map("target_params")
+  sourceParams        Json?                 @map("source_params")
+  targetParams        Json?                 @map("target_params")
   /// Whether this profile passes its own validation rules; false blocks execute
-  isValid             Boolean            @default(false) @map("is_valid")
+  isValid             Boolean               @default(false) @map("is_valid")
   /// Increments on every save; profile_versions captures the snapshot
-  version             Int                @default(1)
+  version             Int                   @default(1)
   /// System profiles ship with every tenant and cannot be deleted
-  isSystem            Boolean            @default(false) @map("is_system")
+  isSystem            Boolean               @default(false) @map("is_system")
   /// Soft delete flag
-  isActive            Boolean            @default(true) @map("is_active")
+  isActive            Boolean               @default(true) @map("is_active")
   /// Save behavior: NONE / INPUT / OUTPUT / BOTH
-  savePayload         SavePayloadOption  @default(NONE) @map("save_payload")
+  savePayload         SavePayloadOption     @default(NONE) @map("save_payload")
   reviewMode          IntegrationReviewMode @default(HOLD) @map("review_mode")
   /// One transaction per document (default) or one for the whole file.
-  atomicity           ImportAtomicity    @default(PER_DOCUMENT)
+  atomicity           ImportAtomicity       @default(PER_DOCUMENT)
   /// What happens to source codes with no mapping.
-  unmappedPolicy      UnmappedPolicy     @default(REJECT) @map("unmapped_policy")
+  unmappedPolicy      UnmappedPolicy        @default(REJECT) @map("unmapped_policy")
   /// Account code that takes unmapped amounts when unmappedPolicy is SUSPENSE.
-  suspenseAccountCode String?            @map("suspense_account_code") @db.VarChar(30)
+  suspenseAccountCode String?               @map("suspense_account_code") @db.VarChar(30)
   /// Rate type used when a document carries no rate.
-  fxRateType          FXRateType?        @map("fx_rate_type")
-  sourceSystemCode    String?            @map("source_system_code") @db.VarChar(20)
-  createdById         String?            @map("created_by")
-  createdAt           DateTime           @default(now()) @map("created_at")
-  updatedAt           DateTime           @updatedAt @map("updated_at")
+  fxRateType          FXRateType?           @map("fx_rate_type")
+  sourceSystemCode    String?               @map("source_system_code") @db.VarChar(20)
+  createdById         String?               @map("created_by")
+  createdAt           DateTime              @default(now()) @map("created_at")
+  updatedAt           DateTime              @updatedAt @map("updated_at")
 
   sourceFormat    IntegrationFormat?          @relation("IntegrationProfileSourceFormat", fields: [sourceFormatId], references: [id])
   targetFormat    IntegrationFormat?          @relation("IntegrationProfileTargetFormat", fields: [targetFormatId], references: [id])
@@ -1589,7 +1595,7 @@ model IntegrationProfile {
   journalRanges   IntegrationJournalRange[]
   executions      IntegrationExecution[]
   automationSteps IntegrationAutomationStep[]
-  sourceSystem    SourceSystem?            @relation(fields: [sourceSystemCode], references: [code], onDelete: Restrict)
+  sourceSystem    SourceSystem?               @relation(fields: [sourceSystemCode], references: [code], onDelete: Restrict)
 
   @@index([profileType, isActive])
   @@map("integration_profiles")
@@ -1978,7 +1984,7 @@ model IntegrationExecutionLog {
   journalId       String?            @map("journal_id")
 
   execution IntegrationExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
-  journal   Journal?          @relation(fields: [journalId], references: [id])
+  journal   Journal?             @relation(fields: [journalId], references: [id])
 
   @@index([executionId, recordIndex])
   @@index([journalId])
@@ -1989,27 +1995,27 @@ model IntegrationExecutionLog {
 // ── TD-DB-019: integration_batches ──────────────────────────────────────────────
 
 model IntegrationBatch {
-  id              String              @id @default(uuid())
-  entityId        String              @map("entity_id")
-  profileId       String              @map("profile_id")
-  executionId     String              @map("execution_id")
-  targetComponent String              @map("target_component")
+  id              String                 @id @default(uuid())
+  entityId        String                 @map("entity_id")
+  profileId       String                 @map("profile_id")
+  executionId     String                 @map("execution_id")
+  targetComponent String                 @map("target_component")
   status          IntegrationBatchStatus @default(PENDING_REVIEW)
-  totalItems      Int                 @default(0) @map("total_items")
-  heldItems       Int                 @default(0) @map("held_items")
-  rejectedItems   Int                 @default(0) @map("rejected_items")
-  committedItems  Int                 @default(0) @map("committed_items")
-  errorItems      Int                 @default(0) @map("error_items")
+  totalItems      Int                    @default(0) @map("total_items")
+  heldItems       Int                    @default(0) @map("held_items")
+  rejectedItems   Int                    @default(0) @map("rejected_items")
+  committedItems  Int                    @default(0) @map("committed_items")
+  errorItems      Int                    @default(0) @map("error_items")
   /// SHA-256 of the mapped source records that produced this batch.
   /// Import idempotency: re-uploading the same file after a timeout used to
   /// stage a second batch and post the revenue twice. The unique constraint
   /// below makes that impossible. Nullable for batches staged before this
   /// existed — Postgres treats NULLs as distinct, so they never collide.
-  sourceHash      String?             @map("source_hash")
-  createdById     String              @map("created_by")
-  createdAt       DateTime            @default(now()) @map("created_at")
-  reviewedById    String?             @map("reviewed_by")
-  committedAt     DateTime?           @map("committed_at")
+  sourceHash      String?                @map("source_hash")
+  createdById     String                 @map("created_by")
+  createdAt       DateTime               @default(now()) @map("created_at")
+  reviewedById    String?                @map("reviewed_by")
+  committedAt     DateTime?              @map("committed_at")
 
   items IntegrationBatchItem[]
 
@@ -2022,18 +2028,18 @@ model IntegrationBatch {
 // ── TD-DB-020: integration_batch_items ──────────────────────────────────────────
 
 model IntegrationBatchItem {
-  id                  String                   @id @default(uuid())
-  batchId             String                   @map("batch_id")
-  itemIndex           Int                      @map("item_index")
+  id                  String                      @id @default(uuid())
+  batchId             String                      @map("batch_id")
+  itemIndex           Int                         @map("item_index")
   status              IntegrationBatchItemStatus  @default(HELD)
-  targetComponent     String                   @map("target_component")
+  targetComponent     String                      @map("target_component")
   payload             Json
-  sourceRecordIndices Int[]                    @map("source_record_indices")
+  sourceRecordIndices Int[]                       @map("source_record_indices")
   validationStatus    IntegrationValidationStatus @default(OK) @map("validation_status")
-  validationMessages  Json?                    @map("validation_messages")
-  resultJournalId     String?                  @map("result_journal_id")
-  rejectedReason      String?                  @map("rejected_reason")
-  createdAt           DateTime                 @default(now()) @map("created_at")
+  validationMessages  Json?                       @map("validation_messages")
+  resultJournalId     String?                     @map("result_journal_id")
+  rejectedReason      String?                     @map("rejected_reason")
+  createdAt           DateTime                    @default(now()) @map("created_at")
 
   batch IntegrationBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
 

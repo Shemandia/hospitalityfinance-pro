@@ -11,6 +11,7 @@ import type {
   AccountUpdateInput,
   JournalCreateInput,
   JournalListQuery,
+  JournalWriteInput,
   JournalTypeCreateInput,
   JournalTypeUpdateInput
 } from "./types.js";
@@ -157,7 +158,7 @@ export class GLRepository {
     });
   }
 
-  createJournal(entityId: string, createdById: string, input: JournalCreateInput) {
+  createJournal(entityId: string, createdById: string, input: JournalWriteInput) {
     return (this.db.journal as any).create({
       data: {
         entityId,
@@ -168,6 +169,14 @@ export class GLRepository {
         source: input.source,
         functionalCurrency: input.functionalCurrency,
         createdById,
+        ...(input.documentDate && { documentDate: new Date(`${input.documentDate}T00:00:00Z`) }),
+        ...(input.sourceSystem && {
+          sourceSystem: input.sourceSystem,
+          sourceDocumentRef: input.sourceDocumentRef,
+          sourceRevision: input.sourceRevision ?? 0
+        }),
+        ...(input.replacesJournalId && { replacesJournalId: input.replacesJournalId }),
+        ...(input.reversalOfId && { reversalOfId: input.reversalOfId }),
         lines: {
           create: input.lines.map((line, index) => ({
             accountId: line.accountId,
@@ -184,6 +193,11 @@ export class GLRepository {
             dimension4: line.dimension4,
             dimension5: line.dimension5,
             dimension6: line.dimension6,
+            dimension7: line.dimension7,
+            dimension8: line.dimension8,
+            dimension9: line.dimension9,
+            dimension10: line.dimension10,
+            ...(line.statValue !== undefined && { statValue: new Prisma.Decimal(line.statValue) }),
             lineNumber: line.lineNumber ?? index + 1
           }))
         }

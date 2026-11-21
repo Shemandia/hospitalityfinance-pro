@@ -129,6 +129,11 @@ export const SYSTEM_PERMISSIONS: ReadonlyArray<SystemPermission> = [
     description: "Configure profiles, formats, transformations",
     category: "Integrations"
   },
+  {
+    code: "INTEGRATIONS_REPLACE",
+    description: "Replace a posted imported document (reverse and post again)",
+    category: "Integrations"
+  },
   // Integrations (connectors): the older connector routes, removed with them (import plan step 9)
   {
     code: "INTEGRATION_READ",
