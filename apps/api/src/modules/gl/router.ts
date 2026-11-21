@@ -31,7 +31,7 @@ import {
 } from "./coa-import-service.js";
 
 import { RecurringJournalService } from "./recurring-service.js";
-import { pageLimit, pageOffset } from "../../shared/pagination.js";
+import { pageLimit, pageMeta, pageOffset } from "../../shared/pagination.js";
 
 const recurringJournalSchema = z.object({
   name: z.string().min(1).max(200),
@@ -388,11 +388,13 @@ export async function registerGLRouter(app: FastifyInstance): Promise<void> {
           try {
             const entityId = requireEntityId(request.entityId);
             const query = journalListQuerySchema.parse(request.query);
+            // One after the other: the RLS middleware binds the entity for one query at a time.
             const data = await glService.listJournals(entityId, query);
+            const total = await glService.countJournals(entityId, query);
             return reply.send({
               data,
               meta: {
-                limit: query.limit,
+                ...pageMeta(total, query.limit, query.offset),
                 cursor: data.length > 0 ? data[data.length - 1].id : null
               },
               errors: []

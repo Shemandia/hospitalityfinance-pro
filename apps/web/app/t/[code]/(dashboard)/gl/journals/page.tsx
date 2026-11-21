@@ -1,13 +1,15 @@
 "use client";
 
+import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { TablePager } from "../../../../../../components/table-pager";
 import {
-  flexRender,
-  getCoreRowModel,
-  getPaginationRowModel,
-  useReactTable,
-  type ColumnDef
-} from "@tanstack/react-table";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+  fetchAllRows,
+  pageFrom,
+  useDebouncedValue,
+  usePaging,
+  type Page
+} from "../../../../../../lib/paging";
 import { useMemo, useState } from "react";
 import { useTenantHref, useTenantRouter } from "../../../../../../hooks/use-tenant-router";
 import { useApiContext } from "../../../../../../components/use-api-context";
@@ -95,19 +97,41 @@ export default function GLJournalsPage() {
   const [selectedJournalId, setSelectedJournalId] = useState<string | null>(null);
   const [confirmReverse, setConfirmReverse] = useState(false);
 
+  const searchTerm = useDebouncedValue(search.trim());
+  const { page, pageSize, offset, setPage, setPageSize } = usePaging([
+    status,
+    searchTerm,
+    apiContext?.entityId
+  ]);
+  const [exporting, setExporting] = useState(false);
+
+  // One page of journals; status and search are applied by the API over all of them.
   const journalsQuery = useQuery({
-    queryKey: ["journals", apiContext?.tenantSlug, apiContext?.entityId, status, search],
-    queryFn: async () => {
-      if (!apiContext) return [];
+    queryKey: [
+      "journals",
+      apiContext?.tenantSlug,
+      apiContext?.entityId,
+      status,
+      searchTerm,
+      offset,
+      pageSize
+    ],
+    queryFn: async (): Promise<Page<JournalRow>> => {
+      if (!apiContext) return { rows: [], total: 0 };
       const response = await getGLJournals(apiContext, {
         status: status || undefined,
-        search: search || undefined,
-        limit: 100
+        search: searchTerm || undefined,
+        limit: pageSize,
+        offset
       });
-      return (response.data as unknown as JournalRow[]) ?? [];
+      return pageFrom(
+        response as unknown as { data: JournalRow[]; meta?: Record<string, unknown> }
+      );
     },
+    placeholderData: keepPreviousData,
     enabled: Boolean(apiContext)
   });
+  const totalJournals = journalsQuery.data?.total ?? 0;
 
   const journalDetailQuery = useQuery({
     queryKey: ["journal", apiContext?.tenantSlug, apiContext?.entityId, selectedJournalId],
@@ -224,12 +248,32 @@ export default function GLJournalsPage() {
   );
 
   const table = useReactTable({
-    data: journalsQuery.data ?? [],
+    data: journalsQuery.data?.rows ?? [],
     columns,
-    getCoreRowModel: getCoreRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    initialState: { pagination: { pageSize: 20 } }
+    getCoreRowModel: getCoreRowModel()
   });
+
+  /** Every journal the filters match, not only the page shown. */
+  async function exportAll() {
+    if (!apiContext) return;
+    setExporting(true);
+    try {
+      exportCsv(
+        await fetchAllRows(async (from, limit) =>
+          pageFrom(
+            (await getGLJournals(apiContext, {
+              status: status || undefined,
+              search: searchTerm || undefined,
+              limit,
+              offset: from
+            })) as unknown as { data: JournalRow[]; meta?: Record<string, unknown> }
+          )
+        )
+      );
+    } finally {
+      setExporting(false);
+    }
+  }
 
   function exportCsv(rows: JournalRow[]) {
     const headers = ["ID", "Reference", "Status", "Source", "Created At"];
@@ -284,8 +328,13 @@ export default function GLJournalsPage() {
                 <SelectItem value="REVERSED">Reversed</SelectItem>
               </SelectContent>
             </Select>
-            <Button variant="outline" size="sm" onClick={() => exportCsv(journalsQuery.data ?? [])}>
-              <Download className="h-3.5 w-3.5 mr-1" /> Export
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void exportAll()}
+              disabled={totalJournals === 0 || exporting}
+            >
+              <Download className="h-3.5 w-3.5 mr-1" /> {exporting ? "Exporting…" : "Export"}
             </Button>
             <Button size="sm" asChild>
               <Link href={tenantHref("/gl/journals/new")}>+ New Journal</Link>
@@ -348,64 +397,16 @@ export default function GLJournalsPage() {
               )}
             </TableBody>
           </Table>
-          {!journalsQuery.isLoading &&
-            !journalsQuery.isError &&
-            (journalsQuery.data?.length ?? 0) > 0 && (
-              <div className="flex items-center justify-between border-t px-4 py-3">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span>Rows per page</span>
-                  <Select
-                    value={String(table.getState().pagination.pageSize)}
-                    onValueChange={(v) => table.setPageSize(Number(v))}
-                  >
-                    <SelectTrigger className="h-7 w-[70px] text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {[10, 20, 50].map((s) => (
-                        <SelectItem key={s} value={String(s)}>
-                          {s}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <span>
-                    {table.getState().pagination.pageIndex * table.getState().pagination.pageSize +
-                      1}
-                    –
-                    {Math.min(
-                      (table.getState().pagination.pageIndex + 1) *
-                        table.getState().pagination.pageSize,
-                      journalsQuery.data?.length ?? 0
-                    )}{" "}
-                    of {journalsQuery.data?.length ?? 0}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7"
-                    onClick={() => table.previousPage()}
-                    disabled={!table.getCanPreviousPage()}
-                  >
-                    Previous
-                  </Button>
-                  <span className="text-xs text-muted-foreground">
-                    Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount() || 1}
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7"
-                    onClick={() => table.nextPage()}
-                    disabled={!table.getCanNextPage()}
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
-            )}
+          {!journalsQuery.isLoading && !journalsQuery.isError && totalJournals > 0 && (
+            <TablePager
+              page={page}
+              pageSize={pageSize}
+              total={totalJournals}
+              onPage={setPage}
+              onPageSize={setPageSize}
+              busy={journalsQuery.isFetching && journalsQuery.isPlaceholderData}
+            />
+          )}
         </CardContent>
       </Card>
 

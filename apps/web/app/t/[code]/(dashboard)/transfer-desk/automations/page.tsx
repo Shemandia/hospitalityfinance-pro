@@ -8,8 +8,7 @@
  */
 
 import Link from "next/link";
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useApiContext } from "../../../../../../components/use-api-context";
 import { usePermissions } from "../../../../../../components/use-permissions";
 import { useTenantHref } from "../../../../../../hooks/use-tenant-router";
@@ -31,21 +30,30 @@ import {
 import { ArrowLeft, Plus, CalendarClock, CheckCircle2, XCircle, Clock } from "lucide-react";
 import { QueryError } from "../../../../../../components/query-error";
 import { TableSkeleton } from "../../../../../../components/page-skeletons";
+import { TablePager } from "../../../../../../components/table-pager";
+import { pageFrom, usePaging } from "../../../../../../lib/paging";
 
 export default function AutomationsListPage() {
   const apiCtx = useApiContext();
   const { canTransferDeskDesigner } = usePermissions();
   const href = useTenantHref();
-  const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(20);
+  const { page, pageSize, offset, setPage, setPageSize } = usePaging([apiCtx?.tenantSlug]);
 
-  const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ["transfer-automations"],
-    queryFn: () => listTransferAutomations(apiCtx!)
+  const { data, isLoading, isFetching, isPlaceholderData, error, refetch } = useQuery({
+    queryKey: ["transfer-automations", apiCtx?.tenantSlug, offset, pageSize],
+    queryFn: async () =>
+      pageFrom(
+        (await listTransferAutomations(apiCtx!, { limit: pageSize, offset })) as {
+          data: TransferAutomationSummary[];
+          meta?: Record<string, unknown>;
+        }
+      ),
+    placeholderData: keepPreviousData,
+    enabled: Boolean(apiCtx)
   });
 
-  const automations: TransferAutomationSummary[] = data?.data ?? [];
-  const pagedAutomations = automations.slice(page * pageSize, (page + 1) * pageSize);
+  const automations: TransferAutomationSummary[] = data?.rows ?? [];
+  const total = data?.total ?? 0;
 
   return (
     <div className="space-y-6">
@@ -115,7 +123,7 @@ export default function AutomationsListPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {pagedAutomations.map((a) => {
+                  {automations.map((a) => {
                     const stepCount = a._count?.steps ?? a.steps?.length ?? 0;
                     const scheduleCount = a._count?.schedules ?? a.schedules?.length ?? 0;
                     const executionCount = a._count?.executions ?? 0;
@@ -170,52 +178,14 @@ export default function AutomationsListPage() {
                   })}
                 </TableBody>
               </Table>
-              <div className="flex items-center justify-between border-t px-4 py-3">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span>Rows per page</span>
-                  <select
-                    className="h-7 rounded border px-2 text-xs"
-                    value={pageSize}
-                    onChange={(e) => {
-                      setPageSize(Number(e.target.value));
-                      setPage(0);
-                    }}
-                  >
-                    {[10, 20, 50].map((n) => (
-                      <option key={n} value={n}>
-                        {n}
-                      </option>
-                    ))}
-                  </select>
-                  <span>
-                    {page * pageSize + 1}–{Math.min((page + 1) * pageSize, automations.length)} of{" "}
-                    {automations.length}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7"
-                    onClick={() => setPage((p) => Math.max(0, p - 1))}
-                    disabled={page === 0}
-                  >
-                    Previous
-                  </Button>
-                  <span className="text-xs text-muted-foreground">
-                    Page {page + 1} of {Math.max(1, Math.ceil(automations.length / pageSize))}
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7"
-                    onClick={() => setPage((p) => p + 1)}
-                    disabled={(page + 1) * pageSize >= automations.length}
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
+              <TablePager
+                page={page}
+                pageSize={pageSize}
+                total={total}
+                onPage={setPage}
+                onPageSize={setPageSize}
+                busy={isFetching && isPlaceholderData}
+              />
             </>
           )}
         </CardContent>

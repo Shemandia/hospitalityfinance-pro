@@ -855,6 +855,10 @@ export class GLService {
     return this.repository(this.prisma).listJournals(entityId, query);
   }
 
+  countJournals(entityId: string, query: JournalListQuery) {
+    return this.repository(this.prisma).countJournals(entityId, query);
+  }
+
   async getJournal(entityId: string, journalId: string) {
     const journal = await this.repository(this.prisma).getJournalWithLines(entityId, journalId);
     if (!journal) {

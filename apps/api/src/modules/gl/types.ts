@@ -104,6 +104,7 @@ export const journalTypeUpdateSchema = journalTypeCreateSchema
 export const journalListQuerySchema = z.object({
   cursor: z.string().uuid().optional(),
   limit: pageFields.limit,
+  offset: pageFields.offset,
   status: z.enum(["DRAFT", "PENDING_APPROVAL", "POSTED", "REVERSED"]).optional(),
   source: z.enum(["MANUAL", "PMS", "POS", "PAYROLL", "FX_REVAL", "AP", "AR"]).optional(),
   journalTypeId: z.string().uuid().optional(),
