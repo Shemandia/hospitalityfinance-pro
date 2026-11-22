@@ -260,7 +260,7 @@ if (!environmentReady || !redisUrl) {
       const updated = await call(
         "admin",
         "PUT",
-        `/api/v1/integrations/builder/profiles/${created.data.id}`,
+        `/api/v1/integrations/profiles/${created.data.id}`,
         {
           unmappedPolicy: "HOLD",
           atomicity: "PER_DOCUMENT"

@@ -1,10 +1,10 @@
 /**
  * Test & Preview API routes — dry-run test execution with SSE streaming.
  *
- * POST /integrations/profiles/:profileId/test
+ * POST /integrations/profiles/:id/test
  *   → Run dry-run test, stream SSE progress events, cache results
  *
- * GET /integrations/profiles/:profileId/test/:testId/results
+ * GET /integrations/profiles/:id/test/:testId/results
  *   → Return cached test results
  */
 
@@ -62,13 +62,13 @@ export async function registerTestRouter(app: FastifyInstance): Promise<void> {
     async (router) => {
       router.addHook("preHandler", requireAuth);
 
-      // ── POST /integrations/profiles/:profileId/test — SSE stream ───────
+      // ── POST /integrations/profiles/:id/test — SSE stream ───────
       //
       // Validates input, then switches to SSE mode and streams progress.
       // The response is an SSE stream, not a JSON envelope.
 
-      router.post<{ Params: { profileId: string } }>(
-        "/integrations/builder/profiles/:profileId/test",
+      router.post<{ Params: { id: string } }>(
+        "/integrations/profiles/:id/test",
         { preHandler: [requirePermission(["INTEGRATIONS_RUN", "INTEGRATIONS_CONFIG"])] },
         async (request, reply) => {
           // Validate input before switching to SSE
@@ -112,7 +112,7 @@ export async function registerTestRouter(app: FastifyInstance): Promise<void> {
           };
 
           try {
-            await testService.runTest(request.params.profileId, userId, fileBuffer, sse);
+            await testService.runTest(request.params.id, userId, fileBuffer, sse);
           } catch (error) {
             const msg = error instanceof Error ? error.message : "Unknown error";
             const code = error instanceof TestServiceError ? error.code : "TEST_EXECUTION_ERROR";
@@ -123,17 +123,14 @@ export async function registerTestRouter(app: FastifyInstance): Promise<void> {
         }
       );
 
-      // ── GET /integrations/profiles/:profileId/test/:testId/results ─────
+      // ── GET /integrations/profiles/:id/test/:testId/results ─────
 
-      router.get<{ Params: { profileId: string; testId: string } }>(
-        "/integrations/builder/profiles/:profileId/test/:testId/results",
+      router.get<{ Params: { id: string; testId: string } }>(
+        "/integrations/profiles/:id/test/:testId/results",
         { preHandler: [requirePermission("INTEGRATIONS_READ")] },
         async (request, reply) => {
           try {
-            const data = await testService.getResults(
-              request.params.profileId,
-              request.params.testId
-            );
+            const data = await testService.getResults(request.params.id, request.params.testId);
             return reply.send({ data, errors: [] });
           } catch (error) {
             return mapError(reply, error);

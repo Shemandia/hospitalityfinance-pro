@@ -17,59 +17,12 @@ import {
   SUPPLIER_SYNC_TARGET_FIELDS
 } from "../transform-engine.js";
 import { mapError } from "./_shared.js";
-import {
-  importPolicyData,
-  importPolicyFields,
-  suspenseProblem,
-  unknownSourceSystem
-} from "../../integrations/types.js";
+import { validateProfileShape } from "../../integrations/service.js";
 import { DOCUMENT_FIELDS } from "@hfp/posting-contract";
 import { pageLimit, pageMeta, pageOffset } from "../../../shared/pagination.js";
 import { signedInUserId } from "../../access/system-user.js";
 
 // ── Profile schemas ─────────────────────────────────────────────────────────
-
-const profileCreateSchema = z.object({
-  name: z.string().min(1).max(100),
-  description: z.string().max(500).optional(),
-  profileType: z.enum(["IMPORT", "EXPORT", "PROCESS", "INTERNAL_TRANSFER", "EXTERNAL_TRANSFER"]),
-  sourceComponent: z.string().optional(),
-  targetComponent: z.string().optional(),
-  sourceFormatId: z.string().uuid().optional(),
-  targetFormatId: z.string().uuid().optional(),
-  transformationId: z.string().uuid().optional(),
-  filterId: z.string().uuid().optional(),
-  sourceParams: z.record(z.unknown()).optional(),
-  targetParams: z.record(z.unknown()).optional(),
-  savePayload: z.enum(["NONE", "INPUT", "OUTPUT", "BOTH"]).optional(),
-  ...importPolicyFields
-});
-type ProfileCreateInput = z.infer<typeof profileCreateSchema>;
-
-function validateProfileShape(p: ProfileCreateInput): string[] {
-  const errors: string[] = [];
-  if (!p.transformationId) {
-    errors.push("transformationId is required (TD-BL-005)");
-  }
-  switch (p.profileType) {
-    case "IMPORT":
-      if (!p.targetComponent) errors.push("Import profiles require targetComponent (TD-BL-002)");
-      break;
-    case "EXPORT":
-      if (!p.sourceComponent) errors.push("Export profiles require sourceComponent (TD-BL-003)");
-      break;
-    case "PROCESS":
-      if (!p.targetComponent) errors.push("Process profiles require targetComponent (TD-BL-004)");
-      break;
-    case "INTERNAL_TRANSFER":
-    case "EXTERNAL_TRANSFER":
-      if (!p.sourceComponent || !p.targetComponent) {
-        errors.push("Transfer profiles require both sourceComponent and targetComponent");
-      }
-      break;
-  }
-  return errors;
-}
 
 // ── Execution schema ────────────────────────────────────────────────────────
 
@@ -1847,242 +1800,6 @@ export function registerIntegrationRoutes(router: FastifyInstance) {
 
   // ── Profile CRUD (TD-API-009..016) ──────────────────────────────────────
 
-  // TD-API-009 — GET /integrations/profiles (list)
-  router.get(
-    "/profiles",
-    { preHandler: [requirePermission("INTEGRATIONS_READ")] },
-    async (request, reply) => {
-      try {
-        const { profileType, isActive, isSystem } = request.query as {
-          profileType?: string;
-          isActive?: string;
-          isSystem?: string;
-        };
-        const data = await (prisma as unknown as PrismaClient).integrationProfile.findMany({
-          where: {
-            ...(profileType ? { profileType: profileType as any } : {}),
-            ...(isActive !== undefined ? { isActive: isActive === "true" } : {}),
-            ...(isSystem !== undefined ? { isSystem: isSystem === "true" } : {})
-          },
-          orderBy: [{ profileType: "asc" }, { name: "asc" }],
-          include: {
-            sourceFormat: { select: { id: true, name: true, classification: true } },
-            targetFormat: { select: { id: true, name: true, classification: true } },
-            transformation: { select: { id: true, name: true } },
-            _count: { select: { executions: true, versions: true } }
-          }
-        });
-        return reply.send({ data, errors: [] });
-      } catch (error) {
-        return mapError(reply, error);
-      }
-    }
-  );
-
-  // TD-API-010 — GET /integrations/profiles/:id (detail)
-  router.get<{ Params: { id: string } }>(
-    "/profiles/:id",
-    { preHandler: [requirePermission("INTEGRATIONS_READ")] },
-    async (request, reply) => {
-      try {
-        const data = await (prisma as unknown as PrismaClient).integrationProfile.findUnique({
-          where: { id: request.params.id },
-          include: {
-            sourceFormat: true,
-            targetFormat: true,
-            transformation: { select: { id: true, name: true, scriptType: true } },
-            filter: { select: { id: true, name: true } },
-            versions: {
-              select: {
-                id: true,
-                version: true,
-                changedBy: true,
-                changedAt: true,
-                changeNote: true
-              },
-              orderBy: { version: "desc" },
-              take: 10
-            }
-          }
-        });
-        if (!data) {
-          return reply.code(404).send({
-            data: null,
-            errors: [{ code: "NOT_FOUND", message: "Profile not found" }]
-          });
-        }
-        return reply.send({ data, errors: [] });
-      } catch (error) {
-        return mapError(reply, error);
-      }
-    }
-  );
-
-  // TD-API-011 — POST /integrations/profiles (create)
-  router.post(
-    "/profiles",
-    { preHandler: [requirePermission(["INTEGRATIONS_CONFIG", "INTEGRATION_CONFIG"])] },
-    async (request, reply) => {
-      try {
-        const payload = profileCreateSchema.parse(request.body);
-        const suspense = suspenseProblem(payload.unmappedPolicy, payload.suspenseAccountCode);
-        if (suspense) {
-          return reply.code(400).send({
-            data: null,
-            errors: [{ code: "PROFILE_SUSPENSE_ACCOUNT_REQUIRED", message: suspense }]
-          });
-        }
-        const unknownSource = await unknownSourceSystem(
-          prisma as unknown as PrismaClient,
-          (payload as { sourceSystemCode?: string | null }).sourceSystemCode
-        );
-        if (unknownSource) {
-          return reply.code(400).send({
-            data: null,
-            errors: [{ code: "SOURCE_SYSTEM_NOT_FOUND", message: unknownSource }]
-          });
-        }
-        const validationErrors = validateProfileShape(payload);
-        const db = prisma as unknown as PrismaClient;
-        const created = await db.integrationProfile.create({
-          data: {
-            name: payload.name,
-            description: payload.description,
-            profileType: payload.profileType as any,
-            sourceComponent: payload.sourceComponent,
-            targetComponent: payload.targetComponent,
-            sourceFormatId: payload.sourceFormatId,
-            targetFormatId: payload.targetFormatId,
-            transformationId: payload.transformationId,
-            filterId: payload.filterId,
-            sourceParams: payload.sourceParams as any,
-            targetParams: payload.targetParams as any,
-            savePayload: (payload.savePayload ?? "NONE") as any,
-            ...importPolicyData(payload),
-            isValid: validationErrors.length === 0,
-            createdById: (request.user as { sub?: string } | undefined)?.sub
-          }
-        });
-        // Snapshot v1
-        await db.integrationProfileVersion.create({
-          data: {
-            profileId: created.id,
-            version: 1,
-            snapshot: created as any,
-            changedBy: (request.user as { sub?: string } | undefined)?.sub,
-            changeNote: "Initial version"
-          }
-        });
-        return reply.code(201).send({ data: { ...created, validationErrors }, errors: [] });
-      } catch (error) {
-        return mapError(reply, error);
-      }
-    }
-  );
-
-  // TD-API-012 — PUT /integrations/profiles/:id (update, creates a new version row)
-  router.put<{ Params: { id: string } }>(
-    "/profiles/:id",
-    { preHandler: [requirePermission(["INTEGRATIONS_CONFIG", "INTEGRATION_CONFIG"])] },
-    async (request, reply) => {
-      try {
-        const payload = profileCreateSchema.partial().parse(request.body);
-        const db = prisma as unknown as PrismaClient;
-        const existing = await db.integrationProfile.findUnique({
-          where: { id: request.params.id }
-        });
-        if (!existing) {
-          return reply.code(404).send({
-            data: null,
-            errors: [{ code: "NOT_FOUND", message: "Profile not found" }]
-          });
-        }
-        const merged = {
-          ...existing,
-          ...payload,
-          sourceParams: (payload.sourceParams ?? existing.sourceParams) as any,
-          targetParams: (payload.targetParams ?? existing.targetParams) as any
-        };
-        const suspense = suspenseProblem(merged.unmappedPolicy, merged.suspenseAccountCode);
-        if (suspense) {
-          return reply.code(400).send({
-            data: null,
-            errors: [{ code: "PROFILE_SUSPENSE_ACCOUNT_REQUIRED", message: suspense }]
-          });
-        }
-        const unknownSource = await unknownSourceSystem(
-          prisma as unknown as PrismaClient,
-          (payload as { sourceSystemCode?: string | null }).sourceSystemCode
-        );
-        if (unknownSource) {
-          return reply.code(400).send({
-            data: null,
-            errors: [{ code: "SOURCE_SYSTEM_NOT_FOUND", message: unknownSource }]
-          });
-        }
-        const validationErrors = validateProfileShape(merged as ProfileCreateInput);
-        const updated = await db.integrationProfile.update({
-          where: { id: request.params.id },
-          data: {
-            name: payload.name,
-            description: payload.description,
-            profileType: payload.profileType as any,
-            sourceComponent: payload.sourceComponent,
-            targetComponent: payload.targetComponent,
-            sourceFormatId: payload.sourceFormatId,
-            targetFormatId: payload.targetFormatId,
-            transformationId: payload.transformationId,
-            filterId: payload.filterId,
-            sourceParams: payload.sourceParams as any,
-            targetParams: payload.targetParams as any,
-            savePayload: payload.savePayload as any,
-            ...importPolicyData(payload),
-            isValid: validationErrors.length === 0,
-            version: { increment: 1 }
-          }
-        });
-        await db.integrationProfileVersion.create({
-          data: {
-            profileId: updated.id,
-            version: updated.version,
-            snapshot: updated as any,
-            changedBy: (request.user as { sub?: string } | undefined)?.sub,
-            changeNote: "Updated"
-          }
-        });
-        return reply.send({ data: { ...updated, validationErrors }, errors: [] });
-      } catch (error) {
-        return mapError(reply, error);
-      }
-    }
-  );
-
-  // TD-API-013 — DELETE /integrations/profiles/:id (soft delete via isActive=false)
-  router.delete<{ Params: { id: string } }>(
-    "/profiles/:id",
-    { preHandler: [requirePermission(["INTEGRATIONS_CONFIG", "INTEGRATION_CONFIG"])] },
-    async (request, reply) => {
-      try {
-        const existing = await (prisma as unknown as PrismaClient).integrationProfile.findUnique({
-          where: { id: request.params.id }
-        });
-        if (!existing) {
-          return reply.status(404).send({ error: "Profile not found" });
-        }
-        if ((existing as any).isSystem) {
-          return reply.status(403).send({ error: "System profiles cannot be deleted" });
-        }
-        const updated = await (prisma as unknown as PrismaClient).integrationProfile.update({
-          where: { id: request.params.id },
-          data: { isActive: false }
-        });
-        return reply.send({ data: { id: updated.id, isActive: false }, errors: [] });
-      } catch (error) {
-        return mapError(reply, error);
-      }
-    }
-  );
-
   // TD-API-014 — POST /integrations/profiles/:id/clone
   router.post<{ Params: { id: string }; Body: { newName: string } }>(
     "/profiles/:id/clone",
@@ -2131,23 +1848,6 @@ export function registerIntegrationRoutes(router: FastifyInstance) {
     }
   );
 
-  // TD-API-015 — GET /integrations/profiles/:id/versions
-  router.get<{ Params: { id: string } }>(
-    "/profiles/:id/versions",
-    { preHandler: [requirePermission("INTEGRATIONS_READ")] },
-    async (request, reply) => {
-      try {
-        const data = await (prisma as unknown as PrismaClient).integrationProfileVersion.findMany({
-          where: { profileId: request.params.id },
-          orderBy: { version: "desc" }
-        });
-        return reply.send({ data, errors: [] });
-      } catch (error) {
-        return mapError(reply, error);
-      }
-    }
-  );
-
   // TD-API-016 — POST /integrations/profiles/:id/validate
   router.post<{ Params: { id: string } }>(
     "/profiles/:id/validate",
@@ -2163,7 +1863,7 @@ export function registerIntegrationRoutes(router: FastifyInstance) {
             errors: [{ code: "NOT_FOUND", message: "Profile not found" }]
           });
         }
-        const errors = validateProfileShape(profile as unknown as ProfileCreateInput);
+        const errors = validateProfileShape(profile);
         // Persist the result on the profile
         if (profile.isValid !== (errors.length === 0)) {
           await (prisma as unknown as PrismaClient).integrationProfile.update({

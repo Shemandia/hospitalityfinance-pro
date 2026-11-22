@@ -16,6 +16,17 @@ describe("old Transfer Desk API paths redirect to Integrations for one release",
     expect(newIntegrationPath("/api/v1/integration/import/saf/preview")).toBe(
       "/api/v1/integrations/import/saf/preview"
     );
+    // The profile builder's profile routes were merged into the one profiles API.
+    expect(newIntegrationPath("/api/v1/integrations/builder/profiles?limit=5")).toBe(
+      "/api/v1/integrations/profiles?limit=5"
+    );
+    expect(newIntegrationPath("/api/v1/integrations/builder/profiles/p1/schedule")).toBe(
+      "/api/v1/integrations/profiles/p1/schedule"
+    );
+    expect(newIntegrationPath("/api/v1/transfer-desk/profiles/p1/test")).toBe(
+      "/api/v1/integrations/profiles/p1/test"
+    );
+    expect(newIntegrationPath("/api/v1/integrations/builder/fsd/parse-preview")).toBeNull();
     expect(newIntegrationPath("/api/v1/integrations/formats")).toBeNull();
   });
 

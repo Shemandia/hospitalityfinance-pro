@@ -96,11 +96,13 @@ function qs(params: Record<string, string | number | boolean | undefined>): stri
 }
 
 const BUILDER = "/api/v1/integrations/builder";
+/** The one profiles API (the builder's profile routes were merged into it). */
+const PROFILES = "/api/v1/integrations/profiles";
 
 // ── Profile CRUD ─────────────────────────────────────────────────────────────
 
 export function createProfile(context: ApiContext, input: ProfileCreateInput) {
-  return request<Profile>(context, `${BUILDER}/profiles`, {
+  return request<Profile>(context, `${PROFILES}`, {
     method: "POST",
     body: JSON.stringify(input)
   });
@@ -109,16 +111,16 @@ export function createProfile(context: ApiContext, input: ProfileCreateInput) {
 export function listProfiles(context: ApiContext, filters: ProfileListFilters = {}) {
   return request<Profile[]>(
     context,
-    `${BUILDER}/profiles${qs(filters as Record<string, string | number | undefined>)}`
+    `${PROFILES}${qs(filters as Record<string, string | number | undefined>)}`
   );
 }
 
 export function getProfile(context: ApiContext, profileId: string) {
-  return request<Profile>(context, `${BUILDER}/profiles/${profileId}`);
+  return request<Profile>(context, `${PROFILES}/${profileId}`);
 }
 
 export function updateProfile(context: ApiContext, profileId: string, input: ProfileUpdateInput) {
-  return request<Profile>(context, `${BUILDER}/profiles/${profileId}`, {
+  return request<Profile>(context, `${PROFILES}/${profileId}`, {
     method: "PUT",
     body: JSON.stringify(input)
   });
@@ -129,24 +131,24 @@ export function changeProfileStatus(
   profileId: string,
   input: ProfileStatusChangeInput
 ) {
-  return request<Profile>(context, `${BUILDER}/profiles/${profileId}/status`, {
+  return request<Profile>(context, `${PROFILES}/${profileId}/status`, {
     method: "PATCH",
     body: JSON.stringify(input)
   });
 }
 
 export function deleteProfile(context: ApiContext, profileId: string) {
-  return request<{ id: string }>(context, `${BUILDER}/profiles/${profileId}`, {
+  return request<{ id: string }>(context, `${PROFILES}/${profileId}`, {
     method: "DELETE"
   });
 }
 
 export function listProfileVersions(context: ApiContext, profileId: string) {
-  return request<ProfileVersion[]>(context, `${BUILDER}/profiles/${profileId}/versions`);
+  return request<ProfileVersion[]>(context, `${PROFILES}/${profileId}/versions`);
 }
 
 export function getProfileVersion(context: ApiContext, profileId: string, versionId: string) {
-  return request<ProfileVersion>(context, `${BUILDER}/profiles/${profileId}/versions/${versionId}`);
+  return request<ProfileVersion>(context, `${PROFILES}/${profileId}/versions/${versionId}`);
 }
 
 // ── FSD Auto-Detection & Validation ──────────────────────────────────────────
@@ -233,11 +235,7 @@ export function updateLookupTable(
 export function startTest(context: ApiContext, profileId: string, file: File) {
   const formData = new FormData();
   formData.append("file", file);
-  return uploadRequest<{ testId: string }>(
-    context,
-    `${BUILDER}/profiles/${profileId}/test`,
-    formData
-  );
+  return uploadRequest<{ testId: string }>(context, `${PROFILES}/${profileId}/test`, formData);
 }
 
 /**
@@ -245,28 +243,28 @@ export function startTest(context: ApiContext, profileId: string, file: File) {
  * Use with EventSource in the useTestStream hook.
  */
 export function getTestStreamUrl(profileId: string, testId: string): string {
-  return `${BUILDER}/profiles/${profileId}/test/${testId}/stream`;
+  return `${PROFILES}/${profileId}/test/${testId}/stream`;
 }
 
 export function getTestResults(context: ApiContext, profileId: string, testId: string) {
-  return request<TestResults>(context, `${BUILDER}/profiles/${profileId}/test/${testId}/results`);
+  return request<TestResults>(context, `${PROFILES}/${profileId}/test/${testId}/results`);
 }
 
 // ── Automation Schedule ──────────────────────────────────────────────────────
 
 export function getSchedule(context: ApiContext, profileId: string) {
-  return request<Schedule | null>(context, `${BUILDER}/profiles/${profileId}/schedule`);
+  return request<Schedule | null>(context, `${PROFILES}/${profileId}/schedule`);
 }
 
 export function createSchedule(context: ApiContext, profileId: string, input: ScheduleCreateInput) {
-  return request<Schedule>(context, `${BUILDER}/profiles/${profileId}/schedule`, {
+  return request<Schedule>(context, `${PROFILES}/${profileId}/schedule`, {
     method: "POST",
     body: JSON.stringify(input)
   });
 }
 
 export function deleteSchedule(context: ApiContext, profileId: string) {
-  return request<{ id: string }>(context, `${BUILDER}/profiles/${profileId}/schedule`, {
+  return request<{ id: string }>(context, `${PROFILES}/${profileId}/schedule`, {
     method: "DELETE"
   });
 }

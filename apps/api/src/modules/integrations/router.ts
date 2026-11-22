@@ -66,8 +66,8 @@ export async function registerIntegrationProfileRouter(app: FastifyInstance): Pr
       // ── POST /integrations/profiles — create new profile (DRAFT) ───────
 
       router.post(
-        "/integrations/builder/profiles",
-        { preHandler: [requirePermission("INTEGRATIONS_CONFIG")] },
+        "/integrations/profiles",
+        { preHandler: [requirePermission(["INTEGRATIONS_CONFIG", "INTEGRATION_CONFIG"])] },
         async (request, reply) => {
           try {
             const userId = requireUserId(request.user?.sub);
@@ -83,7 +83,7 @@ export async function registerIntegrationProfileRouter(app: FastifyInstance): Pr
       // ── GET /integrations/profiles — list (paginated, filterable) ──────
 
       router.get(
-        "/integrations/builder/profiles",
+        "/integrations/profiles",
         { preHandler: [requirePermission("INTEGRATIONS_READ")] },
         async (request, reply) => {
           try {
@@ -104,14 +104,14 @@ export async function registerIntegrationProfileRouter(app: FastifyInstance): Pr
         }
       );
 
-      // ── GET /integrations/profiles/:profileId — get detail ─────────────
+      // ── GET /integrations/profiles/:id — get detail ─────────────
 
-      router.get<{ Params: { profileId: string } }>(
-        "/integrations/builder/profiles/:profileId",
+      router.get<{ Params: { id: string } }>(
+        "/integrations/profiles/:id",
         { preHandler: [requirePermission("INTEGRATIONS_READ")] },
         async (request, reply) => {
           try {
-            const data = await profileService.get(request.params.profileId);
+            const data = await profileService.get(request.params.id);
             return reply.send({ data, errors: [] });
           } catch (error) {
             return mapError(reply, error);
@@ -119,16 +119,16 @@ export async function registerIntegrationProfileRouter(app: FastifyInstance): Pr
         }
       );
 
-      // ── PUT /integrations/profiles/:profileId — update ─────────────────
+      // ── PUT /integrations/profiles/:id — update ─────────────────
 
-      router.put<{ Params: { profileId: string } }>(
-        "/integrations/builder/profiles/:profileId",
-        { preHandler: [requirePermission("INTEGRATIONS_CONFIG")] },
+      router.put<{ Params: { id: string } }>(
+        "/integrations/profiles/:id",
+        { preHandler: [requirePermission(["INTEGRATIONS_CONFIG", "INTEGRATION_CONFIG"])] },
         async (request, reply) => {
           try {
             const userId = requireUserId(request.user?.sub);
             const payload = profileUpdateSchema.parse(request.body);
-            const data = await profileService.update(request.params.profileId, userId, payload);
+            const data = await profileService.update(request.params.id, userId, payload);
             return reply.send({ data, errors: [] });
           } catch (error) {
             return mapError(reply, error);
@@ -136,20 +136,16 @@ export async function registerIntegrationProfileRouter(app: FastifyInstance): Pr
         }
       );
 
-      // ── PATCH /integrations/profiles/:profileId/status — change status ─
+      // ── PATCH /integrations/profiles/:id/status — change status ─
 
-      router.patch<{ Params: { profileId: string } }>(
-        "/integrations/builder/profiles/:profileId/status",
-        { preHandler: [requirePermission("INTEGRATIONS_CONFIG")] },
+      router.patch<{ Params: { id: string } }>(
+        "/integrations/profiles/:id/status",
+        { preHandler: [requirePermission(["INTEGRATIONS_CONFIG", "INTEGRATION_CONFIG"])] },
         async (request, reply) => {
           try {
             const userId = requireUserId(request.user?.sub);
             const payload = profileStatusChangeSchema.parse(request.body);
-            const data = await profileService.changeStatus(
-              request.params.profileId,
-              userId,
-              payload
-            );
+            const data = await profileService.changeStatus(request.params.id, userId, payload);
             return reply.send({ data, errors: [] });
           } catch (error) {
             return mapError(reply, error);
@@ -157,15 +153,15 @@ export async function registerIntegrationProfileRouter(app: FastifyInstance): Pr
         }
       );
 
-      // ── DELETE /integrations/profiles/:profileId — soft delete ─────────
+      // ── DELETE /integrations/profiles/:id — soft delete ─────────
 
-      router.delete<{ Params: { profileId: string } }>(
-        "/integrations/builder/profiles/:profileId",
-        { preHandler: [requirePermission("INTEGRATIONS_CONFIG")] },
+      router.delete<{ Params: { id: string } }>(
+        "/integrations/profiles/:id",
+        { preHandler: [requirePermission(["INTEGRATIONS_CONFIG", "INTEGRATION_CONFIG"])] },
         async (request, reply) => {
           try {
             const userId = requireUserId(request.user?.sub);
-            const data = await profileService.softDelete(request.params.profileId, userId);
+            const data = await profileService.softDelete(request.params.id, userId);
             return reply.send({ data, errors: [] });
           } catch (error) {
             return mapError(reply, error);
@@ -173,14 +169,14 @@ export async function registerIntegrationProfileRouter(app: FastifyInstance): Pr
         }
       );
 
-      // ── GET /integrations/profiles/:profileId/versions — list versions ─
+      // ── GET /integrations/profiles/:id/versions — list versions ─
 
-      router.get<{ Params: { profileId: string } }>(
-        "/integrations/builder/profiles/:profileId/versions",
+      router.get<{ Params: { id: string } }>(
+        "/integrations/profiles/:id/versions",
         { preHandler: [requirePermission("INTEGRATIONS_READ")] },
         async (request, reply) => {
           try {
-            const data = await profileService.listVersions(request.params.profileId);
+            const data = await profileService.listVersions(request.params.id);
             return reply.send({ data, errors: [] });
           } catch (error) {
             return mapError(reply, error);
@@ -188,15 +184,15 @@ export async function registerIntegrationProfileRouter(app: FastifyInstance): Pr
         }
       );
 
-      // ── GET /integrations/profiles/:profileId/versions/:versionId ──────
+      // ── GET /integrations/profiles/:id/versions/:versionId ──────
 
-      router.get<{ Params: { profileId: string; versionId: string } }>(
-        "/integrations/builder/profiles/:profileId/versions/:versionId",
+      router.get<{ Params: { id: string; versionId: string } }>(
+        "/integrations/profiles/:id/versions/:versionId",
         { preHandler: [requirePermission("INTEGRATIONS_READ")] },
         async (request, reply) => {
           try {
             const data = await profileService.getVersion(
-              request.params.profileId,
+              request.params.id,
               request.params.versionId
             );
             return reply.send({ data, errors: [] });

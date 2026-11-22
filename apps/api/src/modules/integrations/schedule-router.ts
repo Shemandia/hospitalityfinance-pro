@@ -1,9 +1,9 @@
 /**
  * Schedule API routes — per-profile automation schedule CRUD.
  *
- * POST   /integrations/profiles/:profileId/schedule — set schedule
- * GET    /integrations/profiles/:profileId/schedule — get current
- * DELETE /integrations/profiles/:profileId/schedule — remove
+ * POST   /integrations/profiles/:id/schedule — set schedule
+ * GET    /integrations/profiles/:id/schedule — get current
+ * DELETE /integrations/profiles/:id/schedule — remove
  *
  * After create/delete, the ScheduleService syncs BullMQ repeatable
  * jobs so cron-scheduled profiles execute on time.
@@ -69,15 +69,15 @@ export async function registerScheduleRouter(app: FastifyInstance): Promise<void
     async (router) => {
       router.addHook("preHandler", requireAuth);
 
-      // ── GET /integrations/profiles/:profileId/schedule ─────────────────
+      // ── GET /integrations/profiles/:id/schedule ─────────────────
 
-      router.get<{ Params: { profileId: string } }>(
-        "/integrations/builder/profiles/:profileId/schedule",
+      router.get<{ Params: { id: string } }>(
+        "/integrations/profiles/:id/schedule",
         { preHandler: [requirePermission("INTEGRATIONS_READ")] },
         async (request, reply) => {
           try {
             const svc = getScheduleService(request);
-            const data = await svc.get(request.params.profileId);
+            const data = await svc.get(request.params.id);
             return reply.send({ data, errors: [] });
           } catch (error) {
             return mapError(reply, error);
@@ -85,17 +85,17 @@ export async function registerScheduleRouter(app: FastifyInstance): Promise<void
         }
       );
 
-      // ── POST /integrations/profiles/:profileId/schedule ────────────────
+      // ── POST /integrations/profiles/:id/schedule ────────────────
 
-      router.post<{ Params: { profileId: string } }>(
-        "/integrations/builder/profiles/:profileId/schedule",
+      router.post<{ Params: { id: string } }>(
+        "/integrations/profiles/:id/schedule",
         { preHandler: [requirePermission("INTEGRATIONS_CONFIG")] },
         async (request, reply) => {
           try {
             const userId = requireUserId(request.user?.sub);
             const payload = scheduleCreateSchema.parse(request.body);
             const svc = getScheduleService(request);
-            const data = await svc.create(request.params.profileId, userId, payload);
+            const data = await svc.create(request.params.id, userId, payload);
             return reply.code(201).send({ data, errors: [] });
           } catch (error) {
             return mapError(reply, error);
@@ -103,15 +103,15 @@ export async function registerScheduleRouter(app: FastifyInstance): Promise<void
         }
       );
 
-      // ── DELETE /integrations/profiles/:profileId/schedule ──────────────
+      // ── DELETE /integrations/profiles/:id/schedule ──────────────
 
-      router.delete<{ Params: { profileId: string } }>(
-        "/integrations/builder/profiles/:profileId/schedule",
+      router.delete<{ Params: { id: string } }>(
+        "/integrations/profiles/:id/schedule",
         { preHandler: [requirePermission("INTEGRATIONS_CONFIG")] },
         async (request, reply) => {
           try {
             const svc = getScheduleService(request);
-            const data = await svc.delete(request.params.profileId);
+            const data = await svc.delete(request.params.id);
             return reply.send({ data, errors: [] });
           } catch (error) {
             return mapError(reply, error);

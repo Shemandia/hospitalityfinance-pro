@@ -184,7 +184,9 @@ The rename is complete; no "transfer desk" is left anywhere:
 10. Screens: the Integrations area. Sources with their settings, profile policies, and the run history per document with errors and journal links.
     - **Part 1, done:** a Sources page (list, add, deactivate; only `INTEGRATIONS_CONFIG` may change), in the sidebar and on the Integrations overview, and a "Posting to the ledger" card on a ledger import profile (source system, journal source, review, whole file or per document, unmapped policy with its suspense account, rate type).
     - **Part 2, done:** a run's records show their document and a link to the journal it posted, or the error code and message. The web client's calls to routes that never existed (function library, function test, full validation, dry run, auto-map, execution stats) were used nowhere and are removed.
-    - Still to do: merging the two profile APIs, and the rate limit on the integrations routes (step 7 notes; the owner's decision).
+    - **Part 3, done: one profiles API** at `/api/v1/integrations/profiles`. The profile builder's service is the one implementation of list, get, create, update, delete and versions: it pages, folds the wizard's data into the profile, keeps the status transitions and refuses changes to system profiles. Its status, version, test and schedule routes moved under the same path; clone, validate and execute stay where they were. Writes still accept the older `INTEGRATION_CONFIG`, as before, so no role loses access. Old `builder/profiles` paths redirect for one release.
+    - Found: the wizard's test preview opens a progress stream at `.../test/:testId/stream`, which does not exist (the API streams in the reply to the test request itself), so the preview gets no progress; to fix with the wizard.
+    - Still to do: the rate limit on the integrations routes (step 7 notes; the owner's decision).
 
 **Needed from the owner for step 8:** real sample files for each source:
 

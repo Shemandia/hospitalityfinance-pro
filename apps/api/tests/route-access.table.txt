@@ -22,13 +22,14 @@ DELETE /api/v1/gl/recurring-journals/:id  ->  entity  GL_WRITE | ADMIN_SETTINGS
 DELETE /api/v1/integration/*  ->  public
 DELETE /api/v1/integration/transfer-desk/*  ->  public
 DELETE /api/v1/integrations/automations/:id  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
-DELETE /api/v1/integrations/builder/profiles/:profileId  ->  entity  INTEGRATIONS_CONFIG
-DELETE /api/v1/integrations/builder/profiles/:profileId/schedule  ->  entity  INTEGRATIONS_CONFIG
+DELETE /api/v1/integrations/builder/profiles  ->  public
+DELETE /api/v1/integrations/builder/profiles/*  ->  public
 DELETE /api/v1/integrations/filters/:id  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
 DELETE /api/v1/integrations/interfaces/:id  ->  entity  INTEGRATION_CONFIG
 DELETE /api/v1/integrations/lookups/:id  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
 DELETE /api/v1/integrations/mappings/:id  ->  entity  INTEGRATION_CONFIG
 DELETE /api/v1/integrations/profiles/:id  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
+DELETE /api/v1/integrations/profiles/:id/schedule  ->  entity  INTEGRATIONS_CONFIG
 DELETE /api/v1/intercompany/account-pairs/:id  ->  entity  IC_CONFIG
 DELETE /api/v1/intercompany/v2/mappings/:id  ->  entity  IC_CONFIG
 DELETE /api/v1/intercompany/v2/pairs/:id  ->  entity  IC_CONFIG
@@ -36,6 +37,8 @@ DELETE /api/v1/platform/tenants/:slug  ->  platform
 DELETE /api/v1/reports/definitions/:id  ->  entity  REPORT_WRITE
 DELETE /api/v1/reports/definitions/:id/schedule  ->  entity  REPORT_WRITE
 DELETE /api/v1/transfer-desk/*  ->  public
+DELETE /api/v1/transfer-desk/profiles  ->  public
+DELETE /api/v1/transfer-desk/profiles/*  ->  public
 DELETE /auth/sessions/:sessionId  ->  session
 GET    /api/v1/account-types  ->  entity  COA_READ | GL_READ
 GET    /api/v1/account-types/all  ->  entity  ADMIN_SETTINGS
@@ -122,12 +125,8 @@ GET    /api/v1/integrations/builder/lookup-tables  ->  entity  INTEGRATIONS_READ
 GET    /api/v1/integrations/builder/lookup-tables/:tableId  ->  entity  INTEGRATIONS_READ
 GET    /api/v1/integrations/builder/mappings/functions  ->  entity  INTEGRATIONS_READ
 GET    /api/v1/integrations/builder/mappings/target-fields  ->  entity  INTEGRATIONS_READ
-GET    /api/v1/integrations/builder/profiles  ->  entity  INTEGRATIONS_READ
-GET    /api/v1/integrations/builder/profiles/:profileId  ->  entity  INTEGRATIONS_READ
-GET    /api/v1/integrations/builder/profiles/:profileId/schedule  ->  entity  INTEGRATIONS_READ
-GET    /api/v1/integrations/builder/profiles/:profileId/test/:testId/results  ->  entity  INTEGRATIONS_READ
-GET    /api/v1/integrations/builder/profiles/:profileId/versions  ->  entity  INTEGRATIONS_READ
-GET    /api/v1/integrations/builder/profiles/:profileId/versions/:versionId  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/builder/profiles  ->  public
+GET    /api/v1/integrations/builder/profiles/*  ->  public
 GET    /api/v1/integrations/components  ->  entity  INTEGRATIONS_READ
 GET    /api/v1/integrations/executions  ->  entity  INTEGRATIONS_READ
 GET    /api/v1/integrations/executions/:id  ->  entity  INTEGRATIONS_READ
@@ -151,7 +150,10 @@ GET    /api/v1/integrations/opera-cloud/statistics  ->  entity  STATS_READ | INT
 GET    /api/v1/integrations/payroll/logs  ->  entity  INTEGRATION_READ
 GET    /api/v1/integrations/profiles  ->  entity  INTEGRATIONS_READ
 GET    /api/v1/integrations/profiles/:id  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/profiles/:id/schedule  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/profiles/:id/test/:testId/results  ->  entity  INTEGRATIONS_READ
 GET    /api/v1/integrations/profiles/:id/versions  ->  entity  INTEGRATIONS_READ
+GET    /api/v1/integrations/profiles/:id/versions/:versionId  ->  entity  INTEGRATIONS_READ
 GET    /api/v1/integrations/simphony/logs  ->  entity  INTEGRATION_READ
 GET    /api/v1/integrations/source-systems  ->  entity  INTEGRATIONS_READ
 GET    /api/v1/integrations/transformations  ->  entity  INTEGRATIONS_READ
@@ -194,6 +196,8 @@ GET    /api/v1/reports/types  ->  entity  REPORT_READ
 GET    /api/v1/setup/progress  ->  session
 GET    /api/v1/setup/templates  ->  tenant  ADMIN_SETTINGS
 GET    /api/v1/transfer-desk/*  ->  public
+GET    /api/v1/transfer-desk/profiles  ->  public
+GET    /api/v1/transfer-desk/profiles/*  ->  public
 GET    /api/v1/version  ->  public
 GET    /auth/me  ->  session
 GET    /auth/sessions  ->  session
@@ -202,8 +206,12 @@ GET    /health  ->  public
 GET    /ready  ->  public
 PATCH  /api/v1/integration/*  ->  public
 PATCH  /api/v1/integration/transfer-desk/*  ->  public
-PATCH  /api/v1/integrations/builder/profiles/:profileId/status  ->  entity  INTEGRATIONS_CONFIG
+PATCH  /api/v1/integrations/builder/profiles  ->  public
+PATCH  /api/v1/integrations/builder/profiles/*  ->  public
+PATCH  /api/v1/integrations/profiles/:id/status  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
 PATCH  /api/v1/transfer-desk/*  ->  public
+PATCH  /api/v1/transfer-desk/profiles  ->  public
+PATCH  /api/v1/transfer-desk/profiles/*  ->  public
 POST   /api/v1/account-types  ->  entity  ADMIN_SETTINGS
 POST   /api/v1/admin/login-audit  ->  any-entity  ADMIN_USERS
 POST   /api/v1/admin/permissions  ->  tenant  ADMIN_ROLES_MANAGE
@@ -296,9 +304,8 @@ POST   /api/v1/integrations/builder/fsd/auto-detect  ->  entity  INTEGRATIONS_RE
 POST   /api/v1/integrations/builder/fsd/parse-preview  ->  entity  INTEGRATIONS_READ
 POST   /api/v1/integrations/builder/fsd/validate-schema  ->  entity  INTEGRATIONS_READ
 POST   /api/v1/integrations/builder/lookup-tables  ->  entity  INTEGRATIONS_CONFIG
-POST   /api/v1/integrations/builder/profiles  ->  entity  INTEGRATIONS_CONFIG
-POST   /api/v1/integrations/builder/profiles/:profileId/schedule  ->  entity  INTEGRATIONS_CONFIG
-POST   /api/v1/integrations/builder/profiles/:profileId/test  ->  entity  INTEGRATIONS_RUN | INTEGRATIONS_CONFIG
+POST   /api/v1/integrations/builder/profiles  ->  public
+POST   /api/v1/integrations/builder/profiles/*  ->  public
 POST   /api/v1/integrations/executions/:id/cancel  ->  entity  INTEGRATIONS_RUN | INTEGRATION_IMPORT
 POST   /api/v1/integrations/filters  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
 POST   /api/v1/integrations/formats  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
@@ -327,6 +334,8 @@ POST   /api/v1/integrations/payroll/import-file  ->  entity  INTEGRATION_IMPORT
 POST   /api/v1/integrations/profiles  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
 POST   /api/v1/integrations/profiles/:id/clone  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
 POST   /api/v1/integrations/profiles/:id/execute  ->  entity  INTEGRATIONS_RUN | INTEGRATION_IMPORT
+POST   /api/v1/integrations/profiles/:id/schedule  ->  entity  INTEGRATIONS_CONFIG
+POST   /api/v1/integrations/profiles/:id/test  ->  entity  INTEGRATIONS_RUN | INTEGRATIONS_CONFIG
 POST   /api/v1/integrations/profiles/:id/validate  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
 POST   /api/v1/integrations/simphony/import  ->  entity  INTEGRATION_IMPORT
 POST   /api/v1/integrations/sky-jana/sync  ->  entity  INTEGRATION_IMPORT
@@ -364,6 +373,8 @@ POST   /api/v1/reports/runs  ->  entity  REPORT_WRITE
 POST   /api/v1/reports/seed-system  ->  entity  REPORT_WRITE
 POST   /api/v1/setup/complete  ->  tenant  ADMIN_SETTINGS
 POST   /api/v1/transfer-desk/*  ->  public
+POST   /api/v1/transfer-desk/profiles  ->  public
+POST   /api/v1/transfer-desk/profiles/*  ->  public
 POST   /auth/change-password  ->  session
 POST   /auth/forgot-password  ->  public
 POST   /auth/login  ->  public
@@ -395,7 +406,8 @@ PUT    /api/v1/integration/*  ->  public
 PUT    /api/v1/integration/transfer-desk/*  ->  public
 PUT    /api/v1/integrations/automations/:id  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
 PUT    /api/v1/integrations/builder/lookup-tables/:tableId  ->  entity  INTEGRATIONS_CONFIG
-PUT    /api/v1/integrations/builder/profiles/:profileId  ->  entity  INTEGRATIONS_CONFIG
+PUT    /api/v1/integrations/builder/profiles  ->  public
+PUT    /api/v1/integrations/builder/profiles/*  ->  public
 PUT    /api/v1/integrations/filters/:id  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
 PUT    /api/v1/integrations/formats/:id  ->  entity  INTEGRATIONS_CONFIG | INTEGRATION_CONFIG
 PUT    /api/v1/integrations/interfaces/:id  ->  entity  INTEGRATION_CONFIG
@@ -410,3 +422,5 @@ PUT    /api/v1/platform/tenants/:slug  ->  platform
 PUT    /api/v1/reports/definitions/:id  ->  entity  REPORT_WRITE
 PUT    /api/v1/setup/steps/:step  ->  tenant  ADMIN_SETTINGS
 PUT    /api/v1/transfer-desk/*  ->  public
+PUT    /api/v1/transfer-desk/profiles  ->  public
+PUT    /api/v1/transfer-desk/profiles/*  ->  public

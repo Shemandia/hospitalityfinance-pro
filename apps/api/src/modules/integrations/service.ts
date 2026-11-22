@@ -42,7 +42,8 @@ const ALLOWED_TRANSITIONS: Record<string, string[]> = {
  *   TD-BL-005 transformationId always mandatory
  *   Transfer types: both sourceComponent and targetComponent required
  */
-function validateProfileShape(p: {
+/** The fields a profile of each type needs; empty when it has them. */
+export function validateProfileShape(p: {
   profileType: string;
   sourceComponent?: string | null;
   targetComponent?: string | null;
