@@ -44,7 +44,7 @@ import { API_ROOT, deployMigrations, migrationNames, schemaPath } from "./migrat
 import { randomPassword, scramSha256Verifier } from "./scram.js";
 import { splitSqlStatements } from "./sql-split.js";
 import { hasRoles, ownerConnectionUrl, postgresUrl } from "./tenant-location.js";
-import { tenantRoleNames } from "./tenant-roles.js";
+import { dropDatabaseForce, tenantRoleNames } from "./tenant-roles.js";
 import { runTenantMigrations } from "./tenant-runner.js";
 import { seal } from "../shared/secret-box.js";
 
@@ -114,13 +114,13 @@ async function baselineCatalog(platformUrl: string, code: string): Promise<strin
       }
     });
     return await withDb(maintenance.toString(), async (admin) => {
-      await admin.$executeRawUnsafe(`DROP DATABASE IF EXISTS ${quote(name)} WITH (FORCE)`);
+      await dropDatabaseForce(admin, quote(name));
       await admin.$executeRawUnsafe(`CREATE DATABASE ${quote(name)}`);
       try {
         await deployMigrations("tenant", refUrl.toString(), join(dir, "schema.prisma"));
         return await lines(refUrl.toString());
       } finally {
-        await admin.$executeRawUnsafe(`DROP DATABASE IF EXISTS ${quote(name)} WITH (FORCE)`);
+        await dropDatabaseForce(admin, quote(name));
       }
     });
   } finally {
@@ -414,13 +414,13 @@ export async function adoptRegistry(
         }
       });
       const expected = await withDb(maintenance.toString(), async (admin) => {
-        await admin.$executeRawUnsafe(`DROP DATABASE IF EXISTS ${quote(name)} WITH (FORCE)`);
+        await dropDatabaseForce(admin, quote(name));
         await admin.$executeRawUnsafe(`CREATE DATABASE ${quote(name)}`);
         try {
           await deployMigrations("registry", refUrl.toString(), join(dir, "schema.prisma"));
           return await lines(refUrl.toString());
         } finally {
-          await admin.$executeRawUnsafe(`DROP DATABASE IF EXISTS ${quote(name)} WITH (FORCE)`);
+          await dropDatabaseForce(admin, quote(name));
         }
       });
       diff = diffCatalogs(expected, await lines(url));

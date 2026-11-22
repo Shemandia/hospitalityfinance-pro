@@ -185,6 +185,25 @@ export async function assertApplicationRoleRights(db: Query, appRole: string): P
 }
 
 /**
+ * DROP DATABASE ... WITH (FORCE), retried briefly when PostgreSQL refuses to
+ * end a session the caller may not end: an autovacuum worker that started on
+ * the database (common right after it was loaded) belongs to no role the
+ * platform role holds, and finishes in moments.
+ */
+export async function dropDatabaseForce(platform: Exec, quotedName: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await platform.$executeRawUnsafe(`DROP DATABASE IF EXISTS ${quotedName} WITH (FORCE)`);
+      return;
+    } catch (error) {
+      const message = String((error as Error)?.message ?? error);
+      if (attempt >= 20 || !/permission denied to terminate process/.test(message)) throw error;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  }
+}
+
+/**
  * Drops a tenant database and both its roles, as the platform role (for
  * tests, a failed first provisioning, and offboarding after the retention
  * period). The platform role holds the tenant's roles without their rights, so
@@ -217,7 +236,7 @@ export async function dropTenantDatabase(
       await platform.$executeRawUnsafe(`GRANT ${role} TO CURRENT_USER WITH INHERIT TRUE, SET TRUE`);
     }
   }
-  await platform.$executeRawUnsafe(`DROP DATABASE IF EXISTS ${ident(names.dbName)} WITH (FORCE)`);
+  await dropDatabaseForce(platform, ident(names.dbName));
   await platform.$executeRawUnsafe(`DROP ROLE IF EXISTS ${ident(names.appRole)}`);
   await platform.$executeRawUnsafe(`DROP ROLE IF EXISTS ${owner}`);
 }

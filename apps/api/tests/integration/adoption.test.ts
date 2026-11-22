@@ -36,7 +36,11 @@ import { PrismaClient as RegistryClient } from "../../src/db/registry-client.js"
 import { catalogLines } from "../../src/db/catalog.js";
 import { API_ROOT, deployMigrations, migrationNames, schemaPath } from "../../src/db/migrate.js";
 import { appConnectionUrl, ownerConnectionUrl } from "../../src/db/tenant-location.js";
-import { dropTenantDatabase, tenantRoleNames } from "../../src/db/tenant-roles.js";
+import {
+  dropDatabaseForce,
+  dropTenantDatabase,
+  tenantRoleNames
+} from "../../src/db/tenant-roles.js";
 import { AdoptionRefused, adoptTenant } from "../../src/db/tenant-adoption.js";
 import { whenRunnerFree } from "./runner-lock.js";
 
@@ -175,7 +179,7 @@ if (!env.ready) {
         await deployMigrations("tenant", urlOf(refName));
         expect(await lines(ownerConnectionUrl(row))).toEqual(await lines(urlOf(refName)));
       } finally {
-        await admin.$executeRawUnsafe(`DROP DATABASE "${refName}" WITH (FORCE)`);
+        await dropDatabaseForce(admin, `"${refName}"`);
       }
 
       const app = new PrismaClient({ datasourceUrl: appConnectionUrl(row) });
