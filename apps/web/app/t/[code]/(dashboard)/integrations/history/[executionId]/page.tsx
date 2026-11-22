@@ -338,6 +338,8 @@ export default function IntegrationExecutionDetailPage() {
               <TableRow>
                 <TableHead className="text-xs w-12">#</TableHead>
                 <TableHead className="text-xs w-24">Status</TableHead>
+                <TableHead className="text-xs w-40">Document</TableHead>
+                <TableHead className="text-xs w-24">Journal</TableHead>
                 <TableHead className="text-xs w-40">Error code</TableHead>
                 <TableHead className="text-xs">Message</TableHead>
               </TableRow>
@@ -345,13 +347,13 @@ export default function IntegrationExecutionDetailPage() {
             <TableBody>
               {logsQ.isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center py-6 text-slate-400 text-xs">
+                  <TableCell colSpan={6} className="text-center py-6 text-slate-400 text-xs">
                     Loading logs…
                   </TableCell>
                 </TableRow>
               ) : logs.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center py-8">
+                  <TableCell colSpan={6} className="text-center py-8">
                     <div className="text-slate-400 text-xs">
                       {execution.status === "QUEUED"
                         ? "Execution hasn't started yet."
@@ -385,6 +387,21 @@ export default function IntegrationExecutionDetailPage() {
                       >
                         {log.status}
                       </Badge>
+                    </TableCell>
+                    <TableCell className="text-xs font-mono text-slate-600">
+                      {log.documentRef ?? "—"}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {log.journalId ? (
+                        <Link
+                          href={tenantHref(`/gl/journals/${log.journalId}`)}
+                          className="text-emerald-700 hover:underline"
+                        >
+                          Open
+                        </Link>
+                      ) : (
+                        "—"
+                      )}
                     </TableCell>
                     <TableCell className="text-xs font-mono text-slate-500">
                       {log.errorCode ?? "—"}

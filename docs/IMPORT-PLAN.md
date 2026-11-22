@@ -183,7 +183,8 @@ The rename is complete; no "transfer desk" is left anywhere:
 9. Migrating saved interface definitions and connector mappings, then deleting `transform-engine.ts`, the interfaces routes, `ConnectorMapping`, `ImportLog` writes and `seed-transfer-desk.ts`.
 10. Screens: the Integrations area. Sources with their settings, profile policies, and the run history per document with errors and journal links.
     - **Part 1, done:** a Sources page (list, add, deactivate; only `INTEGRATIONS_CONFIG` may change), in the sidebar and on the Integrations overview, and a "Posting to the ledger" card on a ledger import profile (source system, journal source, review, whole file or per document, unmapped policy with its suspense account, rate type).
-    - Still to do: the run history per document with errors and journal links, merging the two profile APIs, the three web calls to routes that do not exist (step 2 notes), and the rate limit on the integrations routes (step 7 notes).
+    - **Part 2, done:** a run's records show their document and a link to the journal it posted, or the error code and message. The web client's calls to routes that never existed (function library, function test, full validation, dry run, auto-map, execution stats) were used nowhere and are removed.
+    - Still to do: merging the two profile APIs, and the rate limit on the integrations routes (step 7 notes; the owner's decision).
 
 **Needed from the owner for step 8:** real sample files for each source:
 
