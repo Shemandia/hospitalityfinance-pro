@@ -124,7 +124,9 @@ Lost means: no process has it and no copy exists.
   workers cannot reach any tenant provisioned since WP-2: those tenants fail
   until it is fixed (each is logged as "Tenant database location unusable";
   the others keep working). **No tenant data is lost**: the databases and
-  their contents are untouched, and tenants built before WP-2 are not affected.
+  their contents are untouched. (A tenant built before WP-2 and not yet
+  adopted connects with its plain connection string and is not affected;
+  adopt it, see below.)
 - **Recovery**, in minutes:
   1. Generate a new key, store it, set it as `PLATFORM_ENCRYPTION_KEY`
      (no `_PREVIOUS`).
@@ -134,6 +136,22 @@ Lost means: no process has it and no copy exists.
   3. Restart the API and the workers.
 - Registry backups taken before the loss hold passwords sealed with the lost
   key; after restoring one, run step 2 again.
+- This recovery is tested end to end (`tests/integration/tenant-secrets.test.ts`):
+  with only a new key, nothing opens and `db:reseal-secrets` exits 1;
+  `db:reset-tenant-passwords` under the new key restores access.
+
+### Checking that no secret is readable in the registry
+
+```bash
+pnpm --filter @hfp/api db:check-secrets
+```
+
+Lists every tenant whose registry row still holds a readable password: the
+plain connection string of a tenant built before WP-2 and not yet adopted.
+Exits 1 if there is one; adopt it (`db:adopt tenant <slug>`), which seals its
+passwords and removes the string. Run it after every adoption and before
+go-live. Tenant user passwords and reset tokens live in the tenant databases,
+hashed; connector tokens are platform settings, not stored data.
 
 ### If the key leaks
 

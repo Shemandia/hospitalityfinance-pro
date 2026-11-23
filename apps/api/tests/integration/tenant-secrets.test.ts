@@ -8,6 +8,10 @@
  *      password; the old key alone can no longer open them.
  *   2. db:reset-tenant-passwords (the recovery for a lost key): new passwords
  *      work, the old ones are refused.
+ *   3. A lost key: with only a new key, nothing opens and re-sealing fails;
+ *      resetting the passwords under the new key restores access.
+ *   4. The registry row holds nothing readable: no connection string, and
+ *      both passwords sealed (v1.<key id>.…).
  *
  * Needs TEST_DATABASE_URL, TEST_REGISTRY_DATABASE_URL (migrated) and
  * PLATFORM_ENCRYPTION_KEY; the test role needs CREATEDB and CREATEROLE.
@@ -32,6 +36,7 @@ import { PrismaClient } from "../../src/db/client.js";
 import { PrismaClient as RegistryClient } from "../../src/db/registry-client.js";
 import type { NewLocation } from "../../src/db/tenant-location.js";
 import { dropTenantDatabase } from "../../src/db/tenant-roles.js";
+import { plaintextSecrets } from "../../src/db/registry-secrets.js";
 import { keyId, open, parseKey } from "../../src/shared/secret-box.js";
 import {
   createDatabase,
@@ -140,5 +145,42 @@ if (!env.ready) {
       expect(await canConnect(url(newPassword))).toBe(true);
       expect(await canConnect(url(oldPassword))).toBe(false);
     }, 120_000);
+
+    it("recovers from a lost key: a password reset under a new key restores access", async () => {
+      const sealedBefore = (await row()).appPasswordEnc!;
+      const replacement = randomBytes(32).toString("base64");
+      // The key in use (newKey, since the first test) is lost: only the replacement is configured.
+      const reseal = command("db:reseal-secrets", {
+        PLATFORM_ENCRYPTION_KEY: replacement,
+        PLATFORM_ENCRYPTION_KEY_PREVIOUS: ""
+      });
+      expect(reseal.code, reseal.output).toBe(1);
+      expect((await row()).appPasswordEnc).toBe(sealedBefore);
+
+      const reset = command("db:reset-tenant-passwords", {
+        PLATFORM_ENCRYPTION_KEY: replacement,
+        PLATFORM_ENCRYPTION_KEY_PREVIOUS: ""
+      });
+      expect(reset.code, reset.output).toBe(0);
+      const after = await row();
+      const password = open(after.appPasswordEnc!, parseKey(replacement));
+      const u = new URL("postgresql://placeholder.invalid");
+      u.hostname = after.dbHost!;
+      u.port = String(after.dbPort);
+      u.pathname = `/${after.dbName}`;
+      u.username = after.appRole!;
+      u.password = password;
+      expect(await canConnect(u.toString())).toBe(true);
+      expect(() => open(after.appPasswordEnc!, parseKey(newKey))).toThrow(/Sealed with key/);
+    }, 180_000);
+
+    it("leaves nothing readable in the registry row", async () => {
+      const r = await row();
+      expect(plaintextSecrets([r])).toEqual([]);
+      for (const sealed of [r.appPasswordEnc!, r.ownerPasswordEnc!]) {
+        expect(sealed.startsWith("v1.")).toBe(true);
+      }
+      expect(r.databaseUrl).toBeNull();
+    });
   });
 }
