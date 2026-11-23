@@ -43,7 +43,7 @@ function tenantServer(): { host: string; port: number } {
  * the maintenance database. It creates roles and databases; it never reads
  * tenant data.
  */
-function platformAdminUrl(): string {
+export function platformAdminUrl(): string {
   const url = new URL(registryDatabaseUrl());
   const server = tenantServer();
   url.hostname = server.host;

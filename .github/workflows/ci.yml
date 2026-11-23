@@ -100,6 +100,16 @@ jobs:
             -c "CREATE DATABASE hfp_registry_test OWNER hfp" \
             -c "CREATE DATABASE hfp_shadow OWNER hfp"
 
+      # The backup tests run pg_dump and pg_restore (WP-2 item 9); their major
+      # version must be at least the server's.
+      - name: PostgreSQL client tools
+        env:
+          PGPASSWORD: hfp_ci
+        run: |
+          pg_dump --version
+          pg_restore --version
+          psql -h localhost -U hfp -d hfp_test -Atc "show server_version"
+
       # The connection pooler production runs in front of tenant databases
       # (docs/CONNECTION-POOLER.md): transaction mode, prepared statements on,
       # roles authenticated through auth_query so new tenant roles need no file.
@@ -197,11 +207,13 @@ jobs:
           NODE_ENV: production
           DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
           REGISTRY_DATABASE_URL: ${{ env.TEST_REGISTRY_DATABASE_URL }}
+          # Required by the workers in production. The schedule is not due during the check.
+          BACKUP_DIR: ${{ runner.temp }}/hfp-backups
         run: |
           node --conditions=production dist/jobs/worker-supervisor.js > workers.log 2>&1 &
           sleep 12
           kill -0 %1 || { echo "supervisor exited"; cat workers.log; exit 1; }
           started=$(grep -c 'worker started\|Worker started\|Started;' workers.log || true)
           echo "workers reporting started: $started"
-          [ "$started" -ge 5 ] || { cat workers.log; exit 1; }
+          [ "$started" -ge 6 ] || { cat workers.log; exit 1; }
           kill %1

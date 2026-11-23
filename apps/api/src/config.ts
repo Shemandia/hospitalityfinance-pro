@@ -243,6 +243,31 @@ const schema = z.object({
     .default(60_000)
     .describe("How often the Transfer Desk process checks for added or deactivated tenants."),
 
+  // ── Backups ──────────────────────────────────────────────────────────────
+  BACKUP_DIR: text()
+    .optional()
+    .describe(
+      "Folder the tenant and registry backups are written to (db:backup, the backup worker). Required by the workers in production. Keep it on a different disk from the database and copy it off the server: docs/GO-LIVE-RUNBOOK.md, section 3."
+    ),
+  BACKUP_SCHEDULE: text()
+    .default("30 2 * * *")
+    .describe(
+      "When the backup worker backs up every tenant and the registry: a cron pattern, UTC."
+    ),
+  BACKUP_RETENTION_DAYS: positiveInt()
+    .optional()
+    .describe(
+      "Backups older than this many days are deleted after each scheduled run; the newest successful backup of each database is always kept. Unset: nothing is deleted."
+    ),
+  BACKUP_TIMEOUT_MINUTES: positiveInt()
+    .default(120)
+    .describe("Longest one database's dump may take before the backup of it is abandoned."),
+  PG_BIN_DIR: text()
+    .optional()
+    .describe(
+      "Folder holding pg_dump and pg_restore, when they are not on the PATH. Their major version must be at least the server's."
+    ),
+
   // ── Development ──────────────────────────────────────────────────────────
   SHADOW_DATABASE_URL: url()
     .optional()
@@ -339,7 +364,7 @@ export const STARTUP: Record<ProcessKind, { always: ConfigKey[]; production: Con
   },
   workers: {
     always: ["REDIS_URL", "APP_BASE_URL", "PLATFORM_ENCRYPTION_KEY"],
-    production: ["REGISTRY_DATABASE_URL"]
+    production: ["REGISTRY_DATABASE_URL", "BACKUP_DIR"]
   }
 };
 
@@ -516,6 +541,16 @@ export const CONFIG_GROUPS: ReadonlyArray<{ title: string; keys: readonly Config
       "ENTITLEMENT_CACHE_SECONDS",
       "WORKER_MAX_CLEAN_EXITS",
       "TRANSFER_DESK_TENANT_POLL_MS"
+    ]
+  },
+  {
+    title: "Backups",
+    keys: [
+      "BACKUP_DIR",
+      "BACKUP_SCHEDULE",
+      "BACKUP_RETENTION_DAYS",
+      "BACKUP_TIMEOUT_MINUTES",
+      "PG_BIN_DIR"
     ]
   },
   {

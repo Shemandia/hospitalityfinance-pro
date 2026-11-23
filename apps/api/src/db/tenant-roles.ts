@@ -27,7 +27,7 @@ type Transactional = {
 
 const IDENTIFIER = /^[a-z_][a-z0-9_]{0,62}$/;
 
-function ident(name: string): string {
+export function ident(name: string): string {
   if (!IDENTIFIER.test(name)) throw new Error(`Not a safe PostgreSQL identifier: ${name}`);
   return `"${name}"`;
 }

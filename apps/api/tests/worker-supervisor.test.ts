@@ -53,14 +53,15 @@ describe("worker supervisor (OPS-10)", () => {
     return { supervisor, onFailure };
   }
 
-  it("lists five entry points, each a file that exists", () => {
+  it("lists six entry points, each a file that exists", () => {
     const entries = workerEntryPoints();
     expect(entries.map((e) => e.name)).toEqual([
       "report-generation",
       "dunning",
       "scheduled-reports",
       "transfer-desk",
-      "mv-refresh"
+      "mv-refresh",
+      "backups"
     ]);
     for (const e of entries) expect(existsSync(e.script), e.script).toBe(true);
   });

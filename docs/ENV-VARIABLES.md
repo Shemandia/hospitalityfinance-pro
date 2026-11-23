@@ -129,6 +129,16 @@ and `SEED_USER_PASSWORD`, the database setup scripts need `DATABASE_URL`.
 | `WORKER_MAX_CLEAN_EXITS`       |             | `3`     | Clean exits in a row after which the supervisor gives up on a worker.                                  |
 | `TRANSFER_DESK_TENANT_POLL_MS` |             | `60000` | How often the Transfer Desk process checks for added or deactivated tenants.                           |
 
+### Backups
+
+| Variable                 | Required by           | Default      | Description                                                                                                                                                                                                                                |
+| ------------------------ | --------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `BACKUP_DIR`             | workers in production |              | Folder the tenant and registry backups are written to (db:backup, the backup worker). Required by the workers in production. Keep it on a different disk from the database and copy it off the server: docs/GO-LIVE-RUNBOOK.md, section 3. |
+| `BACKUP_SCHEDULE`        |                       | `30 2 * * *` | When the backup worker backs up every tenant and the registry: a cron pattern, UTC.                                                                                                                                                        |
+| `BACKUP_RETENTION_DAYS`  |                       |              | Backups older than this many days are deleted after each scheduled run; the newest successful backup of each database is always kept. Unset: nothing is deleted.                                                                           |
+| `BACKUP_TIMEOUT_MINUTES` |                       | `120`        | Longest one database's dump may take before the backup of it is abandoned.                                                                                                                                                                 |
+| `PG_BIN_DIR`             |                       |              | Folder holding pg_dump and pg_restore, when they are not on the PATH. Their major version must be at least the server's.                                                                                                                   |
+
 ### Development
 
 | Variable                     | Required by | Default | Description                                                                                                                 |

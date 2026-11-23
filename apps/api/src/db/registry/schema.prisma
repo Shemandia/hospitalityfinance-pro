@@ -26,6 +26,18 @@ enum MigrationRunStatus {
   SKIPPED
 }
 
+enum BackupTarget {
+  TENANT
+  REGISTRY
+}
+
+enum BackupStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+  PRUNED
+}
+
 enum ProvisioningStepStatus {
   PENDING
   IN_PROGRESS
@@ -73,6 +85,7 @@ model Tenant {
   entitlement       TenantEntitlement?
   provisioningSteps TenantProvisioningStep[]
   migrationRuns     TenantMigrationRun[]
+  backups           DatabaseBackup[]
 
   @@map("tenants")
 }
@@ -160,4 +173,37 @@ model TenantMigrationRun {
   @@index([runId])
   @@index([tenantId, startedAt])
   @@map("tenant_migration_runs")
+}
+
+// One backup of one database (WP-2 item 9, OPS-07): a tenant database or the
+// registry itself, taken by db:backup or the backup worker. A run is every
+// row with the same run_id. The dump and its manifest (row counts, checksum)
+// are files under BACKUP_DIR; this row says where, and how the backup went.
+// A tenant's rows outlive the tenant (tenant_id is cleared), so the final
+// backup of an offboarded tenant can still be found.
+model DatabaseBackup {
+  id            String       @id @default(uuid())
+  runId         String       @map("run_id")
+  target        BackupTarget
+  tenantId      String?      @map("tenant_id")
+  tenant        Tenant?      @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  /// The tenant's slug, or "registry".
+  label         String       @db.VarChar(50)
+  dbName        String       @map("db_name")
+  schemaVersion String?      @map("schema_version")
+  /// The dump, relative to BACKUP_DIR; its manifest is beside it (.json).
+  file          String
+  sizeBytes     BigInt?      @map("size_bytes")
+  sha256        String?      @db.VarChar(64)
+  /// Rows per table at the moment of the dump: "schema.table" -> count.
+  rowCounts     Json?        @map("row_counts")
+  status        BackupStatus
+  error         String?
+  startedAt     DateTime     @default(now()) @map("started_at")
+  finishedAt    DateTime?    @map("finished_at")
+  prunedAt      DateTime?    @map("pruned_at")
+
+  @@index([runId])
+  @@index([label, startedAt])
+  @@map("database_backups")
 }

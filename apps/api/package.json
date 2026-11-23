@@ -22,6 +22,8 @@
     "db:reseal-secrets": "tsx src/scripts/tenant-secrets.ts reseal",
     "db:reset-tenant-passwords": "tsx src/scripts/tenant-secrets.ts reset",
     "db:check-secrets": "tsx src/scripts/check-secrets.ts",
+    "db:backup": "tsx src/scripts/backup.ts",
+    "db:restore": "tsx src/scripts/restore.ts",
     "db:migrate:new:registry": "prisma migrate dev --create-only --schema src/db/registry/schema.prisma",
     "db:migrate:new:tenant": "prisma migrate dev --create-only --schema src/db/tenant/schema.prisma",
     "db:check:migrations": "tsx src/scripts/check-migrations.ts",

@@ -21,7 +21,11 @@ RUN pnpm prune --prod
 
 FROM node:22-alpine AS runtime
 
-RUN apk add --no-cache tini
+# pg_dump and pg_restore for the backup worker (WP-2 item 9). Their major
+# version must be at least the database server's; a newer one dumps older
+# servers too. Build with --build-arg PG_CLIENT_MAJOR=<n> to match.
+ARG PG_CLIENT_MAJOR=18
+RUN apk add --no-cache tini postgresql${PG_CLIENT_MAJOR}-client
 
 ENV NODE_ENV=production
 WORKDIR /app
