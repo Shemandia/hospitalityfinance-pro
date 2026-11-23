@@ -349,7 +349,7 @@ Nine work packages, in dependency order. Each closes named findings and is done 
 - [x] Adopt existing tenant databases: a one-time script that baselines each one against the new migration history after a schema diff shows no differences.
 - [ ] Encrypt tenant database credentials and integration credentials; rotate existing passwords. _Un-deferred 23 November 2026: roadmap Stage 1._
 - [ ] Replace `enterWith` with `runWithContext` in the request hook and every worker; data access throws without a bound tenant. _Un-deferred 23 November 2026: roadmap Stage 1._
-- [ ] Connection pooler in front of PostgreSQL; small per-tenant connection limit; safe idle eviction. _Un-deferred 23 November 2026: roadmap Stage 1._
+- [x] Connection pooler in front of PostgreSQL; small per-tenant connection limit; safe idle eviction. _Un-deferred 23 November 2026: roadmap Stage 1. Done 23 November 2026: designed in `docs/CONNECTION-POOLER.md`, tested through PgBouncer in CI; not installed on the development server (owner's decision)._
 - [ ] Row-level security on every entity-scoped table and its children, forced; test that enumerates tables and fails on a gap. _Un-deferred 23 November 2026: roadmap Stage 1._
 - [ ] Scheduled per-tenant backups and a documented, tested restore. _Un-deferred 23 November 2026: roadmap Stage 1._
 

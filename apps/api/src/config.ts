@@ -84,6 +84,19 @@ const schema = z.object({
   TENANT_POOL_MAX: positiveInt()
     .default(50)
     .describe("Most tenant database clients kept open at once."),
+  TENANT_CONNECTION_LIMIT: positiveInt()
+    .default(3)
+    .describe(
+      "Most connections each tenant database client opens (per process). Keep it small; the pooler shares server connections between them."
+    ),
+  TENANT_DB_POOLER_HOST: text()
+    .optional()
+    .describe(
+      "Connection pooler (PgBouncer, transaction mode) that requests and jobs use to reach tenant databases. Unset: they connect directly. Migrations, adoption and provisioning always connect directly. docs/CONNECTION-POOLER.md."
+    ),
+  TENANT_DB_POOLER_PORT: positiveInt()
+    .optional()
+    .describe("The pooler's port (default: the tenant database's port)."),
   TENANT_DB_HOST: text()
     .optional()
     .describe(
@@ -425,6 +438,9 @@ export const CONFIG_GROUPS: ReadonlyArray<{ title: string; keys: readonly Config
       "DATABASE_URL",
       "REGISTRY_DATABASE_URL",
       "TENANT_POOL_MAX",
+      "TENANT_CONNECTION_LIMIT",
+      "TENANT_DB_POOLER_HOST",
+      "TENANT_DB_POOLER_PORT",
       "TENANT_DB_HOST",
       "TENANT_DB_PORT"
     ]

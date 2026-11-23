@@ -57,6 +57,10 @@ jobs:
       PLATFORM_API_KEY: ci-only-platform-key-not-used-outside-this-workflow
       # 32 bytes, base64; seals tenant role passwords in the registry (WP-2).
       PLATFORM_ENCRYPTION_KEY: Y2ktb25seS1lbmNyeXB0aW9uLWtleS0zMi1ieXRlcyE=
+      # PgBouncer in transaction mode, for the pooler tests (WP-2, ARC-04).
+      TEST_POOLER_HOST: 127.0.0.1
+      TEST_POOLER_PORT: "6432"
+      TEST_POOLER_POOL_SIZE: "2"
 
     steps:
       - name: Checkout
@@ -96,6 +100,47 @@ jobs:
             -c "CREATE DATABASE hfp_registry_test OWNER hfp" \
             -c "CREATE DATABASE hfp_shadow OWNER hfp"
 
+      # The connection pooler production runs in front of tenant databases
+      # (docs/CONNECTION-POOLER.md): transaction mode, prepared statements on,
+      # roles authenticated through auth_query so new tenant roles need no file.
+      - name: Start PgBouncer
+        env:
+          PGPASSWORD: hfp_ci
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq pgbouncer
+          sudo systemctl stop pgbouncer || true
+          mkdir -p /tmp/pgbouncer
+          echo '"postgres" "postgres_ci"' > /tmp/pgbouncer/userlist.txt
+          cat > /tmp/pgbouncer/pgbouncer.ini <<'INI'
+          [databases]
+          * = host=localhost port=5432
+          [pgbouncer]
+          listen_addr = 127.0.0.1
+          listen_port = 6432
+          unix_socket_dir =
+          pool_mode = transaction
+          default_pool_size = 2
+          max_client_conn = 500
+          max_prepared_statements = 200
+          auth_type = scram-sha-256
+          auth_file = /tmp/pgbouncer/userlist.txt
+          auth_user = postgres
+          auth_dbname = postgres
+          auth_query = SELECT usename, passwd FROM pg_shadow WHERE usename = $1
+          ignore_startup_parameters = extra_float_digits,options
+          logfile = /tmp/pgbouncer/pgbouncer.log
+          pidfile = /tmp/pgbouncer/pgbouncer.pid
+          INI
+          pgbouncer --version
+          pgbouncer -d /tmp/pgbouncer/pgbouncer.ini
+          for i in $(seq 1 20); do
+            psql -h 127.0.0.1 -p 6432 -U hfp -d hfp_test -Atc "select 'through the pooler'" && exit 0
+            sleep 1
+          done
+          cat /tmp/pgbouncer/pgbouncer.log
+          exit 1
+
       # Fails when a schema.prisma and its migrations disagree.
       - name: Migrations match the schemas
         run: pnpm --filter @hfp/api db:check:migrations
@@ -122,6 +167,10 @@ jobs:
       # Files in parallel here; locally, test:integration runs them one at a time.
       - name: Integration tests
         run: pnpm --filter @hfp/api test:integration:parallel
+
+      - name: PgBouncer log
+        if: failure()
+        run: cat /tmp/pgbouncer/pgbouncer.log || true
 
       - name: Build
         run: pnpm build

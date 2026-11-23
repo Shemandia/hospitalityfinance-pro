@@ -61,6 +61,8 @@ redis-cli -u "$REDIS_URL" ping
 
 Redis is required in production for native auth sessions, refresh-token revocation, BullMQ jobs, and cached background work.
 
+Install PgBouncer 1.21.0 or later in transaction mode in front of the tenant databases and set `TENANT_DB_POOLER_HOST` and `TENANT_DB_POOLER_PORT` (`docs/CONNECTION-POOLER.md`, which has the configuration, the authentication function and the sizing). Check it with `psql -h <pooler> -p 6432 -U <a tenant application role> <its database> -c 'SELECT 1'`. Migrations, adoption and provisioning keep connecting directly.
+
 ### 2. Configure Environment Files
 
 Create production environment files from the examples and set secrets manually.

@@ -30,13 +30,16 @@ and `SEED_USER_PASSWORD`, the database setup scripts need `DATABASE_URL`.
 
 ### Databases
 
-| Variable                | Required by                              | Default | Description                                                                                                                           |
-| ----------------------- | ---------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`          |                                          |         | A tenant database, for setup scripts and the seed; the registry fallback outside production. Never a default tenant.                  |
-| `REGISTRY_DATABASE_URL` | api in production, workers in production |         | The tenant registry database. Required in production.                                                                                 |
-| `TENANT_POOL_MAX`       |                                          | `50`    | Most tenant database clients kept open at once.                                                                                       |
-| `TENANT_DB_HOST`        |                                          |         | Provisioning: server for new tenant databases (default: the registry's). The registry's role creates their roles and databases there. |
-| `TENANT_DB_PORT`        |                                          |         | Provisioning: port for new tenant databases (default: the registry's).                                                                |
+| Variable                  | Required by                              | Default | Description                                                                                                                                                                                                                   |
+| ------------------------- | ---------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`            |                                          |         | A tenant database, for setup scripts and the seed; the registry fallback outside production. Never a default tenant.                                                                                                          |
+| `REGISTRY_DATABASE_URL`   | api in production, workers in production |         | The tenant registry database. Required in production.                                                                                                                                                                         |
+| `TENANT_POOL_MAX`         |                                          | `50`    | Most tenant database clients kept open at once.                                                                                                                                                                               |
+| `TENANT_CONNECTION_LIMIT` |                                          | `3`     | Most connections each tenant database client opens (per process). Keep it small; the pooler shares server connections between them.                                                                                           |
+| `TENANT_DB_POOLER_HOST`   |                                          |         | Connection pooler (PgBouncer, transaction mode) that requests and jobs use to reach tenant databases. Unset: they connect directly. Migrations, adoption and provisioning always connect directly. docs/CONNECTION-POOLER.md. |
+| `TENANT_DB_POOLER_PORT`   |                                          |         | The pooler's port (default: the tenant database's port).                                                                                                                                                                      |
+| `TENANT_DB_HOST`          |                                          |         | Provisioning: server for new tenant databases (default: the registry's). The registry's role creates their roles and databases there.                                                                                         |
+| `TENANT_DB_PORT`          |                                          |         | Provisioning: port for new tenant databases (default: the registry's).                                                                                                                                                        |
 
 ### Redis
 

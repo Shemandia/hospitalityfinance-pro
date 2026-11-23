@@ -82,3 +82,30 @@ export function ownerConnectionUrl(t: TenantLocation): string {
   }
   return postgresUrl(t.dbHost, t.dbPort, t.dbName, t.ownerRole, open(t.ownerPasswordEnc));
 }
+
+export type RuntimeConnection = {
+  /** Most connections the client opens (Prisma `connection_limit`). */
+  connectionLimit: number;
+  /** The connection pooler; unset to connect directly. */
+  poolerHost?: string;
+  /** The pooler's port; defaults to the database's. */
+  poolerPort?: number;
+};
+
+/**
+ * The connection string requests and jobs use: the application role's, routed
+ * through the pooler when there is one, with a small per-client connection
+ * limit. Only for transaction-scoped work: settings made with
+ * set_config(..., true) survive a transaction-mode pooler, session settings
+ * and session advisory locks do not (docs/CONNECTION-POOLER.md). Migrations,
+ * adoption and provisioning use the direct connection strings above.
+ */
+export function runtimeConnectionUrl(direct: string, options: RuntimeConnection): string {
+  const url = new URL(direct);
+  if (options.poolerHost) {
+    url.hostname = options.poolerHost;
+    if (options.poolerPort) url.port = String(options.poolerPort);
+  }
+  url.searchParams.set("connection_limit", String(options.connectionLimit));
+  return url.toString();
+}
