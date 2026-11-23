@@ -17,11 +17,12 @@
  * command line. Dumps and manifests are written mode 0600.
  */
 
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { chmod, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { promisify } from "node:util";
 import { PrismaClient } from "./client.js";
 import { childProcessEnv, config } from "../config.js";
 
@@ -113,6 +114,29 @@ export async function sha256File(file: string): Promise<string> {
 function toolPath(tool: "pg_dump" | "pg_restore"): string {
   const dir = config().PG_BIN_DIR;
   return dir ? join(dir, tool) : tool;
+}
+
+/** The major version of pg_dump or pg_restore, e.g. 18. */
+export async function pgToolMajor(tool: "pg_dump" | "pg_restore"): Promise<number> {
+  const { stdout } = await promisify(execFile)(toolPath(tool), ["--version"]);
+  const match = /\(PostgreSQL\)\s+(\d+)/.exec(stdout);
+  if (!match) throw new Error(`Could not read the version of ${tool}: ${stdout.trim()}`);
+  return Number(match[1]);
+}
+
+/**
+ * pg_restore writes settings of its own version (pg_restore 17 and later set
+ * transaction_timeout), which an older server rejects. A restore therefore
+ * needs a pg_restore no newer than the server; pg_dump only needs to be at
+ * least as new as the server it reads.
+ */
+export async function assertRestoreToolFits(serverMajor: number): Promise<void> {
+  const tool = await pgToolMajor("pg_restore");
+  if (tool > serverMajor) {
+    throw new Error(
+      `pg_restore is version ${tool}, the server ${serverMajor}: restore with pg_restore ${serverMajor} (set PG_BIN_DIR to its folder).`
+    );
+  }
 }
 
 /**

@@ -98,7 +98,7 @@ Every tenant database and the registry are backed up separately (WP-2 item 9, OP
 **What the server needs**
 
 - `BACKUP_DIR`: a folder on a different disk from the database (the workers refuse to start in production without it). Folders are created 0700 and files 0600, owned by the deploy user. The dumps hold all of a tenant's financial data and its users' password hashes; treat the folder like the database.
-- `pg_dump` and `pg_restore` of the database server's major version or newer (`postgresql-client-<n>`; `PG_BIN_DIR` if they are not on the PATH). The workers image installs version 18 (`--build-arg PG_CLIENT_MAJOR`).
+- `pg_dump` and `pg_restore` of the database server's major version (`postgresql-client-<n>`; `PG_BIN_DIR` if they are not on the PATH). A newer `pg_dump` can still dump the server, but a newer `pg_restore` cannot restore into it (it sets parameters the older server does not know), and `db:restore` refuses to run with one. The workers image installs version 18; build it with `--build-arg PG_CLIENT_MAJOR=<server major>`.
 - A copy of `BACKUP_DIR` off the server, at least daily (object storage or another host). The application does not do this; a backup that lives only next to the database is lost with the server.
 - For managed PostgreSQL or a self-run cluster: point-in-time recovery (WAL archiving) at the cluster level as well. The per-tenant dumps restore one tenant to the time of its last dump; point-in-time recovery covers the hours in between, for the whole cluster.
 

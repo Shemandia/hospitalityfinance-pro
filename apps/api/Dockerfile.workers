@@ -21,9 +21,10 @@ RUN pnpm prune --prod
 
 FROM node:22-alpine AS runtime
 
-# pg_dump and pg_restore for the backup worker (WP-2 item 9). Their major
-# version must be at least the database server's; a newer one dumps older
-# servers too. Build with --build-arg PG_CLIENT_MAJOR=<n> to match.
+# pg_dump and pg_restore for the backups (WP-2 item 9): the database
+# server's major version. A newer pg_dump still dumps an older server, but a
+# newer pg_restore cannot restore into one. Build with
+# --build-arg PG_CLIENT_MAJOR=<server major>.
 ARG PG_CLIENT_MAJOR=18
 RUN apk add --no-cache tini postgresql${PG_CLIENT_MAJOR}-client
 

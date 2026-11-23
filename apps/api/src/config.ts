@@ -265,7 +265,7 @@ const schema = z.object({
   PG_BIN_DIR: text()
     .optional()
     .describe(
-      "Folder holding pg_dump and pg_restore, when they are not on the PATH. Their major version must be at least the server's."
+      "Folder holding pg_dump and pg_restore, when they are not on the PATH. Use the database server's major version: pg_dump may be newer than the server, pg_restore may not."
     ),
 
   // ── Development ──────────────────────────────────────────────────────────

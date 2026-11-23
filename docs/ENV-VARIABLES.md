@@ -137,7 +137,7 @@ and `SEED_USER_PASSWORD`, the database setup scripts need `DATABASE_URL`.
 | `BACKUP_SCHEDULE`        |                       | `30 2 * * *` | When the backup worker backs up every tenant and the registry: a cron pattern, UTC.                                                                                                                                                        |
 | `BACKUP_RETENTION_DAYS`  |                       |              | Backups older than this many days are deleted after each scheduled run; the newest successful backup of each database is always kept. Unset: nothing is deleted.                                                                           |
 | `BACKUP_TIMEOUT_MINUTES` |                       | `120`        | Longest one database's dump may take before the backup of it is abandoned.                                                                                                                                                                 |
-| `PG_BIN_DIR`             |                       |              | Folder holding pg_dump and pg_restore, when they are not on the PATH. Their major version must be at least the server's.                                                                                                                   |
+| `PG_BIN_DIR`             |                       |              | Folder holding pg_dump and pg_restore, when they are not on the PATH. Use the database server's major version: pg_dump may be newer than the server, pg_restore may not.                                                                   |
 
 ### Development
 

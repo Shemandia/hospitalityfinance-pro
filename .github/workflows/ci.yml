@@ -100,14 +100,19 @@ jobs:
             -c "CREATE DATABASE hfp_registry_test OWNER hfp" \
             -c "CREATE DATABASE hfp_shadow OWNER hfp"
 
-      # The backup tests run pg_dump and pg_restore (WP-2 item 9); their major
-      # version must be at least the server's.
+      # The backup tests run pg_dump and pg_restore (WP-2 item 9) of the
+      # server's major version (16): the runner's own are newer, and a newer
+      # pg_restore cannot restore into an older server. PG_BIN_DIR points the
+      # tests at them, as it would on a server.
       - name: PostgreSQL client tools
         env:
           PGPASSWORD: hfp_ci
         run: |
-          pg_dump --version
-          pg_restore --version
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-16
+          echo "PG_BIN_DIR=/usr/lib/postgresql/16/bin" >> "$GITHUB_ENV"
+          /usr/lib/postgresql/16/bin/pg_dump --version
+          /usr/lib/postgresql/16/bin/pg_restore --version
           psql -h localhost -U hfp -d hfp_test -Atc "show server_version"
 
       # The connection pooler production runs in front of tenant databases

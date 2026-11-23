@@ -29,6 +29,7 @@ import { PrismaClient as RegistryClient } from "./registry-client.js";
 import { config, registryDatabaseUrl } from "../config.js";
 import {
   assertDumpIntact,
+  assertRestoreToolFits,
   compareRowCounts,
   databaseName,
   dumpDatabase,
@@ -343,6 +344,10 @@ export async function restoreBackup(
 
   const platform = new PrismaClient({ datasourceUrl: singleConnectionUrl(platformAdminUrl()) });
   try {
+    const [server] = await platform.$queryRawUnsafe<Array<{ num: string }>>(
+      `select current_setting('server_version_num') as num`
+    );
+    await assertRestoreToolFits(Math.floor(Number(server!.num) / 10_000));
     const [present] = await platform.$queryRawUnsafe<Array<{ found: boolean }>>(
       `select exists (select 1 from pg_database where datname = '${database}') as found`
     );

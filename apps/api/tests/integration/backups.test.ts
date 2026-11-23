@@ -41,6 +41,7 @@ const env = vi.hoisted(() => {
   return { ready };
 });
 
+import { reloadConfig } from "../../src/config.js";
 import { PrismaClient } from "../../src/db/client.js";
 import { PrismaClient as RegistryClient } from "../../src/db/registry-client.js";
 import type { BackupManifest } from "../../src/db/backup.js";
@@ -51,7 +52,7 @@ import {
   runBackups
 } from "../../src/db/tenant-backup.js";
 import { ownerConnectionUrl, type NewLocation } from "../../src/db/tenant-location.js";
-import { dropTenantDatabase } from "../../src/db/tenant-roles.js";
+import { dropDatabaseForce, dropTenantDatabase } from "../../src/db/tenant-roles.js";
 import {
   createDatabase,
   migrateDatabase,
@@ -137,12 +138,15 @@ if (!env.ready) {
     }, 600_000);
 
     afterAll(async () => {
-      await registry.databaseBackup.deleteMany({ where: { runId: { in: runIds } } });
-      if (location) await dropTenantDatabase(admin, location);
-      await registry.tenant.deleteMany({ where: { slug: { in: Object.values(slugs) } } });
-      await registry.$disconnect();
-      await admin.$disconnect();
-      rmSync(dir, { recursive: true, force: true });
+      try {
+        await registry.databaseBackup.deleteMany({ where: { runId: { in: runIds } } });
+        if (location) await dropTenantDatabase(admin, location);
+      } finally {
+        await registry.tenant.deleteMany({ where: { slug: { in: Object.values(slugs) } } });
+        await registry.$disconnect();
+        await admin.$disconnect();
+        rmSync(dir, { recursive: true, force: true });
+      }
     }, 120_000);
 
     let tenantFile: string;
@@ -209,7 +213,8 @@ if (!env.ready) {
         await admin.$executeRawUnsafe(
           `GRANT "${location.ownerRole}" TO CURRENT_USER WITH INHERIT TRUE, SET TRUE`
         );
-        await admin.$executeRawUnsafe(`DROP DATABASE IF EXISTS "${into}" WITH (FORCE)`);
+        // A fresh restore draws autovacuum, which a plain forced drop cannot end.
+        await dropDatabaseForce(admin, `"${into}"`);
         await admin.$executeRawUnsafe(
           `GRANT "${location.ownerRole}" TO CURRENT_USER WITH INHERIT FALSE, SET TRUE`
         );
@@ -245,6 +250,28 @@ if (!env.ready) {
       const into = `hfp_it_restore_bad_${run}`;
       await expect(restoreBackup(`${copy}.json`, { into })).rejects.toThrow(/damaged/);
       expect(await databaseExists(into)).toBe(false);
+    }, 120_000);
+
+    it("refuses to restore with a pg_restore newer than the server", async () => {
+      const bin = mkdtempSync(join(tmpdir(), "hfp-pgbin-"));
+      writeFileSync(join(bin, "pg_restore"), "#!/bin/sh\necho 'pg_restore (PostgreSQL) 99.0'\n", {
+        mode: 0o755
+      });
+      const previous = process.env.PG_BIN_DIR;
+      process.env.PG_BIN_DIR = bin;
+      reloadConfig();
+      const into = `hfp_it_restore_new_${run}`;
+      try {
+        await expect(restoreBackup(join(dir, `${tenantFile}.json`), { into })).rejects.toThrow(
+          /pg_restore is version 99/
+        );
+        expect(await databaseExists(into)).toBe(false);
+      } finally {
+        if (previous === undefined) delete process.env.PG_BIN_DIR;
+        else process.env.PG_BIN_DIR = previous;
+        reloadConfig();
+        rmSync(bin, { recursive: true, force: true });
+      }
     }, 120_000);
 
     it("reports the table whose restored count is not the manifest's", async () => {
