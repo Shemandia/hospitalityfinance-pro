@@ -59,9 +59,11 @@ if (!base) {
       ]) {
         expect(lines).toContain(`table: ${table} rls=true force=true`);
       }
-      // The entity tree is read before an entity is chosen: enabled, not forced.
-      expect(lines).toContain("table: entities rls=true force=false");
-      expect(lines.filter((l) => l.startsWith("policy: ")).length).toBe(54);
+      // Forced since migration 3 (Stage 1 item 7): reads of the tree made
+      // before an entity is chosen go through the bypass.
+      expect(lines).toContain("table: entities rls=true force=true");
+      // 54 from the baseline, 21 from migration 3 (child tables and the rest).
+      expect(lines.filter((l) => l.startsWith("policy: ")).length).toBe(75);
     });
 
     it("keeps the audit log immutable", () => {
