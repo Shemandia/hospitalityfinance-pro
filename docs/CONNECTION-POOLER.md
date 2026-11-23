@@ -48,7 +48,7 @@ The pooler test proves the first list holds and that nothing leaks between trans
 
 ## Prisma settings
 
-Prisma 5.22 (`apps/api/package.json`). Prisma's PgBouncer guidance: with PgBouncer **1.21.0 or later**, set `max_prepared_statements` above zero in PgBouncer and do **not** add `pgbouncer=true` to the connection string; below 1.21.0, `pgbouncer=true` is needed. The pages read for this (prisma.io, November 2026) are written for Prisma 7, so the CI test is the confirmation for 5.22: it runs PgBouncer 1.22 with `max_prepared_statements = 200` and no `pgbouncer=true`, with interactive transactions and repeated parameterised queries across clients. **PgBouncer 1.21.0 or later is therefore a requirement.**
+Prisma 5.22 (`apps/api/package.json`). Prisma's PgBouncer guidance: with PgBouncer **1.21.0 or later**, set `max_prepared_statements` above zero in PgBouncer and do **not** add `pgbouncer=true` to the connection string; below 1.21.0, `pgbouncer=true` is needed. The pages read for this (prisma.io, November 2026) are written for Prisma 7, so the CI test is the confirmation for 5.22: it runs the PgBouncer the CI runner installs (1.25.1 on 23 November 2026) with `max_prepared_statements = 200` and no `pgbouncer=true`, with interactive transactions and repeated parameterised queries across clients. **PgBouncer 1.21.0 or later is therefore a requirement.**
 
 `connection_limit` is set by the application on every tenant client (`runtimeConnectionUrl`); a value already in a stored connection string is replaced. Prisma's `pool_timeout` stays at its default (10 seconds): a request that cannot get one of its client's connections within that time fails rather than queueing indefinitely.
 
@@ -104,7 +104,7 @@ ignore_startup_parameters = extra_float_digits,options
 
 - `apps/api/tests/tenant-runtime-url.test.ts` (unit): the pooled connection string keeps database, role and password, and sets the limit.
 - `apps/api/tests/integration/tenant-pool.test.ts` (any PostgreSQL): the connection limit holds; a busy client is never closed to make room; `evictTenant` waits for running work; a handle survives an eviction.
-- `apps/api/tests/integration/pooler.test.ts` (CI starts PgBouncer 1.22 in transaction mode, pool size 2): clients share the pooler's connections; the selected entity never leaks between transactions; the SEC-11 bypass holds for its own transaction only; interactive transactions and repeated parameterised queries work without `pgbouncer=true`. Skipped locally, since no pooler is installed on the development server; required in CI.
+- `apps/api/tests/integration/pooler.test.ts` (CI starts PgBouncer, 1.25.1 at present, in transaction mode, pool size 2): clients share the pooler's connections; the selected entity never leaks between transactions; the SEC-11 bypass holds for its own transaction only; interactive transactions and repeated parameterised queries work without `pgbouncer=true`. Skipped locally, since no pooler is installed on the development server; required in CI.
 
 ## Installing it (when the owner decides)
 
