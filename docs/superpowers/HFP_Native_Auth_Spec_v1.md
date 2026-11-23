@@ -163,7 +163,7 @@ User                    Next.js                   API                      Redis
   "tenantCode": "a3f8b2c1",
   "entityId": "entity-uuid",
   "roles": ["ADMIN"],
-  "permissions": ["gl:read", "gl:write", "transfer-desk:execute"],
+  "permissions": ["gl:read", "gl:write", "integrations:execute"],
   "type": "access",
   "iat": 1714000000,
   "exp": 1714000900
@@ -398,7 +398,7 @@ function decodeJwtPayload(token: string): any {
 /t/{code}/reset-password    → Reset password (with token)
 /t/{code}/dashboard         → Main dashboard (protected)
 /t/{code}/financials/...    → Financials module (protected)
-/t/{code}/transfer-desk/... → Transfer Desk (protected)
+/t/{code}/integrations/... → Integrations (protected)
 /t/{code}/admin/...         → Admin pages (protected, ADMIN role)
 ```
 

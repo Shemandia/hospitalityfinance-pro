@@ -1,0 +1,378 @@
+/**
+ * Integrations — per-tenant BullMQ worker.
+ *
+ * One worker per active tenant, on the queue `integration-{tenant-slug}`
+ * (TD-BL-027). This module is a library: the workers run in their own process,
+ * started by integration-runner.ts under the worker supervisor (OPS-10).
+ *
+ * Responsibilities:
+ *   1. Pull IntegrationJobData from the per-tenant queue.
+ *   2. Resolve the tenant DB and load the profile + execution row.
+ *   3. Update integration_executions through QUEUED → RUNNING → COMPLETED / FAILED.
+ *   4. Dispatch to the appropriate pipeline (import / export / process).
+ *
+ * Concurrency: defaults to 1 per tenant. Per-tenant license-tier limits
+ * (Starter=1, Pro=3, Enterprise=10) will be enforced by reading the tenant
+ * license entitlements when the BullMQ Worker is constructed — TODO once the
+ * licensing module exists.
+ *
+ * Lifecycle:
+ *   - The runner starts a worker for each active tenant, picks up new tenants
+ *     and stops the workers of deactivated ones. The API never starts one.
+ *   - All workers are closed by `disconnectAllIntegrationWorkers()` during
+ *     graceful shutdown.
+ */
+
+import { config } from "../config.js";
+import { runWithContext, updateRequestContext } from "../db/requestContext.js";
+import { resolveTenant } from "../db/tenantRegistry.js";
+import { TenantUnavailableError } from "../db/tenantScope.js";
+import type { Job, Worker } from "bullmq";
+import { createWorker } from "./queues.js";
+import { getTenantClient } from "../db/tenantPool.js";
+import { getIntegrationQueueName, type IntegrationJobData } from "./integration-queue.js";
+import {
+  executeImport,
+  executeExport,
+  executeProcess,
+  type PipelineContext,
+  type PipelineResult,
+  type ProfileWithRelations
+} from "./integration-pipeline.js";
+import { getStorageBackend } from "./integration-storage.js";
+import { executeAutomation, type AutomationStep } from "./automation-engine.js";
+import { sendEmail } from "../shared/email.js";
+import { moduleLogger } from "../shared/logger.js";
+import { assertSchemaServiceable } from "../db/schema-version.js";
+
+const log = moduleLogger("integration-worker");
+
+// ── Per-tenant worker cache ────────────────────────────────────────────────
+
+const workers = new Map<string, Worker<IntegrationJobData>>();
+
+/**
+ * Ensure a worker exists for the given tenant. Idempotent.
+ *
+ * The tenantDbUrl is captured in the closure so the worker can spin up its
+ * own Prisma client without depending on AsyncLocalStorage (which is empty
+ * inside a BullMQ worker — workers run outside the request lifecycle).
+ */
+export function ensureIntegrationWorker(tenantSlug: string, tenantDbUrl: string): void {
+  if (workers.has(tenantSlug)) return;
+
+  const worker = createWorker<IntegrationJobData>(
+    getIntegrationQueueName(tenantSlug),
+    // The job runs with its tenant bound, so anything that reaches the shared
+    // prisma client lands in this tenant's database and no other.
+    (job) =>
+      runWithContext({ tenantSlug, tenantDbUrl }, async () => {
+        const tenant = await resolveTenant(tenantSlug);
+        if (!tenant || !tenant.isActive) throw new TenantUnavailableError(tenantSlug);
+        // Behind this release's schema: postponed by createWorker, not failed.
+        assertSchemaServiceable(tenant);
+        updateRequestContext({ tenantId: tenant.id });
+        return processJob(job, tenantSlug, tenantDbUrl);
+      }),
+    {
+      // Platform-wide for now; per-tenant values come with the plans in WP-2 (HC-37).
+      concurrency: config().IMPORT_CONCURRENCY,
+      autorun: true
+    }
+  );
+
+  worker.on("completed", (job) => {
+    log.info({ tenantSlug }, `Job ${job.id} completed`);
+  });
+
+  worker.on("failed", (job, error) => {
+    log.error({ err: error, tenantSlug }, `Job ${job?.id ?? "unknown"} failed`);
+  });
+
+  worker.on("error", (error) => {
+    log.error({ err: error, tenantSlug }, `Worker error`);
+  });
+
+  workers.set(tenantSlug, worker);
+  log.info({ tenantSlug }, `Worker started`);
+}
+
+/**
+ * Job handler. Loads the profile + execution, dispatches to the appropriate
+ * pipeline (import / export / process), and updates the execution row.
+ */
+async function processJob(
+  job: Job<IntegrationJobData>,
+  tenantSlug: string,
+  tenantDbUrl: string
+): Promise<{ executionId: string; status: "COMPLETED" | "FAILED"; recordsTotal: number }> {
+  const { executionId, profileId, automationId } = job.data;
+  const prisma = getTenantClient(tenantSlug, tenantDbUrl) as any;
+
+  // ── Automation job (scheduled via repeatable) ──────────────────────────
+  // If this is an automation trigger from the scheduler (empty executionId),
+  // load the automation and run all its steps via the automation engine.
+  if (automationId && !executionId) {
+    log.info({ tenantSlug }, `Running automation ${automationId}`);
+
+    const automation = await prisma.integrationAutomation.findUnique({
+      where: { id: automationId },
+      include: {
+        steps: { orderBy: { stepOrder: "asc" } }
+      }
+    });
+
+    if (!automation) {
+      throw new Error(`Automation ${automationId} not found`);
+    }
+
+    const result = await executeAutomation(
+      {
+        db: prisma,
+        tenantSlug,
+        tenantDbUrl,
+        triggeredBy: "scheduler"
+      },
+      automationId,
+      automation.steps as AutomationStep[]
+    );
+
+    return {
+      executionId: `automation:${automationId}`,
+      status: result.status === "COMPLETED" ? "COMPLETED" : "FAILED",
+      recordsTotal: result.stepsTotal
+    };
+  }
+
+  log.info({ tenantSlug }, `Picked up execution ${executionId} (profile ${profileId})`);
+
+  // ── Mark RUNNING ────────────────────────────────────────────────────────
+  try {
+    await prisma.integrationExecution.update({
+      where: { id: executionId },
+      data: {
+        status: "RUNNING",
+        startedAt: new Date(),
+        jobId: job.id ?? executionId
+      }
+    });
+  } catch (err) {
+    log.error({ err, tenantSlug }, `Failed to mark execution ${executionId} as RUNNING`);
+    throw err;
+  }
+
+  // ── Load profile ────────────────────────────────────────────────────────
+  let profile: ProfileWithRelations | null;
+  try {
+    profile = await prisma.integrationProfile.findUnique({
+      where: { id: profileId },
+      include: {
+        sourceFormat: true,
+        targetFormat: true,
+        transformation: {
+          select: { id: true, rulesJson: true, functionsJson: true }
+        }
+      }
+    });
+  } catch (err) {
+    await markFailed(prisma, executionId, `Failed to load profile: ${(err as Error).message}`);
+    throw err;
+  }
+
+  if (!profile) {
+    const msg = `Profile ${profileId} not found`;
+    await markFailed(prisma, executionId, msg);
+    throw new Error(msg);
+  }
+
+  // ── Load execution for runtimeParams ────────────────────────────────────
+  let runtimeParams: Record<string, unknown> = {};
+  try {
+    const execution = await prisma.integrationExecution.findUnique({
+      where: { id: executionId },
+      select: { runtimeParams: true }
+    });
+    if (execution?.runtimeParams) {
+      runtimeParams =
+        typeof execution.runtimeParams === "string"
+          ? JSON.parse(execution.runtimeParams)
+          : (execution.runtimeParams as Record<string, unknown>);
+    }
+  } catch {
+    // Non-fatal — proceed with empty params
+  }
+
+  // ── Build pipeline context ──────────────────────────────────────────────
+  const ctx: PipelineContext = {
+    db: prisma,
+    storage: getStorageBackend(),
+    tenantSlug,
+    tenantDbUrl
+  };
+
+  // ── Dispatch to pipeline ────────────────────────────────────────────────
+  let result: PipelineResult;
+
+  try {
+    switch (profile.profileType) {
+      case "IMPORT":
+        result = await executeImport(ctx, executionId, profile, runtimeParams);
+        break;
+      case "EXPORT":
+        result = await executeExport(ctx, executionId, profile, runtimeParams);
+        break;
+      case "PROCESS":
+      case "INTERNAL_TRANSFER":
+      case "EXTERNAL_TRANSFER":
+        result = await executeProcess(ctx, executionId, profile);
+        break;
+      default:
+        result = {
+          recordsTotal: 0,
+          recordsSucceeded: 0,
+          recordsFailed: 0,
+          errorMessage: `Unknown profile type: ${profile.profileType}`
+        };
+    }
+  } catch (err) {
+    await markFailed(prisma, executionId, (err as Error).message);
+    throw err;
+  }
+
+  // ── Mark COMPLETED or FAILED ────────────────────────────────────────────
+  const finalStatus = result.errorMessage ? "FAILED" : "COMPLETED";
+
+  try {
+    await prisma.integrationExecution.update({
+      where: { id: executionId },
+      data: {
+        status: finalStatus,
+        finishedAt: new Date(),
+        recordsTotal: result.recordsTotal,
+        recordsSucceeded: result.recordsSucceeded,
+        recordsFailed: result.recordsFailed,
+        errorMessage: result.errorMessage ?? null
+      }
+    });
+  } catch (err) {
+    log.error({ err, tenantSlug }, `Failed to mark execution ${executionId} as ${finalStatus}`);
+    await markFailed(prisma, executionId, (err as Error).message);
+    throw err;
+  }
+
+  // ── Send execution notifications (if configured via automation schedule) ─
+  await sendExecutionNotification(prisma, tenantSlug, profile, executionId, finalStatus, result);
+
+  return {
+    executionId,
+    status: finalStatus,
+    recordsTotal: result.recordsTotal
+  };
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+async function markFailed(prisma: any, executionId: string, message: string): Promise<void> {
+  await prisma.integrationExecution
+    .update({
+      where: { id: executionId },
+      data: {
+        status: "FAILED",
+        finishedAt: new Date(),
+        errorMessage: message
+      }
+    })
+    .catch(() => {});
+}
+
+/**
+ * Send execution completion/failure notifications if the profile has a
+ * schedule with notification preferences (notifyOnSuccess, notifyOnFailure).
+ */
+async function sendExecutionNotification(
+  prisma: any,
+  tenantSlug: string,
+  profile: ProfileWithRelations,
+  executionId: string,
+  status: "COMPLETED" | "FAILED",
+  result: PipelineResult
+): Promise<void> {
+  try {
+    // Find the automation schedule for this profile to read notification config
+    const step = await prisma.integrationAutomationStep.findFirst({
+      where: { profileId: profile.id },
+      include: {
+        automation: {
+          select: { description: true }
+        }
+      }
+    });
+
+    if (!step?.automation?.description) return;
+
+    let config: Record<string, unknown>;
+    try {
+      config = JSON.parse(step.automation.description);
+    } catch {
+      return;
+    }
+
+    const notifyEmails = Array.isArray(config.notifyEmails) ? config.notifyEmails : [];
+    if (notifyEmails.length === 0) return;
+
+    const shouldNotify =
+      (status === "COMPLETED" && config.notifyOnSuccess === true) ||
+      (status === "FAILED" && config.notifyOnFailure === true);
+
+    if (!shouldNotify) return;
+
+    const subject =
+      status === "COMPLETED"
+        ? `Transfer "${profile.name}" completed (${result.recordsSucceeded}/${result.recordsTotal} records)`
+        : `Transfer "${profile.name}" failed: ${result.errorMessage ?? "unknown error"}`;
+
+    const html = `
+      <p>Integrations execution <strong>${status}</strong></p>
+      <ul>
+        <li>Profile: ${profile.name}</li>
+        <li>Execution: ${executionId}</li>
+        <li>Tenant: ${tenantSlug}</li>
+        <li>Records: ${result.recordsSucceeded} succeeded, ${result.recordsFailed} failed (${result.recordsTotal} total)</li>
+        ${result.errorMessage ? `<li>Error: ${result.errorMessage}</li>` : ""}
+      </ul>
+    `;
+
+    await Promise.allSettled(
+      notifyEmails.map((email: string) => sendEmail({ to: email, subject, html }))
+    );
+  } catch (err) {
+    log.warn({ tenantSlug }, `Notification send failed: ${(err as Error).message}`);
+  }
+}
+
+/** Slugs of the tenants that have a worker running in this process. */
+export function runningIntegrationWorkers(): string[] {
+  return [...workers.keys()];
+}
+
+/** Stops one tenant's worker, for example when the tenant is deactivated. */
+export async function stopIntegrationWorker(tenantSlug: string): Promise<void> {
+  const worker = workers.get(tenantSlug);
+  if (!worker) return;
+  workers.delete(tenantSlug);
+  await worker.close().catch(() => undefined);
+}
+
+/**
+ * Disconnect every running worker (graceful shutdown).
+ */
+export async function disconnectAllIntegrationWorkers(): Promise<void> {
+  const closes = [...workers.values()].map((w) =>
+    w
+      .close()
+      .then(() => undefined)
+      .catch(() => undefined)
+  );
+  await Promise.allSettled(closes);
+  workers.clear();
+}

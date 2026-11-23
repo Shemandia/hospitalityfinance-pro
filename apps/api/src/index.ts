@@ -4,19 +4,20 @@ import { startupConfig } from "./config.js";
 // setting, rather than failing inside whichever module needs it first.
 const { PORT: port } = startupConfig("api");
 
-const { logger: startLog } = await import("./shared/logger.js");
+const { logger: startLog, reportRenamedSettings } = await import("./shared/logger.js");
+reportRenamedSettings(startLog);
 const { createApp } = await import("./app.js");
 const { disconnectAllTenants } = await import("./db/tenantPool.js");
 const { disconnectRegistry } = await import("./db/tenantRegistry.js");
 const { disconnectRedis } = await import("./db/redis.js");
-const { disconnectAllTransferDeskQueues } = await import("./jobs/transfer-desk-queue.js");
+const { disconnectAllIntegrationQueues } = await import("./jobs/integration-queue.js");
 
 async function start(): Promise<void> {
   const app = await createApp();
   await app.listen({ port, host: "0.0.0.0" });
   app.log.info(`API listening on port ${port}`);
 
-  // Background workers, Transfer Desk included, run in the worker process
+  // Background workers, Integrations included, run in the worker process
   // (pnpm workers), not here. The API only enqueues (OPS-10).
 
   // ── Graceful shutdown ──────────────────────────────────────────────────
@@ -37,8 +38,8 @@ async function start(): Promise<void> {
       await app.close();
       app.log.info("Fastify server closed");
 
-      await disconnectAllTransferDeskQueues();
-      app.log.info("Transfer Desk queues closed");
+      await disconnectAllIntegrationQueues();
+      app.log.info("Integrations queues closed");
 
       await Promise.allSettled([disconnectAllTenants(), disconnectRegistry(), disconnectRedis()]);
       app.log.info("All database connections released");

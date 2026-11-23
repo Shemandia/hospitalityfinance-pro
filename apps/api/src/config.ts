@@ -157,11 +157,11 @@ const schema = z.object({
   STORAGE_BACKEND: z
     .enum(["local", "s3"])
     .default("local")
-    .describe("Where Transfer Desk files live."),
-  TD_LOCAL_UPLOADS_PATH: text()
+    .describe("Where Integrations files live."),
+  INTEGRATION_UPLOADS_PATH: text()
     .default("./uploads")
     .describe("Local storage path; keep it outside any public web root."),
-  TD_S3_BUCKET: text().optional().describe("S3 bucket for Transfer Desk files."),
+  INTEGRATION_S3_BUCKET: text().optional().describe("S3 bucket for Integrations files."),
   AWS_REGION: text().optional().describe("AWS region for S3."),
   AWS_S3_BUCKET: text().optional().describe("S3 bucket for generated reports."),
 
@@ -218,14 +218,14 @@ const schema = z.object({
   IMPORT_CONCURRENCY: positiveInt()
     .default(1)
     .describe(
-      "Transfer Desk imports each tenant runs at once. Per-tenant values come with the plans in WP-2."
+      "Integrations imports each tenant runs at once. Per-tenant values come with the plans in WP-2."
     ),
   WORKER_MAX_CLEAN_EXITS: positiveInt()
     .default(3)
     .describe("Clean exits in a row after which the supervisor gives up on a worker."),
-  TRANSFER_DESK_TENANT_POLL_MS: positiveInt()
+  INTEGRATION_TENANT_POLL_MS: positiveInt()
     .default(60_000)
-    .describe("How often the Transfer Desk process checks for added or deactivated tenants."),
+    .describe("How often the Integrations process checks for added or deactivated tenants."),
 
   // ── Development ──────────────────────────────────────────────────────────
   SHADOW_DATABASE_URL: url()
@@ -252,12 +252,41 @@ export class ConfigError extends Error {
   }
 }
 
+/**
+ * Variables renamed with Transfer Desk -> Integrations (21 November 2026). For
+ * one release the old name still works when the new one is unset, with a
+ * warning; then the old names are dropped.
+ */
+export const RENAMED_VARIABLES: Readonly<Record<string, string>> = {
+  TD_LOCAL_UPLOADS_PATH: "INTEGRATION_UPLOADS_PATH",
+  TD_S3_BUCKET: "INTEGRATION_S3_BUCKET",
+  TRANSFER_DESK_TENANT_POLL_MS: "INTEGRATION_TENANT_POLL_MS"
+};
+
+const renamesInUse = new Set<string>();
+
+/**
+ * Old variable names the configuration was read from, as "OLD -> NEW". The
+ * logger reports them once when it starts (it reads the configuration, so the
+ * configuration cannot log).
+ */
+export function renamedVariablesInUse(): string[] {
+  return [...renamesInUse].map((oldName) => `${oldName} -> ${RENAMED_VARIABLES[oldName]}`);
+}
+
 /** Unset and empty are the same. */
 function present(env: NodeJS.ProcessEnv): Record<string, string> {
   const out: Record<string, string> = {};
+  const set = (value: string | undefined) => value !== undefined && value.trim() !== "";
   for (const key of Object.keys(schema.shape)) {
     const value = env[key];
-    if (value !== undefined && value.trim() !== "") out[key] = value;
+    if (set(value)) out[key] = value!;
+  }
+  for (const [oldName, newName] of Object.entries(RENAMED_VARIABLES)) {
+    if (!(newName in out) && set(env[oldName])) {
+      out[newName] = env[oldName]!;
+      renamesInUse.add(oldName);
+    }
   }
   return out;
 }
@@ -451,8 +480,8 @@ export const CONFIG_GROUPS: ReadonlyArray<{ title: string; keys: readonly Config
     keys: [
       "UPLOAD_MAX_MB",
       "STORAGE_BACKEND",
-      "TD_LOCAL_UPLOADS_PATH",
-      "TD_S3_BUCKET",
+      "INTEGRATION_UPLOADS_PATH",
+      "INTEGRATION_S3_BUCKET",
       "AWS_REGION",
       "AWS_S3_BUCKET"
     ]
@@ -492,7 +521,7 @@ export const CONFIG_GROUPS: ReadonlyArray<{ title: string; keys: readonly Config
   { title: "Lists", keys: ["PAGE_SIZE_DEFAULT", "PAGE_SIZE_MAX"] },
   {
     title: "Workers",
-    keys: ["IMPORT_CONCURRENCY", "WORKER_MAX_CLEAN_EXITS", "TRANSFER_DESK_TENANT_POLL_MS"]
+    keys: ["IMPORT_CONCURRENCY", "WORKER_MAX_CLEAN_EXITS", "INTEGRATION_TENANT_POLL_MS"]
   },
   {
     title: "Development",

@@ -25,6 +25,7 @@ import { getRequestContext, runWithContext } from "../../src/db/requestContext.j
 import { withBypassRLS } from "../../src/db/rls-bypass.js";
 import { disconnectAllTenants, getTenantClient } from "../../src/db/tenantPool.js";
 import { disconnectTestPrisma, getTestDatabaseUrl, getTestPrisma } from "./helpers.js";
+import { underGrantLock } from "./grants.js";
 
 const APP_ROLE = "hfp_rls_test_app";
 
@@ -69,14 +70,12 @@ if (!process.env.TEST_DATABASE_URL) {
           `CREATE ROLE ${APP_ROLE} NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE`
         );
       }
-      await fixtures.$executeRawUnsafe(`GRANT ${APP_ROLE} TO CURRENT_USER`);
-      await fixtures.$executeRawUnsafe(`GRANT USAGE ON SCHEMA public TO ${APP_ROLE}`);
-      await fixtures.$executeRawUnsafe(
-        `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${APP_ROLE}`
-      );
-      await fixtures.$executeRawUnsafe(
+      await underGrantLock(fixtures, [
+        `GRANT ${APP_ROLE} TO CURRENT_USER`,
+        `GRANT USAGE ON SCHEMA public TO ${APP_ROLE}`,
+        `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${APP_ROLE}`,
         `GRANT EXECUTE ON FUNCTION app_begin_rls_bypass() TO ${APP_ROLE}`
-      );
+      ]);
 
       await fixture(async (tx) => {
         const entity = (label: string) =>
@@ -171,8 +170,8 @@ if (!process.env.TEST_DATABASE_URL) {
             await asAppRole(tx);
             // Raw, so it is on the bypass transaction whatever the middleware does.
             await tx.$executeRaw`
-              INSERT INTO entities (id, name, type, country_code, updated_at)
-              VALUES (${uncommittedId}, ${`Bypass IT uncommitted ${run}`}, 'PROPERTY'::"EntityType", 'TZ', now())`;
+              INSERT INTO entities (id, code, name, type, country_code, updated_at)
+              VALUES (${uncommittedId}, ${`BU${run}`.slice(0, 20)}, ${`Bypass IT uncommitted ${run}`}, 'PROPERTY'::"EntityType", 'TZ', now())`;
             // A model query on another connection could not see that row.
             const found = await tx.entity.findUnique({
               where: { id: uncommittedId },

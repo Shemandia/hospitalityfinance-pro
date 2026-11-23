@@ -22,11 +22,12 @@ export type {
   TmlUserFunction,
   TmlExecutionOptions,
   TmlResult,
-  TmlRecordError
+  TmlRecordError,
+  TmlLookupResolver
 } from "./types.js";
 
 // Engine
-export { executeTransformation } from "./engine.js";
+export { executeTransformation, UnmappedValueError } from "./engine.js";
 
 // Compiler (wizard → engine bridge)
 export {

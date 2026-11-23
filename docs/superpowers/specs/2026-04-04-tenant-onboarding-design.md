@@ -56,22 +56,22 @@ apps/web/app/
 
 #### `tenant_entitlements`
 
-| Column                  | Type         | Constraints             | Description                                                      |
-| ----------------------- | ------------ | ----------------------- | ---------------------------------------------------------------- |
-| id                      | UUID         | PK, default uuid        |                                                                  |
-| tenant_id               | UUID         | FK → tenants.id, UNIQUE | One entitlement record per tenant                                |
-| license_type            | ENUM         | NOT NULL                | TRIAL, STANDARD, ENTERPRISE                                      |
-| max_properties          | INT          | NOT NULL, default 10    | Property count limit                                             |
-| max_users               | INT          | NOT NULL, default 50    | User count limit                                                 |
-| enabled_modules         | TEXT[]       | NOT NULL                | Module codes: GL, AP, AR, TRANSFER_DESK, REPORTING, FIXED_ASSETS |
-| max_concurrent_sessions | INT          | NOT NULL, default 10    |                                                                  |
-| subscription_start_date | DATE         | NOT NULL                |                                                                  |
-| subscription_end_date   | DATE         | nullable                | null = no expiry                                                 |
-| is_active               | BOOLEAN      | NOT NULL, default true  |                                                                  |
-| created_by              | VARCHAR(255) |                         | Platform admin who created                                       |
-| updated_by              | VARCHAR(255) |                         | Last modifier for audit trail                                    |
-| created_at              | TIMESTAMP    | NOT NULL, default now() |                                                                  |
-| updated_at              | TIMESTAMP    | NOT NULL, auto-update   |                                                                  |
+| Column                  | Type         | Constraints             | Description                                                     |
+| ----------------------- | ------------ | ----------------------- | --------------------------------------------------------------- |
+| id                      | UUID         | PK, default uuid        |                                                                 |
+| tenant_id               | UUID         | FK → tenants.id, UNIQUE | One entitlement record per tenant                               |
+| license_type            | ENUM         | NOT NULL                | TRIAL, STANDARD, ENTERPRISE                                     |
+| max_properties          | INT          | NOT NULL, default 10    | Property count limit                                            |
+| max_users               | INT          | NOT NULL, default 50    | User count limit                                                |
+| enabled_modules         | TEXT[]       | NOT NULL                | Module codes: GL, AP, AR, INTEGRATIONS, REPORTING, FIXED_ASSETS |
+| max_concurrent_sessions | INT          | NOT NULL, default 10    |                                                                 |
+| subscription_start_date | DATE         | NOT NULL                |                                                                 |
+| subscription_end_date   | DATE         | nullable                | null = no expiry                                                |
+| is_active               | BOOLEAN      | NOT NULL, default true  |                                                                 |
+| created_by              | VARCHAR(255) |                         | Platform admin who created                                      |
+| updated_by              | VARCHAR(255) |                         | Last modifier for audit trail                                   |
+| created_at              | TIMESTAMP    | NOT NULL, default now() |                                                                 |
+| updated_at              | TIMESTAMP    | NOT NULL, auto-update   |                                                                 |
 
 #### `tenant_provisioning_steps`
 
@@ -176,15 +176,15 @@ apps/web/app/
 
 #### Step 2: Entitlements
 
-| Field                   | Type          | Validation      | Notes                                              |
-| ----------------------- | ------------- | --------------- | -------------------------------------------------- |
-| License Type            | select        | required        | TRIAL, STANDARD, ENTERPRISE                        |
-| Max Properties          | number        | required, min 1 |                                                    |
-| Max Users               | number        | required, min 1 |                                                    |
-| Enabled Modules         | checkbox grid | min 1 selected  | GL, AP, AR, TRANSFER_DESK, REPORTING, FIXED_ASSETS |
-| Max Concurrent Sessions | number        | required, min 1 |                                                    |
-| Subscription Start      | date          | required        | defaults to today                                  |
-| Subscription End        | date          | optional        | null = no expiry                                   |
+| Field                   | Type          | Validation      | Notes                                             |
+| ----------------------- | ------------- | --------------- | ------------------------------------------------- |
+| License Type            | select        | required        | TRIAL, STANDARD, ENTERPRISE                       |
+| Max Properties          | number        | required, min 1 |                                                   |
+| Max Users               | number        | required, min 1 |                                                   |
+| Enabled Modules         | checkbox grid | min 1 selected  | GL, AP, AR, INTEGRATIONS, REPORTING, FIXED_ASSETS |
+| Max Concurrent Sessions | number        | required, min 1 |                                                   |
+| Subscription Start      | date          | required        | defaults to today                                 |
+| Subscription End        | date          | optional        | null = no expiry                                  |
 
 #### Step 3: Admin Account
 

@@ -2,18 +2,18 @@
 
 **Date:** 2026-06-12
 **Status:** Approved (brainstorming complete)
-**Feature:** SunSystems-style "held journals" for the Transfer Desk — imports stage a reviewable batch of journals that a human inspects (and rejects line items from) before committing them to the ledger.
+**Feature:** SunSystems-style "held journals" for the Integrations — imports stage a reviewable batch of journals that a human inspects (and rejects line items from) before committing them to the ledger.
 
-**Relationship to other work:** This is feature **(B)** of a two-part Transfer Desk uplift. Feature **(A)** — user-defined mappings to _any_ target (replacing the hardcoded `transfer-desk-record-mapper.ts` switch) — is a separate later effort. (B) is built first because the held-batch review is the human checkpoint that makes (A) safe to ship: arbitrary user-defined mappings must not post straight to the ledger. The data model here is deliberately target-agnostic so (A) reuses the same review/commit flow.
+**Relationship to other work:** This is feature **(B)** of a two-part Integrations uplift. Feature **(A)** — user-defined mappings to _any_ target (replacing the hardcoded `integration-record-mapper.ts` switch) — is a separate later effort. (B) is built first because the held-batch review is the human checkpoint that makes (A) safe to ship: arbitrary user-defined mappings must not post straight to the ledger. The data model here is deliberately target-agnostic so (A) reuses the same review/commit flow.
 
 ---
 
 ## 1. Background — current state
 
-The Transfer Desk faithfully mirrors Infor SunSystems (FSD parsing, TML transformation, profiles, lookup tables, scheduled automations, per-record run logs). Two gaps versus SunSystems motivated this work; this spec addresses the second:
+The Integrations faithfully mirrors Infor SunSystems (FSD parsing, TML transformation, profiles, lookup tables, scheduled automations, per-record run logs). Two gaps versus SunSystems motivated this work; this spec addresses the second:
 
-- Today an interactive import calls `GLService.createJournal` **per group immediately** (`apps/api/src/jobs/transfer-desk-pipeline.ts` → `writeToTarget`). Journals land in `DRAFT` (or `PENDING_APPROVAL` if an approval rule matches), with an optional `autoPost` flag.
-- A **dry-run** (`apps/api/src/modules/transfer-desk/test-service.ts`) computes a throwaway journal preview but persists no journals.
+- Today an interactive import calls `GLService.createJournal` **per group immediately** (`apps/api/src/jobs/integration-pipeline.ts` → `writeToTarget`). Journals land in `DRAFT` (or `PENDING_APPROVAL` if an approval rule matches), with an optional `autoPost` flag.
+- A **dry-run** (`apps/api/src/modules/integrations/test-service.ts`) computes a throwaway journal preview but persists no journals.
 - There is **no reviewable import batch**: you cannot import a file, see "here are the N journals this will produce," reject individual ones, and then commit the remainder to posting as a reviewed set. The `JournalStatus` enum (`DRAFT, PENDING_APPROVAL, POSTED, REVERSED, RETURNED, VOIDED`) has no batch/hold grouping.
 
 SunSystems produces **held journals** on import: they sit in a hold area, a person reviews them, then posts them as a set. This spec adds that.
@@ -58,32 +58,32 @@ Held journals are **staged as a batch, not written into the `journals` table**. 
 Two new tables in the tenant schema (`apps/api/src/db/schema-tenant.prisma`). **No change to `JournalStatus`.**
 
 ```prisma
-enum TransferBatchStatus {
+enum IntegrationBatchStatus {
   PENDING_REVIEW
   COMMITTED
   DISCARDED
 }
 
-enum TransferBatchItemStatus {
+enum IntegrationBatchItemStatus {
   HELD        // awaiting review
   COMMITTED   // materialised into a real journal
   REJECTED    // excluded by the reviewer
   ERROR       // failed stage-time validation or commit; cannot post
 }
 
-enum TransferValidationStatus {
+enum IntegrationValidationStatus {
   OK
   WARNING
   ERROR
 }
 
-model TransferBatch {
+model IntegrationBatch {
   id              String              @id @default(uuid())
   entityId        String
   profileId       String
-  executionId     String              // the TransferExecution that produced this batch
+  executionId     String              // the IntegrationExecution that produced this batch
   targetComponent String              // "GL_JOURNAL" in v1
-  status          TransferBatchStatus @default(PENDING_REVIEW)
+  status          IntegrationBatchStatus @default(PENDING_REVIEW)
   totalItems      Int                 @default(0)
   heldItems       Int                 @default(0)
   rejectedItems   Int                 @default(0)
@@ -93,30 +93,30 @@ model TransferBatch {
   createdAt       DateTime            @default(now())
   reviewedById    String?
   committedAt     DateTime?
-  items           TransferBatchItem[]
+  items           IntegrationBatchItem[]
 
   @@index([entityId, status])
   @@index([profileId])
-  @@map("transfer_batches")
+  @@map("integration_batches")
 }
 
-model TransferBatchItem {
+model IntegrationBatchItem {
   id                 String                   @id @default(uuid())
   batchId            String
-  batch              TransferBatch            @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  batch              IntegrationBatch            @relation(fields: [batchId], references: [id], onDelete: Cascade)
   itemIndex          Int                      // ordinal within the batch
-  status             TransferBatchItemStatus  @default(HELD)
+  status             IntegrationBatchItemStatus  @default(HELD)
   targetComponent    String
   payload            Json                     // the fully-mapped JournalCreateInput
   sourceRecordIndices Int[]                   // which parsed source rows produced this journal
-  validationStatus   TransferValidationStatus @default(OK)
+  validationStatus   IntegrationValidationStatus @default(OK)
   validationMessages Json?                    // [{ code, severity, message, line? }]
   resultJournalId    String?                  // set when COMMITTED
   rejectedReason     String?
   createdAt          DateTime                 @default(now())
 
   @@index([batchId, status])
-  @@map("transfer_batch_items")
+  @@map("integration_batch_items")
 }
 ```
 
@@ -127,12 +127,12 @@ model TransferBatchItem {
 Add a per-profile review mode (drives whether an import stages a batch or writes directly):
 
 ```prisma
-enum TransferReviewMode {
+enum IntegrationReviewMode {
   HOLD          // default — interactive imports produce a held batch
   AUTO_COMMIT   // write to the ledger directly (today's behaviour; required for scheduled automations)
 }
-// on TransferProfile:
-//   reviewMode TransferReviewMode @default(HOLD)
+// on IntegrationProfile:
+//   reviewMode IntegrationReviewMode @default(HOLD)
 ```
 
 Scheduled/cron-triggered executions force `AUTO_COMMIT` regardless of the profile setting (no human in the loop). Interactive (manual "Run") executions honor the profile's `reviewMode`.
@@ -155,7 +155,7 @@ Item:   HELD ──commit (validation != ERROR)──▶ COMMITTED (resultJourna
 
 ### 4.1 Import → stage
 
-In `apps/api/src/jobs/transfer-desk-pipeline.ts`, `executeImport` resolves the effective review mode:
+In `apps/api/src/jobs/integration-pipeline.ts`, `executeImport` resolves the effective review mode:
 
 ```
 effectiveMode = isScheduledTrigger ? AUTO_COMMIT : (profile.reviewMode ?? HOLD)
@@ -165,8 +165,8 @@ effectiveMode = isScheduledTrigger ? AUTO_COMMIT : (profile.reviewMode ?? HOLD)
 - `HOLD` and `targetComponent === "GL_JOURNAL"` → new `stageBatch` path:
   1. Parse (FSD) → transform (TML) → `mapRecordsToTarget` produce `MappedJournal[]` — all existing code, unchanged.
   2. For each mapped journal, run **stage-time validation** (§4.2) to compute `validationStatus` + messages.
-  3. Create one `TransferBatch` (status `PENDING_REVIEW`) and one `TransferBatchItem` per mapped journal (status `HELD`, or `ERROR` if validation is ERROR), storing the `JournalCreateInput` as `payload` and the `sourceIndices` as `sourceRecordIndices`.
-  4. Roll counts onto the batch. The `TransferExecution` finishes as `COMPLETED` with a note that it produced a held batch (link via `executionId`).
+  3. Create one `IntegrationBatch` (status `PENDING_REVIEW`) and one `IntegrationBatchItem` per mapped journal (status `HELD`, or `ERROR` if validation is ERROR), storing the `JournalCreateInput` as `payload` and the `sourceIndices` as `sourceRecordIndices`.
+  4. Roll counts onto the batch. The `IntegrationExecution` finishes as `COMPLETED` with a note that it produced a held batch (link via `executionId`).
 - `HOLD` but `targetComponent !== "GL_JOURNAL"` (AP/AR) → falls back to the existing direct path in v1 (out of scope), with a log note.
 
 ### 4.2 Stage-time validation (per mapped journal)
@@ -184,7 +184,7 @@ Reuse the GL service/repository read helpers (account lookup, period lookup) und
 
 ### 4.3 Review
 
-New `BatchReviewService` + router (`apps/api/src/modules/transfer-desk/batch-*.ts`), gated by `TRANSFER_DESK_EXECUTE`:
+New `BatchReviewService` + router (`apps/api/src/modules/integrations/batch-*.ts`), gated by `INTEGRATIONS_RUN`:
 
 - **List** batches (filter by status/profile/entity).
 - **Get** a batch with its items (each item returns a preview: header fields, lines, DR/CR totals, balance flag, validation status + messages, the source row indices).
@@ -211,7 +211,7 @@ New `BatchReviewService` + router (`apps/api/src/modules/transfer-desk/batch-*.t
 
 ## 5. API surface
 
-Under `/api/v1/transfer-desk`, `preHandler: requireAuth` + `requirePermission("TRANSFER_DESK_EXECUTE")`:
+Under `/api/v1/integrations/builder`, `preHandler: requireAuth` + `requirePermission("INTEGRATIONS_RUN")`:
 
 | Method | Path                                 | Purpose                                                    |
 | ------ | ------------------------------------ | ---------------------------------------------------------- |
@@ -228,7 +228,7 @@ All responses use the project's `{ data, errors }` envelope and route errors thr
 
 ## 6. UI
 
-Two pages under the tenant dashboard (`apps/web/app/[tenant]/(dashboard)/transfer-desk/`):
+Two pages under the tenant dashboard (`apps/web/app/[tenant]/(dashboard)/integrations/`):
 
 - **Held Batches list** (`batches/page.tsx`): table of `PENDING_REVIEW` (and recent `COMMITTED`/`DISCARDED`) batches — profile name, created at/by, item counts (held / rejected / error), status badge. Row → detail.
 - **Batch detail / review** (`batches/[id]/page.tsx`):
@@ -237,7 +237,7 @@ Two pages under the tenant dashboard (`apps/web/app/[tenant]/(dashboard)/transfe
   - Row actions: **Reject** (with reason) / **Restore**.
   - Batch actions: **Discard**, **Commit**. Commit opens a confirm dialog: "X journals will post, Y go to approval, Z excluded, W errors skipped."
 
-Add a web API client wrapper alongside the existing transfer-desk client (`apps/web/lib/` or the existing `transfer-desk/api.ts`).
+Add a web API client wrapper alongside the existing integrations client (`apps/web/lib/` or the existing `integrations/api.ts`).
 
 ---
 
@@ -275,22 +275,22 @@ Vitest, following the existing mock-prisma conventions (hand-rolled `mockPrisma`
 
 **API**
 
-- `apps/api/src/db/schema-tenant.prisma` — new enums + `TransferBatch`/`TransferBatchItem`, `reviewMode` on `TransferProfile`; tenant migration.
-- `apps/api/src/jobs/transfer-desk-pipeline.ts` — mode resolution + `stageBatch` branch.
-- `apps/api/src/jobs/transfer-desk-batch-stager.ts` _(new)_ — build + validate items from `MappedJournal[]`.
-- `apps/api/src/modules/transfer-desk/batch-service.ts` _(new)_ — list/get/reject/restore/discard/commit.
-- `apps/api/src/modules/transfer-desk/batch-router.ts` _(new)_ — routes above; register in the transfer-desk module.
-- `apps/api/tests/transfer-desk-batch.test.ts` _(new)_.
+- `apps/api/src/db/schema-tenant.prisma` — new enums + `IntegrationBatch`/`IntegrationBatchItem`, `reviewMode` on `IntegrationProfile`; tenant migration.
+- `apps/api/src/jobs/integration-pipeline.ts` — mode resolution + `stageBatch` branch.
+- `apps/api/src/jobs/integration-batch-stager.ts` _(new)_ — build + validate items from `MappedJournal[]`.
+- `apps/api/src/modules/integrations/batch-service.ts` _(new)_ — list/get/reject/restore/discard/commit.
+- `apps/api/src/modules/integrations/batch-router.ts` _(new)_ — routes above; register in the integrations module.
+- `apps/api/tests/integration-batch.test.ts` _(new)_.
 
 **Web**
 
-- `apps/web/app/[tenant]/(dashboard)/transfer-desk/batches/page.tsx` _(new)_.
-- `apps/web/app/[tenant]/(dashboard)/transfer-desk/batches/[id]/page.tsx` _(new)_.
-- transfer-desk web API client — add batch endpoints.
+- `apps/web/app/[tenant]/(dashboard)/integrations/batches/page.tsx` _(new)_.
+- `apps/web/app/[tenant]/(dashboard)/integrations/batches/[id]/page.tsx` _(new)_.
+- integrations web API client — add batch endpoints.
 
 ---
 
 ## 9. Open items deferred to feature (A)
 
-- Generalised, config-driven mapping to arbitrary targets (replace the hardcoded `transfer-desk-record-mapper.ts` switch).
+- Generalised, config-driven mapping to arbitrary targets (replace the hardcoded `integration-record-mapper.ts` switch).
 - Held batches for AP/AR and the new (A) targets, reusing this batch/review/commit flow.

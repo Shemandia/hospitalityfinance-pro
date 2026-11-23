@@ -26,7 +26,7 @@ There is **no shared "post-journal" service.** Five independent code paths each 
 2. `saf-import-service.ts executeSAFImport` — balance upsert **outside** any transaction; `closing_balance = debit - credit` (no type sign).
 3. `opera-cloud-import-job.ts` — `importOperaSUNFile` (DRAFT only) and legacy `runOperaCloudImport` (POSTED); unsigned; not transactional.
 4. `mews-import-job.ts` — POSTED directly; unsigned; wrapped in `$transaction`.
-5. `routes/interfaces.ts /interfaces/:id/execute` (Transfer Desk / transform-engine) — unsigned; FX hardcoded to 1.
+5. `routes/interfaces.ts /interfaces/:id/execute` (Integrations / transform-engine) — unsigned; FX hardcoded to 1.
 
 Recurring gap in paths 2–5: the **file/source is balance-checked as a whole**, but journals are built from **mapped-only lines** (unmapped codes silently dropped) with **no per-journal debit==credit assertion before posting**.
 
@@ -78,7 +78,7 @@ Recurring gap in paths 2–5: the **file/source is balance-checked as a whole**,
 
 ### F15 — MEDIUM — No import-level reverse/correct flow
 
-- **Status:** ☑ FIXED 2026-07-08 — new `POST /api/v1/integration/imports/:id/reverse` (`routes/imports.ts`) loads the `ImportLog`, reverses its posted journal via `GLService.reverseJournal()`, and marks the log `REVERSED`. Guarded by `INTEGRATION_IMPORT`. Enables F16. Typecheck clean.
+- **Status:** ☑ FIXED 2026-07-08 — new `POST /api/v1/integrations/imports/:id/reverse` (`routes/imports.ts`) loads the `ImportLog`, reverses its posted journal via `GLService.reverseJournal()`, and marks the log `REVERSED`. Guarded by `INTEGRATION_IMPORT`. Enables F16. Typecheck clean.
 
 ### F4 — MEDIUM — Inbound journal batch never asserts debit==credit
 
@@ -86,7 +86,7 @@ Recurring gap in paths 2–5: the **file/source is balance-checked as a whole**,
 
 ### F5 — HIGH — No business-date completeness / missing-day detection
 
-- **Status:** ☑ FIXED 2026-07-08 — new `GET /api/v1/integration/imports/coverage?connectorType=&from=&to=` (`routes/imports.ts`) returns imported days, `missingDays[]`, and a `complete` flag over `ImportLog.businessDate` (SUCCESS only) for the range. Headless for now — a dashboard widget/alert can consume it in the frontend pass. Typecheck clean.
+- **Status:** ☑ FIXED 2026-07-08 — new `GET /api/v1/integrations/imports/coverage?connectorType=&from=&to=` (`routes/imports.ts`) returns imported days, `missingDays[]`, and a `complete` flag over `ImportLog.businessDate` (SUCCESS only) for the range. Headless for now — a dashboard widget/alert can consume it in the frontend pass. Typecheck clean.
 
 ---
 
@@ -94,7 +94,7 @@ Recurring gap in paths 2–5: the **file/source is balance-checked as a whole**,
 
 ### F13 — MEDIUM/HIGH — No PMS-ledger → GL control reconciliation; EZZCL folio-AR not implemented
 
-- **Status:** ◑ PARTIAL 2026-07-08 — **Reconciliation report DONE:** new `GET /api/v1/integration/imports/ledger-reconciliation?from=&to=` (`routes/imports.ts`) aggregates POSTED PMS/POS/AR journal movements per account (functional currency) and checks the documented control-vs-detail relationships (city-ledger control 12450 vs AR detail 11750; guest-ledger 12500; deposit 24100 — all overridable). Gives finance the GL side to tie to the Opera guest/city-ledger reports. Typecheck clean. **Still open:** folio-level AR invoice creation for EZZCL (the `createARInvoices/by_folio_reference` behaviour) — separate feature, needs the AR module + likely a UI.
+- **Status:** ◑ PARTIAL 2026-07-08 — **Reconciliation report DONE:** new `GET /api/v1/integrations/imports/ledger-reconciliation?from=&to=` (`routes/imports.ts`) aggregates POSTED PMS/POS/AR journal movements per account (functional currency) and checks the documented control-vs-detail relationships (city-ledger control 12450 vs AR detail 11750; guest-ledger 12500; deposit 24100 — all overridable). Gives finance the GL side to tie to the Opera guest/city-ledger reports. Typecheck clean. **Still open:** folio-level AR invoice creation for EZZCL (the `createARInvoices/by_folio_reference` behaviour) — separate feature, needs the AR module + likely a UI.
 - **Evidence (was):** no control-vs-detail recon; `runOperaCloudImport` collapses revenue to cash `"1000"`.
 
 ### F17 — MEDIUM — Cross-entity permission bleed

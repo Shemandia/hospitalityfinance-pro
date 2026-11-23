@@ -702,7 +702,7 @@ All existing routes under `/{tenant-slug}/...` must be moved to `/t/{code}/...`:
 ```
 OLD: /essque-hotels/dashboard     → NEW: /t/a3f8b2c1/dashboard
 OLD: /essque-hotels/financials    → NEW: /t/a3f8b2c1/financials
-OLD: /essque-hotels/transfer-desk → NEW: /t/a3f8b2c1/transfer-desk
+OLD: /essque-hotels/integrations → NEW: /t/a3f8b2c1/integrations
 OLD: /essque-hotels/admin         → NEW: /t/a3f8b2c1/admin
 ```
 

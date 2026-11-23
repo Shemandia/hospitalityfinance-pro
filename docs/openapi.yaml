@@ -44,7 +44,7 @@ tags:
   - name: Reporting
     description: Report definitions, runs, scheduling, and PDF generation
   - name: Integration
-    description: PMS/POS connectors, bank feeds, transfer desk
+    description: PMS/POS connectors, bank feeds, integrations
   - name: Admin
     description: Roles, permissions, user management, scope assignment
   - name: Audit
@@ -1360,7 +1360,7 @@ paths:
   /api/v1/interfaces:
     get:
       tags: [Integration]
-      summary: List transfer desk interface definitions
+      summary: List integrations interface definitions
       parameters:
         - $ref: "#/components/parameters/EntityIdHeader"
       responses:
@@ -1368,7 +1368,7 @@ paths:
           description: Interface definitions
     post:
       tags: [Integration]
-      summary: Create transfer desk interface
+      summary: Create integrations interface
       parameters:
         - $ref: "#/components/parameters/EntityIdHeader"
       responses:

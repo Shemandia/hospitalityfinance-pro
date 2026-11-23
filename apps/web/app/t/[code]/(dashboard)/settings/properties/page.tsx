@@ -242,9 +242,10 @@ export default function PropertiesPage() {
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">
-                  Property Code
+                  Code <span className="text-red-500">*</span>
                 </label>
                 <input
+                  required
                   value={editing.code ?? ""}
                   onChange={(e) => setEditing({ ...editing, code: e.target.value.toUpperCase() })}
                   placeholder="e.g. EZZ"
@@ -441,7 +442,11 @@ export default function PropertiesPage() {
             <button
               onClick={handleSave}
               disabled={
-                !editing.name || !editing.countryCode || createMut.isPending || updateMut.isPending
+                !editing.name ||
+                !editing.code?.trim() ||
+                !editing.countryCode ||
+                createMut.isPending ||
+                updateMut.isPending
               }
               className="inline-flex items-center gap-2 px-6 py-2.5 text-sm font-bold rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-all shadow-lg shadow-emerald-100"
             >

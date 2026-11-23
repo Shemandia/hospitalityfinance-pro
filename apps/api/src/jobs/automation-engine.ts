@@ -1,7 +1,7 @@
 /**
- * Transfer Desk — Automation execution engine.
+ * Integrations — Automation execution engine.
  *
- * Runs an automation's steps sequentially. Each step enqueues a Transfer Desk
+ * Runs an automation's steps sequentially. Each step enqueues a Integrations
  * profile execution and waits for it to complete before moving to the next.
  *
  * Behaviour when a step fails depends on the step's `failOnError` flag:
@@ -14,7 +14,7 @@
  *   - FAILED    — stopped early because a fail-on-error step failed
  */
 
-import { enqueueTransferDeskExecution, type TransferDeskJobData } from "./transfer-desk-queue.js";
+import { enqueueIntegrationExecution, type IntegrationJobData } from "./integration-queue.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -78,7 +78,7 @@ export async function executeAutomation(
     };
 
     // Create execution row
-    const execution = await ctx.db.transferExecution.create({
+    const execution = await ctx.db.integrationExecution.create({
       data: {
         profileId: step.profileId,
         automationId,
@@ -90,7 +90,7 @@ export async function executeAutomation(
     });
 
     // Enqueue the job
-    const jobData: TransferDeskJobData = {
+    const jobData: IntegrationJobData = {
       tenantSlug: ctx.tenantSlug,
       executionId: execution.id,
       profileId: step.profileId,
@@ -99,10 +99,10 @@ export async function executeAutomation(
     };
 
     try {
-      await enqueueTransferDeskExecution(jobData);
+      await enqueueIntegrationExecution(jobData);
     } catch (err) {
       // If enqueue fails, mark execution as failed immediately
-      await ctx.db.transferExecution.update({
+      await ctx.db.integrationExecution.update({
         where: { id: execution.id },
         data: {
           status: "FAILED",
@@ -187,7 +187,7 @@ async function waitForExecution(
   executionId: string
 ): Promise<{ status: string; errorMessage: string | null }> {
   for (let i = 0; i < MAX_POLL_ATTEMPTS; i++) {
-    const row = await db.transferExecution.findUnique({
+    const row = await db.integrationExecution.findUnique({
       where: { id: executionId },
       select: { status: true, errorMessage: true }
     });

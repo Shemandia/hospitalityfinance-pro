@@ -72,7 +72,7 @@ describe("applyEntityScope", () => {
   it("keeps application scoping coverage aligned with RLS for entity-scoped models", () => {
     const expectedModels = [
       "RecurringJournal",
-      "TransferJournalRange",
+      "IntegrationJournalRange",
       "LedgerSetup",
       "ProcessLock",
       "PeriodCloseStatus",

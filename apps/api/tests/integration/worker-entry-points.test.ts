@@ -5,9 +5,9 @@
  * own process, the way the supervisor starts it, against a real registry
  * database, tenant database and Redis. Each must still be running after
  * several seconds: an entry point that only exports functions runs to its
- * end and exits 0, which is how the transfer-desk worker restarted every 30s.
+ * end and exits 0, which is how the integrations worker restarted every 30s.
  *
- * The transfer-desk process must also run a worker for each active tenant,
+ * The integrations process must also run a worker for each active tenant,
  * pick up a tenant added to the registry, and stop the worker of a tenant that
  * was deactivated. The mv-refresh process must process a refresh that the
  * period service queues (OPS-11: nothing ran that queue).
@@ -21,7 +21,7 @@ import type { Queue } from "bullmq";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PrismaClient as RegistryClient } from "../../src/db/registry-client.js";
 import { workerEntryPoints } from "../../src/jobs/supervisor.js";
-import { getTransferDeskQueueName } from "../../src/jobs/transfer-desk-queue.js";
+import { getIntegrationQueueName } from "../../src/jobs/integration-queue.js";
 import { createQueue } from "../../src/jobs/queues.js";
 import { MV_REFRESH_QUEUE } from "../../src/jobs/mv-refresh-job.js";
 
@@ -61,9 +61,9 @@ if (!registryUrl || !tenantDbUrl || !redisUrl) {
     const queues: Queue[] = [];
 
     function workerCount(slug: string): Promise<number> {
-      let queue = queues.find((q) => q.name === getTransferDeskQueueName(slug));
+      let queue = queues.find((q) => q.name === getIntegrationQueueName(slug));
       if (!queue) {
-        queue = createQueue(getTransferDeskQueueName(slug));
+        queue = createQueue(getIntegrationQueueName(slug));
         queues.push(queue);
       }
       return queue.getWorkers().then((w) => w.length);
@@ -97,7 +97,7 @@ if (!registryUrl || !tenantDbUrl || !redisUrl) {
             ...process.env,
             REGISTRY_DATABASE_URL: registryUrl,
             DATABASE_URL: tenantDbUrl,
-            TRANSFER_DESK_TENANT_POLL_MS: "500"
+            INTEGRATION_TENANT_POLL_MS: "500"
           }
         });
         child.stdout?.on("data", (d) => output.push(String(d)));
@@ -138,11 +138,11 @@ if (!registryUrl || !tenantDbUrl || !redisUrl) {
       ).toEqual({ exitCode: null, signal: null });
     });
 
-    it("transfer-desk runs a worker for an active tenant", async () => {
+    it("integrations runs a worker for an active tenant", async () => {
       await until(async () => (await workerCount(slugs.first)) === 1, 10_000);
     }, 15_000);
 
-    it("transfer-desk picks up a tenant added to the registry", async () => {
+    it("integrations picks up a tenant added to the registry", async () => {
       await addTenant(slugs.added, (run.slice(-7) + "b").padStart(8, "b"));
       await until(async () => (await workerCount(slugs.added)) === 1, 10_000);
     }, 15_000);
@@ -164,7 +164,7 @@ if (!registryUrl || !tenantDbUrl || !redisUrl) {
       }
     }, 15_000);
 
-    it("transfer-desk stops the worker of a deactivated tenant", async () => {
+    it("integrations stops the worker of a deactivated tenant", async () => {
       await registry.tenant.update({ where: { slug: slugs.first }, data: { isActive: false } });
       await until(async () => (await workerCount(slugs.first)) === 0, 10_000);
       expect(await workerCount(slugs.added)).toBe(1);

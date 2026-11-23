@@ -16,7 +16,7 @@
 
 import { createSupervisor, exponentialBackoff, workerEntryPoints } from "./supervisor.js";
 import { startupConfig } from "../config.js";
-import { moduleLogger } from "../shared/logger.js";
+import { moduleLogger, reportRenamedSettings } from "../shared/logger.js";
 
 const log = moduleLogger("worker-supervisor");
 
@@ -46,5 +46,6 @@ const supervisor = createSupervisor({
 process.on("SIGTERM", () => void exit(0));
 process.on("SIGINT", () => void exit(0));
 
+reportRenamedSettings(log);
 log.info(`Starting ${workers.length} workers: ${workers.map((w) => w.name).join(", ")}`);
 supervisor.start();

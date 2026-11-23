@@ -304,7 +304,7 @@ if (!process.env.TEST_DATABASE_URL || !redisUrl) {
           tx.entity.create({
             data: {
               name: `Access IT ${name} ${run}`,
-              code: `${name}${run}`.slice(0, 20),
+              code: `AC${name}${run}`.slice(0, 20),
               type,
               countryCode: "TZ",
               parentId

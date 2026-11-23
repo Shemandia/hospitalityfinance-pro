@@ -1,6 +1,6 @@
 /**
  * Integration test: the six lists the web app pages through on the server
- * (journals, AP invoices, suppliers, payment runs, Transfer Desk executions
+ * (journals, AP invoices, suppliers, payment runs, Integrations executions
  * and automations) take `limit` and `offset` and report the total, and their
  * filters and figures cover every row, not one page.
  *
@@ -71,7 +71,7 @@ if (!environmentReady || !redisUrl) {
   const prisma = getTestPrisma();
   const run = Date.now().toString(36);
   const tenantId = `it-pages-${run}`;
-  const CODES = ["GL_READ", "AP_READ", "PAYMENT_RUN_READ", "TRANSFER_DESK_READ"] as const;
+  const CODES = ["GL_READ", "AP_READ", "PAYMENT_RUN_READ", "INTEGRATIONS_READ"] as const;
   const DAY = 86_400_000;
 
   describe("server-side list pages", () => {
@@ -224,13 +224,13 @@ if (!environmentReady || !redisUrl) {
         }
 
         profileId = (
-          await tx.transferProfile.create({
+          await tx.integrationProfile.create({
             data: { name: `PG profile ${run}`, profileType: "IMPORT" }
           })
         ).id;
         for (let i = 0; i < 7; i++) {
-          await tx.transferExecution.create({ data: { profileId } });
-          await tx.transferAutomation.create({ data: { name: `PG automation ${run} ${i}` } });
+          await tx.integrationExecution.create({ data: { profileId } });
+          await tx.integrationAutomation.create({ data: { name: `PG automation ${run} ${i}` } });
         }
       });
       await getAccessService().invalidateUser({ tenantId, userId });
@@ -248,9 +248,9 @@ if (!environmentReady || !redisUrl) {
       setAccessService(null);
       await app?.close();
       await bypass(async (tx) => {
-        await tx.transferExecution.deleteMany({ where: { profileId } });
-        await tx.transferProfile.deleteMany({ where: { id: profileId } });
-        await tx.transferAutomation.deleteMany({
+        await tx.integrationExecution.deleteMany({ where: { profileId } });
+        await tx.integrationProfile.deleteMany({ where: { id: profileId } });
+        await tx.integrationAutomation.deleteMany({
           where: { name: { startsWith: `PG automation ${run} ` } }
         });
         await tx.paymentRun.deleteMany({ where: { entityId } });
@@ -318,19 +318,17 @@ if (!environmentReady || !redisUrl) {
       expect(await expectPagesCoverList("/api/v1/ap/payment-runs")).toBe(7);
     });
 
-    it("Transfer Desk executions: pages with the total of the filter", async () => {
+    it("Integrations executions: pages with the total of the filter", async () => {
       expect(
-        await expectPagesCoverList(
-          `/api/v1/integration/transfer-desk/executions?profileId=${profileId}`
-        )
+        await expectPagesCoverList(`/api/v1/integrations/executions?profileId=${profileId}`)
       ).toBe(7);
     });
 
-    it("Transfer Desk automations: pages with the total", async () => {
-      const total = await expectPagesCoverList("/api/v1/integration/transfer-desk/automations");
+    it("Integrations automations: pages with the total", async () => {
+      const total = await expectPagesCoverList("/api/v1/integrations/automations");
       // Automations are tenant-wide: other test files may have left some of their own.
       expect(total).toBeGreaterThanOrEqual(7);
-      expect(total).toBe(await prisma.transferAutomation.count());
+      expect(total).toBe(await prisma.integrationAutomation.count());
     });
   });
 }

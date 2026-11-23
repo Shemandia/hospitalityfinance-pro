@@ -1416,18 +1416,18 @@ export async function runOperaCloudImport(
   context: ApiContext,
   payload: { hotelId: string; businessDate: string; notifyEmail?: string }
 ) {
-  return request<Record<string, unknown>>(context, "/api/v1/integration/opera-cloud/import", {
+  return request<Record<string, unknown>>(context, "/api/v1/integrations/opera-cloud/import", {
     method: "POST",
     body: JSON.stringify(payload)
   });
 }
 
 export async function getOperaCloudLogs(context: ApiContext) {
-  return request<ImportLog[]>(context, "/api/v1/integration/opera-cloud/logs");
+  return request<ImportLog[]>(context, "/api/v1/integrations/opera-cloud/logs");
 }
 
 export async function runSkyJanaSync(context: ApiContext) {
-  return request<Record<string, unknown>>(context, "/api/v1/integration/sky-jana/sync", {
+  return request<Record<string, unknown>>(context, "/api/v1/integrations/sky-jana/sync", {
     method: "POST",
     body: "{}"
   });
@@ -1437,45 +1437,45 @@ export async function importBankStatement(
   context: ApiContext,
   payload: { format: "MT940" | "OFX"; bankAccountRef: string; fileContent: string }
 ) {
-  return request<Record<string, unknown>>(context, "/api/v1/integration/bank/import", {
+  return request<Record<string, unknown>>(context, "/api/v1/integrations/bank/import", {
     method: "POST",
     body: JSON.stringify(payload)
   });
 }
 
 export async function getBankStatements(context: ApiContext) {
-  return request<BankStatement[]>(context, "/api/v1/integration/bank/statements");
+  return request<BankStatement[]>(context, "/api/v1/integrations/bank/statements");
 }
 
 export async function getBankTransactions(context: ApiContext, statementId: string) {
   return request<Array<Record<string, unknown>>>(
     context,
-    `/api/v1/integration/bank/statements/${statementId}/transactions`
+    `/api/v1/integrations/bank/statements/${statementId}/transactions`
   );
 }
 
 export async function getConnectorMappings(context: ApiContext, connectorType?: string) {
   const q = connectorType ? `?connectorType=${encodeURIComponent(connectorType)}` : "";
-  return request<ConnectorMapping[]>(context, `/api/v1/integration/mappings${q}`);
+  return request<ConnectorMapping[]>(context, `/api/v1/integrations/mappings${q}`);
 }
 
 export async function upsertConnectorMapping(
   context: ApiContext,
   payload: { connectorType: string; sourceCode: string; notes?: string; glAccountId: string }
 ) {
-  return request<ConnectorMapping>(context, "/api/v1/integration/mappings", {
+  return request<ConnectorMapping>(context, "/api/v1/integrations/mappings", {
     method: "POST",
     body: JSON.stringify(payload)
   });
 }
 
 export async function deleteConnectorMapping(context: ApiContext, id: string) {
-  return request<void>(context, `/api/v1/integration/mappings/${id}`, {
+  return request<void>(context, `/api/v1/integrations/mappings/${id}`, {
     method: "DELETE"
   });
 }
 
-// ── Transfer Desk — Interface Definitions ─────────────────────────────────────
+// ── Integrations — Interface Definitions ─────────────────────────────────────
 
 export type TargetField =
   // GL Journal
@@ -1604,24 +1604,24 @@ export type PreviewResult = {
   unmappedLookups: string[];
 };
 
-export async function getTransferDeskMetadata(context: ApiContext) {
-  return request<Record<string, unknown>>(context, "/api/v1/integration/transfer-desk/metadata");
+export async function getIntegrationMetadata(context: ApiContext) {
+  return request<Record<string, unknown>>(context, "/api/v1/integrations/metadata");
 }
 
 export async function listInterfaceDefinitions(context: ApiContext, connectorType?: ConnectorType) {
   const q = connectorType ? `?connectorType=${connectorType}` : "";
-  return request<InterfaceDefinition[]>(context, `/api/v1/integration/interfaces${q}`);
+  return request<InterfaceDefinition[]>(context, `/api/v1/integrations/interfaces${q}`);
 }
 
 export async function getInterfaceDefinition(context: ApiContext, id: string) {
-  return request<InterfaceDefinition>(context, `/api/v1/integration/interfaces/${id}`);
+  return request<InterfaceDefinition>(context, `/api/v1/integrations/interfaces/${id}`);
 }
 
 export async function createInterfaceDefinition(
   context: ApiContext,
   payload: InterfaceDefinitionPayload
 ) {
-  return request<InterfaceDefinition>(context, "/api/v1/integration/interfaces", {
+  return request<InterfaceDefinition>(context, "/api/v1/integrations/interfaces", {
     method: "POST",
     body: JSON.stringify(payload)
   });
@@ -1632,14 +1632,14 @@ export async function updateInterfaceDefinition(
   id: string,
   payload: Partial<InterfaceDefinitionPayload>
 ) {
-  return request<InterfaceDefinition>(context, `/api/v1/integration/interfaces/${id}`, {
+  return request<InterfaceDefinition>(context, `/api/v1/integrations/interfaces/${id}`, {
     method: "PUT",
     body: JSON.stringify(payload)
   });
 }
 
 export async function deleteInterfaceDefinition(context: ApiContext, id: string) {
-  return request<void>(context, `/api/v1/integration/interfaces/${id}`, { method: "DELETE" });
+  return request<void>(context, `/api/v1/integrations/interfaces/${id}`, { method: "DELETE" });
 }
 
 export async function previewInterfaceDefinition(
@@ -1648,7 +1648,7 @@ export async function previewInterfaceDefinition(
   sampleData: string,
   maxRows = 10
 ) {
-  return request<PreviewResult>(context, `/api/v1/integration/interfaces/${id}/preview`, {
+  return request<PreviewResult>(context, `/api/v1/integrations/interfaces/${id}/preview`, {
     method: "POST",
     body: JSON.stringify({ sampleData, maxRows })
   });
@@ -1665,7 +1665,7 @@ export async function previewDraftInterfaceDefinition(
     maxRows?: number;
   }
 ) {
-  return request<PreviewResult>(context, "/api/v1/integration/interfaces/preview-draft", {
+  return request<PreviewResult>(context, "/api/v1/integrations/interfaces/preview-draft", {
     method: "POST",
     body: JSON.stringify(payload)
   });
@@ -1696,7 +1696,7 @@ export async function executeInterfaceImport(
 ) {
   return request<InterfaceExecuteResult>(
     context,
-    `/api/v1/integration/interfaces/${interfaceId}/execute`,
+    `/api/v1/integrations/interfaces/${interfaceId}/execute`,
     {
       method: "POST",
       body: JSON.stringify(payload)
@@ -1832,21 +1832,21 @@ export type SAFExecuteOptions = {
 };
 
 export function previewSAFFile(context: ApiContext, fileContent: string, filename?: string) {
-  return request<SAFPreviewSummary>(context, "/api/v1/integration/import/saf/preview", {
+  return request<SAFPreviewSummary>(context, "/api/v1/integrations/import/saf/preview", {
     method: "POST",
     body: JSON.stringify({ fileContent, filename })
   });
 }
 
 export function getSAFAccountMapping(context: ApiContext, fileContent: string, filename?: string) {
-  return request<SAFAccountMapping[]>(context, "/api/v1/integration/import/saf/account-mapping", {
+  return request<SAFAccountMapping[]>(context, "/api/v1/integrations/import/saf/account-mapping", {
     method: "POST",
     body: JSON.stringify({ fileContent, filename })
   });
 }
 
 export function executeSAFImport(context: ApiContext, options: SAFExecuteOptions) {
-  return request<SAFExecuteResult>(context, "/api/v1/integration/import/saf/execute", {
+  return request<SAFExecuteResult>(context, "/api/v1/integrations/import/saf/execute", {
     method: "POST",
     body: JSON.stringify(options)
   });
@@ -2204,14 +2204,14 @@ export async function runMewsImport(
   context: ApiContext,
   payload: { startUtc: string; endUtc: string; notifyEmail?: string }
 ) {
-  return request<Record<string, unknown>>(context, "/api/v1/integration/mews/import", {
+  return request<Record<string, unknown>>(context, "/api/v1/integrations/mews/import", {
     method: "POST",
     body: JSON.stringify(payload)
   });
 }
 
 export async function getMewsLogs(context: ApiContext) {
-  return request<Array<Record<string, unknown>>>(context, "/api/v1/integration/mews/logs");
+  return request<Array<Record<string, unknown>>>(context, "/api/v1/integrations/mews/logs");
 }
 
 // ── Report Scheduling ────────────────────────────────────────────────────────
@@ -2494,14 +2494,14 @@ export async function runSimphonyImport(
   context: ApiContext,
   payload: { locationId: string; businessDate: string; notifyEmail?: string }
 ) {
-  return request<Record<string, unknown>>(context, "/api/v1/integration/simphony/import", {
+  return request<Record<string, unknown>>(context, "/api/v1/integrations/simphony/import", {
     method: "POST",
     body: JSON.stringify(payload)
   });
 }
 
 export async function getSimphonyLogs(context: ApiContext) {
-  return request<Array<Record<string, unknown>>>(context, "/api/v1/integration/simphony/logs");
+  return request<Array<Record<string, unknown>>>(context, "/api/v1/integrations/simphony/logs");
 }
 
 // ── Opera PMS Enhanced ───────────────────────────────────────────────────────
@@ -2513,7 +2513,7 @@ export async function getOperaStatistics(
 ) {
   return request<Record<string, unknown>>(
     context,
-    `/api/v1/integration/opera-cloud/statistics?hotelId=${hotelId}&businessDate=${businessDate}`
+    `/api/v1/integrations/opera-cloud/statistics?hotelId=${hotelId}&businessDate=${businessDate}`
   );
 }
 
@@ -2524,7 +2524,7 @@ export async function getOperaCashierReport(
 ) {
   return request<Record<string, unknown>>(
     context,
-    `/api/v1/integration/opera-cloud/cashier-report?hotelId=${hotelId}&businessDate=${businessDate}`
+    `/api/v1/integrations/opera-cloud/cashier-report?hotelId=${hotelId}&businessDate=${businessDate}`
   );
 }
 
@@ -2535,14 +2535,14 @@ export async function getOperaCityLedger(
 ) {
   return request<Record<string, unknown>>(
     context,
-    `/api/v1/integration/opera-cloud/city-ledger?hotelId=${hotelId}&businessDate=${businessDate}`
+    `/api/v1/integrations/opera-cloud/city-ledger?hotelId=${hotelId}&businessDate=${businessDate}`
   );
 }
 
 // ── Payroll Integration ──────────────────────────────────────────────────────
 
 export async function importPayrollBatch(context: ApiContext, payload: Record<string, unknown>) {
-  return request<Record<string, unknown>>(context, "/api/v1/integration/payroll/import", {
+  return request<Record<string, unknown>>(context, "/api/v1/integrations/payroll/import", {
     method: "POST",
     body: JSON.stringify(payload)
   });
@@ -2558,14 +2558,14 @@ export async function importPayrollFile(
     autoPost: boolean;
   }
 ) {
-  return request<Record<string, unknown>>(context, "/api/v1/integration/payroll/import-file", {
+  return request<Record<string, unknown>>(context, "/api/v1/integrations/payroll/import-file", {
     method: "POST",
     body: JSON.stringify(payload)
   });
 }
 
 export async function getPayrollLogs(context: ApiContext) {
-  return request<Array<Record<string, unknown>>>(context, "/api/v1/integration/payroll/logs");
+  return request<Array<Record<string, unknown>>>(context, "/api/v1/integrations/payroll/logs");
 }
 
 // ── Bank Reconciliation ──────────────────────────────────────────────────────
@@ -2573,14 +2573,14 @@ export async function getPayrollLogs(context: ApiContext) {
 export function getReconciliationSummary(context: ApiContext, statementId: string) {
   return request<ReconciliationSummary>(
     context,
-    `/api/v1/integration/bank/statements/${statementId}/reconciliation`
+    `/api/v1/integrations/bank/statements/${statementId}/reconciliation`
   );
 }
 
 export function getUnreconciledTransactions(context: ApiContext, statementId: string) {
   return request<BankTransactionRow[]>(
     context,
-    `/api/v1/integration/bank/statements/${statementId}/unreconciled`
+    `/api/v1/integrations/bank/statements/${statementId}/unreconciled`
   );
 }
 
@@ -2592,7 +2592,7 @@ export function getMatchCandidates(
   const qs = dateTolerance ? `?dateTolerance=${dateTolerance}` : "";
   return request<MatchCandidate[]>(
     context,
-    `/api/v1/integration/bank/transactions/${transactionId}/candidates${qs}`
+    `/api/v1/integrations/bank/transactions/${transactionId}/candidates${qs}`
   );
 }
 
@@ -2603,7 +2603,7 @@ export function matchBankTransaction(
 ) {
   return request<{ matched: boolean }>(
     context,
-    `/api/v1/integration/bank/transactions/${transactionId}/match`,
+    `/api/v1/integrations/bank/transactions/${transactionId}/match`,
     { method: "POST", body: JSON.stringify({ journalLineId }) }
   );
 }
@@ -2611,7 +2611,7 @@ export function matchBankTransaction(
 export function unmatchBankTransaction(context: ApiContext, transactionId: string) {
   return request<{ unmatched: boolean }>(
     context,
-    `/api/v1/integration/bank/transactions/${transactionId}/unmatch`,
+    `/api/v1/integrations/bank/transactions/${transactionId}/unmatch`,
     { method: "POST", body: "{}" }
   );
 }
@@ -2619,15 +2619,15 @@ export function unmatchBankTransaction(context: ApiContext, transactionId: strin
 export function autoMatchStatement(context: ApiContext, statementId: string, minScore?: number) {
   return request<AutoMatchResult>(
     context,
-    `/api/v1/integration/bank/statements/${statementId}/auto-match`,
+    `/api/v1/integrations/bank/statements/${statementId}/auto-match`,
     { method: "POST", body: JSON.stringify({ minScore: minScore ?? 70 }) }
   );
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Transfer Desk — Self-Service Designer API client stubs
+// Integrations — Self-Service Designer API client stubs
 //
-// Per HFP_TransferDesk_SelfService_Designer_v1_0.md §13. The backend routes
+// Per HFP_Integration_SelfService_Designer_v1_0.md §13. The backend routes
 // for these are scaffolded incrementally; UI code can already import and call
 // them now (they will return 404 until the matching backend endpoint exists).
 // Keep the function signatures stable so the UI doesn't need to change when
@@ -2660,14 +2660,10 @@ export type FormatDetectionResult = {
 };
 
 export function detectFormat(context: ApiContext, sampleContent: string, filename?: string) {
-  return request<FormatDetectionResult>(
-    context,
-    "/api/v1/integration/transfer-desk/formats/detect",
-    {
-      method: "POST",
-      body: JSON.stringify({ sampleContent, filename })
-    }
-  );
+  return request<FormatDetectionResult>(context, "/api/v1/integrations/formats/detect", {
+    method: "POST",
+    body: JSON.stringify({ sampleContent, filename })
+  });
 }
 
 /** UI-API-003/004 — GET /transfer/components — list HFP component schemas */
@@ -2685,113 +2681,17 @@ export type ComponentSchema = {
 };
 
 export function getComponentSchemas(context: ApiContext) {
-  return request<ComponentSchema[]>(context, "/api/v1/integration/transfer-desk/components");
+  return request<ComponentSchema[]>(context, "/api/v1/integrations/components");
 }
 
-/** UI-API-005 — POST /transfer/transformations/{id}/auto-map — generate 1:1 mappings */
-export type AutoMapResult = {
-  mappings: Array<{
-    sourceField: string;
-    targetField: string;
-    confidence: number;
-  }>;
-  unmappedSourceFields: string[];
-  unmappedTargetFields: string[];
-};
-
-export function autoMap(context: ApiContext, transformationId: string) {
-  return request<AutoMapResult>(
-    context,
-    `/api/v1/integration/transfer-desk/transformations/${transformationId}/auto-map`,
-    { method: "POST", body: "{}" }
-  );
-}
-
-/** UI-API-006 — GET /transfer/functions/library — list pre-built JS transformation functions */
-export type TransformFunctionDef = {
-  name: string;
-  category: "Date" | "String" | "Number" | "Currency" | "Conditional" | "AccountMapping";
-  description: string;
-  parameters: Array<{ name: string; type: string; description: string }>;
-  returnType: string;
-  example: string;
-};
-
-export function getFunctionLibrary(context: ApiContext) {
-  return request<TransformFunctionDef[]>(
-    context,
-    "/api/v1/integration/transfer-desk/functions/library"
-  );
-}
-
-/** UI-API-007 — POST /transfer/functions/test — execute a JS function in the sandbox */
-export type FunctionTestResult = {
-  result: unknown;
-  error?: string;
-  executionTimeMs: number;
-};
-
-export function testFunction(
-  context: ApiContext,
-  payload: { functionName: string; functionBody?: string; parameters: Record<string, unknown> }
-) {
-  return request<FunctionTestResult>(context, "/api/v1/integration/transfer-desk/functions/test", {
-    method: "POST",
-    body: JSON.stringify(payload)
-  });
-}
-
-/** UI-API-008 — GET /transfer/profiles/{id}/validate-full — deep profile validation */
-export type ProfileValidationResult = {
-  valid: boolean;
-  errors: Array<{ field: string; code: string; message: string }>;
-  warnings: Array<{ field: string; code: string; message: string }>;
-};
-
-export function validateProfile(context: ApiContext, profileId: string) {
-  return request<ProfileValidationResult>(
-    context,
-    `/api/v1/integration/transfer-desk/profiles/${profileId}/validate-full`
-  );
-}
-
-/** UI-API-009 — POST /transfer/profiles/{id}/dry-run — execute against sample without committing */
-export type DryRunResult = {
-  dryRunId: string;
-  status: "completed" | "failed";
-  preview: Array<Record<string, unknown>>;
-  errors: Array<{ row: number; field?: string; code: string; message: string }>;
-  recordsProcessed: number;
-  recordsFailed: number;
-};
-
-export function dryRun(
-  context: ApiContext,
-  profileId: string,
-  payload: { sampleContent?: string; parameters?: Record<string, unknown> }
-) {
-  return request<DryRunResult>(
-    context,
-    `/api/v1/integration/transfer-desk/profiles/${profileId}/dry-run`,
-    { method: "POST", body: JSON.stringify(payload) }
-  );
-}
-
-/** UI-API-010 — GET /transfer/executions/stats — dashboard stats */
-export type ExecutionStats = {
-  executionsByDay: Array<{ date: string; succeeded: number; failed: number }>;
-  successRate: number; // 0..1
-  avgDurationMs: number;
-  topProfiles: Array<{ profileId: string; profileName: string; runCount: number }>;
-};
-
-export function getExecutionStats(context: ApiContext) {
-  return request<ExecutionStats>(context, "/api/v1/integration/transfer-desk/executions/stats");
-}
+// The function library, function test, full validation and dry-run calls that
+// lived here named API routes that never existed and were used nowhere; removed
+// (import plan, step 2 notes). The profile builder's test and the profile
+// validate route are the working equivalents.
 
 /** UI-API-011 — GET /license/entitlements — tenant license entitlements */
 export type LicenseEntitlements = {
-  transferDeskEnabled: boolean;
+  integrationEnabled: boolean;
   visualMapperEnabled: boolean;
   customFunctionsEnabled: boolean;
   automationEnabled: boolean;
@@ -2805,11 +2705,11 @@ export function getLicenseEntitlements(context: ApiContext) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Transfer Desk — Profile CRUD client (TD-API-009..016)
+// Integrations — Profile CRUD client (TD-API-009..016)
 // Matches the backend routes added in Sprint 3 commit 1.
 // ────────────────────────────────────────────────────────────────────────────
 
-export type TransferProfileType =
+export type IntegrationProfileType =
   | "IMPORT"
   | "EXPORT"
   | "PROCESS"
@@ -2818,7 +2718,7 @@ export type TransferProfileType =
 
 /** Hard-coded profile type definitions for the creation wizard */
 export const TRANSFER_PROFILE_TYPES: ReadonlyArray<{
-  value: TransferProfileType;
+  value: IntegrationProfileType;
   label: string;
   description: string;
 }> = [
@@ -2850,7 +2750,7 @@ export const TRANSFER_PROFILE_TYPES: ReadonlyArray<{
 ] as const;
 
 // ────────────────────────────────────────────────────────────────────────────
-// Transfer Desk — Format types & client (TD-API-030..031)
+// Integrations — Format types & client (TD-API-030..031)
 // ────────────────────────────────────────────────────────────────────────────
 
 export type FormatClassification =
@@ -2861,7 +2761,7 @@ export type FormatClassification =
   | "USER_XML"
   | "SIMPLE_XML";
 
-export type TransferFormatSummary = {
+export type IntegrationFormatSummary = {
   id: string;
   name: string;
   description: string | null;
@@ -2873,31 +2773,28 @@ export type TransferFormatSummary = {
   _count?: { sourceProfiles: number; targetProfiles: number };
 };
 
-export type TransferFormatDetail = TransferFormatSummary & {
+export type IntegrationFormatDetail = IntegrationFormatSummary & {
   fsdXml: string;
   guiState: unknown | null;
   validationErrors: unknown | null;
   createdById: string | null;
 };
 
-export function listTransferFormats(
+export function listIntegrationFormats(
   context: ApiContext,
   filters: { classification?: FormatClassification } = {}
 ) {
   const q = new URLSearchParams();
   if (filters.classification) q.set("classification", filters.classification);
   const qs = q.toString();
-  return request<TransferFormatSummary[]>(
+  return request<IntegrationFormatSummary[]>(
     context,
-    `/api/v1/integration/transfer-desk/formats${qs ? `?${qs}` : ""}`
+    `/api/v1/integrations/formats${qs ? `?${qs}` : ""}`
   );
 }
 
-export function getTransferFormat(context: ApiContext, formatId: string) {
-  return request<TransferFormatDetail>(
-    context,
-    `/api/v1/integration/transfer-desk/formats/${formatId}`
-  );
+export function getIntegrationFormat(context: ApiContext, formatId: string) {
+  return request<IntegrationFormatDetail>(context, `/api/v1/integrations/formats/${formatId}`);
 }
 
 // ── Format auto-detection (TD-API-032) ──────────────────────────────────────
@@ -2926,7 +2823,7 @@ export type DetectionResult = {
 };
 
 export function detectFormatFromFile(context: ApiContext, fileContent: string) {
-  return request<DetectionResult>(context, "/api/v1/integration/transfer-desk/formats/detect", {
+  return request<DetectionResult>(context, "/api/v1/integrations/formats/detect", {
     method: "POST",
     body: JSON.stringify({ fileContent })
   });
@@ -2950,31 +2847,27 @@ export type FormatUpdateInput = {
   guiState?: unknown;
 };
 
-export function createTransferFormat(context: ApiContext, input: FormatCreateInput) {
-  return request<TransferFormatDetail>(context, "/api/v1/integration/transfer-desk/formats", {
+export function createIntegrationFormat(context: ApiContext, input: FormatCreateInput) {
+  return request<IntegrationFormatDetail>(context, "/api/v1/integrations/formats", {
     method: "POST",
     body: JSON.stringify(input)
   });
 }
 
-export function updateTransferFormat(
+export function updateIntegrationFormat(
   context: ApiContext,
   formatId: string,
   input: FormatUpdateInput
 ) {
-  return request<TransferFormatDetail>(
-    context,
-    `/api/v1/integration/transfer-desk/formats/${formatId}`,
-    {
-      method: "PUT",
-      body: JSON.stringify(input)
-    }
-  );
+  return request<IntegrationFormatDetail>(context, `/api/v1/integrations/formats/${formatId}`, {
+    method: "PUT",
+    body: JSON.stringify(input)
+  });
 }
 
 // ── Transformation types + CRUD (TD-API-040..043) ─────────────────────────
 
-export type TransferTransformationSummary = {
+export type IntegrationTransformationSummary = {
   id: string;
   name: string;
   description: string | null;
@@ -2992,7 +2885,7 @@ export type TransferTransformationSummary = {
   _count?: { profiles: number };
 };
 
-export type TransferTransformationDetail = TransferTransformationSummary & {
+export type IntegrationTransformationDetail = IntegrationTransformationSummary & {
   rulesJson: unknown;
   functionsJson: unknown;
   validationErrors: unknown | null;
@@ -3033,7 +2926,7 @@ export type TransformationUpdateInput = {
   functionsJson?: unknown;
 };
 
-export function listTransferTransformations(
+export function listIntegrationTransformations(
   context: ApiContext,
   filters: { sourceComponent?: string; targetComponent?: string } = {}
 ) {
@@ -3041,41 +2934,37 @@ export function listTransferTransformations(
   if (filters.sourceComponent) q.set("sourceComponent", filters.sourceComponent);
   if (filters.targetComponent) q.set("targetComponent", filters.targetComponent);
   const qs = q.toString();
-  return request<TransferTransformationSummary[]>(
+  return request<IntegrationTransformationSummary[]>(
     context,
-    `/api/v1/integration/transfer-desk/transformations${qs ? `?${qs}` : ""}`
+    `/api/v1/integrations/transformations${qs ? `?${qs}` : ""}`
   );
 }
 
-export function getTransferTransformation(context: ApiContext, id: string) {
-  return request<TransferTransformationDetail>(
+export function getIntegrationTransformation(context: ApiContext, id: string) {
+  return request<IntegrationTransformationDetail>(
     context,
-    `/api/v1/integration/transfer-desk/transformations/${id}`
+    `/api/v1/integrations/transformations/${id}`
   );
 }
 
-export function createTransferTransformation(
+export function createIntegrationTransformation(
   context: ApiContext,
   input: TransformationCreateInput
 ) {
-  return request<TransferTransformationDetail>(
-    context,
-    "/api/v1/integration/transfer-desk/transformations",
-    {
-      method: "POST",
-      body: JSON.stringify(input)
-    }
-  );
+  return request<IntegrationTransformationDetail>(context, "/api/v1/integrations/transformations", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
 }
 
-export function updateTransferTransformation(
+export function updateIntegrationTransformation(
   context: ApiContext,
   id: string,
   input: TransformationUpdateInput
 ) {
-  return request<TransferTransformationDetail>(
+  return request<IntegrationTransformationDetail>(
     context,
-    `/api/v1/integration/transfer-desk/transformations/${id}`,
+    `/api/v1/integrations/transformations/${id}`,
     {
       method: "PUT",
       body: JSON.stringify(input)
@@ -3085,7 +2974,7 @@ export function updateTransferTransformation(
 
 // ── Automation types + CRUD (TD-API-050..055) ───────────────────────────
 
-export type TransferAutomationStepSummary = {
+export type IntegrationAutomationStepSummary = {
   id: string;
   automationId: string;
   profileId: string;
@@ -3093,10 +2982,10 @@ export type TransferAutomationStepSummary = {
   failOnError: boolean;
   sourceParamOverrides: Record<string, unknown> | null;
   targetParamOverrides: Record<string, unknown> | null;
-  profile?: { id: string; name: string; profileType: TransferProfileType };
+  profile?: { id: string; name: string; profileType: IntegrationProfileType };
 };
 
-export type TransferAutomationScheduleSummary = {
+export type IntegrationAutomationScheduleSummary = {
   id: string;
   automationId: string;
   cronExpression: string;
@@ -3107,7 +2996,7 @@ export type TransferAutomationScheduleSummary = {
   bullmqRepeatKey: string | null;
 };
 
-export type TransferAutomationSummary = {
+export type IntegrationAutomationSummary = {
   id: string;
   name: string;
   description: string | null;
@@ -3115,15 +3004,15 @@ export type TransferAutomationSummary = {
   createdById: string | null;
   createdAt: string;
   updatedAt: string;
-  steps: TransferAutomationStepSummary[];
-  schedules: TransferAutomationScheduleSummary[];
+  steps: IntegrationAutomationStepSummary[];
+  schedules: IntegrationAutomationScheduleSummary[];
   _count?: { steps: number; schedules: number; executions: number };
 };
 
-export type TransferAutomationDetail = TransferAutomationSummary & {
+export type IntegrationAutomationDetail = IntegrationAutomationSummary & {
   executions?: Array<{
     id: string;
-    status: TransferExecutionStatus;
+    status: IntegrationExecutionStatus;
     startedAt: string | null;
     finishedAt: string | null;
     recordsTotal: number;
@@ -3172,61 +3061,48 @@ export type AutomationUpdateInput = {
   }>;
 };
 
-export function listTransferAutomations(
+export function listIntegrationAutomations(
   context: ApiContext,
   params: { limit?: number; offset?: number } = {}
 ) {
   const qs = new URLSearchParams();
   if (params.limit) qs.set("limit", String(params.limit));
   if (params.offset) qs.set("offset", String(params.offset));
-  return request<TransferAutomationSummary[]>(
+  return request<IntegrationAutomationSummary[]>(
     context,
-    `/api/v1/integration/transfer-desk/automations${qs.toString() ? `?${qs}` : ""}`
+    `/api/v1/integrations/automations${qs.toString() ? `?${qs}` : ""}`
   );
 }
 
-export function getTransferAutomation(context: ApiContext, id: string) {
-  return request<TransferAutomationDetail>(
-    context,
-    `/api/v1/integration/transfer-desk/automations/${id}`
-  );
+export function getIntegrationAutomation(context: ApiContext, id: string) {
+  return request<IntegrationAutomationDetail>(context, `/api/v1/integrations/automations/${id}`);
 }
 
-export function createTransferAutomation(context: ApiContext, input: AutomationCreateInput) {
-  return request<TransferAutomationDetail>(
-    context,
-    "/api/v1/integration/transfer-desk/automations",
-    {
-      method: "POST",
-      body: JSON.stringify(input)
-    }
-  );
+export function createIntegrationAutomation(context: ApiContext, input: AutomationCreateInput) {
+  return request<IntegrationAutomationDetail>(context, "/api/v1/integrations/automations", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
 }
 
-export function updateTransferAutomation(
+export function updateIntegrationAutomation(
   context: ApiContext,
   id: string,
   input: AutomationUpdateInput
 ) {
-  return request<TransferAutomationDetail>(
-    context,
-    `/api/v1/integration/transfer-desk/automations/${id}`,
-    {
-      method: "PUT",
-      body: JSON.stringify(input)
-    }
-  );
+  return request<IntegrationAutomationDetail>(context, `/api/v1/integrations/automations/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(input)
+  });
 }
 
-export function deleteTransferAutomation(context: ApiContext, id: string) {
-  return request<{ id: string; deleted: true }>(
-    context,
-    `/api/v1/integration/transfer-desk/automations/${id}`,
-    { method: "DELETE" }
-  );
+export function deleteIntegrationAutomation(context: ApiContext, id: string) {
+  return request<{ id: string; deleted: true }>(context, `/api/v1/integrations/automations/${id}`, {
+    method: "DELETE"
+  });
 }
 
-export function runTransferAutomation(
+export function runIntegrationAutomation(
   context: ApiContext,
   id: string,
   runtimeParams?: Record<string, unknown>
@@ -3236,7 +3112,7 @@ export function runTransferAutomation(
     automationName: string;
     stepsQueued: number;
     stepExecutions: Array<{ stepOrder: number; executionId: string; profileId: string }>;
-  }>(context, `/api/v1/integration/transfer-desk/automations/${id}/run`, {
+  }>(context, `/api/v1/integrations/automations/${id}/run`, {
     method: "POST",
     body: JSON.stringify({ runtimeParams })
   });
@@ -3246,14 +3122,14 @@ export function runTransferAutomation(
 
 export type LookupValueType = "CONSTANT" | "COPY" | "MAP_TO" | "OMIT" | "REVERSE_SIGN";
 
-export type TransferLookupColumnSummary = {
+export type IntegrationLookupColumnSummary = {
   id: string;
   tableId: string;
   name: string;
   columnOrder: number;
 };
 
-export type TransferLookupValueSummary = {
+export type IntegrationLookupValueSummary = {
   id: string;
   rowId: string;
   columnId: string;
@@ -3263,17 +3139,17 @@ export type TransferLookupValueSummary = {
   column?: { id: string; name: string };
 };
 
-export type TransferLookupRowSummary = {
+export type IntegrationLookupRowSummary = {
   id: string;
   tableId: string;
   businessUnit: string | null;
   rangeFrom: string | null;
   rangeTo: string | null;
   rowOrder: number;
-  values: TransferLookupValueSummary[];
+  values: IntegrationLookupValueSummary[];
 };
 
-export type TransferLookupTableSummary = {
+export type IntegrationLookupTableSummary = {
   id: string;
   name: string;
   description: string | null;
@@ -3282,9 +3158,9 @@ export type TransferLookupTableSummary = {
   _count?: { columns: number; rows: number };
 };
 
-export type TransferLookupTableDetail = TransferLookupTableSummary & {
-  columns: TransferLookupColumnSummary[];
-  rows: TransferLookupRowSummary[];
+export type IntegrationLookupTableDetail = IntegrationLookupTableSummary & {
+  columns: IntegrationLookupColumnSummary[];
+  rows: IntegrationLookupRowSummary[];
 };
 
 export type LookupTableCreateInput = {
@@ -3313,59 +3189,43 @@ export type LookupRowInput = {
   }>;
 };
 
-export function listTransferLookupTables(context: ApiContext) {
-  return request<TransferLookupTableSummary[]>(
-    context,
-    `/api/v1/integration/transfer-desk/lookups`
-  );
+export function listIntegrationLookupTables(context: ApiContext) {
+  return request<IntegrationLookupTableSummary[]>(context, `/api/v1/integrations/lookups`);
 }
 
-export function getTransferLookupTable(context: ApiContext, id: string) {
-  return request<TransferLookupTableDetail>(
-    context,
-    `/api/v1/integration/transfer-desk/lookups/${id}`
-  );
+export function getIntegrationLookupTable(context: ApiContext, id: string) {
+  return request<IntegrationLookupTableDetail>(context, `/api/v1/integrations/lookups/${id}`);
 }
 
-export function createTransferLookupTable(context: ApiContext, input: LookupTableCreateInput) {
-  return request<TransferLookupTableDetail>(context, "/api/v1/integration/transfer-desk/lookups", {
+export function createIntegrationLookupTable(context: ApiContext, input: LookupTableCreateInput) {
+  return request<IntegrationLookupTableDetail>(context, "/api/v1/integrations/lookups", {
     method: "POST",
     body: JSON.stringify(input)
   });
 }
 
-export function updateTransferLookupTable(
+export function updateIntegrationLookupTable(
   context: ApiContext,
   id: string,
   input: LookupTableUpdateInput
 ) {
-  return request<TransferLookupTableDetail>(
-    context,
-    `/api/v1/integration/transfer-desk/lookups/${id}`,
-    {
-      method: "PUT",
-      body: JSON.stringify(input)
-    }
-  );
+  return request<IntegrationLookupTableDetail>(context, `/api/v1/integrations/lookups/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(input)
+  });
 }
 
 export function saveLookupTableRows(context: ApiContext, id: string, rows: LookupRowInput[]) {
-  return request<TransferLookupTableDetail>(
-    context,
-    `/api/v1/integration/transfer-desk/lookups/${id}/rows`,
-    {
-      method: "POST",
-      body: JSON.stringify({ rows })
-    }
-  );
+  return request<IntegrationLookupTableDetail>(context, `/api/v1/integrations/lookups/${id}/rows`, {
+    method: "POST",
+    body: JSON.stringify({ rows })
+  });
 }
 
-export function deleteTransferLookupTable(context: ApiContext, id: string) {
-  return request<{ id: string; deleted: true }>(
-    context,
-    `/api/v1/integration/transfer-desk/lookups/${id}`,
-    { method: "DELETE" }
-  );
+export function deleteIntegrationLookupTable(context: ApiContext, id: string) {
+  return request<{ id: string; deleted: true }>(context, `/api/v1/integrations/lookups/${id}`, {
+    method: "DELETE"
+  });
 }
 
 export function importLookupTableCsv(
@@ -3376,7 +3236,7 @@ export function importLookupTableCsv(
 ) {
   return request<{ tableId: string; rowsImported: number }>(
     context,
-    `/api/v1/integration/transfer-desk/lookups/${id}/import-csv`,
+    `/api/v1/integrations/lookups/${id}/import-csv`,
     {
       method: "POST",
       body: JSON.stringify({ csvContent, hasHeader })
@@ -3384,11 +3244,11 @@ export function importLookupTableCsv(
   );
 }
 
-export type TransferProfileSummary = {
+export type IntegrationProfileSummary = {
   id: string;
   name: string;
   description: string | null;
-  profileType: TransferProfileType;
+  profileType: IntegrationProfileType;
   sourceComponent: string | null;
   targetComponent: string | null;
   sourceFormatId: string | null;
@@ -3403,13 +3263,14 @@ export type TransferProfileSummary = {
   createdById: string | null;
   createdAt: string;
   updatedAt: string;
-  sourceFormat?: { id: string; name: string; classification: string } | null;
-  targetFormat?: { id: string; name: string; classification: string } | null;
-  transformation?: { id: string; name: string } | null;
-  _count?: { executions: number; versions: number };
-};
+} & Partial<IntegrationImportSettings> & {
+    sourceFormat?: { id: string; name: string; classification: string } | null;
+    targetFormat?: { id: string; name: string; classification: string } | null;
+    transformation?: { id: string; name: string } | null;
+    _count?: { executions: number; versions: number };
+  };
 
-export type TransferProfileDetail = TransferProfileSummary & {
+export type IntegrationProfileDetail = IntegrationProfileSummary & {
   sourceParams: Record<string, unknown> | null;
   targetParams: Record<string, unknown> | null;
   versions?: Array<{
@@ -3421,10 +3282,49 @@ export type TransferProfileDetail = TransferProfileSummary & {
   }>;
 };
 
-export type TransferProfileInput = {
+/** How a ledger import posts (import plan sections 4 and 5). */
+export type IntegrationImportSettings = {
+  reviewMode: "HOLD" | "AUTO_COMMIT";
+  sourceSystemCode: string | null;
+  atomicity: "PER_DOCUMENT" | "WHOLE_FILE";
+  unmappedPolicy: "REJECT" | "HOLD" | "SUSPENSE";
+  suspenseAccountCode: string | null;
+  fxRateType: "SPOT" | "AVERAGE" | "BUDGET" | "CLOSING" | null;
+};
+
+/** A system that sends documents to the ledger; the codes are the tenant's. */
+export type SourceSystem = { id: string; code: string; name: string; isActive: boolean };
+
+export function listSourceSystems(context: ApiContext) {
+  return request<SourceSystem[]>(context, "/api/v1/integrations/source-systems");
+}
+
+export function createSourceSystem(context: ApiContext, payload: { code: string; name: string }) {
+  return request<SourceSystem>(context, "/api/v1/integrations/source-systems", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateSourceSystem(
+  context: ApiContext,
+  code: string,
+  payload: { name?: string; isActive?: boolean }
+) {
+  return request<SourceSystem>(
+    context,
+    `/api/v1/integrations/source-systems/${encodeURIComponent(code)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(payload)
+    }
+  );
+}
+
+export type IntegrationProfileInput = Partial<IntegrationImportSettings> & {
   name: string;
   description?: string;
-  profileType: TransferProfileType;
+  profileType: IntegrationProfileType;
   sourceComponent?: string;
   targetComponent?: string;
   sourceFormatId?: string;
@@ -3436,74 +3336,75 @@ export type TransferProfileInput = {
   savePayload?: "NONE" | "INPUT" | "OUTPUT" | "BOTH";
 };
 
-export function listTransferProfiles(
+export function listIntegrationProfiles(
   context: ApiContext,
-  filters: { profileType?: TransferProfileType; isActive?: boolean; isSystem?: boolean } = {}
+  filters: { profileType?: IntegrationProfileType; isActive?: boolean; isSystem?: boolean } = {}
 ) {
   const q = new URLSearchParams();
   if (filters.profileType) q.set("profileType", filters.profileType);
   if (filters.isActive !== undefined) q.set("isActive", String(filters.isActive));
   if (filters.isSystem !== undefined) q.set("isSystem", String(filters.isSystem));
   const qs = q.toString();
-  return request<TransferProfileSummary[]>(
+  return request<IntegrationProfileSummary[]>(
     context,
-    `/api/v1/integration/transfer-desk/profiles${qs ? `?${qs}` : ""}`
+    `/api/v1/integrations/profiles${qs ? `?${qs}` : ""}`
   );
 }
 
-export function getTransferProfile(context: ApiContext, profileId: string) {
-  return request<TransferProfileDetail>(
-    context,
-    `/api/v1/integration/transfer-desk/profiles/${profileId}`
-  );
+export function getIntegrationProfile(context: ApiContext, profileId: string) {
+  return request<IntegrationProfileDetail>(context, `/api/v1/integrations/profiles/${profileId}`);
 }
 
-export function createTransferProfile(context: ApiContext, payload: TransferProfileInput) {
-  return request<TransferProfileDetail>(context, `/api/v1/integration/transfer-desk/profiles`, {
+export function createIntegrationProfile(context: ApiContext, payload: IntegrationProfileInput) {
+  return request<IntegrationProfileDetail>(context, `/api/v1/integrations/profiles`, {
     method: "POST",
     body: JSON.stringify(payload)
   });
 }
 
-export function updateTransferProfile(
+export function updateIntegrationProfile(
   context: ApiContext,
   profileId: string,
-  payload: Partial<TransferProfileInput>
+  payload: Partial<IntegrationProfileInput>
 ) {
-  return request<TransferProfileDetail>(
-    context,
-    `/api/v1/integration/transfer-desk/profiles/${profileId}`,
-    { method: "PUT", body: JSON.stringify(payload) }
-  );
+  return request<IntegrationProfileDetail>(context, `/api/v1/integrations/profiles/${profileId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
 }
 
-export function deleteTransferProfile(context: ApiContext, profileId: string) {
+export function deleteIntegrationProfile(context: ApiContext, profileId: string) {
   return request<{ id: string; isActive: false }>(
     context,
-    `/api/v1/integration/transfer-desk/profiles/${profileId}`,
+    `/api/v1/integrations/profiles/${profileId}`,
     { method: "DELETE" }
   );
 }
 
-export function cloneTransferProfile(context: ApiContext, profileId: string, newName: string) {
-  return request<TransferProfileDetail>(
+export function cloneIntegrationProfile(context: ApiContext, profileId: string, newName: string) {
+  return request<IntegrationProfileDetail>(
     context,
-    `/api/v1/integration/transfer-desk/profiles/${profileId}/clone`,
+    `/api/v1/integrations/profiles/${profileId}/clone`,
     { method: "POST", body: JSON.stringify({ newName }) }
   );
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Transfer Desk — Execution client (TD-API-001..006)
+// Integrations — Execution client (TD-API-001..006)
 // ────────────────────────────────────────────────────────────────────────────
 
-export type TransferExecutionStatus = "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED";
+export type IntegrationExecutionStatus =
+  | "QUEUED"
+  | "RUNNING"
+  | "COMPLETED"
+  | "FAILED"
+  | "CANCELLED";
 
-export type TransferExecutionSummary = {
+export type IntegrationExecutionSummary = {
   id: string;
   profileId: string;
   automationId: string | null;
-  status: TransferExecutionStatus;
+  status: IntegrationExecutionStatus;
   jobId: string | null;
   triggeredBy: string | null;
   recordsTotal: number;
@@ -3513,11 +3414,11 @@ export type TransferExecutionSummary = {
   startedAt: string | null;
   finishedAt: string | null;
   createdAt: string;
-  profile?: { id: string; name: string; profileType: TransferProfileType };
+  profile?: { id: string; name: string; profileType: IntegrationProfileType };
   automation?: { id: string; name: string } | null;
 };
 
-export type TransferExecutionLog = {
+export type IntegrationExecutionLog = {
   id: string;
   executionId: string;
   recordIndex: number;
@@ -3526,9 +3427,13 @@ export type TransferExecutionLog = {
   transformedData: unknown;
   errorCode: string | null;
   errorMessage: string | null;
+  /** Ledger imports: the source document the record belongs to. */
+  documentRef?: string | null;
+  /** Ledger imports: the journal the document posted. */
+  journalId?: string | null;
 };
 
-export function executeTransferProfile(
+export function executeIntegrationProfile(
   context: ApiContext,
   profileId: string,
   payload: {
@@ -3537,18 +3442,18 @@ export function executeTransferProfile(
     inputContent?: string;
   } = {}
 ) {
-  return request<{ executionId: string; jobId: string; status: TransferExecutionStatus }>(
+  return request<{ executionId: string; jobId: string; status: IntegrationExecutionStatus }>(
     context,
-    `/api/v1/integration/transfer-desk/profiles/${profileId}/execute`,
+    `/api/v1/integrations/profiles/${profileId}/execute`,
     { method: "POST", body: JSON.stringify(payload) }
   );
 }
 
-export function listTransferExecutions(
+export function listIntegrationExecutions(
   context: ApiContext,
   filters: {
     profileId?: string;
-    status?: TransferExecutionStatus;
+    status?: IntegrationExecutionStatus;
     limit?: number;
     offset?: number;
   } = {}
@@ -3559,20 +3464,20 @@ export function listTransferExecutions(
   if (filters.limit) q.set("limit", String(filters.limit));
   if (filters.offset) q.set("offset", String(filters.offset));
   const qs = q.toString();
-  return request<TransferExecutionSummary[]>(
+  return request<IntegrationExecutionSummary[]>(
     context,
-    `/api/v1/integration/transfer-desk/executions${qs ? `?${qs}` : ""}`
+    `/api/v1/integrations/executions${qs ? `?${qs}` : ""}`
   );
 }
 
-export function getTransferExecution(context: ApiContext, executionId: string) {
-  return request<TransferExecutionSummary>(
+export function getIntegrationExecution(context: ApiContext, executionId: string) {
+  return request<IntegrationExecutionSummary>(
     context,
-    `/api/v1/integration/transfer-desk/executions/${executionId}`
+    `/api/v1/integrations/executions/${executionId}`
   );
 }
 
-export function getTransferExecutionLogs(
+export function getIntegrationExecutionLogs(
   context: ApiContext,
   executionId: string,
   params: { limit?: number; offset?: number; statusFilter?: "SUCCESS" | "FAILED" | "SKIPPED" } = {}
@@ -3582,16 +3487,16 @@ export function getTransferExecutionLogs(
   if (params.offset) q.set("offset", String(params.offset));
   if (params.statusFilter) q.set("statusFilter", params.statusFilter);
   const qs = q.toString();
-  return request<{ rows: TransferExecutionLog[]; total: number; take: number; skip: number }>(
+  return request<{ rows: IntegrationExecutionLog[]; total: number; take: number; skip: number }>(
     context,
-    `/api/v1/integration/transfer-desk/executions/${executionId}/logs${qs ? `?${qs}` : ""}`
+    `/api/v1/integrations/executions/${executionId}/logs${qs ? `?${qs}` : ""}`
   );
 }
 
-export function cancelTransferExecution(context: ApiContext, executionId: string) {
-  return request<TransferExecutionSummary>(
+export function cancelIntegrationExecution(context: ApiContext, executionId: string) {
+  return request<IntegrationExecutionSummary>(
     context,
-    `/api/v1/integration/transfer-desk/executions/${executionId}/cancel`,
+    `/api/v1/integrations/executions/${executionId}/cancel`,
     { method: "POST", body: "{}" }
   );
 }

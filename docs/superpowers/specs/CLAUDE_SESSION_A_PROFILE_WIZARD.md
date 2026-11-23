@@ -8,9 +8,9 @@
 
 HospitalityFinancePro (HFP) is a multi-tenant SaaS financial platform for hospitality, built as a
 spiritual successor to Infor SunSystems. The **FSD Engine** (Format Schema Definition) is the core
-parsing, validation, and serialisation layer for the Transfer Desk module.
+parsing, validation, and serialisation layer for the Integrations module.
 
-Every data exchange in Transfer Desk — import from Opera PMS, export to Sky Jana MMS, internal GL
+Every data exchange in Integrations — import from Opera PMS, export to Sky Jana MMS, internal GL
 transfers, external bank reconciliations — flows through an FSD schema. The engine must be rock-solid
 before the Profile Creation Wizard UI (Session B) or the BullMQ worker (Sprint 3 skeleton) can be
 completed.
@@ -20,7 +20,7 @@ completed.
 ## 2. What is FSD?
 
 An **FSD (Format Schema Definition)** is a JSON document stored in the database
-(`transfer_profiles.fsd_schema` column, `jsonb`) that describes:
+(`integration_profiles.fsd_schema` column, `jsonb`) that describes:
 
 - The **file format** of an inbound or outbound file (CSV, TSV, fixed-width TXT, XLSX, XML/SSML `.SUN`)
 - The **field layout** — column names, positions, data types, validation rules
@@ -38,7 +38,7 @@ The FSD engine's job is to:
 
 ## 3. Profile Types
 
-There are five Transfer Desk profile types. FSD schemas exist for all five.
+There are five Integrations profile types. FSD schemas exist for all five.
 
 | Type                | Direction | Description                                 |
 | ------------------- | --------- | ------------------------------------------- |

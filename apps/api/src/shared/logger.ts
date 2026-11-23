@@ -12,7 +12,7 @@
  */
 
 import pino, { type DestinationStream, type Logger } from "pino";
-import { config } from "../config.js";
+import { config, renamedVariablesInUse } from "../config.js";
 import { getRequestContext } from "../db/requestContext.js";
 import { logSerializers } from "./log-redactor.js";
 
@@ -42,6 +42,17 @@ export function createLogger(destination?: DestinationStream): Logger {
 }
 
 export const logger: Logger = createLogger();
+
+/**
+ * Reports settings still read by their old names (Transfer Desk ->
+ * Integrations, one release). Called by the process entry points once they
+ * have started, not on import: tests import modules that log.
+ */
+export function reportRenamedSettings(log: Logger = logger): void {
+  for (const rename of renamedVariablesInUse()) {
+    log.warn(`Setting renamed ${rename}; the old name stops working in the next release.`);
+  }
+}
 
 /** A logger whose lines name the module that wrote them. */
 export function moduleLogger(module: string): Logger {

@@ -12,13 +12,13 @@ const STEPS = [
   { id: 3, name: "Review & Provision" }
 ];
 
-const MODULES = ["GL", "AP", "AR", "TRANSFER_DESK", "REPORTING", "FIXED_ASSETS"];
+const MODULES = ["GL", "AP", "AR", "INTEGRATIONS", "REPORTING", "FIXED_ASSETS"];
 
 const MODULE_LABELS: Record<string, string> = {
   GL: "General Ledger",
   AP: "Accounts Payable",
   AR: "Accounts Receivable",
-  TRANSFER_DESK: "Transfer Desk",
+  INTEGRATIONS: "Integrations",
   REPORTING: "Reporting",
   FIXED_ASSETS: "Fixed Assets"
 };

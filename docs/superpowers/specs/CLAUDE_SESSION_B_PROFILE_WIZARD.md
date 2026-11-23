@@ -1,16 +1,16 @@
-# CLAUDE.md — Session B: Transfer Desk Profile Creation Wizard UI
+# CLAUDE.md — Session B: Integrations Profile Creation Wizard UI
 
-> **Purpose**: This is the Claude Code briefing for building the Profile Creation Wizard — the guided UI that lets users create, configure, and test Transfer Desk import/export profiles.
+> **Purpose**: This is the Claude Code briefing for building the Profile Creation Wizard — the guided UI that lets users create, configure, and test Integrations import/export profiles.
 >
 > **Prerequisite**: The FSD Engine (`packages/fsd-engine/`) must be built and tested (Session A) before this session begins. The wizard calls FSD Engine methods directly.
 >
-> **Hard boundary**: This session builds ONLY the wizard UI and its API routes. Do NOT modify the FSD Engine, TML Engine, BullMQ workers, or core Transfer Desk execution pipeline.
+> **Hard boundary**: This session builds ONLY the wizard UI and its API routes. Do NOT modify the FSD Engine, TML Engine, BullMQ workers, or core Integrations execution pipeline.
 
 ---
 
 ## §1 — What This Wizard Does
 
-The Profile Creation Wizard is a multi-step guided interface that walks a user through creating a Transfer Desk profile. A profile defines:
+The Profile Creation Wizard is a multi-step guided interface that walks a user through creating a Integrations profile. A profile defines:
 
 - **What** file format to expect or produce (FSD schema)
 - **How** to transform the data (TML mappings — configured here, executed elsewhere)
@@ -232,48 +232,48 @@ The wizard UI calls these API endpoints. Build these as Fastify routes.
 ### Profile CRUD
 
 ```
-POST   /api/v1/transfer-desk/profiles                    → Create new profile (draft)
-GET    /api/v1/transfer-desk/profiles                    → List profiles (paginated, filterable by type/status/entity)
-GET    /api/v1/transfer-desk/profiles/:profileId         → Get profile detail
-PUT    /api/v1/transfer-desk/profiles/:profileId         → Update profile
-PATCH  /api/v1/transfer-desk/profiles/:profileId/status  → Change status (activate/deactivate/archive)
-DELETE /api/v1/transfer-desk/profiles/:profileId         → Soft delete (→ ARCHIVED)
-GET    /api/v1/transfer-desk/profiles/:profileId/versions → List profile versions
-GET    /api/v1/transfer-desk/profiles/:profileId/versions/:versionId → Get specific version
+POST   /api/v1/integrations/builder/profiles                    → Create new profile (draft)
+GET    /api/v1/integrations/builder/profiles                    → List profiles (paginated, filterable by type/status/entity)
+GET    /api/v1/integrations/builder/profiles/:profileId         → Get profile detail
+PUT    /api/v1/integrations/builder/profiles/:profileId         → Update profile
+PATCH  /api/v1/integrations/builder/profiles/:profileId/status  → Change status (activate/deactivate/archive)
+DELETE /api/v1/integrations/builder/profiles/:profileId         → Soft delete (→ ARCHIVED)
+GET    /api/v1/integrations/builder/profiles/:profileId/versions → List profile versions
+GET    /api/v1/integrations/builder/profiles/:profileId/versions/:versionId → Get specific version
 ```
 
 ### FSD Auto-Detection
 
 ```
-POST   /api/v1/transfer-desk/fsd/auto-detect             → Upload sample file, return proposed FsdSchema
-POST   /api/v1/transfer-desk/fsd/validate-schema         → Validate an FsdSchema JSON
-POST   /api/v1/transfer-desk/fsd/parse-preview           → Parse first N rows of a file using a given schema
+POST   /api/v1/integrations/builder/fsd/auto-detect             → Upload sample file, return proposed FsdSchema
+POST   /api/v1/integrations/builder/fsd/validate-schema         → Validate an FsdSchema JSON
+POST   /api/v1/integrations/builder/fsd/parse-preview           → Parse first N rows of a file using a given schema
 ```
 
 ### TML Mapping
 
 ```
-GET    /api/v1/transfer-desk/mappings/target-fields       → List available HFP target fields (journal fields)
-GET    /api/v1/transfer-desk/mappings/functions            → List pre-built transform functions
-GET    /api/v1/transfer-desk/lookup-tables                 → List lookup tables
-GET    /api/v1/transfer-desk/lookup-tables/:tableId        → Get lookup table entries
-POST   /api/v1/transfer-desk/lookup-tables                 → Create lookup table
-PUT    /api/v1/transfer-desk/lookup-tables/:tableId        → Update lookup table
+GET    /api/v1/integrations/builder/mappings/target-fields       → List available HFP target fields (journal fields)
+GET    /api/v1/integrations/builder/mappings/functions            → List pre-built transform functions
+GET    /api/v1/integrations/builder/lookup-tables                 → List lookup tables
+GET    /api/v1/integrations/builder/lookup-tables/:tableId        → Get lookup table entries
+POST   /api/v1/integrations/builder/lookup-tables                 → Create lookup table
+PUT    /api/v1/integrations/builder/lookup-tables/:tableId        → Update lookup table
 ```
 
 ### Test & Preview (SSE)
 
 ```
-POST   /api/v1/transfer-desk/profiles/:profileId/test     → Run dry-run test, returns SSE stream
-GET    /api/v1/transfer-desk/profiles/:profileId/test/:testId/results → Get cached test results
+POST   /api/v1/integrations/builder/profiles/:profileId/test     → Run dry-run test, returns SSE stream
+GET    /api/v1/integrations/builder/profiles/:profileId/test/:testId/results → Get cached test results
 ```
 
 ### Automation Pipeline
 
 ```
-POST   /api/v1/transfer-desk/profiles/:profileId/schedule  → Set schedule (cron expression)
-DELETE /api/v1/transfer-desk/profiles/:profileId/schedule  → Remove schedule
-GET    /api/v1/transfer-desk/profiles/:profileId/schedule  → Get current schedule
+POST   /api/v1/integrations/builder/profiles/:profileId/schedule  → Set schedule (cron expression)
+DELETE /api/v1/integrations/builder/profiles/:profileId/schedule  → Remove schedule
+GET    /api/v1/integrations/builder/profiles/:profileId/schedule  → Get current schedule
 ```
 
 ---
@@ -405,15 +405,15 @@ The wizard's mapping step (Step 3) offers pre-built transform functions. These a
 
 2. **Wizard step indicator** — horizontal stepper at the top showing all steps, current step highlighted, completed steps with checkmarks. Clickable to navigate back (but not forward past current).
 
-3. **Page title format**: `Transfer Desk → New {ProfileType} Profile` or `Transfer Desk → Edit: {ProfileName}`
+3. **Page title format**: `Integrations → New {ProfileType} Profile` or `Integrations → Edit: {ProfileName}`
 
 4. **Consistent table component** — all data tables use the HFP DataTable component with sorting, filtering, pagination.
 
 5. **Toast notifications** — success/error feedback via toast, not inline alerts (except validation errors which are inline).
 
-6. **Responsive but desktop-first** — Transfer Desk is a power-user feature. Optimise for desktop (1280px+). Responsive down to 1024px. Below that, show a "best viewed on desktop" message.
+6. **Responsive but desktop-first** — Integrations is a power-user feature. Optimise for desktop (1280px+). Responsive down to 1024px. Below that, show a "best viewed on desktop" message.
 
-7. **Tenant slug in URL** — all routes are under `/{tenant-slug}/transfer-desk/profiles/...`
+7. **Tenant slug in URL** — all routes are under `/{tenant-slug}/integrations/profiles/...`
 
 ---
 
@@ -543,7 +543,7 @@ Build the wizard UI in the existing Next.js app structure:
 src/
   app/
     [tenant]/
-      transfer-desk/
+      integrations/
         profiles/
           page.tsx                          # Profile list page
           new/
@@ -557,7 +557,7 @@ src/
             schedule/
               page.tsx                      # Schedule configuration
   components/
-    transfer-desk/
+    integrations/
       wizard/
         WizardContainer.tsx                # Main wizard shell (stepper + step routing)
         WizardStepper.tsx                  # Step indicator bar
@@ -578,7 +578,7 @@ src/
           JournalPreview.tsx               # GL journal preview
           ProgressStream.tsx               # SSE progress display
   lib/
-    transfer-desk/
+    integrations/
       api.ts                              # API client functions
       types.ts                            # TypeScript types (Profile, FsdSchema, TmlMapping, etc.)
       constants.ts                        # Profile types, statuses, function library registry
@@ -598,7 +598,7 @@ src/
 src/
   server/
     routes/
-      transfer-desk/
+      integrations/
         profiles.ts                       # CRUD routes
         fsd.ts                            # Auto-detect, validate, parse-preview
         mappings.ts                       # Target fields, functions list
@@ -606,7 +606,7 @@ src/
         test.ts                           # Test execution + SSE
         schedules.ts                      # Automation schedule CRUD
     services/
-      transfer-desk/
+      integrations/
         profile.service.ts                # Profile business logic
         fsd-integration.service.ts        # FSD Engine wrapper (DB + engine calls)
         mapping.service.ts                # TML mapping logic
@@ -618,16 +618,16 @@ src/
 
 ## §16 — What NOT to Build (Out of Scope)
 
-| Do NOT build               | Why                                                                     |
-| -------------------------- | ----------------------------------------------------------------------- |
-| FSD Engine                 | Built in Session A — import it as a dependency                          |
-| TML Engine (execution)     | Separate future sprint — wizard only configures mappings                |
-| BullMQ worker integration  | Sprint 3 skeleton exists — production wiring is a later sprint          |
-| Actual journal posting     | Wizard only previews — real posting is Transfer Desk execution pipeline |
-| File storage service       | Use existing S3 service from the platform                               |
-| User/auth system           | Use existing Keycloak OIDC middleware                                   |
-| Navigation/layout shell    | Use existing HFP layout components                                      |
-| Intercompany journal logic | Separate spec (INTERCOMPANY_JOURNALS.md)                                |
+| Do NOT build               | Why                                                                    |
+| -------------------------- | ---------------------------------------------------------------------- |
+| FSD Engine                 | Built in Session A — import it as a dependency                         |
+| TML Engine (execution)     | Separate future sprint — wizard only configures mappings               |
+| BullMQ worker integration  | Sprint 3 skeleton exists — production wiring is a later sprint         |
+| Actual journal posting     | Wizard only previews — real posting is Integrations execution pipeline |
+| File storage service       | Use existing S3 service from the platform                              |
+| User/auth system           | Use existing Keycloak OIDC middleware                                  |
+| Navigation/layout shell    | Use existing HFP layout components                                     |
+| Intercompany journal logic | Separate spec (INTERCOMPANY_JOURNALS.md)                               |
 
 ---
 
@@ -699,4 +699,4 @@ line.taxAmount                  # Tax amount
 
 ---
 
-_End of Session B briefing. Build the wizard, test it, and once it's working — the Transfer Desk pipeline is ready for execution wiring in a future sprint._
+_End of Session B briefing. Build the wizard, test it, and once it's working — the Integrations pipeline is ready for execution wiring in a future sprint._

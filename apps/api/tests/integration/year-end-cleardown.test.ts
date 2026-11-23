@@ -81,6 +81,7 @@ if (!process.env.TEST_DATABASE_URL) {
         const entity = await tx.entity.create({
           data: {
             name: `YE Test ${unique}`,
+            code: `YE${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`.toUpperCase(),
             type: "PROPERTY",
             countryCode: "TZ",
             functionalCurrency: "USD"

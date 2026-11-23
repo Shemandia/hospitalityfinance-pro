@@ -121,16 +121,16 @@ The GL repository's `updateAccountBalance()` is the correct canonical implementa
 
 ### Key gaps
 
-| #   | Feature                                                                                                                                                          | Status                                      |
-| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
-| A1  | **Standalone `/api/v1/transfer-desk/*` module** — overlaps with integration module — frontend depends on standalone module; not orphaned but needs consolidation | DEFERRED                                    |
-| A2  | **GL Recurring Journals** — full CRUD backend, zero UI                                                                                                           | FIXED                                       |
-| A3  | **Fixed Assets lifecycle** — only list/create/depreciation in UI; dispose, transfer, revalue, write-off have no page                                             | FIXED                                       |
-| A4  | **Authorization Sets + void/resubmit** — full backend workflow, no frontend page                                                                                 | FIXED                                       |
-| A5  | **AP/AR edit/delete** — `PUT/DELETE` on invoices and customers have no `gl-api.ts` wrapper — inaccessible from UI                                                | FIXED — wrappers added                      |
-| A6  | **Soft-close period transition** — backend endpoint exists, no frontend call                                                                                     | FIXED — `softClosePeriod` wrapper added     |
-| A7  | **FX ledger revaluation** — `gl-api.ts` wrapper exists but no page imports it                                                                                    | FIXED — revaluation dialog added to FX page |
-| A8  | **Session management** — list/revoke sessions endpoints exist, no UI                                                                                             | FIXED — API wrappers added                  |
+| #   | Feature                                                                                                                                                                 | Status                                      |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| A1  | **Standalone `/api/v1/integrations/builder/*` module** — overlaps with integration module — frontend depends on standalone module; not orphaned but needs consolidation | DEFERRED                                    |
+| A2  | **GL Recurring Journals** — full CRUD backend, zero UI                                                                                                                  | FIXED                                       |
+| A3  | **Fixed Assets lifecycle** — only list/create/depreciation in UI; dispose, transfer, revalue, write-off have no page                                                    | FIXED                                       |
+| A4  | **Authorization Sets + void/resubmit** — full backend workflow, no frontend page                                                                                        | FIXED                                       |
+| A5  | **AP/AR edit/delete** — `PUT/DELETE` on invoices and customers have no `gl-api.ts` wrapper — inaccessible from UI                                                       | FIXED — wrappers added                      |
+| A6  | **Soft-close period transition** — backend endpoint exists, no frontend call                                                                                            | FIXED — `softClosePeriod` wrapper added     |
+| A7  | **FX ledger revaluation** — `gl-api.ts` wrapper exists but no page imports it                                                                                           | FIXED — revaluation dialog added to FX page |
+| A8  | **Session management** — list/revoke sessions endpoints exist, no UI                                                                                                    | FIXED — API wrappers added                  |
 
 ### Auth/permission inconsistencies
 
@@ -165,7 +165,7 @@ The GL repository's `updateAccountBalance()` is the correct canonical implementa
 | T2.4 | Add synchronous audit trail for batch financial processes | F10     | FIXED                                                                              |
 | T2.5 | Fix consolidation day-28 hardcode                         | F11     | FIXED                                                                              |
 | T2.6 | Fix legacy intercompany permission gaps                   | A9, A10 | FIXED                                                                              |
-| T2.7 | Remove or consolidate orphaned transfer-desk module       | A1      | DEFERRED — frontend depends on standalone module; consolidation requires migration |
+| T2.7 | Remove or consolidate orphaned integrations module        | A1      | DEFERRED — frontend depends on standalone module; consolidation requires migration |
 | T2.8 | Fix CSP `unsafe-inline` — use nonce-based CSP             | S8      | FIXED                                                                              |
 
 ### Tier 3 — Fix Before Scale (code quality + ops)

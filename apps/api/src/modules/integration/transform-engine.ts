@@ -1,5 +1,5 @@
 /**
- * Transfer Desk — Universal Data Transformation Engine
+ * Integrations — Universal Data Transformation Engine
  *
  * SunSystems-style interface definition engine that can accept ANY data format
  * from ANY external system (procurement, PMS, payroll, POS, banks, custom)

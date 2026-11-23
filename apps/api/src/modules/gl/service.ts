@@ -9,6 +9,7 @@ import type {
   JournalCreateInput,
   JournalListQuery,
   JournalTypeCreateInput,
+  JournalWriteInput,
   JournalTypeUpdateInput
 } from "./types.js";
 
@@ -66,6 +67,12 @@ import { moduleLogger } from "../../shared/logger.js";
 const log = moduleLogger("gl-service");
 
 export class GLServiceError extends ServiceError {}
+
+export type WriteAndPostResult = {
+  journalId: string;
+  status: "POSTED" | "PENDING_APPROVAL" | "AWAITING_AUTHORIZATION";
+  approvalRecipients: Array<{ id: string; email: string; name: string }>;
+};
 
 export class GLService {
   constructor(private readonly prisma: PrismaClient) {}
@@ -548,18 +555,29 @@ export class GLService {
       }
     }
 
+    await this.notifyApprovers(entityId, result.journal.id, result.approvalRecipients);
+
+    return result.journal;
+  }
+
+  /** E-mails the approvers of a journal routed for approval. Failures are logged, not thrown. */
+  private async notifyApprovers(
+    entityId: string,
+    journalId: string,
+    recipients: Array<{ id: string; email: string; name: string }>
+  ): Promise<void> {
     const emailResults = await Promise.allSettled(
-      result.approvalRecipients.map((recipient) =>
+      recipients.map((recipient) =>
         sendApprovalEmail({
           to: recipient.email,
           approverName: recipient.name,
-          journalId: result.journal.id,
+          journalId,
           entityId,
           approveUrl: appUrl(
-            `approval/journals/${result.journal.id}?action=approve&approverId=${recipient.id}`
+            `approval/journals/${journalId}?action=approve&approverId=${recipient.id}`
           ),
           rejectUrl: appUrl(
-            `approval/journals/${result.journal.id}?action=reject&approverId=${recipient.id}`
+            `approval/journals/${journalId}?action=reject&approverId=${recipient.id}`
           )
         })
       )
@@ -576,8 +594,87 @@ export class GLService {
         "Approval e-mails failed"
       );
     }
+  }
 
-    return result.journal;
+  // ── Posting from a document (modules/posting) ─────────────────────────────
+
+  /**
+   * The checks the journal screens run before writing, for a journal built
+   * from an imported document: journal-type rules (and its generated
+   * reference) and source restrictions. Reads only.
+   */
+  async prepareJournal(entityId: string, input: JournalWriteInput): Promise<JournalWriteInput> {
+    const typeRules = await this.applyJournalTypeRules(entityId, input as JournalCreateInput);
+    const prepared =
+      typeRules.generatedRef && !input.reference
+        ? { ...input, reference: typeRules.generatedRef }
+        : input;
+    await this.validateSourceRestrictions(
+      entityId,
+      prepared.source,
+      prepared.lines,
+      prepared.sourceOverrideReason
+    );
+    return prepared;
+  }
+
+  /**
+   * Writes a journal in the caller's transaction (on which the entity is
+   * set) and posts it there too, unless an approval rule or multi-stage
+   * authorization applies: then it is left for them, as a journal entered on
+   * screen would be. Throws GLServiceError for anything the ledger refuses.
+   */
+  async writeAndPostInTransaction(
+    transaction: Prisma.TransactionClient,
+    entityId: string,
+    actorId: string,
+    input: JournalWriteInput
+  ): Promise<WriteAndPostResult> {
+    const repository = this.repository(transaction);
+    const created = await repository.createJournal(entityId, actorId, input);
+    const rule = await repository.getApprovalRuleForAmount(
+      entityId,
+      "GL",
+      this.computeJournalAmount(input.lines)
+    );
+    if (rule && rule.requiredApprovers.length > 0) {
+      await repository.setJournalStatus(entityId, created.id, "PENDING_APPROVAL", null);
+      await repository.createJournalApprovals(entityId, created.id, rule.requiredApprovers);
+      const approvals = await repository.getJournalApprovalEntries(entityId, created.id);
+      return {
+        journalId: created.id,
+        status: "PENDING_APPROVAL",
+        approvalRecipients: approvals.map((entry) => ({
+          id: entry.approver.id,
+          email: entry.approver.email,
+          name: entry.approver.name
+        }))
+      };
+    }
+    const tx = transaction as any;
+    const ledgerSetup = await tx.ledgerSetup.findFirst({ where: { entityId, ledger: "A" } });
+    const journalType = input.journalTypeId
+      ? await tx.journalType.findFirst({ where: { id: input.journalTypeId, entityId } })
+      : null;
+    if (ledgerSetup?.authorizationRequired || journalType?.authorizationRequired) {
+      return { journalId: created.id, status: "AWAITING_AUTHORIZATION", approvalRecipients: [] };
+    }
+    const journal = await repository.getJournalWithLines(entityId, created.id);
+    await this.postJournalInternal(repository, journal as PostingJournal, actorId);
+    return { journalId: created.id, status: "POSTED", approvalRecipients: [] };
+  }
+
+  /** After the transaction of writeAndPostInTransaction: e-mails, or routing to authorization. */
+  async afterWrite(entityId: string, result: WriteAndPostResult): Promise<void> {
+    if (result.status === "AWAITING_AUTHORIZATION") {
+      await new AuthorizationService(this.prisma).submitForAuthorization(
+        entityId,
+        result.journalId
+      );
+    }
+    if (result.approvalRecipients.length > 0) {
+      await this.notifyApprovers(entityId, result.journalId, result.approvalRecipients);
+    }
   }
 
   async postJournal(entityId: string, journalId: string, approvedById: string) {

@@ -28,7 +28,7 @@
 
 import jwt from "jsonwebtoken";
 import { Redis } from "ioredis";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi, onTestFinished } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { Prisma } from "../../src/db/client.js";
 import { grantRole } from "../../src/modules/access/grants.js";
@@ -209,7 +209,7 @@ if (!environmentReady || !redisUrl) {
           tx.entity.create({
             data: {
               name: `Admin IT ${name} ${run}`,
-              code: `${name}${run}`.slice(0, 20),
+              code: `AS${name}${run}`.slice(0, 20),
               type,
               countryCode: "TZ",
               parentId
@@ -765,6 +765,39 @@ if (!environmentReady || !redisUrl) {
           body: { city: "Dar es Salaam" }
         });
         expect(inside.status).toBe(200);
+      });
+
+      it("POST and PUT /entities need a code, unique in the tenant", async () => {
+        const create = (code?: string) =>
+          call({
+            method: "POST",
+            url: "/api/v1/entities",
+            as: "pam",
+            body: {
+              name: `Admin IT X ${run}`,
+              type: "PROPERTY",
+              countryCode: "TZ",
+              parentId: ent.A,
+              ...(code !== undefined && { code })
+            }
+          });
+        expect(await create()).toMatchObject({ status: 400, code: "ENTITY_CODE_REQUIRED" });
+        expect(await create("   ")).toMatchObject({ status: 400, code: "ENTITY_CODE_REQUIRED" });
+        const code = `AX${run}`.slice(0, 20).toUpperCase();
+        // Removed at the end: later tests count the entities under A.
+        onTestFinished(() =>
+          bypass((tx) => tx.entity.deleteMany({ where: { code } })).then(() => {})
+        );
+        expect((await create(code)).status).toBe(201);
+        expect(await create(code)).toMatchObject({ status: 409, code: "ENTITY_CODE_TAKEN" });
+
+        const update = (body: Record<string, unknown>) =>
+          call({ method: "PUT", url: `/api/v1/entities/${ent.A1}`, as: "pam", body });
+        expect(await update({ code: "" })).toMatchObject({
+          status: 400,
+          code: "ENTITY_CODE_REQUIRED"
+        });
+        expect(await update({ code })).toMatchObject({ status: 409, code: "ENTITY_CODE_TAKEN" });
       });
 
       it("DELETE /entities/:id refuses an entity outside the reach", async () => {

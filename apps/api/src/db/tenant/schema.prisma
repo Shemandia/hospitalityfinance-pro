@@ -76,9 +76,9 @@ enum JournalSource {
   FX_REVAL
   AP
   AR
-  // Added per Financials Admin spec FA-ENUM-001 — used by Transfer Desk imports
+  // Added per Financials Admin spec FA-ENUM-001 — used by Integrations imports
   // and period-end processes for filtering and reporting.
-  IMPORT // Generic Transfer Desk profile import
+  IMPORT // Generic Integrations profile import
   SYSTM // System-generated (rounding, balancing, automatic adjustments)
   PAYMT // Payment run posting (bank disbursement leg)
   PAYDS // Payment discount (early-pay discount taken)
@@ -99,7 +99,7 @@ enum JournalStatus {
   VOIDED
 }
 
-enum TransferBatchStatus {
+enum IntegrationBatchStatus {
   PENDING_REVIEW
   /// Commit is in progress. Set before any item is posted and cleared only
   /// once every item has been processed, so a commit interrupted mid-way can
@@ -109,20 +109,20 @@ enum TransferBatchStatus {
   DISCARDED
 }
 
-enum TransferBatchItemStatus {
+enum IntegrationBatchItemStatus {
   HELD
   COMMITTED
   REJECTED
   ERROR
 }
 
-enum TransferValidationStatus {
+enum IntegrationValidationStatus {
   OK
   WARNING
   ERROR
 }
 
-enum TransferReviewMode {
+enum IntegrationReviewMode {
   HOLD
   AUTO_COMMIT
 }
@@ -304,9 +304,10 @@ model TenantSetupProgress {
 model Entity {
   id                 String     @id @default(uuid())
   name               String
-  /// Short business-unit code (e.g. "JUM", "DIFC", "PALM"). Unique within parent group.
+  /// Short business-unit code (e.g. "JUM", "DIFC", "PALM"). Required and unique in
+  /// the tenant: imported documents name their entity by this code.
   /// Equivalent to SunSystems "Business Unit" code. Used in reports and consolidation.
-  code               String?    @db.VarChar(20)
+  code               String     @unique @db.VarChar(20)
   type               EntityType
   functionalCurrency String     @default("USD") @map("functional_currency")
   reportingCurrency  String     @default("USD") @map("reporting_currency")
@@ -708,44 +709,61 @@ model RecurringJournalLine {
 }
 
 model Journal {
-  id                        String                 @id @default(uuid())
-  entityId                  String                 @map("entity_id")
-  periodId                  String                 @map("period_id")
-  journalTypeId             String?                @map("journal_type_id")
+  id                        String                    @id @default(uuid())
+  entityId                  String                    @map("entity_id")
+  periodId                  String                    @map("period_id")
+  journalTypeId             String?                   @map("journal_type_id")
   reference                 String?
   description               String?
   source                    JournalSource
-  status                    JournalStatus          @default(DRAFT)
-  postedAt                  DateTime?              @map("posted_at")
-  functionalCurrency        String                 @map("functional_currency")
-  createdById               String                 @map("created_by")
-  approvedById              String?                @map("approved_by")
+  status                    JournalStatus             @default(DRAFT)
+  postedAt                  DateTime?                 @map("posted_at")
+  functionalCurrency        String                    @map("functional_currency")
+  createdById               String                    @map("created_by")
+  approvedById              String?                   @map("approved_by")
   /// Current authorization stage sequence order (null = not in authorization workflow)
-  currentAuthStageOrder     Int?                   @map("current_auth_stage_order")
+  currentAuthStageOrder     Int?                      @map("current_auth_stage_order")
   /// Authorization set this journal belongs to (for batch approval)
-  authorizationSetId        String?                @map("authorization_set_id")
+  authorizationSetId        String?                   @map("authorization_set_id")
   /// Auto-reversal flag: if true, a mirrored reversal journal is created in the next period
-  isAutoReversible          Boolean                @default(false) @map("is_auto_reversible")
+  isAutoReversible          Boolean                   @default(false) @map("is_auto_reversible")
   /// Self-reference to the original journal this entry reverses (for auto-reversal tracking)
-  reversalOfId              String?                @map("reversal_of_id")
-  createdAt                 DateTime               @default(now()) @map("created_at")
-  updatedAt                 DateTime               @updatedAt @map("updated_at")
-  entity                    Entity                 @relation(fields: [entityId], references: [id])
-  period                    Period                 @relation(fields: [periodId], references: [id])
-  journalType               JournalType?           @relation(fields: [journalTypeId], references: [id])
-  createdBy                 User                   @relation("JournalCreatedBy", fields: [createdById], references: [id])
-  approvedBy                User?                  @relation("JournalApprovedBy", fields: [approvedById], references: [id])
-  authorizationSet          AuthorizationSet?      @relation(fields: [authorizationSetId], references: [id])
-  reversalOf                Journal?               @relation("JournalReversal", fields: [reversalOfId], references: [id])
-  reversals                 Journal[]              @relation("JournalReversal")
+  reversalOfId              String?                   @map("reversal_of_id")
+  /// Business date of the transaction; always inside the period (database trigger).
+  /// Optional here only so that code which does not know it yet can leave it out:
+  /// the database fills it (trg_journal_document_date) and requires it.
+  documentDate              DateTime?                 @map("document_date") @db.Date
+  /// Tenant-defined source system code (source_systems.code), with sourceDocumentRef.
+  sourceSystem              String?                   @map("source_system") @db.VarChar(20)
+  /// The source's own document reference: posts once per entity and source system.
+  sourceDocumentRef         String?                   @map("source_document_ref") @db.VarChar(100)
+  /// 0 for the first posting of a source document; each reverse-and-replace adds one.
+  sourceRevision            Int                       @default(0) @map("source_revision")
+  /// The journal this one replaced (reverse-and-replace); that one was reversed.
+  replacesJournalId         String?                   @unique @map("replaces_journal_id")
+  createdAt                 DateTime                  @default(now()) @map("created_at")
+  updatedAt                 DateTime                  @updatedAt @map("updated_at")
+  entity                    Entity                    @relation(fields: [entityId], references: [id])
+  period                    Period                    @relation(fields: [periodId], references: [id])
+  journalType               JournalType?              @relation(fields: [journalTypeId], references: [id])
+  createdBy                 User                      @relation("JournalCreatedBy", fields: [createdById], references: [id])
+  approvedBy                User?                     @relation("JournalApprovedBy", fields: [approvedById], references: [id])
+  authorizationSet          AuthorizationSet?         @relation(fields: [authorizationSetId], references: [id])
+  reversalOf                Journal?                  @relation("JournalReversal", fields: [reversalOfId], references: [id])
+  reversals                 Journal[]                 @relation("JournalReversal")
+  replaces                  Journal?                  @relation("JournalReplacement", fields: [replacesJournalId], references: [id])
+  replacedBy                Journal?                  @relation("JournalReplacement")
+  sourceSystemRef           SourceSystem?             @relation(fields: [sourceSystem], references: [code], onDelete: Restrict)
+  transferLogs              IntegrationExecutionLog[]
   lines                     JournalLine[]
   approvals                 JournalApproval[]
   authorizations            JournalAuthorization[]
-  icSourceJournals          IntercompanyJournal[]  @relation("ICSourceJournal")
-  icMirrorJournals          IntercompanyJournal[]  @relation("ICMirrorJournal")
-  icTxnInitiatorJournals    ICTransaction[]        @relation("ICTxnInitiatorJournal")
-  icTxnCounterpartyJournals ICTransaction[]        @relation("ICTxnCounterpartyJournal")
+  icSourceJournals          IntercompanyJournal[]     @relation("ICSourceJournal")
+  icMirrorJournals          IntercompanyJournal[]     @relation("ICMirrorJournal")
+  icTxnInitiatorJournals    ICTransaction[]           @relation("ICTxnInitiatorJournal")
+  icTxnCounterpartyJournals ICTransaction[]           @relation("ICTxnCounterpartyJournal")
 
+  @@unique([entityId, sourceSystem, sourceDocumentRef, sourceRevision])
   @@index([entityId, periodId, status])
   @@index([entityId, createdAt])
   @@index([entityId, journalTypeId])
@@ -1461,18 +1479,18 @@ model BankTransaction {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Transfer Desk (Sprint 2 — see HFP_TransferDesk_TechnicalSpecification_v1_0.md)
+// Integrations (Sprint 2 — see HFP_Integration_TechnicalSpecification_v1_0.md)
 //
 // Tenant-wide tables: profiles, formats, transformations, lookups, automations,
 // folders, files, executions are SHARED across all entities in a tenant. They
 // are isolated by the tenant DB boundary; no row-level entity_id needed.
 //
-// Per-entity table: transfer_journal_ranges has business_unit (entity_id) per
+// Per-entity table: integration_journal_ranges has business_unit (entity_id) per
 // spec TD-DB-006 — journal range control state is per BU × ledger.
 //
 // RLS: enabled on all TD tables for consistency with the rest of the schema.
 // Most policies are open (USING (true)) because the tenant DB itself is the
-// isolation boundary. The policy on transfer_journal_ranges enforces the
+// isolation boundary. The policy on integration_journal_ranges enforces the
 // standard entity_id = app_current_entity_id() pattern.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1527,55 +1545,65 @@ enum SavePayloadOption {
   BOTH
 }
 
-// ── TD-DB-003: transfer_profiles ─────────────────────────────────────────────
+// ── TD-DB-003: integration_profiles ─────────────────────────────────────────────
 
-model TransferProfile {
-  id               String             @id @default(uuid())
-  name             String             @unique
-  description      String?
-  profileType      ProfileType        @map("profile_type")
+model IntegrationProfile {
+  id                  String                @id @default(uuid())
+  name                String                @unique
+  description         String?
+  profileType         ProfileType           @map("profile_type")
   /// External component (e.g. "OPERA_CLOUD"); free-text to allow custom systems
-  sourceComponent  String?            @map("source_component")
+  sourceComponent     String?               @map("source_component")
   /// HFP target component (GL_JOURNAL, AP_INVOICE, AR_INVOICE, etc.)
-  targetComponent  String?            @map("target_component")
-  sourceFormatId   String?            @map("source_format_id")
-  targetFormatId   String?            @map("target_format_id")
-  transformationId String?            @map("transformation_id")
-  filterId         String?            @map("filter_id")
+  targetComponent     String?               @map("target_component")
+  sourceFormatId      String?               @map("source_format_id")
+  targetFormatId      String?               @map("target_format_id")
+  transformationId    String?               @map("transformation_id")
+  filterId            String?               @map("filter_id")
   /// Runtime parameters (JSONB) — e.g. ledger, posting_options, file_handling
-  sourceParams     Json?              @map("source_params")
-  targetParams     Json?              @map("target_params")
+  sourceParams        Json?                 @map("source_params")
+  targetParams        Json?                 @map("target_params")
   /// Whether this profile passes its own validation rules; false blocks execute
-  isValid          Boolean            @default(false) @map("is_valid")
+  isValid             Boolean               @default(false) @map("is_valid")
   /// Increments on every save; profile_versions captures the snapshot
-  version          Int                @default(1)
+  version             Int                   @default(1)
   /// System profiles ship with every tenant and cannot be deleted
-  isSystem         Boolean            @default(false) @map("is_system")
+  isSystem            Boolean               @default(false) @map("is_system")
   /// Soft delete flag
-  isActive         Boolean            @default(true) @map("is_active")
+  isActive            Boolean               @default(true) @map("is_active")
   /// Save behavior: NONE / INPUT / OUTPUT / BOTH
-  savePayload      SavePayloadOption  @default(NONE) @map("save_payload")
-  reviewMode       TransferReviewMode @default(HOLD) @map("review_mode")
-  createdById      String?            @map("created_by")
-  createdAt        DateTime           @default(now()) @map("created_at")
-  updatedAt        DateTime           @updatedAt @map("updated_at")
+  savePayload         SavePayloadOption     @default(NONE) @map("save_payload")
+  reviewMode          IntegrationReviewMode @default(HOLD) @map("review_mode")
+  /// One transaction per document (default) or one for the whole file.
+  atomicity           ImportAtomicity       @default(PER_DOCUMENT)
+  /// What happens to source codes with no mapping.
+  unmappedPolicy      UnmappedPolicy        @default(REJECT) @map("unmapped_policy")
+  /// Account code that takes unmapped amounts when unmappedPolicy is SUSPENSE.
+  suspenseAccountCode String?               @map("suspense_account_code") @db.VarChar(30)
+  /// Rate type used when a document carries no rate.
+  fxRateType          FXRateType?           @map("fx_rate_type")
+  sourceSystemCode    String?               @map("source_system_code") @db.VarChar(20)
+  createdById         String?               @map("created_by")
+  createdAt           DateTime              @default(now()) @map("created_at")
+  updatedAt           DateTime              @updatedAt @map("updated_at")
 
-  sourceFormat    TransferFormat?          @relation("TransferProfileSourceFormat", fields: [sourceFormatId], references: [id])
-  targetFormat    TransferFormat?          @relation("TransferProfileTargetFormat", fields: [targetFormatId], references: [id])
-  transformation  TransferTransformation?  @relation(fields: [transformationId], references: [id])
-  filter          TransferFilter?          @relation(fields: [filterId], references: [id])
-  versions        TransferProfileVersion[]
-  journalRanges   TransferJournalRange[]
-  executions      TransferExecution[]
-  automationSteps TransferAutomationStep[]
+  sourceFormat    IntegrationFormat?          @relation("IntegrationProfileSourceFormat", fields: [sourceFormatId], references: [id])
+  targetFormat    IntegrationFormat?          @relation("IntegrationProfileTargetFormat", fields: [targetFormatId], references: [id])
+  transformation  IntegrationTransformation?  @relation(fields: [transformationId], references: [id])
+  filter          IntegrationFilter?          @relation(fields: [filterId], references: [id])
+  versions        IntegrationProfileVersion[]
+  journalRanges   IntegrationJournalRange[]
+  executions      IntegrationExecution[]
+  automationSteps IntegrationAutomationStep[]
+  sourceSystem    SourceSystem?               @relation(fields: [sourceSystemCode], references: [code], onDelete: Restrict)
 
   @@index([profileType, isActive])
-  @@map("transfer_profiles")
+  @@map("integration_profiles")
 }
 
-// ── TD-DB-004: transfer_profile_versions ─────────────────────────────────────
+// ── TD-DB-004: integration_profile_versions ─────────────────────────────────────
 
-model TransferProfileVersion {
+model IntegrationProfileVersion {
   id         String   @id @default(uuid())
   profileId  String   @map("profile_id")
   version    Int
@@ -1585,16 +1613,16 @@ model TransferProfileVersion {
   changedAt  DateTime @default(now()) @map("changed_at")
   changeNote String?  @map("change_note")
 
-  profile TransferProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  profile IntegrationProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@unique([profileId, version])
   @@index([profileId, changedAt])
-  @@map("transfer_profile_versions")
+  @@map("integration_profile_versions")
 }
 
-// ── TD-DB-005: transfer_filters ──────────────────────────────────────────────
+// ── TD-DB-005: integration_filters ──────────────────────────────────────────────
 
-model TransferFilter {
+model IntegrationFilter {
   id              String   @id @default(uuid())
   name            String   @unique
   description     String?
@@ -1606,19 +1634,19 @@ model TransferFilter {
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
-  profiles TransferProfile[]
+  profiles IntegrationProfile[]
 
-  @@map("transfer_filters")
+  @@map("integration_filters")
 }
 
-// ── TD-DB-006: transfer_journal_ranges ───────────────────────────────────────
+// ── TD-DB-006: integration_journal_ranges ───────────────────────────────────────
 //
 // Per-profile, per-business-unit, per-ledger journal number range state.
 // Used by export profiles to remember "I last exported up to journal #1234,
 // resume from #1235 next time". This is the ONLY TD table that's entity-scoped
 // (business_unit = entity_id) per spec TD-DB-006.
 
-model TransferJournalRange {
+model IntegrationJournalRange {
   id                String   @id @default(uuid())
   profileId         String   @map("profile_id")
   /// Business unit / entity this range applies to
@@ -1633,16 +1661,16 @@ model TransferJournalRange {
   lastExecutionId   String?  @map("last_execution_id")
   updatedAt         DateTime @updatedAt @map("updated_at")
 
-  profile TransferProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  profile IntegrationProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@unique([profileId, entityId, ledger])
   @@index([entityId])
-  @@map("transfer_journal_ranges")
+  @@map("integration_journal_ranges")
 }
 
-// ── TD-DB-007: transfer_automations ──────────────────────────────────────────
+// ── TD-DB-007: integration_automations ──────────────────────────────────────────
 
-model TransferAutomation {
+model IntegrationAutomation {
   id          String   @id @default(uuid())
   name        String   @unique
   description String?
@@ -1651,16 +1679,16 @@ model TransferAutomation {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  steps      TransferAutomationStep[]
-  schedules  TransferAutomationSchedule[]
-  executions TransferExecution[]
+  steps      IntegrationAutomationStep[]
+  schedules  IntegrationAutomationSchedule[]
+  executions IntegrationExecution[]
 
-  @@map("transfer_automations")
+  @@map("integration_automations")
 }
 
-// ── TD-DB-008: transfer_automation_steps ─────────────────────────────────────
+// ── TD-DB-008: integration_automation_steps ─────────────────────────────────────
 
-model TransferAutomationStep {
+model IntegrationAutomationStep {
   id                   String  @id @default(uuid())
   automationId         String  @map("automation_id")
   profileId            String  @map("profile_id")
@@ -1670,17 +1698,17 @@ model TransferAutomationStep {
   sourceParamOverrides Json?   @map("source_param_overrides")
   targetParamOverrides Json?   @map("target_param_overrides")
 
-  automation TransferAutomation @relation(fields: [automationId], references: [id], onDelete: Cascade)
-  profile    TransferProfile    @relation(fields: [profileId], references: [id])
+  automation IntegrationAutomation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  profile    IntegrationProfile    @relation(fields: [profileId], references: [id])
 
   @@unique([automationId, stepOrder])
   @@index([profileId])
-  @@map("transfer_automation_steps")
+  @@map("integration_automation_steps")
 }
 
-// ── TD-DB-009: transfer_automation_schedules ─────────────────────────────────
+// ── TD-DB-009: integration_automation_schedules ─────────────────────────────────
 
-model TransferAutomationSchedule {
+model IntegrationAutomationSchedule {
   id              String    @id @default(uuid())
   automationId    String    @map("automation_id")
   /// Standard 5-field cron expression
@@ -1695,15 +1723,15 @@ model TransferAutomationSchedule {
   bullmqRepeatKey String?   @map("bullmq_repeat_key")
   createdAt       DateTime  @default(now()) @map("created_at")
 
-  automation TransferAutomation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  automation IntegrationAutomation @relation(fields: [automationId], references: [id], onDelete: Cascade)
 
   @@index([nextRunAt])
-  @@map("transfer_automation_schedules")
+  @@map("integration_automation_schedules")
 }
 
-// ── TD-DB-010: transfer_formats (FSD) ────────────────────────────────────────
+// ── TD-DB-010: integration_formats (FSD) ────────────────────────────────────────
 
-model TransferFormat {
+model IntegrationFormat {
   id               String               @id @default(uuid())
   name             String               @unique
   description      String?
@@ -1720,18 +1748,18 @@ model TransferFormat {
   createdAt        DateTime             @default(now()) @map("created_at")
   updatedAt        DateTime             @updatedAt @map("updated_at")
 
-  sourceProfiles   TransferProfile[]        @relation("TransferProfileSourceFormat")
-  targetProfiles   TransferProfile[]        @relation("TransferProfileTargetFormat")
-  sourceTransforms TransferTransformation[] @relation("TransferTransformationSourceFormat")
-  targetTransforms TransferTransformation[] @relation("TransferTransformationTargetFormat")
+  sourceProfiles   IntegrationProfile[]        @relation("IntegrationProfileSourceFormat")
+  targetProfiles   IntegrationProfile[]        @relation("IntegrationProfileTargetFormat")
+  sourceTransforms IntegrationTransformation[] @relation("IntegrationTransformationSourceFormat")
+  targetTransforms IntegrationTransformation[] @relation("IntegrationTransformationTargetFormat")
 
   @@index([classification])
-  @@map("transfer_formats")
+  @@map("integration_formats")
 }
 
-// ── TD-DB-011: transfer_transformations (TML) ────────────────────────────────
+// ── TD-DB-011: integration_transformations (TML) ────────────────────────────────
 
-model TransferTransformation {
+model IntegrationTransformation {
   id               String     @id @default(uuid())
   name             String     @unique
   description      String?
@@ -1753,16 +1781,16 @@ model TransferTransformation {
   createdAt        DateTime   @default(now()) @map("created_at")
   updatedAt        DateTime   @updatedAt @map("updated_at")
 
-  sourceFormat TransferFormat?   @relation("TransferTransformationSourceFormat", fields: [sourceFormatId], references: [id])
-  targetFormat TransferFormat?   @relation("TransferTransformationTargetFormat", fields: [targetFormatId], references: [id])
-  profiles     TransferProfile[]
+  sourceFormat IntegrationFormat?   @relation("IntegrationTransformationSourceFormat", fields: [sourceFormatId], references: [id])
+  targetFormat IntegrationFormat?   @relation("IntegrationTransformationTargetFormat", fields: [targetFormatId], references: [id])
+  profiles     IntegrationProfile[]
 
-  @@map("transfer_transformations")
+  @@map("integration_transformations")
 }
 
-// ── TD-DB-012: transfer_lookup_tables ────────────────────────────────────────
+// ── TD-DB-012: integration_lookup_tables ────────────────────────────────────────
 
-model TransferLookupTable {
+model IntegrationLookupTable {
   id          String   @id @default(uuid())
   name        String   @unique
   description String?
@@ -1770,34 +1798,34 @@ model TransferLookupTable {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  columns TransferLookupColumn[]
-  rows    TransferLookupRow[]
+  columns IntegrationLookupColumn[]
+  rows    IntegrationLookupRow[]
 
-  @@map("transfer_lookup_tables")
+  @@map("integration_lookup_tables")
 }
 
-// ── TD-DB-013: transfer_lookup_columns ───────────────────────────────────────
+// ── TD-DB-013: integration_lookup_columns ───────────────────────────────────────
 
-model TransferLookupColumn {
+model IntegrationLookupColumn {
   id          String @id @default(uuid())
   tableId     String @map("table_id")
   name        String
   columnOrder Int    @map("column_order")
 
-  table  TransferLookupTable   @relation(fields: [tableId], references: [id], onDelete: Cascade)
-  values TransferLookupValue[]
+  table  IntegrationLookupTable   @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  values IntegrationLookupValue[]
 
   @@unique([tableId, name])
   @@unique([tableId, columnOrder])
-  @@map("transfer_lookup_columns")
+  @@map("integration_lookup_columns")
 }
 
-// ── TD-DB-014: transfer_lookup_rows ──────────────────────────────────────────
+// ── TD-DB-014: integration_lookup_rows ──────────────────────────────────────────
 //
 // Range-based row matching uses ALPHABETICAL collation, NOT numeric.
 // Always zero-pad numeric values when defining ranges (per spec TD-BL-021).
 
-model TransferLookupRow {
+model IntegrationLookupRow {
   id           String  @id @default(uuid())
   tableId      String  @map("table_id")
   /// Business unit scope: NULL = global data (matches any BU)
@@ -1808,17 +1836,17 @@ model TransferLookupRow {
   rangeTo      String  @map("range_to")
   rowOrder     Int     @map("row_order")
 
-  table  TransferLookupTable   @relation(fields: [tableId], references: [id], onDelete: Cascade)
-  values TransferLookupValue[]
+  table  IntegrationLookupTable   @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  values IntegrationLookupValue[]
 
   @@index([tableId, businessUnit, rangeFrom, rangeTo])
   @@index([tableId, rowOrder])
-  @@map("transfer_lookup_rows")
+  @@map("integration_lookup_rows")
 }
 
-// ── TD-DB-015: transfer_lookup_values ────────────────────────────────────────
+// ── TD-DB-015: integration_lookup_values ────────────────────────────────────────
 
-model TransferLookupValue {
+model IntegrationLookupValue {
   id         String          @id @default(uuid())
   rowId      String          @map("row_id")
   columnId   String          @map("column_id")
@@ -1827,16 +1855,16 @@ model TransferLookupValue {
   valueParam String?         @map("value_param")
   isDefault  Boolean         @default(false) @map("is_default")
 
-  row    TransferLookupRow    @relation(fields: [rowId], references: [id], onDelete: Cascade)
-  column TransferLookupColumn @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  row    IntegrationLookupRow    @relation(fields: [rowId], references: [id], onDelete: Cascade)
+  column IntegrationLookupColumn @relation(fields: [columnId], references: [id], onDelete: Cascade)
 
   @@unique([rowId, columnId])
-  @@map("transfer_lookup_values")
+  @@map("integration_lookup_values")
 }
 
-// ── TD-DB-016: transfer_folders ──────────────────────────────────────────────
+// ── TD-DB-016: integration_folders ──────────────────────────────────────────────
 
-model TransferFolder {
+model IntegrationFolder {
   id          String   @id @default(uuid())
   name        String
   description String?
@@ -1847,18 +1875,18 @@ model TransferFolder {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  parent   TransferFolder?        @relation("TransferFolderHierarchy", fields: [parentId], references: [id])
-  children TransferFolder[]       @relation("TransferFolderHierarchy")
-  access   TransferFolderAccess[]
-  files    TransferFile[]
+  parent   IntegrationFolder?        @relation("IntegrationFolderHierarchy", fields: [parentId], references: [id])
+  children IntegrationFolder[]       @relation("IntegrationFolderHierarchy")
+  access   IntegrationFolderAccess[]
+  files    IntegrationFile[]
 
   @@unique([parentId, name])
-  @@map("transfer_folders")
+  @@map("integration_folders")
 }
 
-// ── TD-DB-017: transfer_folder_access ────────────────────────────────────────
+// ── TD-DB-017: integration_folder_access ────────────────────────────────────────
 
-model TransferFolderAccess {
+model IntegrationFolderAccess {
   id        String  @id @default(uuid())
   folderId  String  @map("folder_id")
   /// Role identifier (e.g. "transfer:user", "transfer:designer")
@@ -1868,15 +1896,15 @@ model TransferFolderAccess {
   canWrite  Boolean @default(false) @map("can_write")
   canDelete Boolean @default(false) @map("can_delete")
 
-  folder TransferFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  folder IntegrationFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
 
   @@unique([folderId, roleName])
-  @@map("transfer_folder_access")
+  @@map("integration_folder_access")
 }
 
-// ── TD-DB-018: transfer_files ────────────────────────────────────────────────
+// ── TD-DB-018: integration_files ────────────────────────────────────────────────
 
-model TransferFile {
+model IntegrationFile {
   id           String   @id @default(uuid())
   folderId     String   @map("folder_id")
   filename     String
@@ -1890,18 +1918,18 @@ model TransferFile {
   uploadedById String?  @map("uploaded_by")
   uploadedAt   DateTime @default(now()) @map("uploaded_at")
 
-  folder TransferFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  folder IntegrationFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
 
   @@index([folderId, uploadedAt])
-  @@map("transfer_files")
+  @@map("integration_files")
 }
 
-// ── TD-DB-001: transfer_executions ───────────────────────────────────────────
+// ── TD-DB-001: integration_executions ───────────────────────────────────────────
 //
 // One row per profile execution. Tracked through QUEUED → RUNNING →
-// COMPLETED/FAILED/CANCELLED. Per-record details live in transfer_execution_logs.
+// COMPLETED/FAILED/CANCELLED. Per-record details live in integration_execution_logs.
 
-model TransferExecution {
+model IntegrationExecution {
   id                  String          @id @default(uuid())
   profileId           String          @map("profile_id")
   /// Set when this execution is part of an automation pipeline
@@ -1925,21 +1953,21 @@ model TransferExecution {
   finishedAt          DateTime?       @map("finished_at")
   createdAt           DateTime        @default(now()) @map("created_at")
 
-  profile    TransferProfile        @relation(fields: [profileId], references: [id])
-  automation TransferAutomation?    @relation(fields: [automationId], references: [id])
-  logs       TransferExecutionLog[]
+  profile    IntegrationProfile        @relation(fields: [profileId], references: [id])
+  automation IntegrationAutomation?    @relation(fields: [automationId], references: [id])
+  logs       IntegrationExecutionLog[]
 
   @@index([profileId, createdAt])
   @@index([status])
   @@index([automationId, automationStepOrder])
-  @@map("transfer_executions")
+  @@map("integration_executions")
 }
 
-// ── TD-DB-002: transfer_execution_logs ───────────────────────────────────────
+// ── TD-DB-002: integration_execution_logs ───────────────────────────────────────
 //
 // One row per source record processed. BIGSERIAL primary key for sortable order.
 
-model TransferExecutionLog {
+model IntegrationExecutionLog {
   id              BigInt             @id @default(autoincrement())
   executionId     String             @map("execution_id")
   recordIndex     Int                @map("record_index")
@@ -1950,67 +1978,73 @@ model TransferExecutionLog {
   transformedData Json?              @map("transformed_data")
   errorCode       String?            @map("error_code")
   errorMessage    String?            @map("error_message") @db.Text
+  /// The canonical document this record belongs to (its sourceDocumentRef).
+  documentRef     String?            @map("document_ref") @db.VarChar(100)
+  /// The journal the document created.
+  journalId       String?            @map("journal_id")
 
-  execution TransferExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  execution IntegrationExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  journal   Journal?             @relation(fields: [journalId], references: [id])
 
   @@index([executionId, recordIndex])
+  @@index([journalId])
   @@index([executionId, status])
-  @@map("transfer_execution_logs")
+  @@map("integration_execution_logs")
 }
 
-// ── TD-DB-019: transfer_batches ──────────────────────────────────────────────
+// ── TD-DB-019: integration_batches ──────────────────────────────────────────────
 
-model TransferBatch {
-  id              String              @id @default(uuid())
-  entityId        String              @map("entity_id")
-  profileId       String              @map("profile_id")
-  executionId     String              @map("execution_id")
-  targetComponent String              @map("target_component")
-  status          TransferBatchStatus @default(PENDING_REVIEW)
-  totalItems      Int                 @default(0) @map("total_items")
-  heldItems       Int                 @default(0) @map("held_items")
-  rejectedItems   Int                 @default(0) @map("rejected_items")
-  committedItems  Int                 @default(0) @map("committed_items")
-  errorItems      Int                 @default(0) @map("error_items")
+model IntegrationBatch {
+  id              String                 @id @default(uuid())
+  entityId        String                 @map("entity_id")
+  profileId       String                 @map("profile_id")
+  executionId     String                 @map("execution_id")
+  targetComponent String                 @map("target_component")
+  status          IntegrationBatchStatus @default(PENDING_REVIEW)
+  totalItems      Int                    @default(0) @map("total_items")
+  heldItems       Int                    @default(0) @map("held_items")
+  rejectedItems   Int                    @default(0) @map("rejected_items")
+  committedItems  Int                    @default(0) @map("committed_items")
+  errorItems      Int                    @default(0) @map("error_items")
   /// SHA-256 of the mapped source records that produced this batch.
   /// Import idempotency: re-uploading the same file after a timeout used to
   /// stage a second batch and post the revenue twice. The unique constraint
   /// below makes that impossible. Nullable for batches staged before this
   /// existed — Postgres treats NULLs as distinct, so they never collide.
-  sourceHash      String?             @map("source_hash")
-  createdById     String              @map("created_by")
-  createdAt       DateTime            @default(now()) @map("created_at")
-  reviewedById    String?             @map("reviewed_by")
-  committedAt     DateTime?           @map("committed_at")
+  sourceHash      String?                @map("source_hash")
+  createdById     String                 @map("created_by")
+  createdAt       DateTime               @default(now()) @map("created_at")
+  reviewedById    String?                @map("reviewed_by")
+  committedAt     DateTime?              @map("committed_at")
 
-  items TransferBatchItem[]
+  items IntegrationBatchItem[]
 
   @@unique([entityId, profileId, sourceHash])
   @@index([entityId, status])
   @@index([profileId])
-  @@map("transfer_batches")
+  @@map("integration_batches")
 }
 
-// ── TD-DB-020: transfer_batch_items ──────────────────────────────────────────
+// ── TD-DB-020: integration_batch_items ──────────────────────────────────────────
 
-model TransferBatchItem {
-  id                  String                   @id @default(uuid())
-  batchId             String                   @map("batch_id")
-  itemIndex           Int                      @map("item_index")
-  status              TransferBatchItemStatus  @default(HELD)
-  targetComponent     String                   @map("target_component")
+model IntegrationBatchItem {
+  id                  String                      @id @default(uuid())
+  batchId             String                      @map("batch_id")
+  itemIndex           Int                         @map("item_index")
+  status              IntegrationBatchItemStatus  @default(HELD)
+  targetComponent     String                      @map("target_component")
   payload             Json
-  sourceRecordIndices Int[]                    @map("source_record_indices")
-  validationStatus    TransferValidationStatus @default(OK) @map("validation_status")
-  validationMessages  Json?                    @map("validation_messages")
-  resultJournalId     String?                  @map("result_journal_id")
-  rejectedReason      String?                  @map("rejected_reason")
-  createdAt           DateTime                 @default(now()) @map("created_at")
+  sourceRecordIndices Int[]                       @map("source_record_indices")
+  validationStatus    IntegrationValidationStatus @default(OK) @map("validation_status")
+  validationMessages  Json?                       @map("validation_messages")
+  resultJournalId     String?                     @map("result_journal_id")
+  rejectedReason      String?                     @map("rejected_reason")
+  createdAt           DateTime                    @default(now()) @map("created_at")
 
-  batch TransferBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  batch IntegrationBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
 
   @@index([batchId, status])
-  @@map("transfer_batch_items")
+  @@map("integration_batch_items")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2881,4 +2915,31 @@ model TaxRate {
 
   @@index([taxCodeId, isCurrent])
   @@map("tax_rates")
+}
+
+/// A system that sends documents to the ledger (a PMS, a POS, a materials
+/// system). Tenant data: the codes are the tenant's, not an enum in code.
+model SourceSystem {
+  id        String   @id @default(uuid())
+  code      String   @unique @db.VarChar(20)
+  name      String   @db.VarChar(100)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  journals Journal[]
+  profiles IntegrationProfile[]
+
+  @@map("source_systems")
+}
+
+enum ImportAtomicity {
+  PER_DOCUMENT
+  WHOLE_FILE
+}
+
+enum UnmappedPolicy {
+  REJECT
+  HOLD
+  SUSPENSE
 }

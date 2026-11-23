@@ -11,12 +11,12 @@ Assess the current HospitalityFinancePro codebase against three specification do
    - Based on: SunSystems 6.4.x Financials Administration Guide (403 pages, 13 chapters)
    - Contains: Database schemas, API endpoints, business logic rules, ENUM definitions, validation rules
 
-2. **HFP_TransferDesk_TechnicalSpecification_v1_0.md** (~108K chars)
+2. **HFP_Integration_TechnicalSpecification_v1_0.md** (~108K chars)
    - Covers: 9 modules — Core Engine, Profile Management, Automation Engine, Format Designer (FSD), Transformation Designer (TML), Lookup Table Designer, Server Folder Management, Multi-Tenancy, Hospitality Integration Profiles
    - Contains: Database schemas (tenant-scoped), API endpoints, BullMQ job specs, S3 integration, FSD XML grammar, TML command language, pre-built hospitality profiles (Opera PMS, Sky Jana, MICROS Simphony)
 
-3. **HFP_TransferDesk_SelfService_Designer_v1_0.md** (~70K chars)
-   - Covers: Full UI/UX specification for the Transfer Desk frontend
+3. **HFP_Integration_SelfService_Designer_v1_0.md** (~70K chars)
+   - Covers: Full UI/UX specification for the Integrations frontend
    - Contains: URL structure, page layouts, wizard flows, visual mapper spec, component specs, role-based access (4 roles: user, power-user, designer, admin)
    - Stack: Next.js pages, React components, SSE for real-time progress
 
@@ -92,8 +92,8 @@ Output a prioritized CLAUDE.md-compatible task list:
 
 ## Important Notes
 
-- The Transfer Desk spec (Module 9) contains pre-built integration profiles for Opera PMS (4 file types: EZZRV, EZZCL, EZZMS, EZZDS), Sky Jana (purchasing vouchers, internal movements, inventory differences), and MICROS Simphony POS. Cross-reference with any existing `simphony_to_jana.py` or `simphony-jana-bridge` code.
-- The Financials Admin spec defines journal import via Transfer Desk profiles — this is the same pattern as SunSystems' Ledger Import SSC Component. The posting options (Post, Post if no errors, Validation only) must be preserved.
+- The Integrations spec (Module 9) contains pre-built integration profiles for Opera PMS (4 file types: EZZRV, EZZCL, EZZMS, EZZDS), Sky Jana (purchasing vouchers, internal movements, inventory differences), and MICROS Simphony POS. Cross-reference with any existing `simphony_to_jana.py` or `simphony-jana-bridge` code.
+- The Financials Admin spec defines journal import via Integrations profiles — this is the same pattern as SunSystems' Ledger Import SSC Component. The posting options (Post, Post if no errors, Validation only) must be preserved.
 - FSD (Format Schema Definition) files are stored as raw XML in the database — same as TML transformation definitions. The Self-Service Designer provides a visual editor but the underlying storage is XML/JSON.
-- The Transfer Desk uses 5 profile types: Import, Export, Process, Internal Transfer, External Transfer. Each has different runtime parameters and execution semantics.
+- The Integrations uses 5 profile types: Import, Export, Process, Internal Transfer, External Transfer. Each has different runtime parameters and execution semantics.
 - Jana parsing rules: purchasing vouchers use whole integers (TZS zero-decimal); internal movements use ÷1000 (3 implied decimals). Source detected by Journal Type field.

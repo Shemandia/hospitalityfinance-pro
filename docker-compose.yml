@@ -56,7 +56,7 @@ services:
       redis:
         condition: service_healthy
 
-  # Background workers: reports, dunning, scheduled reports, Transfer Desk
+  # Background workers: reports, dunning, scheduled reports, Integrations
   # imports and materialized-view refreshes. The API only enqueues; without
   # this service nothing runs (OPS-10).
   workers:

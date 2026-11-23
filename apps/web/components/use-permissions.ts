@@ -33,13 +33,13 @@ export function usePermissions() {
   return {
     can,
 
-    /** Transfer Desk: view profiles, browse history and files. */
-    canTransferDeskUser: can("TRANSFER_DESK_READ"),
-    /** Transfer Desk: run profiles and cancel running executions. */
-    canTransferDeskPowerUser: can("TRANSFER_DESK_EXECUTE"),
-    /** Transfer Desk: create, edit and delete profiles, formats, transformations, lookups. */
-    canTransferDeskDesigner: can("TRANSFER_DESK_CONFIG"),
-    /** Transfer Desk: configuration export, import and cleardown. */
-    canTransferDeskAdmin: can("TRANSFER_DESK_CONFIG")
+    /** Integrations: view profiles, browse history and files. */
+    canIntegrationUser: can("INTEGRATIONS_READ"),
+    /** Integrations: run profiles and cancel running executions. */
+    canIntegrationPowerUser: can("INTEGRATIONS_RUN"),
+    /** Integrations: create, edit and delete profiles, formats, transformations, lookups. */
+    canIntegrationDesigner: can("INTEGRATIONS_CONFIG"),
+    /** Integrations: configuration export, import and cleardown. */
+    canIntegrationAdmin: can("INTEGRATIONS_CONFIG")
   };
 }

@@ -3,6 +3,32 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   output: "standalone",
+  // Transfer Desk was renamed Integrations on 21 November 2026; the old
+  // addresses redirect for one release, then these entries are removed.
+  async redirects() {
+    return [
+      {
+        source: "/t/:code/settings/integrations/transfer-desk",
+        destination: "/t/:code/integrations/interfaces",
+        permanent: true
+      },
+      {
+        source: "/t/:code/settings/integrations/saf-import",
+        destination: "/t/:code/integrations/saf-import",
+        permanent: true
+      },
+      {
+        source: "/t/:code/settings/integrations",
+        destination: "/t/:code/integrations/connectors",
+        permanent: true
+      },
+      {
+        source: "/t/:code/transfer-desk/:path*",
+        destination: "/t/:code/integrations/:path*",
+        permanent: true
+      }
+    ];
+  },
   async headers() {
     return [
       {

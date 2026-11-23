@@ -67,19 +67,33 @@ describe("config", () => {
   });
 
   it("requireConfig names what is missing and who needs it", () => {
-    process.env.TD_S3_BUCKET = "";
+    process.env.INTEGRATION_S3_BUCKET = "";
     reloadConfig();
-    expect(() => requireConfig(["TD_S3_BUCKET"], "S3 storage")).toThrow(
-      /TD_S3_BUCKET is required by S3 storage/
+    expect(() => requireConfig(["INTEGRATION_S3_BUCKET"], "S3 storage")).toThrow(
+      /INTEGRATION_S3_BUCKET is required by S3 storage/
     );
   });
 
   it("requireConfig picks up a value set after the first read", () => {
-    process.env.TD_S3_BUCKET = "";
+    process.env.INTEGRATION_S3_BUCKET = "";
     reloadConfig();
-    process.env.TD_S3_BUCKET = "late-bucket";
-    expect(requireConfig(["TD_S3_BUCKET"], "S3 storage").TD_S3_BUCKET).toBe("late-bucket");
-    expect(config().TD_S3_BUCKET).toBe("late-bucket");
+    process.env.INTEGRATION_S3_BUCKET = "late-bucket";
+    expect(requireConfig(["INTEGRATION_S3_BUCKET"], "S3 storage").INTEGRATION_S3_BUCKET).toBe(
+      "late-bucket"
+    );
+    expect(config().INTEGRATION_S3_BUCKET).toBe("late-bucket");
+  });
+
+  it("reads a renamed variable by its old name for one release, the new name winning", () => {
+    process.env.INTEGRATION_UPLOADS_PATH = "";
+    process.env.TD_LOCAL_UPLOADS_PATH = "/srv/old-uploads";
+    try {
+      expect(reloadConfig().INTEGRATION_UPLOADS_PATH).toBe("/srv/old-uploads");
+      process.env.INTEGRATION_UPLOADS_PATH = "/srv/uploads";
+      expect(reloadConfig().INTEGRATION_UPLOADS_PATH).toBe("/srv/uploads");
+    } finally {
+      delete process.env.TD_LOCAL_UPLOADS_PATH;
+    }
   });
 
   it("builds links into the web app from APP_BASE_URL, with or without a path (HC-31)", () => {
