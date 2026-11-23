@@ -108,7 +108,9 @@ jobs:
         env:
           PGPASSWORD: hfp_ci
         run: |
-          sudo apt-get update -qq
+          # The runner's own apt sources carry only its default PostgreSQL client.
+          ls /etc/apt/sources.list.d/
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y >/dev/null
           sudo apt-get install -y -qq postgresql-client-16
           echo "PG_BIN_DIR=/usr/lib/postgresql/16/bin" >> "$GITHUB_ENV"
           /usr/lib/postgresql/16/bin/pg_dump --version
