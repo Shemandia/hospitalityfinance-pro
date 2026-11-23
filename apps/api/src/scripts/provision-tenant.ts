@@ -9,8 +9,11 @@
  *     --name "Jumeirah Group" --slug jumeirah --admin-email admin@jumeirah.com \
  *     [--admin-first-name Ada] [--admin-last-name Admin] \
  *     [--admin-password <temporary password, 12+ chars>] \
- *     [--country AE] [--plan STANDARD|ENTERPRISE|TRIAL] [--max-properties 10] \
- *     [--max-users 50] [--modules GL,AP,AR,REPORTING]
+ *     [--country AE] [--plan <plan code, default: the default plan>] \
+ *     [--max-properties <n>] [--max-users <n>] [--modules GL,AP,...] \
+ *     [--upload-max-mb <n>] [--import-concurrency <n>]
+ *
+ * Limits not given are the plan's (registry table plans).
  *
  * Needs REGISTRY_DATABASE_URL (its role creates roles and databases: CREATEDB
  * and CREATEROLE) and PLATFORM_ENCRYPTION_KEY. TENANT_DB_HOST/PORT place the
@@ -20,6 +23,7 @@
 import crypto from "node:crypto";
 import { provisionTenantSchema } from "../modules/tenant/types.js";
 import { ProvisioningService } from "../modules/tenant/provisioning-service.js";
+import { registryPrisma } from "../db/prisma.js";
 
 function args(): Map<string, string> {
   const list = process.argv.slice(2);
@@ -33,6 +37,10 @@ function args(): Map<string, string> {
 }
 
 const a = args();
+const number = (key: string) => (a.has(key) ? Number(a.get(key)) : undefined);
+const planCode =
+  a.get("plan")?.toUpperCase() ??
+  (await registryPrisma.plan.findFirst({ where: { isDefault: true, isActive: true } }))?.code;
 const generatedPassword = !a.has("admin-password");
 const parsed = provisionTenantSchema.safeParse({
   tenant: {
@@ -42,11 +50,12 @@ const parsed = provisionTenantSchema.safeParse({
     countryCode: a.get("country") ?? "AE"
   },
   entitlements: {
-    licenseType: (a.get("plan") ?? "STANDARD").toUpperCase(),
-    maxProperties: Number(a.get("max-properties") ?? 10),
-    maxUsers: Number(a.get("max-users") ?? 50),
-    enabledModules: (a.get("modules") ?? "GL,AP,AR,REPORTING").split(","),
-    maxConcurrentSessions: 10,
+    planCode,
+    maxProperties: number("max-properties"),
+    maxUsers: number("max-users"),
+    enabledModules: a.get("modules")?.split(","),
+    uploadMaxMb: number("upload-max-mb"),
+    importConcurrency: number("import-concurrency"),
     subscriptionStartDate: new Date().toISOString().slice(0, 10)
   },
   adminUser: {

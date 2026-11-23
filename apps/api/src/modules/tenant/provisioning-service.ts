@@ -17,6 +17,7 @@ import {
 } from "./types.js";
 import { hashPassword } from "../../services/password-policy.js";
 import { appUrl } from "../../config.js";
+import { activePlan, exceptionsFrom } from "./entitlements.js";
 
 type SSEWriter = (event: string, data: Record<string, unknown>) => void;
 
@@ -27,6 +28,17 @@ export class ProvisioningService {
    */
   async provision(input: ProvisionTenantInput, sse: SSEWriter): Promise<void> {
     const { tenant, entitlements, adminUser } = input;
+
+    const plan = await activePlan(entitlements.planCode);
+    if (!plan) {
+      sse("error", {
+        step: "creating_database",
+        order: 1,
+        status: "FAILED",
+        error: `There is no active plan "${entitlements.planCode}".`
+      });
+      return;
+    }
 
     // Check slug uniqueness
     const existing = await registryPrisma.tenant.findUnique({
@@ -66,11 +78,8 @@ export class ProvisioningService {
       await tx.tenantEntitlement.create({
         data: {
           tenantId: t.id,
-          licenseType: entitlements.licenseType,
-          maxProperties: entitlements.maxProperties,
-          maxUsers: entitlements.maxUsers,
-          enabledModules: entitlements.enabledModules,
-          maxConcurrentSessions: entitlements.maxConcurrentSessions,
+          planId: plan.id,
+          ...exceptionsFrom(plan, entitlements),
           subscriptionStartDate: new Date(entitlements.subscriptionStartDate),
           subscriptionEndDate: entitlements.subscriptionEndDate
             ? new Date(entitlements.subscriptionEndDate)

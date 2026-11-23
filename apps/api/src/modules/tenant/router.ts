@@ -13,6 +13,7 @@ import { registryPrisma } from "../../db/prisma.js";
 import { generateTenantCode } from "../../db/generateTenantCode.js";
 import { invalidateTenantCache, listTenants } from "../../db/tenantRegistry.js";
 import { evictTenant } from "../../db/tenantPool.js";
+import { activePlan, activePlans } from "./entitlements.js";
 import { provisionTenantSchema } from "./types.js";
 import { ProvisioningService } from "./provisioning-service.js";
 import { requireConfig } from "../../config.js";
@@ -264,6 +265,12 @@ export async function registerTenantRouter(app: FastifyInstance): Promise<void> 
 
       const provisioningService = new ProvisioningService();
 
+      // The plans a tenant can be given, with their limits (HC-40).
+      router.get("/plans", { config: { access: "platform" } }, async () => ({
+        data: await activePlans(),
+        errors: []
+      }));
+
       // Start provisioning (SSE stream)
       router.post(
         "/tenants/provision",
@@ -284,6 +291,19 @@ export async function registerTenantRouter(app: FastifyInstance): Promise<void> 
               });
             }
             throw err;
+          }
+
+          if (!(await activePlan(input.entitlements.planCode))) {
+            return reply.code(400).send({
+              data: null,
+              errors: [
+                {
+                  code: "UNKNOWN_PLAN",
+                  message: `There is no active plan "${input.entitlements.planCode}".`,
+                  path: ["entitlements", "planCode"]
+                }
+              ]
+            });
           }
 
           const origin = request.headers.origin ?? "*";

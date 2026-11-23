@@ -66,14 +66,14 @@ and `SEED_USER_PASSWORD`, the database setup scripts need `DATABASE_URL`.
 
 ### Files
 
-| Variable                | Required by | Default     | Description                                                                                                               |
-| ----------------------- | ----------- | ----------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `UPLOAD_MAX_MB`         |             | `10`        | Largest request body the API accepts, in MB; file imports arrive this way. Per-tenant limits come with the plans in WP-2. |
-| `STORAGE_BACKEND`       |             | `local`     | Where Transfer Desk files live.                                                                                           |
-| `TD_LOCAL_UPLOADS_PATH` |             | `./uploads` | Local storage path; keep it outside any public web root.                                                                  |
-| `TD_S3_BUCKET`          |             |             | S3 bucket for Transfer Desk files.                                                                                        |
-| `AWS_REGION`            |             |             | AWS region for S3.                                                                                                        |
-| `AWS_S3_BUCKET`         |             |             | S3 bucket for generated reports.                                                                                          |
+| Variable                | Required by | Default     | Description                                                                                                                                          |
+| ----------------------- | ----------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `UPLOAD_MAX_MB`         |             | `10`        | Largest request body the API accepts, in MB; file imports arrive this way. A tenant's plan or entitlement can set a lower limit, never a higher one. |
+| `STORAGE_BACKEND`       |             | `local`     | Where Transfer Desk files live.                                                                                                                      |
+| `TD_LOCAL_UPLOADS_PATH` |             | `./uploads` | Local storage path; keep it outside any public web root.                                                                                             |
+| `TD_S3_BUCKET`          |             |             | S3 bucket for Transfer Desk files.                                                                                                                   |
+| `AWS_REGION`            |             |             | AWS region for S3.                                                                                                                                   |
+| `AWS_S3_BUCKET`         |             |             | S3 bucket for generated reports.                                                                                                                     |
 
 ### E-mail
 
@@ -122,11 +122,12 @@ and `SEED_USER_PASSWORD`, the database setup scripts need `DATABASE_URL`.
 
 ### Workers
 
-| Variable                       | Required by | Default | Description                                                                                    |
-| ------------------------------ | ----------- | ------- | ---------------------------------------------------------------------------------------------- |
-| `IMPORT_CONCURRENCY`           |             | `1`     | Transfer Desk imports each tenant runs at once. Per-tenant values come with the plans in WP-2. |
-| `WORKER_MAX_CLEAN_EXITS`       |             | `3`     | Clean exits in a row after which the supervisor gives up on a worker.                          |
-| `TRANSFER_DESK_TENANT_POLL_MS` |             | `60000` | How often the Transfer Desk process checks for added or deactivated tenants.                   |
+| Variable                       | Required by | Default | Description                                                                                            |
+| ------------------------------ | ----------- | ------- | ------------------------------------------------------------------------------------------------------ |
+| `IMPORT_CONCURRENCY`           |             | `1`     | Transfer Desk imports each tenant runs at once, unless its plan or entitlement sets fewer; never more. |
+| `ENTITLEMENT_CACHE_SECONDS`    |             | `60`    | How long a tenant's plan limits are cached per process after reading the registry.                     |
+| `WORKER_MAX_CLEAN_EXITS`       |             | `3`     | Clean exits in a row after which the supervisor gives up on a worker.                                  |
+| `TRANSFER_DESK_TENANT_POLL_MS` |             | `60000` | How often the Transfer Desk process checks for added or deactivated tenants.                           |
 
 ### Development
 

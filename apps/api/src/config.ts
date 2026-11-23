@@ -165,7 +165,7 @@ const schema = z.object({
   UPLOAD_MAX_MB: positiveInt()
     .default(10)
     .describe(
-      "Largest request body the API accepts, in MB; file imports arrive this way. Per-tenant limits come with the plans in WP-2."
+      "Largest request body the API accepts, in MB; file imports arrive this way. A tenant's plan or entitlement can set a lower limit, never a higher one."
     ),
   STORAGE_BACKEND: z
     .enum(["local", "s3"])
@@ -231,8 +231,11 @@ const schema = z.object({
   IMPORT_CONCURRENCY: positiveInt()
     .default(1)
     .describe(
-      "Transfer Desk imports each tenant runs at once. Per-tenant values come with the plans in WP-2."
+      "Transfer Desk imports each tenant runs at once, unless its plan or entitlement sets fewer; never more."
     ),
+  ENTITLEMENT_CACHE_SECONDS: positiveInt()
+    .default(60)
+    .describe("How long a tenant's plan limits are cached per process after reading the registry."),
   WORKER_MAX_CLEAN_EXITS: positiveInt()
     .default(3)
     .describe("Clean exits in a row after which the supervisor gives up on a worker."),
@@ -508,7 +511,12 @@ export const CONFIG_GROUPS: ReadonlyArray<{ title: string; keys: readonly Config
   { title: "Lists", keys: ["PAGE_SIZE_DEFAULT", "PAGE_SIZE_MAX"] },
   {
     title: "Workers",
-    keys: ["IMPORT_CONCURRENCY", "WORKER_MAX_CLEAN_EXITS", "TRANSFER_DESK_TENANT_POLL_MS"]
+    keys: [
+      "IMPORT_CONCURRENCY",
+      "ENTITLEMENT_CACHE_SECONDS",
+      "WORKER_MAX_CLEAN_EXITS",
+      "TRANSFER_DESK_TENANT_POLL_MS"
+    ]
   },
   {
     title: "Development",

@@ -13,12 +13,6 @@ datasource db {
 
 // ─── Enums ────────────────────────────────────────────────────────────────────
 
-enum LicenseType {
-  TRIAL
-  STANDARD
-  ENTERPRISE
-}
-
 enum ProvisioningStatus {
   PENDING
   PROVISIONING
@@ -83,22 +77,51 @@ model Tenant {
   @@map("tenants")
 }
 
+/// A plan: the limits a tenant gets unless its entitlement overrides them
+/// (HC-40). Values are edited by the platform administrator; no plan values
+/// live in code. A null upload size or import concurrency means the platform
+/// setting (UPLOAD_MAX_MB, IMPORT_CONCURRENCY), which is also the ceiling.
+model Plan {
+  id                    String              @id @default(uuid())
+  code                  String              @unique @db.VarChar(50)
+  name                  String              @db.VarChar(100)
+  maxProperties         Int                 @map("max_properties")
+  maxUsers              Int                 @map("max_users")
+  maxConcurrentSessions Int                 @map("max_concurrent_sessions")
+  enabledModules        String[]            @map("enabled_modules")
+  uploadMaxMb           Int?                @map("upload_max_mb")
+  importConcurrency     Int?                @map("import_concurrency")
+  /// The plan a tenant without one is given (exactly one plan).
+  isDefault             Boolean             @default(false) @map("is_default")
+  isActive              Boolean             @default(true) @map("is_active")
+  createdAt             DateTime            @default(now()) @map("created_at")
+  updatedAt             DateTime            @updatedAt @map("updated_at")
+  entitlements          TenantEntitlement[]
+
+  @@map("plans")
+}
+
+/// A tenant's plan and its own exceptions to it. Null means "as the plan";
+/// the effective values come from modules/tenant/entitlements.ts only.
 model TenantEntitlement {
-  id                    String      @id @default(uuid())
-  tenantId              String      @unique @map("tenant_id")
-  tenant                Tenant      @relation(fields: [tenantId], references: [id])
-  licenseType           LicenseType @map("license_type")
-  maxProperties         Int         @default(10) @map("max_properties")
-  maxUsers              Int         @default(50) @map("max_users")
-  enabledModules        String[]    @map("enabled_modules")
-  maxConcurrentSessions Int         @default(10) @map("max_concurrent_sessions")
-  subscriptionStartDate DateTime    @map("subscription_start_date") @db.Date
-  subscriptionEndDate   DateTime?   @map("subscription_end_date") @db.Date
-  isActive              Boolean     @default(true) @map("is_active")
-  createdBy             String?     @map("created_by") @db.VarChar(255)
-  updatedBy             String?     @map("updated_by") @db.VarChar(255)
-  createdAt             DateTime    @default(now()) @map("created_at")
-  updatedAt             DateTime    @updatedAt @map("updated_at")
+  id                    String    @id @default(uuid())
+  tenantId              String    @unique @map("tenant_id")
+  tenant                Tenant    @relation(fields: [tenantId], references: [id])
+  planId                String    @map("plan_id")
+  plan                  Plan      @relation(fields: [planId], references: [id])
+  maxProperties         Int?      @map("max_properties")
+  maxUsers              Int?      @map("max_users")
+  enabledModules        String[]  @map("enabled_modules")
+  maxConcurrentSessions Int?      @map("max_concurrent_sessions")
+  uploadMaxMb           Int?      @map("upload_max_mb")
+  importConcurrency     Int?      @map("import_concurrency")
+  subscriptionStartDate DateTime  @map("subscription_start_date") @db.Date
+  subscriptionEndDate   DateTime? @map("subscription_end_date") @db.Date
+  isActive              Boolean   @default(true) @map("is_active")
+  createdBy             String?   @map("created_by") @db.VarChar(255)
+  updatedBy             String?   @map("updated_by") @db.VarChar(255)
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
 
   @@map("tenant_entitlements")
 }

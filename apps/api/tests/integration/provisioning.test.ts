@@ -69,7 +69,7 @@ if (!env.ready) {
         {
           tenant: { name: "IT Provisioning", slug, adminEmail: "owner@it.test", countryCode: "AE" },
           entitlements: {
-            licenseType: "STANDARD",
+            planCode: "STANDARD",
             maxProperties: 5,
             maxUsers: 10,
             enabledModules: ["GL"],
@@ -111,6 +111,20 @@ if (!env.ready) {
       await registry.$disconnect();
       await admin.$disconnect();
     }, 60_000);
+
+    it("records the plan and only the limits that differ from it (HC-40)", async () => {
+      const t = await registry.tenant.findUniqueOrThrow({ where: { slug } });
+      const e = await registry.tenantEntitlement.findUniqueOrThrow({
+        where: { tenantId: t.id },
+        include: { plan: true }
+      });
+      expect(e.plan.code).toBe("STANDARD");
+      // Asked for 5 properties, 10 users, GL only, 5 sessions: all differ from the plan.
+      expect([e.maxProperties, e.maxUsers, e.maxConcurrentSessions]).toEqual([5, 10, 5]);
+      expect(e.enabledModules).toEqual(["GL"]);
+      // Not asked for: as the plan.
+      expect([e.uploadMaxMb, e.importConcurrency]).toEqual([null, null]);
+    });
 
     it("completes every step", () => {
       expect(events.filter((e) => e.event === "error")).toEqual([]);
