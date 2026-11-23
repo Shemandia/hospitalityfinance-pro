@@ -42,7 +42,6 @@ import {
   tenantRoleNames
 } from "../../src/db/tenant-roles.js";
 import { AdoptionRefused, adoptTenant } from "../../src/db/tenant-adoption.js";
-import { whenRunnerFree } from "./runner-lock.js";
 
 if (!env.ready) {
   describe("tenant adoption", () => {
@@ -157,8 +156,36 @@ if (!env.ready) {
       expect([row.databaseUrl, row.ownerRole]).toEqual([urlOf(tenants.odd.db), null]);
     }, 300_000);
 
-    it("adopts the legacy database", async () => {
-      const report = await whenRunnerFree(() => adoptTenant(tenants.legacy.slug));
+    it("adopts the legacy database, waiting for a migration run that holds the runner", async () => {
+      // Hold the runner's lock until the tenant is adopted in the registry:
+      // adoption's last step (the migration run) must wait for it, because
+      // adopting the tenant a second time is refused.
+      const holder = new RegistryClient({
+        datasourceUrl: `${process.env.TEST_REGISTRY_DATABASE_URL}${process.env.TEST_REGISTRY_DATABASE_URL!.includes("?") ? "&" : "?"}connection_limit=1`
+      });
+      let report: Awaited<ReturnType<typeof adoptTenant>>;
+      try {
+        await holder.$executeRawUnsafe(
+          `select pg_advisory_lock(hashtext('hfp:tenant-migration-runner'))`
+        );
+        const adopting = adoptTenant(tenants.legacy.slug);
+        adopting.catch(() => {});
+        for (let i = 0; ; i++) {
+          const t = await registry.tenant.findUniqueOrThrow({
+            where: { slug: tenants.legacy.slug }
+          });
+          if (t.ownerRole && !t.databaseUrl) break;
+          if (i > 600) throw new Error("adoption never reached its migration step");
+          await new Promise((r) => setTimeout(r, 200));
+        }
+        await new Promise((r) => setTimeout(r, 1500)); // adoption is now waiting
+        await holder.$executeRawUnsafe(
+          `select pg_advisory_unlock(hashtext('hfp:tenant-migration-runner'))`
+        );
+        report = await adopting;
+      } finally {
+        await holder.$disconnect();
+      }
       expect(report.adopted).toBe(true);
       expect(report.legacy).toBe(true);
 

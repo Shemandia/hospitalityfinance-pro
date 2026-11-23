@@ -45,11 +45,14 @@ import { randomPassword, scramSha256Verifier } from "./scram.js";
 import { splitSqlStatements } from "./sql-split.js";
 import { hasRoles, ownerConnectionUrl, postgresUrl } from "./tenant-location.js";
 import { dropDatabaseForce, tenantRoleNames } from "./tenant-roles.js";
-import { runTenantMigrations } from "./tenant-runner.js";
+import { RunnerBusyError, runTenantMigrations } from "./tenant-runner.js";
 import { seal } from "../shared/secret-box.js";
 
 const run = promisify(execFile);
 const BASELINE = "0_baseline";
+/** How long adoption waits for a migration run that holds the runner's lock. */
+const RUNNER_WAIT_MS = 10 * 60_000;
+const RUNNER_WAIT_STEP_MS = 1_000;
 const LEGACY_CONTRACT = resolve(
   API_ROOT,
   "src/db/tenant/legacy/20261114000000_drop_legacy_role_tables.sql"
@@ -349,7 +352,24 @@ export async function adoptTenant(
     );
 
     // ── 8. migrate ────────────────────────────────────────────────────────
-    const result = await runTenantMigrations({ only: [slug] });
+    // The tenant is adopted from here on: adopting it again is refused. So a
+    // migration run that holds the runner's lock is waited for, not reported
+    // as "try again" (found 23 November 2026, a parallel CI run).
+    let result: Awaited<ReturnType<typeof runTenantMigrations>> | undefined;
+    for (let waited = 0; !result; waited += RUNNER_WAIT_STEP_MS) {
+      try {
+        result = await runTenantMigrations({ only: [slug] });
+      } catch (error) {
+        if (!(error instanceof RunnerBusyError)) throw error;
+        if (waited >= RUNNER_WAIT_MS) {
+          throw new Error(
+            `${slug} is adopted, but another migration run held the runner for ${RUNNER_WAIT_MS / 60_000} min; ` +
+              `finish with db:migrate:tenants --tenant ${slug}.`
+          );
+        }
+        await new Promise((r) => setTimeout(r, RUNNER_WAIT_STEP_MS));
+      }
+    }
     const outcome = result.outcomes[0];
     if (!result.ok || outcome?.status !== "SUCCEEDED") {
       throw new Error(
