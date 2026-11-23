@@ -1,7 +1,7 @@
 # HospitalityFinance Pro Go-Live Runbook
 
 **Version:** 2.0
-**Last Updated:** 2026-05-17
+**Last Updated:** 2026-11-23
 **Owner:** Infrastructure / DevOps Lead
 
 This runbook targets direct server deployment. Docker, ECS, and ECR are not part of the target production path. Docker files may remain in the repository as optional legacy artifacts, but go-live must use Node.js, pnpm, PostgreSQL, Redis, PM2, and a reverse proxy with HTTPS.
@@ -20,7 +20,7 @@ Before starting the cutover, confirm:
 - [ ] TLS certificates issued and renewable
 - [ ] Production API and web environment files prepared
 - [ ] Storage backend configured outside public web roots, preferably S3-compatible storage for production
-- [ ] Backup and restore plan tested for registry and tenant databases
+- [ ] `BACKUP_DIR` set, copied off the server daily; a restore drill (section 3) passed for the registry and every tenant database
 - [ ] UAT sign-off obtained from the finance controller
 - [ ] Rollback plan reviewed and approved by stakeholders
 
@@ -61,6 +61,8 @@ redis-cli -u "$REDIS_URL" ping
 
 Redis is required in production for native auth sessions, refresh-token revocation, BullMQ jobs, and cached background work.
 
+Install PgBouncer 1.21.0 or later in transaction mode in front of the tenant databases and set `TENANT_DB_POOLER_HOST` and `TENANT_DB_POOLER_PORT` (`docs/CONNECTION-POOLER.md`, which has the configuration, the authentication function and the sizing). Check it with `psql -h <pooler> -p 6432 -U <a tenant application role> <its database> -c 'SELECT 1'`. Migrations, adoption and provisioning keep connecting directly.
+
 ### 2. Configure Environment Files
 
 Create production environment files from the examples and set secrets manually.
@@ -89,17 +91,68 @@ TD_S3_BUCKET=<secure-transfer-desk-bucket>
 AWS_S3_BUCKET=<secure-report-bucket>
 ```
 
-### 3. Verify Backup Plan
+### 3. Backups and restore
 
-Take backups before migrations or data import. Keep registry and tenant backups separate.
+Every tenant database and the registry are backed up separately (WP-2 item 9, OPS-07). Each backup is a `pg_dump` custom-format file with a manifest beside it (`.dump.json`): the exact row count of every table at the moment of the dump, the file's size and SHA-256, the schema version. Each backup is also a row in the registry table `database_backups`. Code: `apps/api/src/db/backup.ts`, `apps/api/src/db/tenant-backup.ts`.
+
+**What the server needs**
+
+- `BACKUP_DIR`: a folder on a different disk from the database (the workers refuse to start in production without it). Folders are created 0700 and files 0600, owned by the deploy user. The dumps hold all of a tenant's financial data and its users' password hashes; treat the folder like the database.
+- `pg_dump` and `pg_restore` of the database server's major version (`postgresql-client-<n>`; `PG_BIN_DIR` if they are not on the PATH). A newer `pg_dump` can still dump the server, but a newer `pg_restore` cannot restore into it (it sets parameters the older server does not know), and `db:restore` refuses to run with one. The workers image installs version 18; build it with `--build-arg PG_CLIENT_MAJOR=<server major>`.
+- A copy of `BACKUP_DIR` off the server, at least daily (object storage or another host). The application does not do this; a backup that lives only next to the database is lost with the server.
+- For managed PostgreSQL or a self-run cluster: point-in-time recovery (WAL archiving) at the cluster level as well. The per-tenant dumps restore one tenant to the time of its last dump; point-in-time recovery covers the hours in between, for the whole cluster.
+
+**Schedule.** The backup worker (run by the worker supervisor, so by PM2's `hfp-workers`) backs up every provisioned tenant and then the registry on `BACKUP_SCHEDULE` (default `30 2 * * *`, UTC). After a run in which every database succeeded it deletes backups older than `BACKUP_RETENTION_DAYS`, never the newest successful backup of a database; with the setting unset nothing is deleted. A database that could not be backed up is a `FAILED` row with the reason, and fails the job (logged by `backup-worker`). A tenant built before WP-2 always fails: adopt it first (`db:adopt`).
+
+**By hand** (before go-live, before a migration or a data import):
 
 ```bash
-mkdir -p backups
-pg_dump "$REGISTRY_DATABASE_URL" > backups/registry-pre-go-live.sql
-pg_dump "$DATABASE_URL" > backups/tenant-primary-pre-go-live.sql
+pnpm --filter @hfp/api db:backup                       # every tenant, then the registry
+pnpm --filter @hfp/api db:backup --tenant <slug> --no-registry
 ```
 
-For managed PostgreSQL, also create a provider snapshot or point-in-time recovery restore point before proceeding.
+Exit code 1 means at least one database was not backed up; the output names it.
+
+**Check the backups** after the first scheduled run and then daily:
+
+```sql
+-- in the registry database: the last backup of each database, and anything that failed
+SELECT DISTINCT ON (label) label, status, started_at, size_bytes, error
+  FROM database_backups ORDER BY label, started_at DESC;
+```
+
+**Restore drill** (before go-live, then monthly, and after every PostgreSQL major upgrade). It restores a backup into a new database beside the live one, as the tenant's owner role, compares every table's row count with the manifest, and drops the copy. It never writes to a live database.
+
+```bash
+pnpm --filter @hfp/api db:restore "$BACKUP_DIR/tenants/<slug>/<slug>-<time>.dump.json"
+pnpm --filter @hfp/api db:restore "$BACKUP_DIR/registry/registry-<time>.dump.json"
+```
+
+Pass: `Row counts match: <n> tables, <m> rows.` and exit code 0. A damaged file (size or checksum not the manifest's) is refused before anything is created; any table that differs is listed and the exit code is 1. Record each drill (date, backup, result) in the go-live log.
+
+**Recovering one tenant** (its database is lost or damaged). Needs the owner's and finance's sign-off: anything posted after the backup is lost unless it is re-entered.
+
+1. Stop the API and the workers (`pm2 stop hfp-api hfp-workers`), or at least take the tenant out of service.
+2. Restore the chosen backup beside the live database and keep it:
+   `pnpm --filter @hfp/api db:restore <manifest> --into hfp_<slug>_restored --keep` (slug with `_` for `-`). It must report matching row counts.
+3. As the platform role, swap the databases. Renaming needs the owner's rights and CREATEDB together, which only the platform role holding the owner role can have; take the owner's rights for the swap and give them back at once (`hfp_<code>` from the registry's `owner_role`):
+
+   ```sql
+   GRANT "hfp_<code>_owner" TO CURRENT_USER WITH INHERIT TRUE, SET TRUE;
+   ALTER DATABASE "hfp_<slug>" RENAME TO "hfp_<slug>_damaged_<yyyymmdd>";
+   ALTER DATABASE "hfp_<slug>_restored" RENAME TO "hfp_<slug>";
+   SET ROLE "hfp_<code>_owner";
+   REVOKE ALL ON DATABASE "hfp_<slug>" FROM PUBLIC;
+   GRANT CONNECT, TEMPORARY ON DATABASE "hfp_<slug>" TO "hfp_<code>_app";
+   RESET ROLE;
+   GRANT "hfp_<code>_owner" TO CURRENT_USER WITH INHERIT FALSE, SET TRUE;
+   ```
+
+4. If the backup's schema version (in the manifest) is older than the release, run `pnpm --filter @hfp/api db:migrate:tenants --tenant <slug>`; it also re-grants the application role.
+5. Start the API and the workers; sign in as a user of the tenant and check the trial balance against the last figures finance reported.
+6. Keep `hfp_<slug>_damaged_<yyyymmdd>` until finance confirms, then drop it.
+
+**Recovering the registry** works the same way with the registry backup, restored as the registry's role (`db:restore <registry manifest> --into hfp_registry_restored --keep`), then swapping the registry database names while everything is stopped.
 
 ### 4. Run Registry Migrations
 
@@ -119,19 +172,27 @@ psql "$REGISTRY_DATABASE_URL" -c "SELECT 1;"
 
 ### 5. Run Tenant Migrations and Setup
 
-Tenant migrations currently run one tenant database at a time. An automated "migrate all tenants from registry" command is not implemented yet.
-
-For each tenant database, set `DATABASE_URL` to that tenant database and keep `REGISTRY_DATABASE_URL` pointed at the registry database:
+Each release migrates the registry first, then every tenant database:
 
 ```bash
-export REGISTRY_DATABASE_URL="postgresql://hfp:<password>@db.example.com:5432/hfp_registry"
-
-export DATABASE_URL="postgresql://hfp:<password>@db.example.com:5432/hfp_tenant_a"
-pnpm --filter @hfp/api run db:setup:tenant
-
-export DATABASE_URL="postgresql://hfp:<password>@db.example.com:5432/hfp_tenant_b"
-pnpm --filter @hfp/api run db:setup:tenant
+pnpm --filter @hfp/api run db:migrate:deploy:registry
+pnpm --filter @hfp/api run db:migrate:tenants --dry-run   # what would change
+pnpm --filter @hfp/api run db:migrate:tenants
 ```
+
+`db:migrate:tenants` walks every provisioned tenant in the registry, oldest
+first, and applies its pending migrations as that tenant's owner role, then
+re-grants the application role and records the new schema version. Each
+attempt is recorded in the registry table `tenant_migration_runs`. It stops at
+the first failure and exits 1 (`--keep-going` carries on past failures); fix
+the cause, then `--resume` continues the same run. Only one run at a time.
+A tenant behind the running release answers 503 ("being updated") and its
+jobs are postponed, so switch traffic to a new release only after this
+command has succeeded; other tenants are not affected by one that fails.
+
+Tenants are created by provisioning, which applies the migrations itself. A
+tenant database built before WP-2 has no migration history: the runner skips
+it, and it must be adopted (`db:adopt registry`, then `db:adopt tenant <slug>`) before it can be migrated. Afterwards `db:check-secrets` must report no readable secrets in the registry (docs/SECRETS-ROTATION.md).
 
 Do not run `db:seed` here: it creates a demo tenant and demo users, and refuses
 to run with `NODE_ENV=production`. A production tenant gets its roles and
@@ -277,7 +338,7 @@ All items must pass:
 - [ ] Payment file download uses secure storage and correct permissions
 - [ ] Report generation/export works for authorized users
 - [ ] Web dashboard loads without browser console errors
-- [ ] Database backup files or managed snapshots are confirmed
+- [ ] `db:backup` of every database succeeded during the window, and its restore drill reports matching row counts
 - [ ] No P1/P2 errors in monitoring
 
 If any critical item fails, execute rollback.
@@ -306,14 +367,7 @@ pnpm pm2:restart
 
 ### Database Rollback
 
-Use the pre-go-live PostgreSQL dumps or managed database snapshot. Coordinate with finance before restoring if users may have created valid transactions after cutover.
-
-```bash
-pm2 stop hfp-api hfp-workers
-psql "$REGISTRY_DATABASE_URL" < backups/registry-pre-go-live.sql
-psql "$DATABASE_URL" < backups/tenant-primary-pre-go-live.sql
-pm2 start hfp-api hfp-workers
-```
+Never load a dump into a live database. Restore the backup taken before the cutover (section 3) beside the live database and swap the two, as in "Recovering one tenant" and "Recovering the registry" in section 3. Coordinate with finance before restoring if users may have created valid transactions after cutover.
 
 For managed PostgreSQL, restore from the provider snapshot or point-in-time recovery workflow.
 
@@ -341,7 +395,7 @@ For managed PostgreSQL, restore from the provider snapshot or point-in-time reco
 - [ ] Reports and PDF exports are generated by authorized users
 - [ ] Payment file storage and download audit records are reviewed
 - [ ] Tenant/entity access failures are reviewed for expected denials
-- [ ] Backup jobs complete successfully
+- [ ] The first scheduled backup run succeeded for every database (`database_backups`), and its files reached the off-server copy
 
 ### Week 1
 

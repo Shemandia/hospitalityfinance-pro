@@ -5,7 +5,7 @@
  *   TEST_DATABASE_URL — PostgreSQL connection string for a test database
  *
  * The test database should be a clean tenant database (hfp_test).
- * Run: DATABASE_URL=$TEST_DATABASE_URL pnpm db:push:tenant
+ * Build it: DATABASE_URL=$TEST_DATABASE_URL pnpm db:migrate:deploy:tenant
  */
 
 import { PrismaClient } from "../../src/db/client.js";

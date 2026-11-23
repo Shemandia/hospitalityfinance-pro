@@ -17,12 +17,16 @@ export const provisionTenantSchema = z.object({
     adminEmail: z.string().email(),
     countryCode: z.string().length(2)
   }),
+  // The plan, by code (registry table plans), and the tenant's own limits
+  // where they differ from it; a value equal to the plan's is not stored.
   entitlements: z.object({
-    licenseType: z.enum(["TRIAL", "STANDARD", "ENTERPRISE"]),
-    maxProperties: z.number().int().min(1),
-    maxUsers: z.number().int().min(1),
-    enabledModules: z.array(z.string().min(1)).min(1),
-    maxConcurrentSessions: z.number().int().min(1),
+    planCode: z.string().min(1).max(50),
+    maxProperties: z.number().int().min(1).optional(),
+    maxUsers: z.number().int().min(1).optional(),
+    enabledModules: z.array(z.string().min(1)).min(1).optional(),
+    maxConcurrentSessions: z.number().int().min(1).optional(),
+    uploadMaxMb: z.number().int().min(1).optional(),
+    importConcurrency: z.number().int().min(1).optional(),
     subscriptionStartDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "ISO date required"),
     subscriptionEndDate: z
       .string()

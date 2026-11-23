@@ -162,6 +162,7 @@ GET    /api/v1/license  ->  session
 GET    /api/v1/me  ->  session
 GET    /api/v1/period-close/year-end-config  ->  entity  PERIOD_READ | PERIOD_MANAGE
 GET    /api/v1/periods  ->  entity  PERIOD_READ | GL_READ
+GET    /api/v1/platform/plans  ->  platform
 GET    /api/v1/platform/tenants  ->  platform
 GET    /api/v1/platform/tenants/:slug  ->  platform
 GET    /api/v1/platform/tenants/:slug/provision-status  ->  platform

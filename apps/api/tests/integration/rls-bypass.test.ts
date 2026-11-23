@@ -74,6 +74,9 @@ if (!process.env.TEST_DATABASE_URL) {
       await fixtures.$executeRawUnsafe(
         `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${APP_ROLE}`
       );
+      await fixtures.$executeRawUnsafe(
+        `GRANT EXECUTE ON FUNCTION app_begin_rls_bypass() TO ${APP_ROLE}`
+      );
 
       await fixture(async (tx) => {
         const entity = (label: string) =>

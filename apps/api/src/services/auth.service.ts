@@ -14,6 +14,8 @@ import { withBypassRLS } from "../db/rls-bypass.js";
 import { hashPassword, passwordPolicyErrors } from "./password-policy.js";
 import type { Prisma } from "../db/client.js";
 import { requireConfig } from "../config.js";
+import { appConnectionUrl } from "../db/tenant-location.js";
+import { assertSchemaServiceable } from "../db/schema-version.js";
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
@@ -158,6 +160,7 @@ export class AuthService {
     // 1. Resolve tenant from code
     const tenant = await resolveTenantByCode(tenantCode);
     if (!tenant) throw new AuthError("Invalid credentials");
+    assertSchemaServiceable(tenant);
 
     // 2. Get tenant prisma client
     const tenantPrisma = getTenantClient(tenant.slug, tenant.databaseUrl);
@@ -166,7 +169,8 @@ export class AuthService {
     const user = await withBypassRLS(tenantPrisma, (tx: Prisma.TransactionClient) =>
       tx.user.findUnique({ where: { email: email.toLowerCase() } })
     );
-    if (!user || !user.passwordHash) throw new AuthError("Invalid credentials");
+    // The system user (HC-38) never signs in, whatever its row says.
+    if (!user || !user.passwordHash || user.isSystem) throw new AuthError("Invalid credentials");
 
     // 4. Check account lock
     if (user.lockedUntil && user.lockedUntil > new Date()) {
@@ -317,7 +321,7 @@ export class AuthService {
     if (!tenant || !tenant.isActive) throw new AuthError("Invalid tenant");
 
     // Load fresh user claims from tenant DB
-    const tenantPrisma = getTenantClient(tenant.slug, tenant.databaseUrl);
+    const tenantPrisma = getTenantClient(tenant.slug, appConnectionUrl(tenant));
     const user = await tenantPrisma.user.findUnique({
       where: { id: userId },
       select: { id: true, isActive: true }
@@ -426,6 +430,7 @@ export class AuthService {
   ): Promise<{ token: string; userId: string } | null> {
     const tenant = await resolveTenantByCode(tenantCode);
     if (!tenant) return null; // Don't reveal tenant existence
+    assertSchemaServiceable(tenant);
 
     const tenantPrisma = getTenantClient(tenant.slug, tenant.databaseUrl);
     const user = await tenantPrisma.user.findUnique({
@@ -453,6 +458,7 @@ export class AuthService {
   async resetPassword(token: string, newPassword: string, tenantCode: string) {
     const tenant = await resolveTenantByCode(tenantCode);
     if (!tenant) throw new AuthError("Invalid reset token", 400, "INVALID_TOKEN");
+    assertSchemaServiceable(tenant);
 
     const tenantPrisma = getTenantClient(tenant.slug, tenant.databaseUrl);
     const tokenHash = crypto.createHash("sha256").update(token).digest("hex");

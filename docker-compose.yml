@@ -48,6 +48,7 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       PLATFORM_API_KEY: ${PLATFORM_API_KEY:?Set PLATFORM_API_KEY in .env}
+      PLATFORM_ENCRYPTION_KEY: ${PLATFORM_ENCRYPTION_KEY:?Set PLATFORM_ENCRYPTION_KEY in .env}
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3001}
     depends_on:
       postgres:
@@ -71,6 +72,7 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3001}
+      PLATFORM_ENCRYPTION_KEY: ${PLATFORM_ENCRYPTION_KEY:?Set PLATFORM_ENCRYPTION_KEY in .env}
     depends_on:
       postgres:
         condition: service_healthy

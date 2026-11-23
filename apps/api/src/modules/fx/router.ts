@@ -18,6 +18,7 @@ import {
   updateRevaluationProfileSchema,
   runLedgerRevaluationSchema
 } from "./revaluation-types.js";
+import { signedInUserId } from "../access/system-user.js";
 
 const fxService = new FXService(prisma as unknown as PrismaClient);
 
@@ -350,7 +351,7 @@ export async function registerFXRouter(app: FastifyInstance): Promise<void> {
                 errors: [{ code: "MISSING_ENTITY", message: "X-Entity-ID required." }]
               });
             const payload = runLedgerRevaluationSchema.parse(request.body);
-            const actorId = (request as any).user?.id ?? (request as any).user?.sub ?? "system";
+            const actorId = signedInUserId(request);
             const data = await runLedgerRevaluation(
               prisma as unknown as PrismaClient,
               entityId,

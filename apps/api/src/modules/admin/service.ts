@@ -134,7 +134,11 @@ type UserStanding =
 
 /** Where a user stands relative to the caller's reach. */
 async function userStanding(tx: Tx, reach: Reach, userId: string): Promise<UserStanding> {
-  const user = await tx.user.findUnique({ where: { id: userId }, select: { id: true } });
+  // The system user (HC-38) is not a person: no administrator can see or change it.
+  const user = await tx.user.findFirst({
+    where: { id: userId, isSystem: false },
+    select: { id: true }
+  });
   if (!user) return { exists: false };
   if (reach === "all") return { exists: true, withinReach: true, whollyWithinReach: true };
 
@@ -556,7 +560,7 @@ export async function listAllUsers(actor: AdminActorContext) {
   const reach = actorReach(actor);
   return bypass((tx) =>
     tx.user.findMany({
-      where: usersWithin(reach),
+      where: { AND: [usersWithin(reach), { isSystem: false }] },
       select: { id: true, name: true, email: true, createdAt: true },
       orderBy: { name: "asc" }
     })

@@ -14,6 +14,7 @@ import { sendPasswordResetEmail } from "../../shared/email.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
 import { AccessInfrastructureError } from "../access/service.js";
 import { appUrl, config } from "../../config.js";
+import { TenantMaintenanceError } from "../../db/schema-version.js";
 
 const COOKIE_SECURE = config().NODE_ENV === "production" ? true : config().COOKIE_SECURE;
 const COOKIE_DOMAIN = config().COOKIE_DOMAIN;
@@ -29,8 +30,10 @@ function getAuthService(): AuthService {
 }
 
 function sendError(reply: FastifyReply, error: unknown) {
-  // An access-service outage is answered with 503 by the application's error handler.
+  // An access-service outage and a tenant under maintenance are answered with
+  // 503 by the application's error handler.
   if (error instanceof AccessInfrastructureError) throw error;
+  if (error instanceof TenantMaintenanceError) throw error;
   if (error instanceof AuthError) {
     return reply.code(error.statusCode).send({
       data: null,

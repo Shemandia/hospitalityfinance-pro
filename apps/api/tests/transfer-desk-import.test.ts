@@ -25,8 +25,18 @@ vi.mock("../src/modules/ar/service.js", () => ({
   }
 }));
 
+// The pipeline sets the acting user in the context it opens; the mocked
+// system-user module reads it back, as the real one does.
+const acting = vi.hoisted(() => ({ userId: null as string | null }));
 vi.mock("../src/db/requestContext.js", () => ({
-  runWithContext: (_ctx: unknown, fn: () => unknown) => fn()
+  runWithContext: (ctx: { userId?: string | null }, fn: () => unknown) => {
+    acting.userId = ctx?.userId ?? null;
+    return fn();
+  }
+}));
+vi.mock("../src/modules/access/system-user.js", () => ({
+  systemUserId: async () => "system-user",
+  actingUserId: async () => acting.userId ?? "system-user"
 }));
 
 import {
@@ -189,6 +199,8 @@ describe("executeImport — happy path (Jana voucher → GL_JOURNAL)", () => {
 
     // GLService.createJournal should have been called once (all records → one journal)
     expect(createJournalMock).toHaveBeenCalledTimes(1);
+    // Recorded as the user who ran the import, never the entity id (IMP-01).
+    expect(createJournalMock.mock.calls[0]?.[1]).toBe("user-001");
 
     // Should have logged 2 SUCCESS records
     const successLogs = dbStub.logs.filter((l) => l.status === "SUCCESS");

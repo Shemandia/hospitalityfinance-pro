@@ -12,8 +12,8 @@
  *    normal-balance-positive consolidated figures, so a credit-normal
  *    intercompany payable was increased rather than eliminated.
  *
- * Reads mv_period_account_balances, so it needs the materialized view:
- *   DATABASE_URL=$TEST_DATABASE_URL pnpm tsx src/db/setupPerformance.ts
+ * Reads mv_period_account_balances, which the tenant migrations create:
+ *   DATABASE_URL=$TEST_DATABASE_URL pnpm db:migrate:deploy:tenant
  *
  * Run: TEST_DATABASE_URL=… pnpm vitest run tests/integration/consolidation-currency.test.ts
  */

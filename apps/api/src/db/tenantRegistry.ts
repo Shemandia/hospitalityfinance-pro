@@ -5,18 +5,28 @@
  * tenant configuration. In dev mode, falls back to the main DATABASE_URL.
  *
  * The registry holds ONLY the `tenants` table. All financial data lives in
- * each tenant's own database (tenant.databaseUrl).
+ * each tenant's own database. A cached TenantRecord carries the connection
+ * string for it (the application role's, built in memory from the sealed
+ * password: db/tenant-location.ts); the registry never stores it in plain
+ * text for tenants provisioned since WP-2.
  */
 
 import { PrismaClient } from "./registry-client.js";
 import { registryDatabaseUrlIfSet } from "../config.js";
+import { moduleLogger } from "../shared/logger.js";
+import { appConnectionUrl } from "./tenant-location.js";
+
+const log = moduleLogger("tenant-registry");
 
 export type TenantRecord = {
   id: string;
   slug: string;
   tenantCode: string;
   name: string;
+  /** How the API and the workers reach the tenant's database. In memory only. */
   databaseUrl: string;
+  /** The last tenant migration applied, when the registry knows it. */
+  schemaVersion: string | null;
   domain: string | null;
   adminEmail: string;
   plan: string;
@@ -51,7 +61,30 @@ async function refreshCache(): Promise<void> {
   });
 
   tenantCache.clear();
-  for (const t of tenants) {
+  for (const row of tenants) {
+    let databaseUrl: string;
+    try {
+      databaseUrl = appConnectionUrl(row);
+    } catch (error) {
+      // A tenant whose password cannot be opened (wrong PLATFORM_ENCRYPTION_KEY)
+      // is unavailable; the others are not affected.
+      log.error({ err: error, tenantSlug: row.slug }, "Tenant database location unusable");
+      continue;
+    }
+    const t: TenantRecord = {
+      id: row.id,
+      slug: row.slug,
+      tenantCode: row.tenantCode,
+      name: row.name,
+      databaseUrl,
+      schemaVersion: row.schemaVersion,
+      domain: row.domain,
+      adminEmail: row.adminEmail,
+      plan: row.plan,
+      maxProperties: row.maxProperties,
+      isActive: row.isActive,
+      provisionedAt: row.provisionedAt
+    };
     tenantCache.set(t.slug, t);
     if (t.tenantCode) {
       tenantCache.set(t.tenantCode, t);
@@ -87,6 +120,14 @@ export async function resolveTenantByCode(tenantCode: string): Promise<TenantRec
     await refreshCache();
   }
   return tenantCache.get(tenantCode) ?? null;
+}
+
+/**
+ * The cached record of a tenant, without refreshing the cache. For checks on
+ * a hot path; undefined when the tenant is not in the cache.
+ */
+export function cachedTenant(slug: string): TenantRecord | undefined {
+  return tenantCache.get(slug);
 }
 
 /**

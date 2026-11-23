@@ -1,0 +1,209 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/registry"
+}
+
+datasource db {
+  provider          = "postgresql"
+  url               = env("REGISTRY_DATABASE_URL")
+  // An empty scratch database for `migrate dev` and the drift check, so Prisma
+  // never creates one with its own name (src/scripts/check-migrations.ts).
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum ProvisioningStatus {
+  PENDING
+  PROVISIONING
+  ACTIVE
+  FAILED
+}
+
+enum MigrationRunStatus {
+  SUCCEEDED
+  FAILED
+  SKIPPED
+}
+
+enum BackupTarget {
+  TENANT
+  REGISTRY
+}
+
+enum BackupStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+  PRUNED
+}
+
+enum ProvisioningStepStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+// ─── Tenant Registry ─────────────────────────────────────────────────────────
+// In production, this table lives in a shared registry database (REGISTRY_DATABASE_URL).
+// Each tenant's financial data lives in its own isolated database (tenant.databaseUrl).
+
+model Tenant {
+  id                 String             @id @default(uuid())
+  slug               String             @unique @db.VarChar(50) // URL-safe identifier, e.g. "marriott-me"
+  tenantCode         String             @unique @map("tenant_code") @db.VarChar(8) // Opaque 8-char hex for URLs: /t/{tenantCode}/...
+  name               String // Display name, e.g. "Marriott Middle East"
+  // Before WP-2: the full connection string, password included, in plain text.
+  // Tenants provisioned since use the fields below; adoption moves the rest.
+  databaseUrl        String?            @map("database_url")
+  // Where the tenant's database is, and the two roles that use it (WP-2).
+  dbHost             String?            @map("db_host")
+  dbPort             Int?               @map("db_port")
+  dbName             String?            @map("db_name")
+  // Owns the schema; runs migrations. Never used by the API or the workers.
+  ownerRole          String?            @map("owner_role")
+  // Data rights only; the API and the workers connect as this role.
+  appRole            String?            @map("app_role")
+  // The roles' passwords, sealed with PLATFORM_ENCRYPTION_KEY (shared/secret-box.ts).
+  ownerPasswordEnc   String?            @map("owner_password_enc")
+  appPasswordEnc     String?            @map("app_password_enc")
+  // The last tenant migration applied (src/db/tenant/migrations).
+  schemaVersion      String?            @map("schema_version")
+  domain             String?            @unique // Custom domain, e.g. "finance.marriott.com"
+  adminEmail         String             @map("admin_email") // Primary contact
+  countryCode        String             @default("") @map("country_code") @db.VarChar(2) // ISO 3166-1 alpha-2
+  plan               String             @default("standard") // standard, enterprise, trial
+  maxProperties      Int                @default(10) @map("max_properties")
+  isActive           Boolean            @default(true) @map("is_active")
+  provisionedAt      DateTime?          @map("provisioned_at") // Set when DB is created + migrated
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+  provisioningStatus ProvisioningStatus @default(PENDING) @map("provisioning_status")
+
+  // Relations
+  entitlement       TenantEntitlement?
+  provisioningSteps TenantProvisioningStep[]
+  migrationRuns     TenantMigrationRun[]
+  backups           DatabaseBackup[]
+
+  @@map("tenants")
+}
+
+/// A plan: the limits a tenant gets unless its entitlement overrides them
+/// (HC-40). Values are edited by the platform administrator; no plan values
+/// live in code. A null upload size or import concurrency means the platform
+/// setting (UPLOAD_MAX_MB, IMPORT_CONCURRENCY), which is also the ceiling.
+model Plan {
+  id                    String              @id @default(uuid())
+  code                  String              @unique @db.VarChar(50)
+  name                  String              @db.VarChar(100)
+  maxProperties         Int                 @map("max_properties")
+  maxUsers              Int                 @map("max_users")
+  maxConcurrentSessions Int                 @map("max_concurrent_sessions")
+  enabledModules        String[]            @map("enabled_modules")
+  uploadMaxMb           Int?                @map("upload_max_mb")
+  importConcurrency     Int?                @map("import_concurrency")
+  /// The plan a tenant without one is given (exactly one plan).
+  isDefault             Boolean             @default(false) @map("is_default")
+  isActive              Boolean             @default(true) @map("is_active")
+  createdAt             DateTime            @default(now()) @map("created_at")
+  updatedAt             DateTime            @updatedAt @map("updated_at")
+  entitlements          TenantEntitlement[]
+
+  @@map("plans")
+}
+
+/// A tenant's plan and its own exceptions to it. Null means "as the plan";
+/// the effective values come from modules/tenant/entitlements.ts only.
+model TenantEntitlement {
+  id                    String    @id @default(uuid())
+  tenantId              String    @unique @map("tenant_id")
+  tenant                Tenant    @relation(fields: [tenantId], references: [id])
+  planId                String    @map("plan_id")
+  plan                  Plan      @relation(fields: [planId], references: [id])
+  maxProperties         Int?      @map("max_properties")
+  maxUsers              Int?      @map("max_users")
+  enabledModules        String[]  @map("enabled_modules")
+  maxConcurrentSessions Int?      @map("max_concurrent_sessions")
+  uploadMaxMb           Int?      @map("upload_max_mb")
+  importConcurrency     Int?      @map("import_concurrency")
+  subscriptionStartDate DateTime  @map("subscription_start_date") @db.Date
+  subscriptionEndDate   DateTime? @map("subscription_end_date") @db.Date
+  isActive              Boolean   @default(true) @map("is_active")
+  createdBy             String?   @map("created_by") @db.VarChar(255)
+  updatedBy             String?   @map("updated_by") @db.VarChar(255)
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  @@map("tenant_entitlements")
+}
+
+model TenantProvisioningStep {
+  id           String                 @id @default(uuid())
+  tenantId     String                 @map("tenant_id")
+  tenant       Tenant                 @relation(fields: [tenantId], references: [id])
+  stepName     String                 @map("step_name") @db.VarChar(50)
+  stepOrder    Int                    @map("step_order")
+  status       ProvisioningStepStatus @default(PENDING)
+  errorMessage String?                @map("error_message")
+  startedAt    DateTime?              @map("started_at")
+  completedAt  DateTime?              @map("completed_at")
+  createdAt    DateTime               @default(now()) @map("created_at")
+  updatedAt    DateTime               @updatedAt @map("updated_at")
+
+  @@index([tenantId])
+  @@map("tenant_provisioning_steps")
+}
+
+// One tenant's result in one run of the tenant migration runner (WP-2 item 3,
+// db:migrate:tenants). A run is every row with the same run_id.
+model TenantMigrationRun {
+  id          String             @id @default(uuid())
+  runId       String             @map("run_id")
+  tenantId    String             @map("tenant_id")
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fromVersion String?            @map("from_version")
+  toVersion   String             @map("to_version")
+  status      MigrationRunStatus
+  error       String?
+  startedAt   DateTime           @default(now()) @map("started_at")
+  finishedAt  DateTime?          @map("finished_at")
+
+  @@index([runId])
+  @@index([tenantId, startedAt])
+  @@map("tenant_migration_runs")
+}
+
+// One backup of one database (WP-2 item 9, OPS-07): a tenant database or the
+// registry itself, taken by db:backup or the backup worker. A run is every
+// row with the same run_id. The dump and its manifest (row counts, checksum)
+// are files under BACKUP_DIR; this row says where, and how the backup went.
+// A tenant's rows outlive the tenant (tenant_id is cleared), so the final
+// backup of an offboarded tenant can still be found.
+model DatabaseBackup {
+  id            String       @id @default(uuid())
+  runId         String       @map("run_id")
+  target        BackupTarget
+  tenantId      String?      @map("tenant_id")
+  tenant        Tenant?      @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  /// The tenant's slug, or "registry".
+  label         String       @db.VarChar(50)
+  dbName        String       @map("db_name")
+  schemaVersion String?      @map("schema_version")
+  /// The dump, relative to BACKUP_DIR; its manifest is beside it (.json).
+  file          String
+  sizeBytes     BigInt?      @map("size_bytes")
+  sha256        String?      @db.VarChar(64)
+  /// Rows per table at the moment of the dump: "schema.table" -> count.
+  rowCounts     Json?        @map("row_counts")
+  status        BackupStatus
+  error         String?
+  startedAt     DateTime     @default(now()) @map("started_at")
+  finishedAt    DateTime?    @map("finished_at")
+  prunedAt      DateTime?    @map("pruned_at")
+
+  @@index([runId])
+  @@index([label, startedAt])
+  @@map("database_backups")
+}

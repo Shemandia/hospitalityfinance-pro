@@ -84,18 +84,27 @@ const schema = z.object({
   TENANT_POOL_MAX: positiveInt()
     .default(50)
     .describe("Most tenant database clients kept open at once."),
+  TENANT_CONNECTION_LIMIT: positiveInt()
+    .default(3)
+    .describe(
+      "Most connections each tenant database client opens (per process). Keep it small; the pooler shares server connections between them."
+    ),
+  TENANT_DB_POOLER_HOST: text()
+    .optional()
+    .describe(
+      "Connection pooler (PgBouncer, transaction mode) that requests and jobs use to reach tenant databases. Unset: they connect directly. Migrations, adoption and provisioning always connect directly. docs/CONNECTION-POOLER.md."
+    ),
+  TENANT_DB_POOLER_PORT: positiveInt()
+    .optional()
+    .describe("The pooler's port (default: the tenant database's port)."),
   TENANT_DB_HOST: text()
     .optional()
-    .describe("Provisioning: host for new tenant databases (default: the registry's)."),
+    .describe(
+      "Provisioning: server for new tenant databases (default: the registry's). The registry's role creates their roles and databases there."
+    ),
   TENANT_DB_PORT: text()
     .optional()
     .describe("Provisioning: port for new tenant databases (default: the registry's)."),
-  TENANT_DB_USER: text()
-    .optional()
-    .describe("Provisioning: role that owns new tenant databases (default: the registry's)."),
-  TENANT_DB_PASSWORD: text()
-    .optional()
-    .describe("Provisioning: that role's password (default: the registry's)."),
 
   // ── Redis ────────────────────────────────────────────────────────────────
   REDIS_URL: url()
@@ -135,12 +144,28 @@ const schema = z.object({
   PLATFORM_API_KEY: text()
     .optional()
     .describe("Key the platform admin uses for tenant routes. Required by the API."),
+  PLATFORM_ENCRYPTION_KEY_PREVIOUS: text()
+    .refine((v) => Buffer.from(v, "base64").length === 32, {
+      message: "must be 32 bytes, base64-encoded"
+    })
+    .optional()
+    .describe(
+      "During a key rotation only: the key being replaced, so values it sealed can still be opened until db:reseal-secrets has re-sealed them. docs/SECRETS-ROTATION.md."
+    ),
+  PLATFORM_ENCRYPTION_KEY: text()
+    .refine((v) => Buffer.from(v, "base64").length === 32, {
+      message: "must be 32 bytes, base64-encoded"
+    })
+    .optional()
+    .describe(
+      "Encrypts tenant database passwords in the registry (AES-256-GCM). 32 random bytes, base64: node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\". Rotation: docs/SECRETS-ROTATION.md."
+    ),
 
   // ── Files ────────────────────────────────────────────────────────────────
   UPLOAD_MAX_MB: positiveInt()
     .default(10)
     .describe(
-      "Largest request body the API accepts, in MB; file imports arrive this way. Per-tenant limits come with the plans in WP-2."
+      "Largest request body the API accepts, in MB; file imports arrive this way. A tenant's plan or entitlement can set a lower limit, never a higher one."
     ),
   STORAGE_BACKEND: z
     .enum(["local", "s3"])
@@ -206,8 +231,11 @@ const schema = z.object({
   IMPORT_CONCURRENCY: positiveInt()
     .default(1)
     .describe(
-      "Transfer Desk imports each tenant runs at once. Per-tenant values come with the plans in WP-2."
+      "Transfer Desk imports each tenant runs at once, unless its plan or entitlement sets fewer; never more."
     ),
+  ENTITLEMENT_CACHE_SECONDS: positiveInt()
+    .default(60)
+    .describe("How long a tenant's plan limits are cached per process after reading the registry."),
   WORKER_MAX_CLEAN_EXITS: positiveInt()
     .default(3)
     .describe("Clean exits in a row after which the supervisor gives up on a worker."),
@@ -215,7 +243,37 @@ const schema = z.object({
     .default(60_000)
     .describe("How often the Transfer Desk process checks for added or deactivated tenants."),
 
+  // ── Backups ──────────────────────────────────────────────────────────────
+  BACKUP_DIR: text()
+    .optional()
+    .describe(
+      "Folder the tenant and registry backups are written to (db:backup, the backup worker). Required by the workers in production. Keep it on a different disk from the database and copy it off the server: docs/GO-LIVE-RUNBOOK.md, section 3."
+    ),
+  BACKUP_SCHEDULE: text()
+    .default("30 2 * * *")
+    .describe(
+      "When the backup worker backs up every tenant and the registry: a cron pattern, UTC."
+    ),
+  BACKUP_RETENTION_DAYS: positiveInt()
+    .optional()
+    .describe(
+      "Backups older than this many days are deleted after each scheduled run; the newest successful backup of each database is always kept. Unset: nothing is deleted."
+    ),
+  BACKUP_TIMEOUT_MINUTES: positiveInt()
+    .default(120)
+    .describe("Longest one database's dump may take before the backup of it is abandoned."),
+  PG_BIN_DIR: text()
+    .optional()
+    .describe(
+      "Folder holding pg_dump and pg_restore, when they are not on the PATH. Use the database server's major version: pg_dump may be newer than the server, pg_restore may not."
+    ),
+
   // ── Development ──────────────────────────────────────────────────────────
+  SHADOW_DATABASE_URL: url()
+    .optional()
+    .describe(
+      "An empty scratch database (name it hfp_shadow) for db:check:migrations and creating migrations; its contents are discarded."
+    ),
   SEED_USER_PASSWORD: text()
     .optional()
     .describe("The demo users' password (pnpm dev:setup, db:seed)."),
@@ -295,12 +353,18 @@ export type ProcessKind = "api" | "workers";
 /** What each long-running process needs, always and in production. */
 export const STARTUP: Record<ProcessKind, { always: ConfigKey[]; production: ConfigKey[] }> = {
   api: {
-    always: ["JWT_SECRET", "REDIS_URL", "APP_BASE_URL", "PLATFORM_API_KEY"],
+    always: [
+      "JWT_SECRET",
+      "REDIS_URL",
+      "APP_BASE_URL",
+      "PLATFORM_API_KEY",
+      "PLATFORM_ENCRYPTION_KEY"
+    ],
     production: ["REGISTRY_DATABASE_URL"]
   },
   workers: {
-    always: ["REDIS_URL", "APP_BASE_URL"],
-    production: ["REGISTRY_DATABASE_URL"]
+    always: ["REDIS_URL", "APP_BASE_URL", "PLATFORM_ENCRYPTION_KEY"],
+    production: ["REGISTRY_DATABASE_URL", "BACKUP_DIR"]
   }
 };
 
@@ -402,10 +466,11 @@ export const CONFIG_GROUPS: ReadonlyArray<{ title: string; keys: readonly Config
       "DATABASE_URL",
       "REGISTRY_DATABASE_URL",
       "TENANT_POOL_MAX",
+      "TENANT_CONNECTION_LIMIT",
+      "TENANT_DB_POOLER_HOST",
+      "TENANT_DB_POOLER_PORT",
       "TENANT_DB_HOST",
-      "TENANT_DB_PORT",
-      "TENANT_DB_USER",
-      "TENANT_DB_PASSWORD"
+      "TENANT_DB_PORT"
     ]
   },
   { title: "Redis", keys: ["REDIS_URL", "ACCESS_CACHE_TTL_SECONDS"] },
@@ -420,7 +485,9 @@ export const CONFIG_GROUPS: ReadonlyArray<{ title: string; keys: readonly Config
       "LOCKOUT_DURATION_MINUTES",
       "COOKIE_SECURE",
       "COOKIE_DOMAIN",
-      "PLATFORM_API_KEY"
+      "PLATFORM_API_KEY",
+      "PLATFORM_ENCRYPTION_KEY",
+      "PLATFORM_ENCRYPTION_KEY_PREVIOUS"
     ]
   },
   {
@@ -469,7 +536,25 @@ export const CONFIG_GROUPS: ReadonlyArray<{ title: string; keys: readonly Config
   { title: "Lists", keys: ["PAGE_SIZE_DEFAULT", "PAGE_SIZE_MAX"] },
   {
     title: "Workers",
-    keys: ["IMPORT_CONCURRENCY", "WORKER_MAX_CLEAN_EXITS", "TRANSFER_DESK_TENANT_POLL_MS"]
+    keys: [
+      "IMPORT_CONCURRENCY",
+      "ENTITLEMENT_CACHE_SECONDS",
+      "WORKER_MAX_CLEAN_EXITS",
+      "TRANSFER_DESK_TENANT_POLL_MS"
+    ]
   },
-  { title: "Development", keys: ["SEED_USER_PASSWORD", "TML_ALLOW_INSECURE_SANDBOX"] }
+  {
+    title: "Backups",
+    keys: [
+      "BACKUP_DIR",
+      "BACKUP_SCHEDULE",
+      "BACKUP_RETENTION_DAYS",
+      "BACKUP_TIMEOUT_MINUTES",
+      "PG_BIN_DIR"
+    ]
+  },
+  {
+    title: "Development",
+    keys: ["SHADOW_DATABASE_URL", "SEED_USER_PASSWORD", "TML_ALLOW_INSECURE_SANDBOX"]
+  }
 ];

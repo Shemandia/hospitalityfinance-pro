@@ -21,7 +21,12 @@ RUN pnpm prune --prod
 
 FROM node:22-alpine AS runtime
 
-RUN apk add --no-cache tini
+# pg_dump and pg_restore for the backups (WP-2 item 9): the database
+# server's major version. A newer pg_dump still dumps an older server, but a
+# newer pg_restore cannot restore into one. Build with
+# --build-arg PG_CLIENT_MAJOR=<server major>.
+ARG PG_CLIENT_MAJOR=18
+RUN apk add --no-cache tini postgresql${PG_CLIENT_MAJOR}-client
 
 ENV NODE_ENV=production
 WORKDIR /app
@@ -31,6 +36,10 @@ COPY --from=builder /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/apps/api/package.json ./apps/api/
 COPY --from=builder /app/apps/api/src/db/generated ./apps/api/src/db/generated
+# Schemas and migrations: the workers read the release's tenant schema version
+# from them (a tenant behind it is under maintenance), as the API does.
+COPY --from=builder /app/apps/api/src/db/registry ./apps/api/src/db/registry
+COPY --from=builder /app/apps/api/src/db/tenant ./apps/api/src/db/tenant
 COPY --from=builder /app/packages ./packages
 
 RUN addgroup -g 1001 -S hfp && adduser -S hfp -u 1001 -G hfp

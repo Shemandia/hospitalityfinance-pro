@@ -28,14 +28,15 @@ import {
   stopTransferDeskWorker
 } from "./transfer-desk-worker.js";
 import { startupConfig } from "../config.js";
+import { forgetEntitlements, tenantEntitlements } from "../modules/tenant/entitlements.js";
 import { moduleLogger } from "../shared/logger.js";
 
 const log = moduleLogger("transfer-desk-runner");
 
 const { TRANSFER_DESK_TENANT_POLL_MS: POLL_MS } = startupConfig("workers");
 
-async function startTenant(tenant: TenantRecord): Promise<void> {
-  ensureTransferDeskWorker(tenant.slug, tenant.databaseUrl);
+async function startTenant(tenant: TenantRecord, concurrency: number): Promise<void> {
+  ensureTransferDeskWorker(tenant.slug, tenant.databaseUrl, concurrency);
   try {
     const db = getTenantClient(tenant.slug, tenant.databaseUrl);
     const result = await syncAutomationSchedules(db, tenant.slug);
@@ -53,12 +54,29 @@ async function startTenant(tenant: TenantRecord): Promise<void> {
 /** Brings the running workers in line with the registry's active tenants. */
 async function reconcile(): Promise<void> {
   await invalidateTenantCache();
+  // Plan changes reach the workers at the next reconcile.
+  forgetEntitlements();
   const tenants = await listTenants();
   const active = new Set(tenants.map((t) => t.slug));
   const running = new Set(runningTransferDeskWorkers());
 
   for (const tenant of tenants) {
-    if (!running.has(tenant.slug)) await startTenant(tenant);
+    let importConcurrency: number;
+    try {
+      ({ importConcurrency } = await tenantEntitlements(tenant.id));
+    } catch (err) {
+      // No limits, no imports for this tenant; the others carry on.
+      log.error(
+        { err, tenantSlug: tenant.slug },
+        "Cannot read the tenant's limits; worker not started"
+      );
+      continue;
+    }
+    if (running.has(tenant.slug)) {
+      ensureTransferDeskWorker(tenant.slug, tenant.databaseUrl, importConcurrency);
+    } else {
+      await startTenant(tenant, importConcurrency);
+    }
   }
   for (const slug of running) {
     if (!active.has(slug)) {

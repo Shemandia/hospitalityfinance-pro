@@ -13,9 +13,37 @@ import { registryPrisma } from "../../db/prisma.js";
 import { generateTenantCode } from "../../db/generateTenantCode.js";
 import { invalidateTenantCache, listTenants } from "../../db/tenantRegistry.js";
 import { evictTenant } from "../../db/tenantPool.js";
+import { activePlan, activePlans } from "./entitlements.js";
 import { provisionTenantSchema } from "./types.js";
 import { ProvisioningService } from "./provisioning-service.js";
 import { requireConfig } from "../../config.js";
+
+/**
+ * What the platform API shows of a tenant: an allow-list, so a new registry
+ * column (a connection string, a role, a sealed password) is never sent by
+ * accident.
+ */
+const PUBLIC_TENANT_FIELDS = [
+  "id",
+  "slug",
+  "tenantCode",
+  "name",
+  "domain",
+  "adminEmail",
+  "countryCode",
+  "plan",
+  "maxProperties",
+  "isActive",
+  "provisioningStatus",
+  "provisionedAt",
+  "schemaVersion",
+  "createdAt",
+  "updatedAt"
+] as const;
+
+function publicTenant<T extends Record<string, unknown>>(tenant: T) {
+  return Object.fromEntries(PUBLIC_TENANT_FIELDS.map((key) => [key, tenant[key] ?? null]));
+}
 
 // ── Platform API key auth ─────────────────────────────────────────────────────
 
@@ -74,9 +102,7 @@ export async function registerTenantRouter(app: FastifyInstance): Promise<void> 
               errors: [{ code: "TENANT_NOT_FOUND", message: "Tenant not found." }]
             });
           }
-          // Never expose databaseUrl in API response
-          const { databaseUrl, ...safe } = tenant;
-          return reply.send({ data: safe, errors: [] });
+          return reply.send({ data: publicTenant(tenant), errors: [] });
         }
       );
 
@@ -142,8 +168,7 @@ export async function registerTenantRouter(app: FastifyInstance): Promise<void> 
 
         await invalidateTenantCache();
 
-        const { databaseUrl, ...safe } = tenant;
-        return reply.code(201).send({ data: safe, errors: [] });
+        return reply.code(201).send({ data: publicTenant(tenant), errors: [] });
       });
 
       // Update tenant
@@ -188,8 +213,7 @@ export async function registerTenantRouter(app: FastifyInstance): Promise<void> 
 
         await invalidateTenantCache();
 
-        const { databaseUrl, ...safe } = tenant;
-        return reply.send({ data: safe, errors: [] });
+        return reply.send({ data: publicTenant(tenant), errors: [] });
       });
 
       // Deactivate tenant (soft delete)
@@ -241,6 +265,12 @@ export async function registerTenantRouter(app: FastifyInstance): Promise<void> 
 
       const provisioningService = new ProvisioningService();
 
+      // The plans a tenant can be given, with their limits (HC-40).
+      router.get("/plans", { config: { access: "platform" } }, async () => ({
+        data: await activePlans(),
+        errors: []
+      }));
+
       // Start provisioning (SSE stream)
       router.post(
         "/tenants/provision",
@@ -261,6 +291,19 @@ export async function registerTenantRouter(app: FastifyInstance): Promise<void> 
               });
             }
             throw err;
+          }
+
+          if (!(await activePlan(input.entitlements.planCode))) {
+            return reply.code(400).send({
+              data: null,
+              errors: [
+                {
+                  code: "UNKNOWN_PLAN",
+                  message: `There is no active plan "${input.entitlements.planCode}".`,
+                  path: ["entitlements", "planCode"]
+                }
+              ]
+            });
           }
 
           const origin = request.headers.origin ?? "*";

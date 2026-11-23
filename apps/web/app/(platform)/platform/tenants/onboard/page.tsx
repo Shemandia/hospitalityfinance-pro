@@ -31,12 +31,28 @@ type TenantData = {
   countryCode: string;
 };
 
+/** A plan from the registry (GET /api/platform/plans). */
+type Plan = {
+  code: string;
+  name: string;
+  maxProperties: number;
+  maxUsers: number;
+  maxConcurrentSessions: number;
+  enabledModules: string[];
+  uploadMaxMb: number | null;
+  importConcurrency: number | null;
+  isDefault: boolean;
+};
+
 type EntitlementData = {
-  licenseType: "TRIAL" | "STANDARD" | "ENTERPRISE";
+  planCode: string;
   maxProperties: number;
   maxUsers: number;
   enabledModules: string[];
   maxConcurrentSessions: number;
+  /** Empty: as the plan (or the platform setting). */
+  uploadMaxMb: string;
+  importConcurrency: string;
   subscriptionStartDate: string;
   subscriptionEndDate: string;
 };
@@ -109,15 +125,49 @@ function OnboardWizard() {
     countryCode: ""
   });
 
+  // The limits start from the chosen plan; nothing here is a default of its own.
+  const [plans, setPlans] = useState<Plan[] | null>(null);
+  const [plansError, setPlansError] = useState<string | null>(null);
   const [entitlements, setEntitlements] = useState<EntitlementData>({
-    licenseType: "STANDARD",
-    maxProperties: 10,
-    maxUsers: 50,
-    enabledModules: ["GL", "AP", "AR", "REPORTING"],
-    maxConcurrentSessions: 10,
+    planCode: "",
+    maxProperties: 1,
+    maxUsers: 1,
+    enabledModules: [],
+    maxConcurrentSessions: 1,
+    uploadMaxMb: "",
+    importConcurrency: "",
     subscriptionStartDate: new Date().toISOString().split("T")[0],
     subscriptionEndDate: ""
   });
+
+  const choosePlan = (plan: Plan) =>
+    setEntitlements((ent) => ({
+      ...ent,
+      planCode: plan.code,
+      maxProperties: plan.maxProperties,
+      maxUsers: plan.maxUsers,
+      maxConcurrentSessions: plan.maxConcurrentSessions,
+      enabledModules: [...plan.enabledModules],
+      uploadMaxMb: plan.uploadMaxMb === null ? "" : String(plan.uploadMaxMb),
+      importConcurrency: plan.importConcurrency === null ? "" : String(plan.importConcurrency)
+    }));
+
+  useEffect(() => {
+    fetch("/api/platform/plans")
+      .then(async (r) => {
+        const json = await r.json().catch(() => null);
+        if (!r.ok || !Array.isArray(json?.data)) {
+          throw new Error(json?.errors?.[0]?.message ?? json?.error ?? `Error ${r.status}`);
+        }
+        const list = json.data as Plan[];
+        setPlans(list);
+        const first = list.find((p) => p.isDefault) ?? list[0];
+        if (first) choosePlan(first);
+      })
+      .catch((err: Error) => setPlansError(`The plans could not be loaded: ${err.message}`));
+  }, []);
+
+  const selectedPlan = plans?.find((p) => p.code === entitlements.planCode) ?? null;
 
   const [admin, setAdmin] = useState<AdminData>({
     firstName: "",
@@ -181,7 +231,16 @@ function OnboardWizard() {
             countryCode: tenant.countryCode
           },
           entitlements: {
-            ...entitlements,
+            planCode: entitlements.planCode,
+            maxProperties: entitlements.maxProperties,
+            maxUsers: entitlements.maxUsers,
+            maxConcurrentSessions: entitlements.maxConcurrentSessions,
+            enabledModules: entitlements.enabledModules,
+            uploadMaxMb: entitlements.uploadMaxMb ? Number(entitlements.uploadMaxMb) : undefined,
+            importConcurrency: entitlements.importConcurrency
+              ? Number(entitlements.importConcurrency)
+              : undefined,
+            subscriptionStartDate: entitlements.subscriptionStartDate,
             subscriptionEndDate: entitlements.subscriptionEndDate || undefined
           },
           adminUser: {
@@ -619,27 +678,44 @@ function OnboardWizard() {
           stepNumber={2}
           totalSteps={3}
           title="Entitlements"
-          description="Configure license, limits, and module access"
+          description="Choose the plan; change a limit only where this tenant differs from it"
           onBack={handleBack}
           onNext={handleNext}
-          isNextDisabled={entitlements.enabledModules.length === 0}
+          isNextDisabled={!selectedPlan || entitlements.enabledModules.length === 0}
         >
           <div className="bg-white border border-slate-200 rounded-3xl shadow-[0_10px_30px_rgba(0,0,0,0.03)] overflow-hidden">
             <div className="p-8 space-y-5">
-              {/* License Type */}
+              {/* Plan */}
               <div>
-                <label className={labelClass}>License Type *</label>
-                <select
-                  value={entitlements.licenseType}
-                  onChange={(e) =>
-                    setEntitlements((ent) => ({ ...ent, licenseType: e.target.value as any }))
-                  }
-                  className={inputClass}
-                >
-                  <option value="TRIAL">Trial</option>
-                  <option value="STANDARD">Standard</option>
-                  <option value="ENTERPRISE">Enterprise</option>
-                </select>
+                <label className={labelClass}>Plan *</label>
+                {plansError ? (
+                  <p className="flex items-center gap-2 text-sm text-red-600">
+                    <AlertTriangle className="h-4 w-4" /> {plansError}
+                  </p>
+                ) : !plans ? (
+                  <p className="flex items-center gap-2 text-sm text-slate-500">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Loading plans…
+                  </p>
+                ) : plans.length === 0 ? (
+                  <p className="text-sm text-red-600">
+                    No active plans are defined in the registry; a tenant cannot be created.
+                  </p>
+                ) : (
+                  <select
+                    value={entitlements.planCode}
+                    onChange={(e) => {
+                      const plan = plans.find((p) => p.code === e.target.value);
+                      if (plan) choosePlan(plan);
+                    }}
+                    className={inputClass}
+                  >
+                    {plans.map((plan) => (
+                      <option key={plan.code} value={plan.code}>
+                        {plan.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               {/* Max Properties, Users, Sessions */}
@@ -690,6 +766,40 @@ function OnboardWizard() {
                   />
                 </div>
               </div>
+
+              {/* Upload size and import concurrency: empty means the plan's, or the platform setting */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className={labelClass}>Largest upload (MB)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={entitlements.uploadMaxMb}
+                    placeholder="Platform setting"
+                    onChange={(e) =>
+                      setEntitlements((ent) => ({ ...ent, uploadMaxMb: e.target.value }))
+                    }
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>Imports at once</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={entitlements.importConcurrency}
+                    placeholder="Platform setting"
+                    onChange={(e) =>
+                      setEntitlements((ent) => ({ ...ent, importConcurrency: e.target.value }))
+                    }
+                    className={inputClass}
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-slate-500">
+                Empty: as the plan, or the platform setting. The platform setting is the upper limit
+                for both.
+              </p>
 
               {/* Enabled Modules */}
               <div>
@@ -838,9 +948,11 @@ function OnboardWizard() {
                 <dl className="grid grid-cols-2 gap-x-6 gap-y-4 text-sm">
                   <div>
                     <dt className="text-[11px] font-extrabold text-slate-400 uppercase tracking-[0.05em] mb-1">
-                      License
+                      Plan
                     </dt>
-                    <dd className="font-semibold text-slate-900">{entitlements.licenseType}</dd>
+                    <dd className="font-semibold text-slate-900">
+                      {selectedPlan?.name ?? entitlements.planCode}
+                    </dd>
                   </div>
                   <div>
                     <dt className="text-[11px] font-extrabold text-slate-400 uppercase tracking-[0.05em] mb-1">

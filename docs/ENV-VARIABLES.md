@@ -30,15 +30,16 @@ and `SEED_USER_PASSWORD`, the database setup scripts need `DATABASE_URL`.
 
 ### Databases
 
-| Variable                | Required by                              | Default | Description                                                                                                          |
-| ----------------------- | ---------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`          |                                          |         | A tenant database, for setup scripts and the seed; the registry fallback outside production. Never a default tenant. |
-| `REGISTRY_DATABASE_URL` | api in production, workers in production |         | The tenant registry database. Required in production.                                                                |
-| `TENANT_POOL_MAX`       |                                          | `50`    | Most tenant database clients kept open at once.                                                                      |
-| `TENANT_DB_HOST`        |                                          |         | Provisioning: host for new tenant databases (default: the registry's).                                               |
-| `TENANT_DB_PORT`        |                                          |         | Provisioning: port for new tenant databases (default: the registry's).                                               |
-| `TENANT_DB_USER`        |                                          |         | Provisioning: role that owns new tenant databases (default: the registry's).                                         |
-| `TENANT_DB_PASSWORD`    |                                          |         | Provisioning: that role's password (default: the registry's).                                                        |
+| Variable                  | Required by                              | Default | Description                                                                                                                                                                                                                   |
+| ------------------------- | ---------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`            |                                          |         | A tenant database, for setup scripts and the seed; the registry fallback outside production. Never a default tenant.                                                                                                          |
+| `REGISTRY_DATABASE_URL`   | api in production, workers in production |         | The tenant registry database. Required in production.                                                                                                                                                                         |
+| `TENANT_POOL_MAX`         |                                          | `50`    | Most tenant database clients kept open at once.                                                                                                                                                                               |
+| `TENANT_CONNECTION_LIMIT` |                                          | `3`     | Most connections each tenant database client opens (per process). Keep it small; the pooler shares server connections between them.                                                                                           |
+| `TENANT_DB_POOLER_HOST`   |                                          |         | Connection pooler (PgBouncer, transaction mode) that requests and jobs use to reach tenant databases. Unset: they connect directly. Migrations, adoption and provisioning always connect directly. docs/CONNECTION-POOLER.md. |
+| `TENANT_DB_POOLER_PORT`   |                                          |         | The pooler's port (default: the tenant database's port).                                                                                                                                                                      |
+| `TENANT_DB_HOST`          |                                          |         | Provisioning: server for new tenant databases (default: the registry's). The registry's role creates their roles and databases there.                                                                                         |
+| `TENANT_DB_PORT`          |                                          |         | Provisioning: port for new tenant databases (default: the registry's).                                                                                                                                                        |
 
 ### Redis
 
@@ -49,28 +50,30 @@ and `SEED_USER_PASSWORD`, the database setup scripts need `DATABASE_URL`.
 
 ### Sign-in and sessions
 
-| Variable                   | Required by | Default  | Description                                                         |
-| -------------------------- | ----------- | -------- | ------------------------------------------------------------------- |
-| `JWT_SECRET`               | api         |          | Signs session tokens. Required by the API.                          |
-| `JWT_ACCESS_EXPIRY`        |             | `900`    | Access token lifetime, seconds.                                     |
-| `JWT_REFRESH_EXPIRY`       |             | `604800` | Refresh token lifetime, seconds.                                    |
-| `BCRYPT_SALT_ROUNDS`       |             | `12`     | bcrypt cost for password hashes.                                    |
-| `MAX_FAILED_ATTEMPTS`      |             | `5`      | Failed sign-ins before the account locks.                           |
-| `LOCKOUT_DURATION_MINUTES` |             | `15`     | How long a locked account stays locked.                             |
-| `COOKIE_SECURE`            |             | `false`  | Mark session cookies Secure. Always on in production.               |
-| `COOKIE_DOMAIN`            |             |          | Domain attribute for session cookies; normally unset.               |
-| `PLATFORM_API_KEY`         | api         |          | Key the platform admin uses for tenant routes. Required by the API. |
+| Variable                           | Required by  | Default  | Description                                                                                                                                                                                                 |
+| ---------------------------------- | ------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `JWT_SECRET`                       | api          |          | Signs session tokens. Required by the API.                                                                                                                                                                  |
+| `JWT_ACCESS_EXPIRY`                |              | `900`    | Access token lifetime, seconds.                                                                                                                                                                             |
+| `JWT_REFRESH_EXPIRY`               |              | `604800` | Refresh token lifetime, seconds.                                                                                                                                                                            |
+| `BCRYPT_SALT_ROUNDS`               |              | `12`     | bcrypt cost for password hashes.                                                                                                                                                                            |
+| `MAX_FAILED_ATTEMPTS`              |              | `5`      | Failed sign-ins before the account locks.                                                                                                                                                                   |
+| `LOCKOUT_DURATION_MINUTES`         |              | `15`     | How long a locked account stays locked.                                                                                                                                                                     |
+| `COOKIE_SECURE`                    |              | `false`  | Mark session cookies Secure. Always on in production.                                                                                                                                                       |
+| `COOKIE_DOMAIN`                    |              |          | Domain attribute for session cookies; normally unset.                                                                                                                                                       |
+| `PLATFORM_API_KEY`                 | api          |          | Key the platform admin uses for tenant routes. Required by the API.                                                                                                                                         |
+| `PLATFORM_ENCRYPTION_KEY`          | api, workers |          | Encrypts tenant database passwords in the registry (AES-256-GCM). 32 random bytes, base64: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))". Rotation: docs/SECRETS-ROTATION.md. |
+| `PLATFORM_ENCRYPTION_KEY_PREVIOUS` |              |          | During a key rotation only: the key being replaced, so values it sealed can still be opened until db:reseal-secrets has re-sealed them. docs/SECRETS-ROTATION.md.                                           |
 
 ### Files
 
-| Variable                | Required by | Default     | Description                                                                                                               |
-| ----------------------- | ----------- | ----------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `UPLOAD_MAX_MB`         |             | `10`        | Largest request body the API accepts, in MB; file imports arrive this way. Per-tenant limits come with the plans in WP-2. |
-| `STORAGE_BACKEND`       |             | `local`     | Where Transfer Desk files live.                                                                                           |
-| `TD_LOCAL_UPLOADS_PATH` |             | `./uploads` | Local storage path; keep it outside any public web root.                                                                  |
-| `TD_S3_BUCKET`          |             |             | S3 bucket for Transfer Desk files.                                                                                        |
-| `AWS_REGION`            |             |             | AWS region for S3.                                                                                                        |
-| `AWS_S3_BUCKET`         |             |             | S3 bucket for generated reports.                                                                                          |
+| Variable                | Required by | Default     | Description                                                                                                                                          |
+| ----------------------- | ----------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `UPLOAD_MAX_MB`         |             | `10`        | Largest request body the API accepts, in MB; file imports arrive this way. A tenant's plan or entitlement can set a lower limit, never a higher one. |
+| `STORAGE_BACKEND`       |             | `local`     | Where Transfer Desk files live.                                                                                                                      |
+| `TD_LOCAL_UPLOADS_PATH` |             | `./uploads` | Local storage path; keep it outside any public web root.                                                                                             |
+| `TD_S3_BUCKET`          |             |             | S3 bucket for Transfer Desk files.                                                                                                                   |
+| `AWS_REGION`            |             |             | AWS region for S3.                                                                                                                                   |
+| `AWS_S3_BUCKET`         |             |             | S3 bucket for generated reports.                                                                                                                     |
 
 ### E-mail
 
@@ -119,18 +122,30 @@ and `SEED_USER_PASSWORD`, the database setup scripts need `DATABASE_URL`.
 
 ### Workers
 
-| Variable                       | Required by | Default | Description                                                                                    |
-| ------------------------------ | ----------- | ------- | ---------------------------------------------------------------------------------------------- |
-| `IMPORT_CONCURRENCY`           |             | `1`     | Transfer Desk imports each tenant runs at once. Per-tenant values come with the plans in WP-2. |
-| `WORKER_MAX_CLEAN_EXITS`       |             | `3`     | Clean exits in a row after which the supervisor gives up on a worker.                          |
-| `TRANSFER_DESK_TENANT_POLL_MS` |             | `60000` | How often the Transfer Desk process checks for added or deactivated tenants.                   |
+| Variable                       | Required by | Default | Description                                                                                            |
+| ------------------------------ | ----------- | ------- | ------------------------------------------------------------------------------------------------------ |
+| `IMPORT_CONCURRENCY`           |             | `1`     | Transfer Desk imports each tenant runs at once, unless its plan or entitlement sets fewer; never more. |
+| `ENTITLEMENT_CACHE_SECONDS`    |             | `60`    | How long a tenant's plan limits are cached per process after reading the registry.                     |
+| `WORKER_MAX_CLEAN_EXITS`       |             | `3`     | Clean exits in a row after which the supervisor gives up on a worker.                                  |
+| `TRANSFER_DESK_TENANT_POLL_MS` |             | `60000` | How often the Transfer Desk process checks for added or deactivated tenants.                           |
+
+### Backups
+
+| Variable                 | Required by           | Default      | Description                                                                                                                                                                                                                                |
+| ------------------------ | --------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `BACKUP_DIR`             | workers in production |              | Folder the tenant and registry backups are written to (db:backup, the backup worker). Required by the workers in production. Keep it on a different disk from the database and copy it off the server: docs/GO-LIVE-RUNBOOK.md, section 3. |
+| `BACKUP_SCHEDULE`        |                       | `30 2 * * *` | When the backup worker backs up every tenant and the registry: a cron pattern, UTC.                                                                                                                                                        |
+| `BACKUP_RETENTION_DAYS`  |                       |              | Backups older than this many days are deleted after each scheduled run; the newest successful backup of each database is always kept. Unset: nothing is deleted.                                                                           |
+| `BACKUP_TIMEOUT_MINUTES` |                       | `120`        | Longest one database's dump may take before the backup of it is abandoned.                                                                                                                                                                 |
+| `PG_BIN_DIR`             |                       |              | Folder holding pg_dump and pg_restore, when they are not on the PATH. Use the database server's major version: pg_dump may be newer than the server, pg_restore may not.                                                                   |
 
 ### Development
 
-| Variable                     | Required by | Default | Description                                                              |
-| ---------------------------- | ----------- | ------- | ------------------------------------------------------------------------ |
-| `SEED_USER_PASSWORD`         |             |         | The demo users' password (pnpm dev:setup, db:seed).                      |
-| `TML_ALLOW_INSECURE_SANDBOX` |             | `false` | Tests only: run TML without the isolated sandbox. Ignored in production. |
+| Variable                     | Required by | Default | Description                                                                                                                 |
+| ---------------------------- | ----------- | ------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `SHADOW_DATABASE_URL`        |             |         | An empty scratch database (name it hfp_shadow) for db:check:migrations and creating migrations; its contents are discarded. |
+| `SEED_USER_PASSWORD`         |             |         | The demo users' password (pnpm dev:setup, db:seed).                                                                         |
+| `TML_ALLOW_INSECURE_SANDBOX` |             | `false` | Tests only: run TML without the isolated sandbox. Ignored in production.                                                    |
 
 <!-- api-config:end -->
 

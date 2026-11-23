@@ -118,11 +118,13 @@ that one tenant's session never reaches the other's data. Create both once
 The worker tests also need a registry database of their own:
 
 ```powershell
-psql -c "CREATE DATABASE hfp_test" -c "CREATE DATABASE hfp_test_b" -c "CREATE DATABASE hfp_registry_test"
+psql -c "CREATE DATABASE hfp_test" -c "CREATE DATABASE hfp_test_b" -c "CREATE DATABASE hfp_registry_test" -c "CREATE DATABASE hfp_shadow"
 $env:DATABASE_URL="postgresql://USER:PASS@localhost:5432/hfp_test";   pnpm --filter @hfp/api run db:setup:test
 $env:DATABASE_URL="postgresql://USER:PASS@localhost:5432/hfp_test_b"; pnpm --filter @hfp/api run db:setup:test
-$env:REGISTRY_DATABASE_URL="postgresql://USER:PASS@localhost:5432/hfp_registry_test"; pnpm --filter @hfp/api exec prisma db push --schema src/db/schema-registry.prisma --skip-generate
+$env:REGISTRY_DATABASE_URL="postgresql://USER:PASS@localhost:5432/hfp_registry_test"; pnpm --filter @hfp/api run db:migrate:deploy:registry
 ```
+
+`hfp_shadow` is an empty scratch database for the check that each schema matches its migrations: set `SHADOW_DATABASE_URL` to it in `apps/api/.env` and run `pnpm --filter @hfp/api db:check:migrations`. Prisma also uses it when you create a migration (`db:migrate:new:tenant`, `db:migrate:new:registry`).
 
 Then add to `apps/api/.env`:
 
@@ -133,7 +135,10 @@ TEST_REGISTRY_DATABASE_URL=postgresql://USER:PASS@localhost:5432/hfp_registry_te
 ```
 
 and run `pnpm --filter @hfp/api test:integration`. It refuses to start when
-any of these variables is missing. The worker tests start the real worker
+any of these variables is missing. It runs the test files one at a time:
+several at once time out in their setup on a busy machine, and a failed
+local run should always mean a real fault. CI runs them in parallel
+(`test:integration:parallel`). The worker tests start the real worker
 processes against `REDIS_URL` for about ten seconds; on a shared development
 Redis they could pick up a job queued in that window.
 

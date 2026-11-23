@@ -37,6 +37,17 @@ function readAcrossEntities<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>)
 }
 
 /**
+ * Writes the entity tree after the route has checked the caller's rights to
+ * the entities concerned (canManageEntity, canPlaceEntityUnder). The entities
+ * table is under forced row-level security that shows only the selected
+ * entity and its children, while these routes act on any entity in the
+ * caller's reach; so the write runs under the bypass, like the reads above.
+ */
+function writeAcrossEntities<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  return withBypassRLS(prisma, fn);
+}
+
+/**
  * True when the caller may manage this entity: ADMIN_ENTITIES tenant-wide, at
  * the entity, or at its parent. The parent clause only matters for an inactive
  * entity, which nobody can open but its administrators must be able to restore.
@@ -211,22 +222,24 @@ export async function registerEntityRouter(app: FastifyInstance): Promise<void> 
       }
 
       const entity = await changeEntityTree(request, () =>
-        prisma.entity.create({
-          data: {
-            name: b.name,
-            code: b.code ?? null,
-            type: b.type,
-            parentId: b.parentId ?? null,
-            functionalCurrency: b.functionalCurrency ?? "USD",
-            reportingCurrency: b.reportingCurrency ?? "USD",
-            timezone: b.timezone ?? "UTC",
-            countryCode: b.countryCode,
-            address: b.address,
-            city: b.city,
-            postalCode: b.postalCode,
-            maxProperties: b.type === "GROUP" ? (b.maxProperties ?? 0) : 0
-          }
-        })
+        writeAcrossEntities((tx) =>
+          tx.entity.create({
+            data: {
+              name: b.name,
+              code: b.code ?? null,
+              type: b.type,
+              parentId: b.parentId ?? null,
+              functionalCurrency: b.functionalCurrency ?? "USD",
+              reportingCurrency: b.reportingCurrency ?? "USD",
+              timezone: b.timezone ?? "UTC",
+              countryCode: b.countryCode,
+              address: b.address,
+              city: b.city,
+              postalCode: b.postalCode,
+              maxProperties: b.type === "GROUP" ? (b.maxProperties ?? 0) : 0
+            }
+          })
+        )
       );
 
       // No membership to record: the creator already holds ADMIN_ENTITIES at
@@ -287,24 +300,28 @@ export async function registerEntityRouter(app: FastifyInstance): Promise<void> 
       }
 
       const entity = await changeEntityTree(request, () =>
-        prisma.entity.update({
-          where: { id: request.params.id },
-          data: {
-            ...(b.name !== undefined && { name: b.name }),
-            ...(b.code !== undefined && { code: b.code }),
-            ...(b.parentId !== undefined && { parentId: b.parentId }),
-            ...(b.functionalCurrency !== undefined && { functionalCurrency: b.functionalCurrency }),
-            ...(b.reportingCurrency !== undefined && { reportingCurrency: b.reportingCurrency }),
-            ...(b.timezone !== undefined && { timezone: b.timezone }),
-            ...(b.countryCode !== undefined && { countryCode: b.countryCode }),
-            ...(b.address !== undefined && { address: b.address }),
-            ...(b.city !== undefined && { city: b.city }),
-            ...(b.postalCode !== undefined && { postalCode: b.postalCode }),
-            ...(b.isActive !== undefined && { isActive: b.isActive }),
-            ...(b.maxProperties !== undefined &&
-              existing.type === "GROUP" && { maxProperties: b.maxProperties })
-          }
-        })
+        writeAcrossEntities((tx) =>
+          tx.entity.update({
+            where: { id: request.params.id },
+            data: {
+              ...(b.name !== undefined && { name: b.name }),
+              ...(b.code !== undefined && { code: b.code }),
+              ...(b.parentId !== undefined && { parentId: b.parentId }),
+              ...(b.functionalCurrency !== undefined && {
+                functionalCurrency: b.functionalCurrency
+              }),
+              ...(b.reportingCurrency !== undefined && { reportingCurrency: b.reportingCurrency }),
+              ...(b.timezone !== undefined && { timezone: b.timezone }),
+              ...(b.countryCode !== undefined && { countryCode: b.countryCode }),
+              ...(b.address !== undefined && { address: b.address }),
+              ...(b.city !== undefined && { city: b.city }),
+              ...(b.postalCode !== undefined && { postalCode: b.postalCode }),
+              ...(b.isActive !== undefined && { isActive: b.isActive }),
+              ...(b.maxProperties !== undefined &&
+                existing.type === "GROUP" && { maxProperties: b.maxProperties })
+            }
+          })
+        )
       );
       return { data: entity, errors: [] };
     }
@@ -351,7 +368,7 @@ export async function registerEntityRouter(app: FastifyInstance): Promise<void> 
       }
       // Grants at the entity go with it (ON DELETE CASCADE).
       await changeEntityTree(request, async () => {
-        await prisma.entity.delete({ where: { id: request.params.id } });
+        await writeAcrossEntities((tx) => tx.entity.delete({ where: { id: request.params.id } }));
       });
       reply.code(204);
       return;

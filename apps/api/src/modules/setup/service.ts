@@ -124,10 +124,10 @@ export class SetupService {
     const stepData = progress.stepData as Record<string, any>;
 
     try {
-      // Bypass RLS via transaction-local session variable to bootstrap records
-      // without entity context. The bypass reverts automatically when the txn ends.
+      // Bypass RLS for this transaction to bootstrap records without entity
+      // context; the grant ends with the transaction (SEC-11).
       await db.$transaction(async (tx: any) => {
-        await tx.$executeRawUnsafe("SELECT set_config('app.bypass_rls', 'true', true)");
+        await tx.$executeRawUnsafe("SELECT app_begin_rls_bypass()");
 
         // Materialize all step data into actual database records
         await this.materialize(tx, stepData);

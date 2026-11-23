@@ -35,6 +35,7 @@ import { registerTestRouter } from "./modules/transfer-desk/test-router.js";
 import { registerScheduleRouter } from "./modules/transfer-desk/schedule-router.js";
 import { registerIntercompanyRouter } from "./modules/intercompany/router.js";
 import authPlugin from "./plugins/auth.js";
+import { enforceTenantUploadLimits } from "./modules/tenant/upload-limit.js";
 import { registerRouteAccessRegistry, type RouteAccess } from "./modules/access/route-access.js";
 import { AccessInfrastructureError } from "./modules/access/service.js";
 import { registerAuthRouter } from "./modules/auth/router.js";
@@ -43,6 +44,7 @@ import { resolveChainEntityId } from "./modules/entity/chain.js";
 import { registerContextRouter } from "./modules/access/context.js";
 import { registerEntityRouter } from "./modules/entity/router.js";
 import { config } from "./config.js";
+import { TenantMaintenanceError } from "./db/schema-version.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -91,6 +93,15 @@ export async function createApp(): Promise<FastifyInstance> {
         ]
       });
     }
+    if (error instanceof TenantMaintenanceError) {
+      return reply
+        .code(503)
+        .header("Retry-After", "120")
+        .send({
+          data: null,
+          errors: [{ code: error.code, message: error.message }]
+        });
+    }
     return reply.send(error);
   });
 
@@ -121,6 +132,10 @@ export async function createApp(): Promise<FastifyInstance> {
   });
 
   await app.register(authPlugin);
+
+  // The tenant's own upload limit, under the platform ceiling (bodyLimit).
+  // Registered before any route, so it reaches all of them.
+  enforceTenantUploadLimits(app);
 
   // Connect Redis for session management
   await connectRedis();

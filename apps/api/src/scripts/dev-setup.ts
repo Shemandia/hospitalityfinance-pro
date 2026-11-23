@@ -12,10 +12,11 @@
  *
  * Steps, each safe to repeat:
  *   1. Create both databases when they do not exist.
- *   2. Build the registry schema.
- *   3. Build the tenant database the way tenant provisioning does: schema,
- *      row-level security, audit immutability, performance objects, the
- *      access tables.
+ *   2. Apply the registry migrations.
+ *   3. Apply the tenant migrations, as tenant provisioning does: tables,
+ *      row-level security, audit immutability, reporting view.
+ *      A database built before WP-2 has tables but no migration history;
+ *      dev:setup stops and says so instead of changing it (adopt it first).
  *   4. Seed: system catalogue, demo tenant, properties, users with
  *      SEED_USER_PASSWORD, a tenant-wide Administrator assignment for
  *      admin@hfp.local; the tenant's setup is marked complete.
@@ -94,6 +95,30 @@ async function ensureDatabase(url: string, variable: string): Promise<void> {
   }
 }
 
+/**
+ * Stops when a database has tables but no migration history: it was built
+ * before WP-2 with `db push`, and `migrate deploy` would refuse it with a less
+ * helpful message. Such a database is adopted, never rebuilt.
+ */
+async function requireMigrationHistory(url: string, variable: string): Promise<void> {
+  const client = new RegistryClient({ datasourceUrl: url });
+  try {
+    const [row] = await client.$queryRaw<Array<{ tables: number; history: boolean }>>`
+      SELECT (SELECT count(*)::int FROM pg_tables
+               WHERE schemaname = 'public' AND tablename <> '_prisma_migrations') AS "tables",
+             to_regclass('public._prisma_migrations') IS NOT NULL AS "history"`;
+    if (row && row.tables > 0 && !row.history) {
+      fail(
+        `${databaseName(url, variable)} (${variable}) was built before WP-2: it has tables but no ` +
+          `migration history. Adopt it first (WP-2 item 4, db:adopt-tenant), or point ` +
+          `${variable} at a new, empty database.`
+      );
+    }
+  } finally {
+    await client.$disconnect();
+  }
+}
+
 function run(label: string, args: string[], env: Record<string, string>): void {
   console.log(`\n── ${label}`);
   const result = spawnSync("pnpm", args, {
@@ -133,20 +158,13 @@ async function main(): Promise<void> {
   await ensureDatabase(registryUrl, "REGISTRY_DATABASE_URL");
   await ensureDatabase(tenantUrl, "DATABASE_URL");
 
-  run(
-    "Registry schema",
-    [
-      "exec",
-      "prisma",
-      "db",
-      "push",
-      "--schema",
-      "src/db/schema-registry.prisma",
-      "--skip-generate"
-    ],
-    { REGISTRY_DATABASE_URL: registryUrl }
-  );
-  run("Tenant database", ["run", "db:build:tenant"], { DATABASE_URL: tenantUrl });
+  await requireMigrationHistory(registryUrl, "REGISTRY_DATABASE_URL");
+  await requireMigrationHistory(tenantUrl, "DATABASE_URL");
+
+  run("Registry migrations", ["run", "db:migrate:deploy:registry"], {
+    REGISTRY_DATABASE_URL: registryUrl
+  });
+  run("Tenant migrations", ["run", "db:migrate:deploy:tenant"], { DATABASE_URL: tenantUrl });
   run("Seed", ["exec", "tsx", "src/db/seed.ts"], {
     DATABASE_URL: tenantUrl,
     REGISTRY_DATABASE_URL: registryUrl,

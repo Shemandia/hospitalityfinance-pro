@@ -48,11 +48,19 @@ jobs:
       TEST_SECOND_DATABASE_URL: postgresql://hfp:hfp_ci@localhost:5432/hfp_test_b
       # A registry database, for the worker entry-point tests (OPS-10).
       TEST_REGISTRY_DATABASE_URL: postgresql://hfp:hfp_ci@localhost:5432/hfp_registry_test
+      # Scratch database for the schema/migrations drift check (WP-2).
+      SHADOW_DATABASE_URL: postgresql://hfp:hfp_ci@localhost:5432/hfp_shadow
       REDIS_URL: redis://localhost:6379
       JWT_SECRET: ci-only-secret-not-used-outside-this-workflow
       # The API and the workers will not start without these (apps/api/src/config.ts).
       APP_BASE_URL: http://web.ci.invalid
       PLATFORM_API_KEY: ci-only-platform-key-not-used-outside-this-workflow
+      # 32 bytes, base64; seals tenant role passwords in the registry (WP-2).
+      PLATFORM_ENCRYPTION_KEY: Y2ktb25seS1lbmNyeXB0aW9uLWtleS0zMi1ieXRlcyE=
+      # PgBouncer in transaction mode, for the pooler tests (WP-2, ARC-04).
+      TEST_POOLER_HOST: 127.0.0.1
+      TEST_POOLER_PORT: "6432"
+      TEST_POOLER_POOL_SIZE: "2"
 
     steps:
       - name: Checkout
@@ -79,11 +87,9 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      # The tenant migration chain cannot build an empty database yet (OPS-04).
-      # Until WP-2 replaces it with a clean baseline, the test database is built
-      # the same way provisioning builds a tenant. Replace with `migrate deploy`
-      # and add the migrate-from-empty check when WP-2 lands.
-      - name: Create application role and test database
+      # Test databases are built from empty by the migrations, exactly as
+      # provisioning builds a tenant (WP-2, ARC-03).
+      - name: Create application role and test databases
         env:
           PGPASSWORD: postgres_ci
         run: |
@@ -91,7 +97,70 @@ jobs:
             -c "CREATE ROLE hfp LOGIN PASSWORD 'hfp_ci' NOSUPERUSER NOBYPASSRLS CREATEDB CREATEROLE" \
             -c "CREATE DATABASE hfp_test OWNER hfp" \
             -c "CREATE DATABASE hfp_test_b OWNER hfp" \
-            -c "CREATE DATABASE hfp_registry_test OWNER hfp"
+            -c "CREATE DATABASE hfp_registry_test OWNER hfp" \
+            -c "CREATE DATABASE hfp_shadow OWNER hfp"
+
+      # The backup tests run pg_dump and pg_restore (WP-2 item 9) of the
+      # server's major version (16): the runner's own are newer, and a newer
+      # pg_restore cannot restore into an older server. PG_BIN_DIR points the
+      # tests at them, as it would on a server.
+      - name: PostgreSQL client tools
+        env:
+          PGPASSWORD: hfp_ci
+        run: |
+          # The runner's own apt sources carry only its default PostgreSQL client.
+          ls /etc/apt/sources.list.d/
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y >/dev/null
+          sudo apt-get install -y -qq postgresql-client-16
+          echo "PG_BIN_DIR=/usr/lib/postgresql/16/bin" >> "$GITHUB_ENV"
+          /usr/lib/postgresql/16/bin/pg_dump --version
+          /usr/lib/postgresql/16/bin/pg_restore --version
+          psql -h localhost -U hfp -d hfp_test -Atc "show server_version"
+
+      # The connection pooler production runs in front of tenant databases
+      # (docs/CONNECTION-POOLER.md): transaction mode, prepared statements on,
+      # roles authenticated through auth_query so new tenant roles need no file.
+      - name: Start PgBouncer
+        env:
+          PGPASSWORD: hfp_ci
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq pgbouncer
+          sudo systemctl stop pgbouncer || true
+          mkdir -p /tmp/pgbouncer
+          echo '"postgres" "postgres_ci"' > /tmp/pgbouncer/userlist.txt
+          cat > /tmp/pgbouncer/pgbouncer.ini <<'INI'
+          [databases]
+          * = host=localhost port=5432
+          [pgbouncer]
+          listen_addr = 127.0.0.1
+          listen_port = 6432
+          unix_socket_dir =
+          pool_mode = transaction
+          default_pool_size = 2
+          max_client_conn = 500
+          max_prepared_statements = 200
+          auth_type = scram-sha-256
+          auth_file = /tmp/pgbouncer/userlist.txt
+          auth_user = postgres
+          auth_dbname = postgres
+          auth_query = SELECT usename, passwd FROM pg_shadow WHERE usename = $1
+          ignore_startup_parameters = extra_float_digits,options
+          logfile = /tmp/pgbouncer/pgbouncer.log
+          pidfile = /tmp/pgbouncer/pgbouncer.pid
+          INI
+          pgbouncer --version
+          pgbouncer -d /tmp/pgbouncer/pgbouncer.ini
+          for i in $(seq 1 20); do
+            psql -h 127.0.0.1 -p 6432 -U hfp -d hfp_test -Atc "select 'through the pooler'" && exit 0
+            sleep 1
+          done
+          cat /tmp/pgbouncer/pgbouncer.log
+          exit 1
+
+      # Fails when a schema.prisma and its migrations disagree.
+      - name: Migrations match the schemas
+        run: pnpm --filter @hfp/api db:check:migrations
 
       - name: Prepare test database
         run: pnpm --filter @hfp/api db:setup:test
@@ -104,7 +173,7 @@ jobs:
           DATABASE_URL: ${{ env.TEST_SECOND_DATABASE_URL }}
 
       - name: Prepare test registry database
-        run: pnpm --filter @hfp/api exec prisma db push --schema src/db/schema-registry.prisma --skip-generate
+        run: pnpm --filter @hfp/api db:migrate:deploy:registry
         env:
           REGISTRY_DATABASE_URL: ${{ env.TEST_REGISTRY_DATABASE_URL }}
 
@@ -112,8 +181,13 @@ jobs:
         run: pnpm test
 
       # Run explicitly so a missing database fails the job instead of skipping.
+      # Files in parallel here; locally, test:integration runs them one at a time.
       - name: Integration tests
-        run: pnpm --filter @hfp/api test:integration
+        run: pnpm --filter @hfp/api test:integration:parallel
+
+      - name: PgBouncer log
+        if: failure()
+        run: cat /tmp/pgbouncer/pgbouncer.log || true
 
       - name: Build
         run: pnpm build
@@ -131,4 +205,22 @@ jobs:
           node --conditions=production dist/index.js > api.log 2>&1 &
           for i in $(seq 1 30); do curl -fs http://127.0.0.1:4599/health && break; sleep 1; done
           curl -fs http://127.0.0.1:4599/health || { cat api.log; exit 1; }
+          kill %1
+
+      # The built worker supervisor must keep its workers running.
+      - name: Built workers start
+        working-directory: apps/api
+        env:
+          NODE_ENV: production
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+          REGISTRY_DATABASE_URL: ${{ env.TEST_REGISTRY_DATABASE_URL }}
+          # Required by the workers in production. The schedule is not due during the check.
+          BACKUP_DIR: ${{ runner.temp }}/hfp-backups
+        run: |
+          node --conditions=production dist/jobs/worker-supervisor.js > workers.log 2>&1 &
+          sleep 12
+          kill -0 %1 || { echo "supervisor exited"; cat workers.log; exit 1; }
+          started=$(grep -c 'worker started\|Worker started\|Started;' workers.log || true)
+          echo "workers reporting started: $started"
+          [ "$started" -ge 6 ] || { cat workers.log; exit 1; }
           kill %1

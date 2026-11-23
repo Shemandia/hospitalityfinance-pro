@@ -43,6 +43,7 @@ import { getStorageBackend } from "./transfer-desk-storage.js";
 import { executeAutomation, type AutomationStep } from "./automation-engine.js";
 import { sendEmail } from "../shared/email.js";
 import { moduleLogger } from "../shared/logger.js";
+import { assertSchemaServiceable } from "../db/schema-version.js";
 
 const log = moduleLogger("transfer-desk-worker");
 
@@ -51,14 +52,27 @@ const log = moduleLogger("transfer-desk-worker");
 const workers = new Map<string, Worker<TransferDeskJobData>>();
 
 /**
- * Ensure a worker exists for the given tenant. Idempotent.
+ * Ensure a worker exists for the given tenant, running at most `concurrency`
+ * imports at once (the tenant's entitlement, HC-37). Idempotent; a running
+ * worker takes a changed concurrency at once.
  *
  * The tenantDbUrl is captured in the closure so the worker can spin up its
  * own Prisma client without depending on AsyncLocalStorage (which is empty
  * inside a BullMQ worker — workers run outside the request lifecycle).
  */
-export function ensureTransferDeskWorker(tenantSlug: string, tenantDbUrl: string): void {
-  if (workers.has(tenantSlug)) return;
+export function ensureTransferDeskWorker(
+  tenantSlug: string,
+  tenantDbUrl: string,
+  concurrency: number
+): void {
+  const running = workers.get(tenantSlug);
+  if (running) {
+    if (running.concurrency !== concurrency) {
+      running.concurrency = concurrency;
+      log.info({ tenantSlug, concurrency }, "Import concurrency changed");
+    }
+    return;
+  }
 
   const worker = createWorker<TransferDeskJobData>(
     getTransferDeskQueueName(tenantSlug),
@@ -68,12 +82,13 @@ export function ensureTransferDeskWorker(tenantSlug: string, tenantDbUrl: string
       runWithContext({ tenantSlug, tenantDbUrl }, async () => {
         const tenant = await resolveTenant(tenantSlug);
         if (!tenant || !tenant.isActive) throw new TenantUnavailableError(tenantSlug);
+        // Behind this release's schema: postponed by createWorker, not failed.
+        assertSchemaServiceable(tenant);
         updateRequestContext({ tenantId: tenant.id });
         return processJob(job, tenantSlug, tenantDbUrl);
       }),
     {
-      // Platform-wide for now; per-tenant values come with the plans in WP-2 (HC-37).
-      concurrency: config().IMPORT_CONCURRENCY,
+      concurrency,
       autorun: true
     }
   );

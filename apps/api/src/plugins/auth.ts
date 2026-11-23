@@ -24,6 +24,7 @@ import { updateRequestContext } from "../db/requestContext.js";
 import { getRedisClient } from "../db/redis.js";
 import type { AccessTokenClaims } from "../services/auth.service.js";
 import { requireConfig } from "../config.js";
+import { assertSchemaServiceable } from "../db/schema-version.js";
 
 type ErrorWithStatus = Error & { statusCode: number };
 type HeaderDecision = { error?: { statusCode: number; message: string } };
@@ -163,6 +164,8 @@ export default fp(async (fastify: FastifyInstance) => {
     if (!tenant.isActive) {
       throw buildError(403, "This tenant is deactivated.");
     }
+    // Behind this release's schema: 503 until the migration runner has run.
+    assertSchemaServiceable(tenant);
 
     const tenantHeaderCheck = validateTenantHeaders({
       headerTenantSlug: getSingleHeader(request.headers["x-tenant-slug"]),
