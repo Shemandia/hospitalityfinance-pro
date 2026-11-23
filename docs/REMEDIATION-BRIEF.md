@@ -1,5 +1,7 @@
 # HospitalityFinance Pro — Remediation Report and Implementation Brief
 
+> **Order of work:** [`docs/PRODUCT-ROADMAP.md`](PRODUCT-ROADMAP.md), approved 21 November 2026, sets the order of work and supersedes the work-package order in sections 8 and 11 of this brief. The findings, the hard-coded register, the working rules and the design decisions here still apply.
+
 Nov 11, 2026 · @SHABANI RAMADHANI
 
 ## 1. Summary
@@ -341,17 +343,17 @@ Nine work packages, in dependency order. Each closes named findings and is done 
 
 ### WP-2 Tenant platform
 
-- [ ] New baseline migrations: one folder for the registry, one for tenant databases. Security functions, policies, constraints, triggers and indexes are in migrations; delete the separate SQL setup scripts.
-- [ ] Provisioning uses `migrate deploy`, creates owner and application roles, creates the tenant system user, and records the schema version in the registry.
-- [ ] Migration runner command: all tenants, resumable, per-tenant result recorded, non-zero exit on any failure. The API returns a maintenance response for a tenant behind the required version.
-- [ ] Adopt existing tenant databases: a one-time script that baselines each one against the new migration history after a schema diff shows no differences.
-- [ ] Encrypt tenant database credentials and integration credentials; rotate existing passwords. _Deferred until before the first customer (21 November 2026)._
-- [ ] Replace `enterWith` with `runWithContext` in the request hook and every worker; data access throws without a bound tenant. _Deferred until before the first customer (21 November 2026)._
-- [ ] Connection pooler in front of PostgreSQL; small per-tenant connection limit; safe idle eviction. _Deferred until before the first customer (21 November 2026)._
-- [ ] Row-level security on every entity-scoped table and its children, forced; test that enumerates tables and fails on a gap. _Deferred until before the first customer (21 November 2026)._
-- [ ] Scheduled per-tenant backups and a documented, tested restore. _Deferred until before the first customer (21 November 2026)._
+- [x] New baseline migrations: one folder for the registry, one for tenant databases. Security functions, policies, constraints, triggers and indexes are in migrations; delete the separate SQL setup scripts.
+- [x] Provisioning uses `migrate deploy`, creates owner and application roles, creates the tenant system user, and records the schema version in the registry.
+- [x] Migration runner command: all tenants, resumable, per-tenant result recorded, non-zero exit on any failure. The API returns a maintenance response for a tenant behind the required version.
+- [x] Adopt existing tenant databases: a one-time script that baselines each one against the new migration history after a schema diff shows no differences.
+- [ ] Encrypt tenant database credentials and integration credentials; rotate existing passwords. _Un-deferred 23 November 2026: roadmap Stage 1._
+- [ ] Replace `enterWith` with `runWithContext` in the request hook and every worker; data access throws without a bound tenant. _Un-deferred 23 November 2026: roadmap Stage 1._
+- [ ] Connection pooler in front of PostgreSQL; small per-tenant connection limit; safe idle eviction. _Un-deferred 23 November 2026: roadmap Stage 1._
+- [ ] Row-level security on every entity-scoped table and its children, forced; test that enumerates tables and fails on a gap. _Un-deferred 23 November 2026: roadmap Stage 1._
+- [ ] Scheduled per-tenant backups and a documented, tested restore. _Un-deferred 23 November 2026: roadmap Stage 1._
 
-Items 5 to 9 above (credentials, request context, pooler, forced RLS everywhere, backups) are deferred until before the first customer; WP-2 closes for now with items 1 to 4, and the acceptance below is checked in full when the deferred items are done.
+Items 5 to 9 were deferred on 21 November and are no longer deferred (23 November 2026): `docs/PRODUCT-ROADMAP.md` Stage 1 finishes all of WP-2 before any other stage, and its gate is the acceptance below.
 
 **Accepted when:** an empty PostgreSQL instance can be taken to a working tenant by provisioning alone; a second release with a new migration upgrades two tenants through the runner; a test connecting as the application role for entity A cannot read or write any row of entity B in any table; no secret is readable in the registry.
 
@@ -433,6 +435,8 @@ Items 5 to 9 above (credentials, request context, pooler, forced RLS everywhere,
 **Decided 15 November 2026.** HC-35 (upload limit) and HC-37 (import concurrency) become platform settings in WP-1, `UPLOAD_MAX_MB` and `IMPORT_CONCURRENCY`. Their per-tenant values move to WP-2 with the plans table (HC-40), so WP-1 makes no registry schema change.
 
 **Decided 21 November 2026.** The schedule is behind. WP-2 items 5 to 9 (encrypted integration credentials and password rotation, `runWithContext` everywhere, the connection pooler, forced RLS on every table with its gap test, scheduled backups with a tested restore) are deferred until before the first customer. WP-2 finishes items 3 (migration runner) and 4 (adoption of the existing databases, after tested `pg_dump` backups and the owner's go-ahead). The import feature (the canonical posting contract and the single Transfer Desk pipeline, from WP-3, WP-4 and WP-5) starts next, after a plan the owner approves.
+
+**Decided 23 November 2026.** `docs/PRODUCT-ROADMAP.md` (approved 21 November) sets the order of work and supersedes the order in sections 8 and 11. WP-2 items 5 to 9 are no longer deferred: they are Stage 1, which ends at the WP-2 acceptance below. The import work (`feat/import-pipeline`, draft PR #7) is paused; `docs/IMPORT-PLAN.md` becomes input to Stage 2. Status on that date: items 1 to 4 are done (`hfp_db` and `hfp_registry` were adopted on 21 November), and SEC-11 is fixed and applied to `hfp_db`.
 
 ## 9. Verification evidence and limits
 
