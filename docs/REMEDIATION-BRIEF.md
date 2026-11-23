@@ -1,5 +1,7 @@
 # HospitalityFinance Pro — Remediation Report and Implementation Brief
 
+> **Order of work:** [`docs/PRODUCT-ROADMAP.md`](PRODUCT-ROADMAP.md), approved 21 November 2026, sets the order of work and supersedes the work-package order in sections 8 and 11 of this brief. The findings, the hard-coded register, the working rules and the design decisions here still apply.
+
 Nov 11, 2026 · @SHABANI RAMADHANI
 
 ## 1. Summary
