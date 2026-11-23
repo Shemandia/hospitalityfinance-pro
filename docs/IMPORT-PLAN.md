@@ -1,6 +1,6 @@
 # Import feature: plan for approval
 
-Status: **approved 21 November 2026, with the owner's decisions in section 8.** Work proceeds step by step (section 7), with a report after each step. It covers the import feature that the owner moved ahead of WP-U on 21 November:
+Status: **paused, 23 November 2026.** The product roadmap (`docs/PRODUCT-ROADMAP.md`) now sets the order of work. This plan, and the code on `feat/import-pipeline` (draft PR #7, steps 1 to 6 and parts of 7 and 10), become input to Stage 2 document 2.7 (`POSTING-CONTRACT.md`) and to Stage 4. No new steps are added here and no pipeline code is written until Stage 4. The owner's decisions in section 8 below, including those of 23 November, stand.
 
 - the canonical posting contract;
 - one Transfer Desk pipeline that posts GL journals through that contract;
@@ -215,6 +215,14 @@ The accepted test for the phase: a sample Opera night-audit file imports through
 9. **Rename depth:** everything, the database tables included. Old URLs and API paths redirect for one release.
 10. **Hard-coded source logic** is removed per source, after parity on real files. Network clients stay only as fetch adapters.
 11. **CI:** a draft PR from `feat/import-pipeline` into `wp-2/tenant-platform` checks every step.
+
+**Decided 23 November 2026** (answers to the questions left open by steps 2 to 10):
+
+12. **JSON:** the format engine reads JSON natively (no conversion to delimited files in the fetch adapters).
+13. **Permissions:** `INTEGRATIONS_*` and the older `INTEGRATION_*` merge into one permission family, by a migration in which no role loses access.
+14. **Several properties in one run:** a person may run an import that posts to several properties, but only to those where they hold the import permission; documents for the others are refused and listed.
+15. **Rate limits:** become settings, per user and per tenant: generous for reads, strict for uploads and runs.
+16. The owner supplies the real files for the templates and the parity tests.
 
 **Before step 1:** the RLS bypass (finding SEC-11, P0) is fixed first; see `REMEDIATION-BRIEF.md`.
 
